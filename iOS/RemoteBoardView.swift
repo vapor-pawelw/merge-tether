@@ -228,12 +228,12 @@ private struct RemoteConnectionToolbar: View {
     var body: some View {
         let status = model.connectionStatus(now: now)
         HStack(spacing: 16) {
-            Button { Task { await model.refresh(fromGitLab: true) } } label: {
+            Button { Task { await model.refreshContent(fromGitLab: true) } } label: {
                 Image(systemName: "arrow.clockwise")
             }
-            .accessibilityLabel(Text(.Remote.remoteRefreshData))
+            .accessibilityLabel(Text(.Remote.remoteRefreshGitLabBoard))
             .accessibilityIdentifier("remote.refresh")
-            .disabled(status != .connected)
+            .disabled(status != .connected || model.isManuallyRefreshingContent)
             Menu {
                 if model.supportsDraftRegeneration, model.draftRegenerationBatch == nil,
                    model.draftRegenerationCount(for: .all) > 0 {

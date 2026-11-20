@@ -304,6 +304,7 @@ public struct RemoteMessage: Codable, Sendable {
     public static let detailsCapability = "mr-details-v1"
     public static let detailContextCapability = "detail-context-v1"
     public static let detailPreviewCapability = "detail-preview-v1"
+    public static let cachedDetailsCapability = "detail-cache-v1"
     public static let detailOriginsCapability = "detail-origins-v1"
     public static let mrControlsCapability = "mr-controls-v1"
     public static let commentOriginCapability = "comment-origin-v1"
@@ -328,8 +329,7 @@ public struct RemoteMessage: Codable, Sendable {
     public var draftRegenerationPage: RemoteDraftRegenerationPage?
     public var cachedAvatarURLs: [URL]?
     public var avatarThumbnails: [RemoteAvatarThumbnail]?
-    /// True reads GitLab before answering. False reads only the host's current board.
-    /// When omitted, initial connections and stale boards may cause a GitLab refresh.
+    /// True reads GitLab before answering. Otherwise the host returns its current board.
     public var refresh: Bool?
     public init(type: Kind, challenge: UUID? = nil, board: RemoteBoard? = nil,
                 command: RemoteCommand? = nil, result: RemoteCommandResult? = nil, capabilities: [String]? = nil,

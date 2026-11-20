@@ -755,13 +755,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Refresh details"
+            "value": "Refresh this merge request from GitLab"
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Odśwież szczegóły"
+            "value": "Odśwież ten merge request z GitLaba"
           }
         }
       }

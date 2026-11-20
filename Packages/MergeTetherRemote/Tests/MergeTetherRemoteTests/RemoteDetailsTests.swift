@@ -22,6 +22,16 @@ import Testing
         #expect(RemotePerson(name: nil, username: "alice").profileURL(on: source.flatMap { URL(string: $0) }) == nil)
     }
 
+    @MainActor @Test func cachedDetailResponseFinishesTheReadWithoutAuthorizingDiscussionControls() throws {
+        let board = board(), card = board.cards[0], state = RemoteDetailState()
+        let request = try #require(state.begin(card: card, board: board, now: date, cachedOnly: true))
+        #expect(try JSONDecoder().decode(RemoteDetailRequest.self, from: JSONEncoder().encode(request)).cachedOnly == true)
+        state.receive(.init(request: request, status: .current, details: .init(checkedAt: date, description: "Mac snapshot")), board: board)
+        #expect(state.pending == nil)
+        #expect(state.details(for: card, board: board) == nil)
+        #expect(state.displayedDetails(for: card, board: board)?.description == "Mac snapshot")
+    }
+
     @MainActor @Test func previewsKeepTheReadPendingAndPreserveCachedDiscussionsThroughFailures() throws {
         var board = board()
         let card = board.cards[0], state = RemoteDetailState()

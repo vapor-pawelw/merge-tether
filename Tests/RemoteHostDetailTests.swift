@@ -49,6 +49,34 @@ import MergeTetherRemote
         #expect(f.transport.messages.filter { $0.challenge == cachedChallenge }.map(\.type) == [.snapshot])
     }
 
+    @Test func cachedDetailsReturnCurrentMacDiscussionsWithoutAGitLabRead() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        f.detailNotes = [.init(id: "1", body: "Old comment")]
+        let board = try await f.board()
+        let card = try #require(board.cards.first { $0.id == "mr:1:2" })
+        let live = try RemoteDetailRequest(card: card, board: board)
+        await f.transport.onMessage?(.init(type: .detailRequest, detailRequest: live))
+        await f.host.detailTask?.value
+        #expect(f.readerCount == 1)
+
+        let handler = try #require(f.gitlab.handler)
+        f.gitlab.handler = { call in
+            if call.endpoint.contains("/discussions?") {
+                return InMemoryGitLab.output(#"[{"id":"local","notes":[{"id":2,"body":"New Mac comment","system":false}]}]"#)
+            }
+            return try await handler(call)
+        }
+        _ = try await f.monitor.glab.fetchMergeRequestDiscussions(projectID: 1, iid: 2, host: "gitlab.example.test")
+        let count = f.gitlab.requests.count
+        let request = try RemoteDetailRequest(card: card, board: board, cachedOnly: true)
+        await f.transport.onMessage?(.init(type: .detailRequest, detailRequest: request))
+        await f.host.detailTask?.value
+        let result = try #require(f.transport.messages.last?.detailResponse)
+        #expect(result.request == request && result.status == .current && result.isPreview != true)
+        #expect(result.details?.threads?.first?.notes.first?.body == "New Mac comment")
+        #expect(f.readerCount == 1 && f.gitlab.requests.count == count)
+    }
+
     @Test func phoneReceivesLocalDetailsBeforeGitLabAndCachedDiscussionsOnReopen() async throws {
         let f = try Fixture(); defer { f.clean() }
         f.detailNotes = [.init(id: "1", body: "Previously loaded comment")]
@@ -587,6 +615,7 @@ import MergeTetherRemote
         func board(originUpdates: Bool = false, markReady: Bool = false, detailPreviews: Bool = false,
                    detailAvatars: Bool = false) async throws -> RemoteBoard {
             await host.startupLoadTask?.value
+            if monitor.lastRefresh == nil { await monitor.refreshNow() }
             let capabilities = [RemoteMessage.detailsCapability]
                 + (originUpdates ? [RemoteMessage.detailOriginsCapability] : [])
                 + (markReady ? [RemoteMessage.markReadyCapability] : [])

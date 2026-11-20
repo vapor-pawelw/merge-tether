@@ -8,11 +8,13 @@ public struct RemoteDetailRequest: Codable, Equatable, Sendable {
     public let cardID: String
     public let cardDigest: String
     public let contentDigest: String?
-    public init(card: RemoteCard, board: RemoteBoard, presentationIndependent: Bool = false) throws {
+    public let cachedOnly: Bool?
+    public init(card: RemoteCard, board: RemoteBoard, presentationIndependent: Bool = false, cachedOnly: Bool? = nil) throws {
         guard card.id.utf8.count <= 128, board.account.utf8.count <= 1_024 else { throw RemoteProtocolError.invalid }
         id = UUID(); hostSession = board.hostSession; account = board.account
         cardID = card.id; cardDigest = try RemoteDigest.token(card)
         contentDigest = presentationIndependent ? card.detailContextDigest : nil
+        self.cachedOnly = cachedOnly
     }
     public func matches(_ board: RemoteBoard) -> Bool {
         isValid && hostSession == board.hostSession && account == board.account
@@ -309,6 +311,7 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
     public var details: RemoteMRDetails?
     /// A display-only response while the same request's GitLab read continues.
     public let isPreview: Bool?
+    var isDisplayOnly: Bool { isPreview == true || request.cachedOnly == true }
     public init(request: RemoteDetailRequest, status: Status, details: RemoteMRDetails? = nil, isPreview: Bool? = nil) {
         self.request = request; self.status = status; self.details = details; self.isPreview = isPreview
     }
@@ -467,10 +470,11 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
     private var authorKindRevisions: [String: UInt64] = [:]
     public init() {}
     public func begin(card: RemoteCard, board: RemoteBoard, now: Date = Date(), force: Bool = false,
-                      presentationIndependent: Bool = true) -> RemoteDetailRequest? {
+                      presentationIndependent: Bool = true, cachedOnly: Bool? = nil) -> RemoteDetailRequest? {
         guard board.cards.contains(card), card.id.hasPrefix("mr:"),
               force || pending == nil || !isLoading(now: now),
-              let request = try? RemoteDetailRequest(card: card, board: board, presentationIndependent: presentationIndependent) else { return nil }
+              let request = try? RemoteDetailRequest(card: card, board: board, presentationIndependent: presentationIndependent,
+                                                     cachedOnly: cachedOnly) else { return nil }
         pending = request; openRequest = request; deadline = now.addingTimeInterval(45); failure = nil
         originRevisions = [:]
         authorKindRevisions = [:]
@@ -484,7 +488,8 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
         }
         pending = nil
         if value.status == .current, value.details != nil {
-            response = value; failure = nil
+            if !value.isDisplayOnly { response = value }
+            failure = nil
             cacheForDisplay(value)
         }
         else {
@@ -574,7 +579,7 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
             let sameContent = (value.request.contentDigest ?? value.request.cardDigest)
                 == (cached.request.contentDigest ?? cached.request.cardDigest)
             // Keep richer sections through a partial host preview or an optional GitLab read failure.
-            if value.isPreview == true, cached.isPreview != true, sameContent, details.checkedAt <= previous.checkedAt {
+            if value.isDisplayOnly, !cached.isDisplayOnly, sameContent, details.checkedAt <= previous.checkedAt {
                 return
             }
             if details.threads == nil {

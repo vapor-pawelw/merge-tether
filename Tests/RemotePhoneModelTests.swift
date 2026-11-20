@@ -108,11 +108,12 @@ import MergeTetherRemote
     func actionsReloadOpenDetailsEvenWhenTheBoardContextDoesNotChange(_ closeBeforeResult: Bool) async throws {
         let f = try PhoneFixture(), model = f.model
         var board = f.board; board.lanes[0].cards[0].id = "mr:1:2"
-        let capabilities = [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability]
+        let capabilities = [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability, RemoteMessage.cachedDetailsCapability]
         model.connect(); await model.refresh(); await f.reply(board: board, capabilities: capabilities)
         let transport = f.transports[0], card = board.cards[0]
         await model.requestDetails(card: card)
         let original = try #require(transport.sent.last?.detailRequest)
+        #expect(original.cachedOnly == true)
         await transport.onMessage?(.init(type: .details, detailResponse: .init(request: original,
             status: .current, details: .init(checkedAt: f.date))))
         if closeBeforeResult { model.cancelDetails() }
@@ -124,6 +125,7 @@ import MergeTetherRemote
         #expect(transport.sent.filter { $0.type == .detailRequest }.count == (closeBeforeResult ? 1 : 2))
         if !closeBeforeResult {
             #expect(transport.sent.last?.detailRequest?.id != original.id)
+            #expect(transport.sent.last?.detailRequest?.cachedOnly == true)
         }
     }
 
@@ -145,13 +147,16 @@ import MergeTetherRemote
     func manualRefreshWaitsForTheBoardAndOpenDetailsAndCoalescesGestures(_ detailsOpen: Bool) async throws {
         let f = try PhoneFixture(), model = f.model
         var board = f.board; board.lanes[0].cards[0].id = "mr:1:2"
-        let capabilities = [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability, RemoteMessage.detailPreviewCapability]
+        let capabilities = [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability, RemoteMessage.detailPreviewCapability,
+            RemoteMessage.cachedDetailsCapability]
         model.connect(); await model.refresh(); await f.reply(board: board, capabilities: capabilities)
         let transport = f.transports[0]
         #expect(transport.sent.first?.capabilities?.contains(RemoteMessage.detailPreviewCapability) == true)
+        #expect(transport.sent.first?.refresh == false)
         if detailsOpen {
             await model.requestDetails(card: board.cards[0])
             let request = try #require(transport.sent.last?.detailRequest)
+            #expect(request.cachedOnly == true)
             await transport.onMessage?(.init(type: .details, detailResponse: .init(request: request,
                 status: .current, details: .init(checkedAt: f.date))))
         }
@@ -162,14 +167,13 @@ import MergeTetherRemote
         while transport.sent.filter({ $0.type == .hello }).count < 2, ContinuousClock.now < deadline { await Task.yield() }
         #expect(!firstFinished && !secondFinished)
         #expect(model.isManuallyRefreshingContent)
+        #expect(transport.sent.last?.refresh == false)
         if detailsOpen { #expect(model.detailState.displayedDetails(for: board.cards[0], board: board) != nil) }
         await f.reply(board: board, capabilities: capabilities)
         if detailsOpen {
             let request = try #require(transport.sent.last?.detailRequest)
-            #expect(request.contentDigest != nil)
+            #expect(request.contentDigest != nil && request.cachedOnly == true)
             #expect(!firstFinished && !secondFinished)
-            await transport.onMessage?(.init(type: .details, detailResponse: .init(request: request,
-                status: .current, details: .init(checkedAt: f.date, description: "From the Mac"), isPreview: true)))
             #expect(model.detailState.pending == request)
             #expect(model.isManuallyRefreshingContent)
             await transport.onMessage?(.init(type: .details, detailResponse: .init(request: request,
@@ -181,6 +185,39 @@ import MergeTetherRemote
         #expect(transport.sent.filter { $0.type == .hello }.count == 2)
         #expect(transport.sent.filter { $0.type == .detailRequest }.count == (detailsOpen ? 2 : 0))
         #expect(!model.isSynchronizingDetails)
+    }
+
+    @Test(arguments: [false, true])
+    func explicitGitLabRefreshUsesOnlyTheRequestedScope(_ details: Bool) async throws {
+        let f = try PhoneFixture(), model = f.model
+        var board = f.board; board.lanes[0].cards[0].id = "mr:1:2"
+        let capabilities = [RemoteMessage.detailsCapability, RemoteMessage.cachedDetailsCapability]
+        model.connect(); await model.refresh(); await f.reply(board: board, capabilities: capabilities)
+        let transport = f.transports[0], card = board.cards[0]
+        let count = transport.sent.count
+        let task = Task {
+            if details { await model.refreshDetailsFromGitLab(card: card) }
+            else { await model.refreshContent(fromGitLab: true) }
+        }
+        defer { task.cancel() }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while transport.sent.count == count, ContinuousClock.now < deadline { await Task.yield() }
+        let sent = try #require(transport.sent.dropFirst(count).first)
+        #expect(model.isManuallyRefreshingContent)
+        if details {
+            #expect(sent.type == .detailRequest && sent.refresh == nil)
+            let request = try #require(sent.detailRequest)
+            #expect(request.cardID == card.id && request.cachedOnly != true)
+            await transport.onMessage?(.init(type: .details, detailResponse: .init(request: request,
+                status: .current, details: .init(checkedAt: f.date, description: "From GitLab"))))
+            #expect(model.detailState.details(for: card, board: board)?.description == "From GitLab")
+        } else {
+            #expect(sent.type == .hello && sent.refresh == true)
+            await f.reply(board: board, capabilities: capabilities)
+        }
+        await task.value
+        #expect(transport.sent.count == count + 1)
+        #expect(!model.isManuallyRefreshingContent)
     }
 
     @Test func continuouslyChangingDetailsStopAutomaticRecoveryAfterTwoAttempts() async throws {
@@ -206,7 +243,8 @@ import MergeTetherRemote
     func changedDetailsRecoverThroughAFreshBoardWithoutAskingTheUser(_ actionRunning: Bool) async throws {
         let f = try PhoneFixture(), model = f.model
         var board = f.board; board.lanes[0].cards[0].id = "mr:1:2"
-        model.connect(); await model.refresh(); await f.reply(board: board, capabilities: [RemoteMessage.detailsCapability])
+        let capabilities = [RemoteMessage.detailsCapability, RemoteMessage.cachedDetailsCapability]
+        model.connect(); await model.refresh(); await f.reply(board: board, capabilities: capabilities)
         let transport = f.transports[0], card = board.cards[0]
         await model.requestDetails(card: card)
         let request = try #require(transport.sent.last?.detailRequest)
@@ -219,19 +257,19 @@ import MergeTetherRemote
             await transport.onMessage?(.init(type: .result, result: .init(id: command.id, status: .completed)))
         }
         #expect(transport.sent.last?.type == .hello)
-        #expect(transport.sent.last?.refresh == true)
+        #expect(transport.sent.last?.refresh == false)
         board.lanes[0].cards[0].head = "after-action"
-        await f.reply(board: board, capabilities: [RemoteMessage.detailsCapability])
+        await f.reply(board: board, capabilities: capabilities)
         let current = try #require(transport.sent.last?.detailRequest)
-        #expect(current.id != request.id)
+        #expect(current.id != request.id && current.cachedOnly == true)
         await transport.onMessage?(.init(type: .details, detailResponse: .init(request: current,
             status: .current, details: .init(checkedAt: f.date, description: "Current details"))))
-        #expect(model.detailState.details(for: board.cards[0], board: board)?.description == "Current details")
+        #expect(model.detailState.displayedDetails(for: board.cards[0], board: board)?.description == "Current details")
         #expect(model.detailState.failure == nil)
     }
 
     @Test(arguments: [RemoteCommandResult.Status.completed, .changed, .uncertain, .checked])
-    func actionResultsSupersedePreActionRefreshesAndReadGitLabAutomatically(_ status: RemoteCommandResult.Status) async throws {
+    func actionResultsSupersedePreActionSnapshotsWithoutRefreshingGitLab(_ status: RemoteCommandResult.Status) async throws {
         let f = try PhoneFixture(), model = f.model, board = f.board
         model.connect(); await model.refresh(); await f.reply(board: board)
         let transport = f.transports[0], card = board.cards[0]
@@ -242,7 +280,7 @@ import MergeTetherRemote
         }
         await model.perform(card: card, action: card.actions[0])
         let refreshed = try #require(transport.sent.last { $0.type == .hello })
-        #expect(refreshed.refresh == true)
+        #expect(refreshed.refresh == false)
         #expect(refreshed.challenge != beforeAction)
         var stale = board; stale.lanes[0].cards[0].title = "Before the action"
         await transport.onMessage?(.init(type: .snapshot, challenge: beforeAction, board: stale))
@@ -582,8 +620,8 @@ import MergeTetherRemote
         let reloading = Task { await model.reloadAfterApprovalExpiry(cardID: card.id) }
         defer { reloading.cancel() }
         let deadline = ContinuousClock.now + .seconds(2)
-        while transport.sent.last?.refresh != true, ContinuousClock.now < deadline { await Task.yield() }
-        try #require(transport.sent.last?.type == .hello && transport.sent.last?.refresh == true)
+        while transport.sent.filter({ $0.type == .hello }).count < 2, ContinuousClock.now < deadline { await Task.yield() }
+        try #require(transport.sent.last?.type == .hello && transport.sent.last?.refresh == false)
         #expect(model.prepareApproval(card: card, action: action) == nil)
         board.lanes[0].cards[0].head = "current-head"
         board.lanes[0].cards[0].actions[0].token = "current-approval-token"
@@ -677,7 +715,7 @@ import MergeTetherRemote
             #expect(model.state.result?.status == .completed)
         }
         let hello = try #require(fixture.transports.last?.sent.last)
-        #expect(hello.type == .hello && hello.refresh == (kind == .markDone))
+        #expect(hello.type == .hello && hello.refresh == false)
     }
 
     @Test func phoneRestartQueriesTheDurableCommandWithoutSendingItAgainAndRetainsItUntilAcknowledged() async throws {

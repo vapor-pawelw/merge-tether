@@ -383,8 +383,8 @@ private struct RemoteDetailRefreshButton: View {
     var body: some View {
         let loading = model.isManuallyRefreshingContent
         Button {
-            guard card != nil else { return }
-            Task { await model.refreshContent() }
+            guard let card else { return }
+            Task { await model.refreshDetailsFromGitLab(card: card) }
         } label: {
             Image(systemName: "arrow.clockwise").opacity(loading ? 0 : 1)
                 .overlay { if loading { ProgressView() } }

@@ -65,6 +65,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Reuse downloaded avatars on iPhone and show initials while a photo is unavailable.
 - Within each activity group, put MRs ready for manual merge immediately below pinned cards. Cards needing attention come before MRs eligible for automatic merge.
 
+- On iPhone, pull to refresh gets the latest data from the Mac. The board and MR Details toolbar buttons request a GitLab refresh for their respective scope.
+
 - Show saved iPhone MR details immediately and refresh them in the background. Manual refresh shows progress while keeping the details visible.
 
 - On Mac MR cards, show the repository name before the MR number on the line below the title.

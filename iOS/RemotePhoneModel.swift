@@ -24,6 +24,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     private(set) var supportsDetails = false
     private(set) var supportsDetailContext = false
     private(set) var supportsDetailPreviews = false
+    private var supportsCachedDetails = false
     private(set) var supportsOriginUpdates = false
     private(set) var supportsDraftRegeneration = false
     private(set) var draftRegenerationLoadFailed = false
@@ -53,6 +54,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         return pendingActionPresentation?.card
     }
     private var needsDetailReload = false
+    private var needsLiveDetailReload = false
     private var detailRecoveryAttempts = 0
     @ObservationIgnored private var contentRefresh: Task<Void, Never>?
     var paired = false
@@ -161,7 +163,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                     self.avatarSnapshotChallenge = nil
                     self.connectionRevision = UUID(); self.cancelApproval(); self.state.disconnected()
                     self.detailState.disconnect(); self.supportsDetails = false; self.supportsOriginUpdates = false
-                    self.supportsDetailContext = false; self.supportsDetailPreviews = false
+                    self.supportsDetailContext = false; self.supportsDetailPreviews = false; self.supportsCachedDetails = false
                     self.suspendDraftRegenerationReads()
                     self.isSynchronizingDetails = false; self.isManuallyRefreshingContent = false
                     self.contentRefresh?.cancel(); self.contentRefresh = nil
@@ -219,8 +221,9 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                         self.detailRecoveryAttempts += 1
                         self.detailState.prepareToReload()
                         self.needsDetailReload = true
+                        self.needsLiveDetailReload = response.request.cachedOnly != true
                         self.isSynchronizingDetails = true
-                        if self.state.pending == nil { await self.refresh(force: true, fromGitLab: true) }
+                        if self.state.pending == nil { await self.refresh(force: true) }
                         return
                     }
                     self.detailState.receive(response, board: board)
@@ -258,6 +261,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                     self.supportsDetails = message.capabilities?.contains(RemoteMessage.detailsCapability) == true
                     self.supportsDetailContext = self.supportsDetails && message.capabilities?.contains(RemoteMessage.detailContextCapability) == true
                     self.supportsDetailPreviews = self.supportsDetails && message.capabilities?.contains(RemoteMessage.detailPreviewCapability) == true
+                    self.supportsCachedDetails = self.supportsDetails && message.capabilities?.contains(RemoteMessage.cachedDetailsCapability) == true
                     self.supportsOriginUpdates = self.supportsDetails && message.capabilities?.contains(RemoteMessage.detailOriginsCapability) == true
                     if self.state.board?.hostSession != previousBoard?.hostSession || self.state.board?.account != previousBoard?.account {
                         self.resetDraftRegenerationConnection()
@@ -288,16 +292,15 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         old?.stop(); cancelApproval(); state.disconnected(); connectingUntil = .distantPast
         avatarSnapshotChallenge = nil
         detailState.disconnect(); supportsDetails = false; supportsOriginUpdates = false
-        supportsDetailContext = false; supportsDetailPreviews = false
+        supportsDetailContext = false; supportsDetailPreviews = false; supportsCachedDetails = false
         suspendDraftRegenerationReads()
         isSynchronizingDetails = false; isManuallyRefreshingContent = false
         contentRefresh?.cancel(); contentRefresh = nil
         shouldRecoverCommand = recovery != nil; receiptChallenge = nil; receiptRevision = nil
     }
-    /// An explicit false requests the host snapshot after an action that already refreshed its MR.
-    func refresh(force: Bool = false, fromGitLab: Bool? = nil) async {
+    func refresh(force: Bool = false, fromGitLab: Bool = false) async {
         let requestState = state
-        guard let connection, let challenge = requestState.beginRefresh(force: force || fromGitLab == true, now: now()) else { return }
+        guard let connection, let challenge = requestState.beginRefresh(force: force || fromGitLab, now: now()) else { return }
         do { try await connection.send(.init(type: .hello, challenge: challenge,
             capabilities: [RemoteMessage.commentReviewCapability, RemoteMessage.mergeActionsCapability, RemoteMessage.detailsCapability,
                            RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability,
@@ -332,18 +335,28 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         let visible = detailAvatarURLs.union(state.board?.avatarThumbnailURLs ?? [])
         avatarThumbnails = avatarThumbnails.filter { visible.contains($0.key) }
     }
-    func refreshContent() async {
+    func refreshContent(fromGitLab: Bool = false) async {
+        await refreshManually { model in
+            model.prepareDetailsReload()
+            await model.refresh(force: true, fromGitLab: fromGitLab)
+        }
+    }
+
+    func refreshDetailsFromGitLab(card: RemoteCard) async {
+        await refreshManually { model in
+            model.detailRecoveryAttempts = 0
+            await model.requestDetails(card: card, force: true, fromGitLab: true)
+        }
+    }
+
+    private func refreshManually(_ operation: @escaping @MainActor (RemotePhoneModel) async -> Void) async {
         if let contentRefresh { await contentRefresh.value; return }
         isManuallyRefreshingContent = true
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
-            self.detailRecoveryAttempts = 0
-            self.needsDetailReload = self.viewedCardID != nil
-            self.isSynchronizingDetails = self.viewedCardID != nil
-            self.detailState.prepareToReload()
             let revision = self.connectionRevision
             let deadline = ContinuousClock.now + .seconds(45)
-            await self.refresh(force: true, fromGitLab: true)
+            await operation(self)
             while !Task.isCancelled, self.connectionRevision == revision, ContinuousClock.now < deadline,
                   self.state.isRefreshing(now: self.now()) || self.detailState.isLoading(now: self.now()) {
                 do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
@@ -355,45 +368,55 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         if !task.isCancelled { contentRefresh = nil; isManuallyRefreshingContent = false }
     }
 
-    private func finishAction(_ result: RemoteCommandResult) async {
-        shouldRecoverCommand = false
-        let command = recovery?.command
-        let completedCommand = command?.id == result.id ? command : nil
-        if result.status == .completed, completedCommand?.isCompletionAcknowledgement == true {
-            state.acknowledgeResult()
-        }
-        if let completedCommand, completedCommand.isDraftRegeneration,
-           completedCommand.actionID != RemoteDraftRegenerationControl.applyID {
-            await refresh(force: true, fromGitLab: false)
-            return
-        }
+    private func prepareDetailsReload() {
         needsDetailReload = viewedCardID != nil
+        needsLiveDetailReload = false
         isSynchronizingDetails = viewedCardID != nil
         detailRecoveryAttempts = 0
         detailState.prepareToReload()
-        let usesCurrentBoard = completedCommand?.isFeedbackSuggestionDecision == true || completedCommand?.isCompletionAcknowledgement == true || completedCommand?.isDraftRegeneration == true
-        await refresh(force: true, fromGitLab: !usesCurrentBoard)
+    }
+
+    private func finishAction(_ result: RemoteCommandResult) async {
+        shouldRecoverCommand = false
+        if result.status == .completed, let command = recovery?.command,
+           command.id == result.id, command.isCompletionAcknowledgement {
+            state.acknowledgeResult()
+        }
+        if let command = recovery?.command, command.id == result.id, command.isDraftRegeneration,
+           command.actionID != RemoteDraftRegenerationControl.applyID {
+            await refresh(force: true)
+            return
+        }
+        prepareDetailsReload()
+        await refresh(force: true)
     }
 
     private func refreshViewedDetails() async {
         guard supportsDetails, let id = viewedCardID, let card = state.board?.cards.first(where: { $0.id == id }) else {
             isSynchronizingDetails = false; return
         }
-        await requestDetails(card: card, force: needsDetailReload)
+        await requestDetails(card: card, force: needsDetailReload, fromGitLab: needsLiveDetailReload)
     }
 
-    func requestDetails(card: RemoteCard, force: Bool = false) async {
-        guard state.board?.cards.contains(where: { $0.id == card.id }) == true else { return }
-        if viewedCardID != card.id { detailRecoveryAttempts = 0 }
+    func requestDetails(card: RemoteCard, force: Bool = false, fromGitLab: Bool? = nil) async {
+        guard supportsDetails, state.board?.cards.contains(where: { $0.id == card.id }) == true else { return }
+        let opening = viewedCardID != card.id
+        if opening { detailRecoveryAttempts = 0; needsLiveDetailReload = false }
         viewedCardID = card.id
+        // Older Macs only have the original live detail read. Keep it for opening Details.
+        let live = fromGitLab ?? (needsLiveDetailReload || (opening && !supportsCachedDetails))
         if state.pending != nil || (state.isRefreshing(now: now()) && (needsDetailReload || isManuallyRefreshingContent)) {
-            needsDetailReload = true; isSynchronizingDetails = true; return
+            needsDetailReload = true; needsLiveDetailReload = needsLiveDetailReload || live
+            isSynchronizingDetails = true; return
         }
-        guard supportsDetails, state.isConnected(now: now()), let board = state.board, let connection,
-              force || detailState.openRequest == nil || detailState.details(for: card, board: board) == nil,
+        guard live || supportsCachedDetails else {
+            needsDetailReload = false; isSynchronizingDetails = false; return
+        }
+        guard state.isConnected(now: now()), let board = state.board, let connection,
+              force || detailState.openRequest == nil,
               let request = detailState.begin(card: card, board: board, now: now(), force: force,
-                  presentationIndependent: supportsDetailContext) else { return }
-        needsDetailReload = false; isSynchronizingDetails = false
+                  presentationIndependent: supportsDetailContext, cachedOnly: live ? nil : true) else { return }
+        needsDetailReload = false; needsLiveDetailReload = false; isSynchronizingDetails = false
         let revision = connectionRevision
         do { try await connection.send(.init(type: .detailRequest, detailRequest: request,
             cachedAvatarURLs: Array(avatarThumbnails.keys.prefix(64)))) }
@@ -407,7 +430,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         detailState.disconnect()
         detailAvatarURLs.removeAll()
         pruneAvatarThumbnails()
-        viewedCardID = nil; needsDetailReload = false; isSynchronizingDetails = false; detailRecoveryAttempts = 0
+        viewedCardID = nil; needsDetailReload = false; needsLiveDetailReload = false
+        isSynchronizingDetails = false; detailRecoveryAttempts = 0
         guard supportsDetails, let request, let connection else { return }
         Task { try? await connection.send(.init(type: .cancelDetails, detailRequest: request)) }
     }

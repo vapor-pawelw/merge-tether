@@ -25,8 +25,8 @@ final class GlabService {
     private struct DiscussionKey: Hashable { let projectID: Int; let iid: Int }
     @ObservationIgnored private var recentDiscussions: [DiscussionKey: (readAt: Date, discussions: [GitLabMergeRequestDiscussion])] = [:]
 
-    func cachedDiscussions(projectID: Int, iid: Int) -> [GitLabMergeRequestDiscussion]? {
-        recentDiscussions[DiscussionKey(projectID: projectID, iid: iid)]?.discussions
+    func cachedDiscussions(projectID: Int, iid: Int) -> (readAt: Date, discussions: [GitLabMergeRequestDiscussion])? {
+        recentDiscussions[DiscussionKey(projectID: projectID, iid: iid)]
     }
 
     func rememberDiscussions(_ discussions: [GitLabMergeRequestDiscussion], projectID: Int, iid: Int, readAt: Date) {

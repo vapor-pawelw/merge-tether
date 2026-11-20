@@ -834,13 +834,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "GitLab could not be refreshed. Previous data is shown and actions are paused."
+            "value": "The Mac is showing incomplete board data. Actions are paused."
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nie udało się odświeżyć GitLaba. Widać poprzednie dane, a akcje są wstrzymane."
+            "value": "Dane tablicy na Macu są niepełne. Akcje są wstrzymane."
           }
         }
       }
@@ -1283,6 +1283,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Odśwież tablicę"
+          }
+        }
+      }
+    },
+    "remote.refreshGitLabBoard": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh board from GitLab"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Odśwież tablicę z GitLaba"
           }
         }
       }

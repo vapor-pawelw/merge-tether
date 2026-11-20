@@ -197,11 +197,12 @@ struct RemoteHostStartupTests {
 
 @MainActor
 struct RemoteHostSessionTests {
-    @Test func aSnapshotOnlyHelloDoesNotStartTheInitialGitLabRefresh() async throws {
+    @Test(arguments: [nil, false] as [Bool?])
+    func aSnapshotHelloDoesNotStartTheInitialGitLabRefresh(_ refresh: Bool?) async throws {
         let f = try Fixture(); defer { f.clean() }
         await f.host.startupLoadTask?.value
         f.gitlab.requests.removeAll()
-        await f.transport.onMessage?(.init(type: .hello, challenge: UUID(), refresh: false))
+        await f.transport.onMessage?(.init(type: .hello, challenge: UUID(), refresh: refresh))
         #expect(f.gitlab.requests.isEmpty)
         #expect(f.transport.messages.last?.board?.partial == true)
         #expect(f.monitor.lastRefresh == nil)
@@ -526,6 +527,7 @@ struct RemoteHostSessionTests {
             }, removePairing: {}, commandGate: RemoteCommandGate(store: receiptStore), makeConnection: { _ in transport })
         }
         func board(requireCards: Bool = true) async throws -> RemoteBoard {
+            if monitor.lastRefresh == nil { await monitor.refreshNow() }
             await transport.onMessage?(.init(type: .hello, challenge: UUID(), capabilities: [RemoteMessage.mergeActionsCapability]))
             let board = try #require(transport.messages.last(where: { $0.type == .snapshot })?.board)
             try #require(!board.partial, "refresh=\(monitor.boardRefreshState) error=\(String(describing: monitor.lastError)) attention=\(monitor.attention.hasError)/\(monitor.attention.isLoading) authored=\(monitor.authoredMergeRequests.hasError)/\(monitor.authoredMergeRequests.isLoading) loading=\(monitor.isLoading)")

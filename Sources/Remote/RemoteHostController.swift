@@ -76,11 +76,10 @@ extension RemoteConnection: RemoteHostTransport {}
     private var originSubscription: RemoteDetailOriginSubscription?
     @ObservationIgnored private var originUpdateTask: Task<Void, Never>?
     @ObservationIgnored private(set) var detailTask: Task<Void, Never>?
-    @ObservationIgnored private var backgroundRefresh: Task<Void, Never>?
     private let detailReader: DetailReader
     private var activeDetailRequest: RemoteDetailRequest?
     private var lastDetailRead = Date.distantPast
-    @ObservationIgnored private var recentDetails: [String: (digest: String, details: RemoteMRDetails)] = [:]
+    @ObservationIgnored private var recentDetails: [String: (digest: String, readAt: Date, details: RemoteMRDetails)] = [:]
     @ObservationIgnored private var resolutionPreviews: [String: ManualDiscussionResolution.Prepared] = [:]
 
     init(monitor: TodoMonitorService,
@@ -252,16 +251,13 @@ extension RemoteConnection: RemoteHostTransport {}
             phoneSupportsOriginUpdates = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.detailOriginsCapability) == true
             if !phoneSupportsOriginUpdates { clearOriginSubscription() }
             let fresh: Bool
-            if message.refresh == true || (message.refresh == nil && monitor.lastRefresh == nil) {
-                // An explicit refresh, or a Mac that has not loaded GitLab yet, waits for current data.
-                fresh = await refreshSource(force: message.refresh == true, deadline: .now + .seconds(35))
+            if message.refresh == true {
+                fresh = await refreshSource(deadline: .now + .seconds(35))
             } else {
-                // A snapshot-only hello after a suggestion decision does not trigger a stale-board poll.
                 let settled = await RemoteRefreshBarrier.refresh(deadline: .now + .seconds(4), isRefreshing: {
                     self.monitor.isLoading || self.monitor.attention.isLoading || self.monitor.authoredMergeRequests.isLoading
                 }, refresh: {}, validate: { true })
                 fresh = settled && monitor.lastRefresh != nil
-                if message.refresh == nil { refreshInBackgroundIfStale() }
             }
             guard connection === active else { return }
             var board = snapshot()
@@ -269,7 +265,7 @@ extension RemoteConnection: RemoteHostTransport {}
             do { try await active.send(.init(type: .snapshot, challenge: challenge, board: board,
                 capabilities: [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability, RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability,
                                RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability, RemoteMessage.detailPreviewCapability,
-                               RemoteMessage.draftRegenerationCapability])) }
+                               RemoteMessage.cachedDetailsCapability, RemoteMessage.draftRegenerationCapability])) }
             catch { failed = true; try? await active.send(.init(type: .unavailable)); return }
             if message.capabilities?.contains(RemoteMessage.boardAvatarsCapability) == true {
                 guard avatarChallenge == challenge else { return }
@@ -299,7 +295,7 @@ extension RemoteConnection: RemoteHostTransport {}
             guard let command = message.command, let pairing else { return }
             // Seen acknowledges a local receipt. Draft regeneration and suggestion decisions validate their own context.
             let fresh = if command.isCompletionAcknowledgement || command.isFeedbackSuggestionDecision || command.isDraftRegeneration { true } else {
-                await refreshSource(force: true, deadline: .now + .seconds(35))
+                await refreshSource(deadline: .now + .seconds(35))
             }
             var board = snapshot()
             if !fresh { board.partial = true }
@@ -397,11 +393,12 @@ extension RemoteConnection: RemoteHostTransport {}
         }
         cancelDetailAvatars()
         clearOriginSubscription()
+        let cachedOnly = request.cachedOnly == true
         let nextRead = lastDetailRead.addingTimeInterval(1)
         let digest = card.detailContextDigest
         detailTask?.cancel(); activeDetailRequest = request
         let revision = monitor.glab.accountRevision
-        let subscription = phoneSupportsOriginUpdates
+        let subscription = phoneSupportsOriginUpdates && !cachedOnly
             ? RemoteDetailOriginSubscription(request: request, source: source, accountRevision: revision) : nil
         originSubscription = subscription
         detailTask = Task { [weak self, weak active] in
@@ -411,28 +408,37 @@ extension RemoteConnection: RemoteHostTransport {}
             }
             let response: RemoteDetailResponse
             do {
-                if phoneSupportsDetailPreviews, let username = monitor.glab.currentUsername {
-                    let preview = await detailPreview(request, source: source, row: row, username: username,
+                if cachedOnly {
+                    guard let username = monitor.glab.currentUsername else { throw RemoteMRDetailLoader.ReadError.changed }
+                    let details = await cachedDetails(request, source: source, row: row, username: username,
                         digest: digest, checkedAt: board.updatedAt ?? now())
+                    response = .init(request: request, status: .current, details: details)
+                } else {
+                    if phoneSupportsDetailPreviews, let username = monitor.glab.currentUsername {
+                        let details = await cachedDetails(request, source: source, row: row, username: username,
+                            digest: digest, checkedAt: board.updatedAt ?? now())
+                        let preview = RemoteDetailResponse(request: request, status: .current, details: details, isPreview: true)
+                        let bounded = await Task.detached(priority: .userInitiated) { preview.bounded() }.value
+                        guard !Task.isCancelled, phoneSupportsDetails, connection === active,
+                              self.pairing?.sessionID == pairingSession, monitor.glab.accountRevision == revision,
+                              activeDetailRequest == request else { return }
+                        if phoneSupportsDetailPreviews, request.matches(snapshot()) {
+                            try? await active.send(.init(type: .details, detailResponse: bounded))
+                        }
+                    }
+                    let delay = nextRead.timeIntervalSince(now())
+                    if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
                     guard !Task.isCancelled, phoneSupportsDetails, connection === active,
                           self.pairing?.sessionID == pairingSession, monitor.glab.accountRevision == revision,
                           activeDetailRequest == request else { return }
-                    if phoneSupportsDetailPreviews, request.matches(snapshot()) {
-                        try? await active.send(.init(type: .details, detailResponse: preview))
-                    }
+                    guard request.matches(snapshot()) else { throw RemoteMRDetailLoader.ReadError.changed }
+                    lastDetailRead = now()
+                    var details = try await detailReader(source, row.evidenceMatchesCatalogContext ? row.item.drafts : [], monitor.glab)
+                    let usage = try? await AssistantUsageStore.shared.snapshot()
+                    try Task.checkCancellation()
+                    RemoteMRDetailSupplement.append(to: &details, row: row, monitor: monitor, usage: usage)
+                    response = .init(request: request, status: .current, details: details)
                 }
-                let delay = nextRead.timeIntervalSince(now())
-                if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
-                guard !Task.isCancelled, phoneSupportsDetails, connection === active,
-                      self.pairing?.sessionID == pairingSession, monitor.glab.accountRevision == revision,
-                      activeDetailRequest == request else { return }
-                guard request.matches(snapshot()) else { throw RemoteMRDetailLoader.ReadError.changed }
-                lastDetailRead = now()
-                var details = try await detailReader(source, row.evidenceMatchesCatalogContext ? row.item.drafts : [], monitor.glab)
-                let usage = try? await AssistantUsageStore.shared.snapshot()
-                try Task.checkCancellation()
-                RemoteMRDetailSupplement.append(to: &details, row: row, monitor: monitor, usage: usage)
-                response = .init(request: request, status: .current, details: details)
             } catch RemoteMRDetailLoader.ReadError.changed { response = .init(request: request, status: .changed) }
             catch { response = .init(request: request, status: .unavailable) }
             let bounded = await Task.detached(priority: .utility) { response.bounded() }.value
@@ -440,9 +446,9 @@ extension RemoteConnection: RemoteHostTransport {}
                   monitor.glab.accountRevision == revision, activeDetailRequest == request else { return }
             var checked = bounded
             if !request.matches(snapshot()) { checked = .init(request: request, status: .changed) }
-            if checked.status == .current, let digest, let details = checked.details {
-                recentDetails[request.cardID] = (digest, details)
-                if recentDetails.count > 16, let oldest = recentDetails.min(by: { $0.value.details.checkedAt < $1.value.details.checkedAt })?.key {
+            if !cachedOnly, checked.status == .current, let digest, let details = checked.details {
+                recentDetails[request.cardID] = (digest, Date(), details)
+                if recentDetails.count > 16, let oldest = recentDetails.min(by: { $0.value.readAt < $1.value.readAt })?.key {
                     recentDetails.removeValue(forKey: oldest)
                 }
             }
@@ -456,7 +462,7 @@ extension RemoteConnection: RemoteHostTransport {}
                     detailAvatarTask = deliverAvatarThumbnails(delivered.avatarThumbnailURLs, challenge: request.id,
                         session: request.hostSession, excluding: cachedAvatarURLs, over: active) { $0.detailAvatarRequest == request.id }
                 }
-                if checked.status == .current, let details = response.details {
+                if !cachedOnly, checked.status == .current, let details = response.details {
                     if let subscription, originSubscription === subscription, let delivered = checked.details {
                         subscription.delivered(full: details, rendered: delivered)
                         flushOriginUpdates()
@@ -467,21 +473,30 @@ extension RemoteConnection: RemoteHostTransport {}
         }
     }
 
-    private func detailPreview(_ request: RemoteDetailRequest, source: GitLabMergeRequest, row: MergeRequestBoardSnapshot.Row,
-                               username: String, digest: String?, checkedAt: Date) async -> RemoteDetailResponse {
-        if let cached = recentDetails[request.cardID], cached.digest == digest {
-            let response = RemoteDetailResponse(request: request, status: .current, details: cached.details, isPreview: true)
-            return await Task.detached(priority: .userInitiated) { response.bounded() }.value
-        }
-        let discussions = monitor.glab.cachedDiscussions(projectID: source.projectID, iid: source.iid)
+    private func cachedDetails(_ request: RemoteDetailRequest, source: GitLabMergeRequest, row: MergeRequestBoardSnapshot.Row,
+                               username: String, digest: String?, checkedAt: Date) async -> RemoteMRDetails {
+        let cached = recentDetails[request.cardID].flatMap { $0.digest == digest ? $0 : nil }
+        let discussionRead = monitor.glab.cachedDiscussions(projectID: source.projectID, iid: source.iid)
+        let newerDiscussions = discussionRead.map { $0.readAt > (cached?.readAt ?? .distantPast) } ?? false
+        if let cached, !newerDiscussions, checkedAt <= cached.readAt { return cached.details }
         let item = row.evidenceMatchesCatalogContext ? row.item : row.displayItem
         var details = await Task.detached(priority: .userInitiated) {
             RemoteMRDetailLoader.project(request: source, progress: item.approvalProgress, rules: nil, reviewers: nil,
-                discussions: discussions, drafts: item.drafts, username: username, checkedAt: checkedAt)
+                discussions: newerDiscussions ? discussionRead?.discussions : nil, drafts: item.drafts, username: username,
+                checkedAt: max(checkedAt, discussionRead?.readAt ?? .distantPast))
         }.value
+        if let cached, !newerDiscussions {
+            details.threads = cached.details.threads
+            details.discussionFingerprint = cached.details.discussionFingerprint
+            details.activeDiscussionFingerprint = cached.details.activeDiscussionFingerprint
+            details.draftContexts = cached.details.draftContexts
+            details.proposedSolutionDraftIDs = cached.details.proposedSolutionDraftIDs
+            details.approvals = cached.details.approvals ?? details.approvals
+        }
         RemoteMRDetailSupplement.append(to: &details, row: row, monitor: monitor, usage: nil)
-        let response = RemoteDetailResponse(request: request, status: .current, details: details, isPreview: true)
-        return await Task.detached(priority: .userInitiated) { response.bounded() }.value
+        details.usage = cached?.details.usage
+        details.approvals?.rules = cached?.details.approvals?.rules
+        return details
     }
 
     private func clearOriginSubscription() {
@@ -528,24 +543,10 @@ extension RemoteConnection: RemoteHostTransport {}
             }
         }
     }
-    /// Keeps an open phone current without making it wait: a later lease renewal carries the result.
-    private func refreshInBackgroundIfStale() {
-        guard backgroundRefresh == nil, !monitor.isLoading,
-              monitor.lastRefresh.map({ now().timeIntervalSince($0) > 120 }) ?? true else { return }
-        backgroundRefresh = Task { [weak self] in
-            await self?.monitor.refreshNow()
-            self?.backgroundRefresh = nil
-        }
-    }
-
-    private func refreshSource(force: Bool, deadline: ContinuousClock.Instant) async -> Bool {
+    private func refreshSource(deadline: ContinuousClock.Instant) async -> Bool {
         await RemoteRefreshBarrier.refresh(deadline: deadline, isRefreshing: {
             self.monitor.isLoading || self.monitor.attention.isLoading || self.monitor.authoredMergeRequests.isLoading
-        }, refresh: {
-            if force || (self.monitor.lastRefresh.map({ Date().timeIntervalSince($0) > 30 }) ?? true) {
-                await self.monitor.refreshNow()
-            }
-        }, validate: {
+        }, refresh: { await self.monitor.refreshNow() }, validate: {
             await self.monitor.attention.refreshPendingDrafts()
             return self.monitor.lastError == nil && !self.monitor.attention.hasError && !self.monitor.authoredMergeRequests.hasError
         })
