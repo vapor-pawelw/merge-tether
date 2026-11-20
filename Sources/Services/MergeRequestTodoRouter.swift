@@ -145,7 +145,120 @@ final class MergeRequestTodoRouter {
                 await run(intent.id, manual: false)
             }
         }
+        if automatically {
+            for intent in settings.mrActionIntents where intent.target.host == host && intent.target.username == username
+                && intent.kind == .review && intent.state == .failed && intent.reviewRecoveryJobID == nil {
+                guard !Task.isCancelled, isCurrentPass() else { break }
+                await recoverRejectedReview(intent)
+            }
+        }
         return acknowledged
+    }
+
+    private func recoverRejectedReview(_ intent: MRTodoIntent) async {
+        guard let job = settings.assistantHandoffs.first(where: { $0.id == intent.jobID }),
+              job.manual == false, job.execution?.state == .succeeded, job.execution?.cancellationOrigin != .user,
+              job.key.username == intent.target.username, job.key.work == .init(host: intent.target.host,
+                projectID: intent.target.projectID, iid: intent.request.iid),
+              job.mergeRequestURL == intent.request.webURL, job.taskPrompt != nil,
+              AssistantAutomationRunner.recordsReviewVerdict(for: job, history: settings.assistantHandoffs),
+              launching.insert(intent.id).inserted else { return }
+        defer { launching.remove(intent.id) }
+        let work = job.key.work
+        let configuration = settings.automation
+        let revision = glab.accountRevision
+        func permits(_ request: GitLabMergeRequest) -> Bool {
+            !Task.isCancelled && glab.accountRevision == revision && isCurrent(work.host, job.key.username)
+                && settings.automation == configuration
+                && matchesCompletionSnapshot(intent, job: job)
+                && settings.assistantHandoffs.first(where: { $0.id == job.id })?.execution?.cancellationOrigin != .user
+                && request.projectID == work.projectID && request.iid == work.iid && request.webURL == job.mergeRequestURL
+                && shouldRunAutomatically(.review, request: request, target: intent.target, workflowEventKind: .reviewUpdate)
+                && !AssistantAutomationRunner.isWorking(on: work)
+                && !settings.workflowActivity.contains(where: { entry in
+                    entry.host == work.host && entry.user.username == job.key.username && entry.event.kind == .reviewUpdate
+                        && entry.event.mergeRequest.webURL == request.webURL && entry.event.mergeRequest.sha == request.sha
+                        && [.queued, .running, .waitingForAssistant].contains(entry.state)
+                })
+        }
+        guard permits(intent.request), await canAutomate(), await AssistantJobJournal.loadKey(),
+              let user = try? await glab.fetchAuthenticatedUser(host: work.host, expectedUsername: job.key.username),
+              let request = try? await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: work.host),
+              request.author.id != user.id, let head = request.sha, GlabService.isFullGitSHA(head),
+              permits(request),
+              let drafts = try? await glab.fetchOwnDraftNoteCount(projectID: work.projectID, iid: work.iid,
+                host: work.host, userID: user.id), drafts == 0, permits(request),
+              !settings.assistantHandoffs.contains(where: { $0.key.work == work && $0.key.username == job.key.username
+                  && $0.execution?.state.isActive == true }) else { return }
+
+        // Reserve a stable job ID before dispatch. A restart can adopt the exact job if it was recorded.
+        let reservedID = UUID()
+        update(intent.id) { $0.reviewRecoveryJobID = reservedID }
+        guard settings.automaticActionsAllowed else { return }
+        var recovery = intent
+        recovery.request = request
+        recovery.headSHA = head
+        recovery.reviewRecoveryJobID = reservedID
+        do {
+            let replacementID: UUID
+            if let launcher { replacementID = try await launcher(recovery, false) }
+            else { replacementID = try await launchReviewRecovery(recovery, previous: job, user: user, configuration: configuration) }
+            guard replacementID == reservedID, glab.accountRevision == revision, isCurrent(work.host, user.username),
+                  settings.mrActionIntents.contains(where: { $0.id == intent.id && $0.jobID == job.id
+                      && $0.reviewRecoveryJobID == reservedID && $0.state == .failed }) else { return }
+            update(intent.id, origin: .automatic) {
+                $0.jobID = replacementID; $0.request = request; $0.headSHA = head; $0.state = .running; $0.error = nil
+            }
+            settings.recordAutomationEvent(target: intent.target, action: .retry, origin: .automatic, state: .queued,
+                intentID: intent.id, jobID: replacementID, relatedJobID: job.id)
+        } catch is AssistantAutomationRunner.ReviewAdmissionReadFailure,
+                AssistantAutomationRunner.HandoffError.mergeRequestBusy,
+                AssistantJobExecutor.ExecutionError.headChanged {
+            update(intent.id) { if $0.reviewRecoveryJobID == reservedID { $0.reviewRecoveryJobID = nil } }
+        } catch {
+            settings.recordAutomationEvent(target: intent.target, action: .retry, origin: .automatic, state: .failed,
+                message: String(describing: error), intentID: intent.id, jobID: job.id)
+        }
+    }
+
+    private func launchReviewRecovery(_ intent: MRTodoIntent, previous: AssistantAutomationRunner.Handoff,
+                                      user: GitLabAuthenticatedUser, configuration: AutomationSettings) async throws -> UUID {
+        guard let id = intent.reviewRecoveryJobID else { throw CancellationError() }
+        let work = previous.key.work
+        let configured = Self.configuredAssistantContext(intent, configuration: configuration)
+        let verified = ReviewVerdictStore.authenticatedVerdict(host: work.host, projectID: work.projectID, iid: work.iid,
+            user: user, settings: settings, in: proofDirectory)
+        let candidate = ReviewVerdictStore.verdict(host: work.host, projectID: work.projectID, iid: work.iid,
+            user: user, in: proofDirectory)
+        let scope: String
+        if verified == nil, let candidate, candidate.runID == previous.id, candidate.headSHA == intent.headSHA,
+           !candidate.requiresFreshReview(forSemanticContext: intent.request.semanticContextFingerprint) {
+            scope = """
+                The previous run reported reviewing this exact current commit, but its completion could not be authenticated.
+                Verify which code and discussions it actually assessed from its saved review evidence and current GitLab data.
+                If the evidence confirms coverage of this code, retain it and check only new or edited notes in active threads.
+                If coverage cannot be established, check the uncovered parts of the current diff before recording a verdict.
+                """
+        } else {
+            scope = AssistantAutomationRunner.currentReviewTask(work: work, head: intent.headSHA,
+                semanticContextFingerprint: intent.request.semanticContextFingerprint, user: user,
+                settings: settings, fullReview: false)
+        }
+        let custom = configured.instructions.isEmpty ? nil : configured.instructions
+        let task = scope + """
+
+            Recover the prior review result at the pinned current commit. Skip resolved discussions. Preserve existing
+            findings and drafts unless the live evidence changes their assessment. Do not repeat published comments.
+            Record a fresh verdict and classify every current active discussion from retained or newly verified evidence.
+            """ + (custom.map { AssistantAutomationRunner.TaskIntent.customInstructions + $0 } ?? "")
+        let job = try await AssistantAutomationRunner.launch(configuration.assistant, title: configured.title,
+            mergeRequestURL: intent.request.webURL, prompt: AssistantAutomationRunner.retryTaskPrompt(task, previous: previous),
+            workspace: configuration.assistantWorkspace, access: .gitLabRead, work: work, username: user.username,
+            settings: settings, isReview: true, mrWorkflow: .review, manual: false, expectedHeadSHA: intent.headSHA,
+            configurationSnapshot: configuration, glab: glab.freshSession(),
+            taskIntent: .review(configuredInstructions: custom), workflowEventKind: .reviewUpdate,
+            preparedWorkflowReview: .init(jobID: id, user: user))
+        return job.id
     }
 
     func run(_ id: UUID, manual: Bool, reviewIsConfirmed: (GitLabMergeRequest) -> Bool = { _ in true }) async {
@@ -507,6 +620,16 @@ final class MergeRequestTodoRouter {
                   request.projectID == original.target.projectID, request.iid == iid,
                   request.webURL.isGitLabMergeRequest(host: host, iid: iid) else { continue }
             guard matchesCompletionSnapshot(original, job: job) else { continue }
+            if original.state == .failed, let job, let reserved = original.reviewRecoveryJobID, reserved != job.id,
+               let recovered = settings.assistantHandoffs.first(where: { $0.id == reserved }),
+               recovered.createdAt > job.createdAt, recovered.key.work == job.key.work, recovered.key.username == username,
+               recovered.mergeRequestURL == request.webURL, recovered.workflowEventKind == .reviewUpdate,
+               let recoveredHead = recovered.expectedHeadSHA {
+                update(original.id) {
+                    $0.jobID = reserved; $0.request = request; $0.headSHA = recoveredHead; $0.state = .running; $0.error = nil
+                }
+                continue
+            }
             // Preserve current readiness so an adopted Draft can start naturally
             // when the author marks it ready, without a second incoming event.
             if original.request.draft != request.draft || original.request.sha != request.sha
@@ -539,7 +662,7 @@ final class MergeRequestTodoRouter {
                 continue
             }
             var sameReviewedHead = false
-            if original.kind == .review, let job, job.execution?.state == .succeeded, job.expectedHeadSHA == request.sha {
+            if original.kind == .review, let job, job.execution?.state == .succeeded {
                 sameReviewedHead = await reviewMatches(job, request: request)
             }
             var provedFollowUp = original.kind == .followUp && job?.execution?.state == .succeeded
@@ -567,10 +690,15 @@ final class MergeRequestTodoRouter {
             } else if stoppedFollowUp, let execution = job?.execution {
                 update(original.id) { $0.state = .failed; $0.error = execution.attentionExplanation ?? execution.error ?? execution.summary }
             } else if job?.execution?.state == .succeeded {
-                update(original.id) {
-                    $0.state = .failed
-                    $0.error = String(localized: original.kind == .followUp
-                        ? .TodoRouting.todoRoutingFollowUpNeedsEvidence : .TodoRouting.todoRoutingNeedsRecheck)
+                let reason: LocalizedStringResource = switch original.kind {
+                case .followUp: .TodoRouting.todoRoutingFollowUpNeedsEvidence
+                case .review where job?.expectedHeadSHA != request.sha: .TodoRouting.todoRoutingReviewHeadChanged
+                case .review: .TodoRouting.todoRoutingReviewNeedsEvidence
+                default: .TodoRouting.todoRoutingNeedsRecheck
+                }
+                let error = String(localized: reason)
+                if original.state != .failed || original.error != error {
+                    update(original.id) { $0.state = .failed; $0.error = error }
                 }
             } else if original.isAwaitingFollowUpVerification && unboundFollowUp {
                 if followUpCompletion == .needsWork {
@@ -592,6 +720,7 @@ final class MergeRequestTodoRouter {
     private func matchesCompletionSnapshot(_ original: MRTodoIntent, job: AssistantAutomationRunner.Handoff?) -> Bool {
         guard let current = settings.mrActionIntents.first(where: { $0.id == original.id }),
               current.jobID == original.jobID, current.headSHA == original.headSHA,
+              current.reviewRecoveryJobID == original.reviewRecoveryJobID,
               current.noteIDs == original.noteIDs, current.state == original.state else { return false }
         let currentJob = original.jobID.flatMap { id in settings.assistantHandoffs.first { $0.id == id } }
         guard currentJob?.id == job?.id && currentJob?.execution?.state == job?.execution?.state else { return false }
@@ -608,12 +737,17 @@ final class MergeRequestTodoRouter {
     private func reviewMatches(_ job: AssistantAutomationRunner.Handoff, request: GitLabMergeRequest) async -> Bool {
         guard let user = try? await glab.fetchAuthenticatedUser(host: job.key.work.host, expectedUsername: job.key.username),
               let verdict = ReviewVerdictStore.verdict(host: job.key.work.host, projectID: request.projectID,
-                    iid: request.iid, user: user, in: proofDirectory), verdict.headSHA == request.sha, verdict.runID == job.id,
-              AssistantJobJournal.reviewVerdict(for: job) == verdict,
+                    iid: request.iid, user: user, in: proofDirectory), verdict.headSHA == request.sha,
+              let review = settings.assistantHandoffs.first(where: { $0.id == verdict.runID }),
+              review.key.work == job.key.work, review.key.username == job.key.username,
+              review.execution?.state == .succeeded, review.expectedHeadSHA == request.sha,
+              review.id == job.id || review.createdAt > job.createdAt,
+              !verdict.requiresFreshReview(forSemanticContext: request.semanticContextFingerprint),
+              AssistantJobJournal.reviewVerdict(for: review) == verdict,
               verdict.discussionFingerprint != nil,
               let modified = try? ReviewVerdictStore.fileURL(host: job.key.work.host, projectID: request.projectID,
                     iid: request.iid, in: proofDirectory).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
-              modified >= job.createdAt,
+              modified >= review.createdAt,
               let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: request.projectID,
                     iid: request.iid, host: job.key.work.host) else { return false }
         return ReviewVerdictStore.contentMatches(verdict, head: request.sha ?? "", discussions: discussions,

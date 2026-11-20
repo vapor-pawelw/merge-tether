@@ -28,6 +28,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Name the authors of open review threads and replies on Mac and iPhone. Review and feedback statuses show up to two people and count the rest. Hover or tap a name to see the person's avatar and GitLab username.
 
+- Recover an unverified automated review once after its drafts are handled, focusing on uncovered code or active discussion changes. Surface the reason when a review still needs attention.
+
 - Drag the sheet handle down to dismiss iPhone MR Details and refresh with the toolbar button.
 
 - Make iPhone discussion cards easier to distinguish from the section background in MR Details.

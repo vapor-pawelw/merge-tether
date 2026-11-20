@@ -47,6 +47,7 @@ extension TodoMonitorService {
               assistantReady ?? availableAssistants.contains(configuration.assistant),
               cliHealth.hold(for: configuration.assistant) == nil,
               let current = settings.assistantHandoffs.first(where: { $0.id == job.id }),
+              !settings.mrActionIntents.contains(where: { $0.reviewRecoveryJobID == job.id }),
               retryableExecution(current), current.draftRepair == nil,
               !(current.workflow == .followUp && !(current.feedbackNoteIDs ?? []).isEmpty),
               !settings.assistantHandoffs.contains(where: { $0.id != current.id && $0.key.work == current.key.work

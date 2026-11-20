@@ -56,6 +56,28 @@
         }
       }
     },
+    "todoRouting.reviewHeadChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The review started on an older commit. The result still needs verification against the current commit."
+          }
+        }
+      }
+    },
+    "todoRouting.reviewNeedsEvidence": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The review finished, but its result could not be confirmed for the current commit and discussions."
+          }
+        }
+      }
+    },
     "todoRouting.previousAttempt": {
       "extractionState": "manual",
       "localizations": {

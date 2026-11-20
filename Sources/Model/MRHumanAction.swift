@@ -163,8 +163,8 @@ struct MRHumanAction {
     private var requiresPublishedReply = false
     var explanation: String {
         if requiresPublishedReply { return String(localized: .MRHumanAction.mrHumanActionFeedbackReply) }
-        let feedbackReason = kind == .feedback ? AgentExplanation.summary(detail) : nil
-        let explanation = AgentExplanation.summary(summary) ?? feedbackReason ?? String(localized: message)
+        let reason = kind == .feedback || retryIntent?.kind == .review ? AgentExplanation.summary(detail) : nil
+        let explanation = AgentExplanation.summary(summary) ?? reason ?? String(localized: message)
         guard preparedReply != nil else { return explanation }
         let subject = String(localized: .PreparedReplies.preparedRepliesNeedsReview)
         return explanation == subject ? subject : subject + " " + explanation

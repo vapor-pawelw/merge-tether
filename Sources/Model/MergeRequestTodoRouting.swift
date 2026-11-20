@@ -21,6 +21,8 @@ struct MRTodoIntent: Codable, Identifiable, Sendable {
     var updatedAt: Date
     var sourceTodo: Todo?
     var workflowEventKind: MergeWorkflowTrigger? = nil
+    /// The reserved job ID also records that this request has spent its recovery attempt.
+    var reviewRecoveryJobID: UUID? = nil
 
     var isAwaitingFollowUpVerification: Bool {
         kind == .followUp && (state == .verifying || (state == .running && jobID == nil))

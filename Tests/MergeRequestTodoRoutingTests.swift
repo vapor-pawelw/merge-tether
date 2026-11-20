@@ -1234,6 +1234,55 @@ import Testing
         #expect(launches == 1)
     }
 
+    @Test(arguments: ["enabled", "paused", "overridden", "stopped"])
+    func rejectedReviewGetsOneRecoveryAfterItsDraftIsPublished(_ scenario: String) async throws {
+        let f = try fixture(); defer { f.cleanup() }
+        f.settings.automation.reviewRequested.isEnabled = true
+        f.settings.automation.workflowRules[.reviewUpdate].mode = .assistant
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: f.gitlab.data("mr"))
+        let oldHead = String(repeating: "b", count: 40)
+        let job = AssistantAutomationRunner.Handoff(id: UUID(),
+            key: .init(assistant: .codex, work: .init(host: target.host, projectID: 7, iid: 11),
+                username: target.username, workspace: "", access: .gitLabRead),
+            title: "Review", prompt: "Review", createdAt: Date(), allowsPush: false,
+            execution: .init(state: .succeeded, cancellationOrigin: scenario == "stopped" ? .user : nil),
+            taskPrompt: "Review", mergeRequestURL: request.webURL,
+            workflow: .review, manual: false, expectedHeadSHA: oldHead)
+        f.settings.assistantHandoffs = [job]
+        let intent = MRTodoIntent(id: UUID(), target: target, kind: .review, state: .running,
+            todoIDs: [], noteIDs: [], sourceEvents: [], request: request, headSHA: oldHead,
+            jobID: job.id, updatedAt: Date())
+        f.settings.mrActionIntents = [intent]
+        if scenario == "paused" { f.settings.automation.scope[target] = .paused }
+        if scenario == "overridden" { f.settings.automation.workflowRules[.reviewUpdate].mode = .notify }
+        var launched: [String] = []
+        var replacementID: UUID?
+        func poll() async {
+            let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true },
+                launcher: { replacement, manual in
+                    #expect(!manual)
+                    launched.append(replacement.headSHA)
+                    let reserved = try #require(replacement.reviewRecoveryJobID)
+                    #expect(f.settings.mrActionIntents.first?.reviewRecoveryJobID == reserved)
+                    replacementID = reserved
+                    return reserved
+                })
+            _ = await router.process([], host: target.host, username: target.username, managed: [target])
+        }
+
+        f.gitlab.write("drafts", #"[{"id":5,"author_id":1,"note":"Reviewed finding"}]"#)
+        await poll()
+        #expect(launched.isEmpty)
+        f.gitlab.write("drafts", "[]")
+        await poll()
+        await poll()
+
+        let currentHead = try #require(request.sha)
+        #expect(launched == (scenario == "enabled" ? [currentHead] : []))
+        #expect(f.settings.mrActionIntents.first?.jobID == (scenario == "enabled" ? replacementID : job.id))
+        #expect(!f.gitlab.has("acks"))
+    }
+
     @Test func missingRunAndChangedHeadSuccessBecomeVisibleFailures() async throws {
         let f = try fixture(); defer { f.cleanup() }
         f.settings.automation.reviewRequested.isEnabled = true

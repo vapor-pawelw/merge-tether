@@ -605,6 +605,30 @@ struct MergeWorkflowMonitorTests {
         #expect(events.count == 1)
     }
 
+    @Test(arguments: [false, true])
+    func onlyNewActiveFeedbackTriggersReviewWhileOurFindingIsOpen(_ resolved: Bool) async throws {
+        let fixture = try FreshnessFixture(request: mergeRequest(13, sha: String(repeating: "a", count: 40), author: 2))
+        defer { fixture.cleanUp() }
+        let before = fixture.liveThreads.replacingOccurrences(of: "safe fallback\",\"resolvable\":true,\"resolved\":true",
+            with: "safe fallback\",\"resolvable\":true,\"resolved\":false")
+        try fixture.write("threads", before)
+        try fixture.recordVerdict(threads: before)
+        let monitor = MergeWorkflowMonitor(defaults: fixture.defaults, verdictDirectory: fixture.verdictDirectory)
+        var events: [MergeWorkflowEvent] = []
+        await fixture.poll(monitor) { events.append($0) }
+        #expect(events.isEmpty)
+        let after = String(before.dropLast()) + """
+            ,{"id":"new","notes":[{"id":300,"author":{"id":3},"system":false,"body":"Check the timeout","resolvable":true,"resolved":\(resolved)}]}]
+            """
+        try fixture.write("threads", after)
+        await fixture.poll(monitor) { events.append($0) }
+        await fixture.poll(monitor) { events.append($0) }
+        #expect(events.count == (resolved ? 0 : 1))
+        if !resolved {
+            #expect(events.first?.context.contains("new or edited since your review: 300.") == true)
+        }
+    }
+
     @Test func publishingKnownOwnDraftsDoesNotTriggerARedundantFreshnessReview() async throws {
         let fixture = try FreshnessFixture(request: mergeRequest(13, sha: String(repeating: "a", count: 40), author: 2))
         defer { fixture.cleanUp() }
