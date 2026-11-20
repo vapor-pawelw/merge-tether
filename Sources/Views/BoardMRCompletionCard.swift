@@ -4,6 +4,7 @@ struct BoardMRCompletionCard: View {
     let completion: MergeRequestLifecycleLedger.CompletionReceipt
     let monitor: TodoMonitorService
     @State private var showingDetails = false
+    private let sectionSpacing: CGFloat = 9
 
     private var state: MergeRequestFinishedState {
         completion.kind == .merged ? .merged : .closed
@@ -25,7 +26,7 @@ struct BoardMRCompletionCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: sectionSpacing) {
             metadata
             VStack(alignment: .leading, spacing: 3) {
                 Button(action: openDetails) {
@@ -35,8 +36,8 @@ struct BoardMRCompletionCard: View {
                 BoardMRReferenceLine(iid: completion.target.iid, projectID: completion.target.projectID,
                     repositoryPath: completion.url.gitLabProjectPath)
             }
-            HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .bottom, spacing: 8) {
+                VStack(alignment: .leading, spacing: sectionSpacing) {
                     Text(completion.kind == .merged ? .MRLifecycle.completionMerged : .MRLifecycle.completionClosed)
                         .foregroundStyle(.secondary)
                     InboxUpdateTimestamp(date: completion.observedAt)

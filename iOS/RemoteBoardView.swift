@@ -305,48 +305,25 @@ struct RemoteCardView: View {
             $0.kind == .finishCommentReview || (card.id.hasPrefix("completion:") && $0.id == "seen" && $0.kind == .markDone)
         }
     }
+    private var showsActions: Bool {
+        !expanded && onOpen != nil && (primaryCTA != nil || secondaryCTA != nil || directAction != nil)
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
-            if hasInformation { content }
-            if !expanded, onOpen != nil, primaryCTA != nil || secondaryCTA != nil || directAction != nil {
-                HStack {
-                    if let secondary = secondaryCTA {
-                        RemoteCardCTAButton(cta: secondary, canAct: { actionsModel?.state.canAct(now: $0) == true },
-                                            labelHitArea: CardControlHitArea()) { onOpenCTA?(secondary) }
-                            .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
-                            .accessibilityIdentifier("remote.secondary-cta.\(card.id)")
+            if let date = inboxUpdateDate {
+                HStack(alignment: .bottom) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        cardInformation
+                        InboxUpdateTimestamp(date: date)
                     }
-                    Spacer(minLength: 0)
-                    if let action = directAction, let actionsModel {
-                        let pending = actionsModel.pendingActionCard?.id == card.id ? actionsModel.state.pending : nil
-                        let seen = action.kind == .markDone
-                        let button = Button {
-                            if seen {
-                                Task { await actionsModel.perform(card: card, action: action) }
-                            } else {
-                                onOpenCTA?(.init(title: String(localized: .CommentReview.commentReviewFinish),
-                                    destination: .actions, actionID: action.id))
-                            }
-                        } label: {
-                            RemoteActionProgressLabel(running: pending?.actionID == action.id) {
-                                Text(seen ? .Remote.remoteSeen : .CommentReview.commentReviewFinish)
-                            }
-                        }
-                        Group {
-                            if seen { button.buttonStyle(.bordered).tint(.secondary) }
-                            else { button.buttonStyle(.borderedProminent) }
-                        }
-                        .font(.subheadline.weight(.semibold)).controlSize(.large)
-                        .modifier(RemoteActionAvailability(state: actionsModel.state))
-                        .accessibilityIdentifier("remote.\(seen ? "seen" : "finish-comment-review").\(card.id)")
-                    } else if let cta = primaryCTA {
-                        RemoteCardCTAButton(cta: cta, canAct: { actionsModel?.state.canAct(now: $0) == true }) { onOpenCTA?(cta) }
-                            .font(.subheadline.weight(.semibold)).buttonStyle(.bordered)
-                            .controlSize(.large)
-                            .accessibilityIdentifier("remote.cta.\(card.id)")
-                    }
+                    if showsActions { cardActions }
                 }
+            } else {
+                cardInformation
+            }
+            if inboxUpdateDate == nil, showsActions {
+                HStack { cardActions }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(16)
@@ -359,6 +336,48 @@ struct RemoteCardView: View {
                 .allowsHitTesting(false)
         }
         .environment(\.gitLabPersonSourceURL, card.url)
+    }
+    @ViewBuilder
+    private var cardInformation: some View {
+        if hasInformation { content }
+    }
+    @ViewBuilder
+    private var cardActions: some View {
+        if let secondary = secondaryCTA {
+            RemoteCardCTAButton(cta: secondary, canAct: { actionsModel?.state.canAct(now: $0) == true },
+                                labelHitArea: CardControlHitArea()) { onOpenCTA?(secondary) }
+                .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
+                .accessibilityIdentifier("remote.secondary-cta.\(card.id)")
+        }
+        Spacer(minLength: 0)
+        if let action = directAction, let actionsModel {
+            let pending = actionsModel.pendingActionCard?.id == card.id ? actionsModel.state.pending : nil
+            let seen = action.kind == .markDone
+            let button = Button {
+                if seen {
+                    Task { await actionsModel.perform(card: card, action: action) }
+                } else {
+                    onOpenCTA?(.init(title: String(localized: .CommentReview.commentReviewFinish),
+                        destination: .actions, actionID: action.id))
+                }
+            } label: {
+                RemoteActionProgressLabel(running: pending?.actionID == action.id) {
+                    Text(seen ? .Remote.remoteSeen : .CommentReview.commentReviewFinish)
+                }
+            }
+            Group {
+                if seen { button.buttonStyle(.bordered).tint(.secondary) }
+                else { button.buttonStyle(.borderedProminent) }
+            }
+            .font(.subheadline.weight(.semibold)).controlSize(.large)
+            .modifier(RemoteActionAvailability(state: actionsModel.state))
+            .accessibilityIdentifier("remote.\(seen ? "seen" : "finish-comment-review").\(card.id)")
+        } else if let cta = primaryCTA {
+            RemoteCardCTAButton(cta: cta, canAct: { actionsModel?.state.canAct(now: $0) == true }) { onOpenCTA?(cta) }
+                .font(.subheadline.weight(.semibold)).buttonStyle(.bordered)
+                .controlSize(.large)
+                .accessibilityIdentifier("remote.cta.\(card.id)")
+        }
     }
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -431,8 +450,7 @@ struct RemoteCardView: View {
         }
     }
     private var hasInformation: Bool {
-        !card.detail.isEmpty || inboxUpdateDate != nil
-            || card.presentation?.requirements?.isEmpty == false || card.visibleStatus != nil
+        !card.detail.isEmpty || card.presentation?.requirements?.isEmpty == false || card.visibleStatus != nil
             || card.presentation?.pendingDrafts != nil || card.dependencies != nil
             || card.presentation?.steps?.isEmpty == false || card.visibleNextStep != nil
             || !(card.presentation?.chips.isEmpty ?? card.drafts.isEmpty)
@@ -452,9 +470,6 @@ struct RemoteCardView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .modifier(MRDetailStatusCard(isPresented: expanded))
                 }
-            }
-            if let date = inboxUpdateDate {
-                InboxUpdateTimestamp(date: date)
             }
             if let requirements = card.presentation?.requirements, !requirements.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {

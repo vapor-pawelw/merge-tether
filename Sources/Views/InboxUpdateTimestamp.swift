@@ -9,7 +9,7 @@ struct InboxUpdateTimestamp: View {
         Button {
             showsFullDate.toggle()
         } label: {
-            Label {
+            Group {
                 if showsFullDate {
                     Text(date, format: .dateTime.year().month().day().hour().minute().second())
                 } else {
@@ -17,18 +17,17 @@ struct InboxUpdateTimestamp: View {
                         relativeTime(asOf: .now)
                     }
                 }
-            } icon: {
-                Image(systemName: "clock").accessibilityHidden(true)
             }
             .fixedSize(horizontal: false, vertical: true)
             #if os(iOS)
-            .frame(minHeight: 44)
-            #endif
+            .contentShape(.interaction, CardControlHitArea())
+            #else
             .contentShape(Rectangle())
+            #endif
         }
         .font(.caption)
         .buttonStyle(.plain)
-        .foregroundStyle(.tint)
+        .foregroundStyle(.secondary)
         .accessibilityHint(Text(formatHint))
         #if os(macOS)
         .help(Text(formatHint))

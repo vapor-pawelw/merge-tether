@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Highlight merge requests that need attention with a padded inline callout, give MR cards a clearer border, and bring MR titles and repository labels closer together on Mac and iPhone.
 
-- Show how long ago an Inbox update arrived on Mac and iPhone. Click or tap its timestamp to switch between relative time and the full date and time.
+- Show how long ago an Inbox update arrived in gray beside **Seen** on Mac and iPhone. Click or tap its timestamp to switch between relative time and the full date and time.
 
 - Use MergeTether for the macOS app, Xcode project and schemes, release downloads, and Homebrew cask. New macOS installations use the bundle identifier `com.vaporpw.MergeTether`. Local rebuilds retain the installed bundle identity and pairing.
 
