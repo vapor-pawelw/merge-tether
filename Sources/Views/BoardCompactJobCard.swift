@@ -111,10 +111,14 @@ struct BoardCompactJobCard: View {
                 BoardPinButton(pin: .mergeRequest(host: handoff.key.work.host,
                     username: handoff.key.username, projectID: handoff.key.work.projectID, iid: handoff.key.work.iid),
                     settings: monitor.settings)
+                if let url = handoff.mergeRequestURL {
+                    CopyMergeRequestLinkButton(url: url, placement: .header)
+                }
                 BoardActionsMenu { menuItems }
             }
         }
         .font(.caption).foregroundStyle(.secondary)
+        .zIndex(1)
     }
 }
 

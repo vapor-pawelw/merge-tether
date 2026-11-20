@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Copy a GitLab merge request link from the button beside the pin on Mac cards and in Details, with a brief confirmation.
+
 - Open a conversation draft in T3 Code from a merge request on Mac, with the MR link and title ready in the composer.
 
 - Shorten the pending draft summary and group it with the attention message. Add more room around the repository line and distinguish card backgrounds from the Mac board in both appearances.

@@ -1,3 +1,4 @@
+import Accessibility
 import AppKit
 import SwiftUI
 
@@ -27,15 +28,68 @@ struct GitLabRefreshButton: View {
     }
 }
 
+struct MergeRequestLinkCopyFeedback {
+    private(set) var confirmationID: UUID?
+
+    mutating func copy(_ url: URL, to pasteboard: NSPasteboard) {
+        pasteboard.clearContents()
+        confirmationID = pasteboard.setString(url.absoluteString, forType: .string) ? UUID() : nil
+    }
+
+    mutating func dismiss(_ id: UUID) {
+        if confirmationID == id { confirmationID = nil }
+    }
+}
+
 struct CopyMergeRequestLinkButton: View {
+    enum Placement { case menu, header }
+
     let url: URL
+    var placement: Placement = .menu
+    @State private var feedback = MergeRequestLinkCopyFeedback()
 
     var body: some View {
-        Button {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(url.absoluteString, forType: .string)
-        } label: {
-            Label { Text(.CommandCenter.commandCenterCopyLink) } icon: { Image(systemName: "doc.on.doc") }
+        switch placement {
+        case .menu:
+            Button(action: copy) {
+                Label { Text(.CommandCenter.commandCenterCopyLink) } icon: { Image(systemName: "doc.on.doc") }
+            }
+        case .header:
+            Button(action: copy) {
+                BoardCardActionIcon(systemName: feedback.confirmationID == nil ? "doc.on.doc" : "checkmark")
+                    .foregroundStyle(feedback.confirmationID == nil ? Color.secondary : Color.accentColor)
+            }
+            .buttonStyle(.plain)
+            .boardHeaderControlHover()
+            .help(Text(.CommandCenter.commandCenterCopyLink))
+            .accessibilityLabel(Text(.CommandCenter.commandCenterCopyLink))
+            .onDisappear { feedback = MergeRequestLinkCopyFeedback() }
+            .overlay(alignment: .bottomTrailing) {
+                if let id = feedback.confirmationID {
+                    Text(.CommandCenter.commandCenterLinkCopied)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+                        .shadow(color: .black.opacity(0.16), radius: 4, y: 2)
+                        .fixedSize()
+                        .alignmentGuide(.bottom) { $0[.top] - 4 }
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                        .task(id: id) {
+                            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                            feedback.dismiss(id)
+                        }
+                }
+            }
+        }
+    }
+
+    private func copy() {
+        feedback.copy(url, to: .general)
+        if feedback.confirmationID != nil {
+            AccessibilityNotification.Announcement(String(localized: .CommandCenter.commandCenterLinkCopied)).post()
         }
     }
 }

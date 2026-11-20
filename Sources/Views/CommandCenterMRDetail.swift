@@ -378,10 +378,12 @@ private struct CommandCenterMRDetailContent: View {
                     BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
                         username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
                         settings: monitor.settings)
+                    CopyMergeRequestLinkButton(url: item.url, placement: .header)
                     headerMenu
                 }
             }
             .font(.callout).foregroundStyle(.secondary)
+            .zIndex(1)
             Text(verbatim: presentationRow.displayTitle).font(.title2.weight(.semibold))
                 .lineLimit(3).textSelection(.enabled).padding(.top, 2)
             if let stage = progress.mergeStage {

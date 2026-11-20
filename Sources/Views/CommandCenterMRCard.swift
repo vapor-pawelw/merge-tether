@@ -49,7 +49,7 @@ private struct CommandCenterMRCardContent: View {
         let cardSpacing: CGFloat = 9
         let repositorySpacing: CGFloat = 16
         VStack(alignment: .leading, spacing: cardSpacing) {
-            metadataHeader
+            metadataHeader.zIndex(1)
             VStack(alignment: .leading, spacing: repositorySpacing) {
                 Button(action: onDetails) {
                     BoardCardTitle(title: row.displayTitle, repositoryPath: row.displayURL.gitLabProjectPath,
@@ -247,6 +247,7 @@ private struct CommandCenterMRCardContent: View {
                 BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
                     username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
                     settings: monitor.settings)
+                CopyMergeRequestLinkButton(url: item.url, placement: .header)
                 moreMenu
             }
         }
@@ -560,9 +561,13 @@ struct BoardTodoRow: View {
                 }
                 BoardPinButton(pin: .todo(host: monitor.glab.resolvedHost,
                     username: monitor.glab.currentUsername, id: todo.id), settings: monitor.settings)
+                if todo.targetType == .mergeRequest {
+                    CopyMergeRequestLinkButton(url: todo.targetURL, placement: .header)
+                }
                 moreMenu
             }
         }
+        .zIndex(1)
     }
 
     private var moreMenu: some View {

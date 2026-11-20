@@ -165,9 +165,11 @@ struct BoardMRProposalCard: View {
                 }
                 BoardPinButton(pin: .mergeRequest(host: proposal.target.host, username: proposal.target.username,
                     projectID: proposal.target.projectID, iid: proposal.target.iid ?? 0), settings: monitor.settings)
+                CopyMergeRequestLinkButton(url: proposal.url, placement: .header)
                 moreMenu
             }
         }
+        .zIndex(1)
     }
 
     private var moreMenu: some View {

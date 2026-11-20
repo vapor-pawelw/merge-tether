@@ -9,7 +9,15 @@
             "state": "translated",
             "value": "Copy link"
           }
-        }
+        },
+        "pl": { "stringUnit": { "state": "translated", "value": "Kopiuj link" } }
+      }
+    },
+    "commandCenter.linkCopied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Link copied" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Skopiowano link" } }
       }
     },
     "commandCenter.title": {
