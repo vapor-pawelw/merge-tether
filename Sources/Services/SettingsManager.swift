@@ -93,6 +93,8 @@ final class SettingsManager {
     }
     var routedMRTodoReceipts: Set<MRTodoRouteReceipt>
     var boardPins: Set<BoardCardPin>
+    var ownAutomationOffExpanded: Bool
+    var reviewingAutomationOffExpanded: Bool
     var boardGrouping: MRBoardGrouping = .withoutAutomation
     var effectiveBoardGrouping: MRBoardGrouping { boardGrouping.effective(for: configuredAutomation) }
     var mrLifecycleLedger = MergeRequestLifecycleLedger()
@@ -132,6 +134,8 @@ final class SettingsManager {
         routedMRTodoReceipts = store.load(Key.routedMRTodoReceipts, fallback: [])
         boardGrouping = defaults.string(forKey: Key.boardGrouping).flatMap(MRBoardGrouping.init(rawValue:)) ?? .withoutAutomation
         boardPins = store.load(Key.boardPins, fallback: [])
+        ownAutomationOffExpanded = defaults.bool(forKey: Key.ownAutomationOffExpanded)
+        reviewingAutomationOffExpanded = defaults.bool(forKey: Key.reviewingAutomationOffExpanded)
         mrLifecycleLedger = store.load(Key.mrLifecycleLedger, fallback: .init())
         conflictReceipts = store.load(Key.conflictReceipts, fallback: [])
         reReviewReceipts = store.load(Key.reReviewReceipts, fallback: [:])
@@ -208,6 +212,8 @@ final class SettingsManager {
         defaults.removeObject(forKey: Key.showMergedMRCompletions)
         defaults.removeObject(forKey: Key.showClosedMRCompletions)
         defaults.set(boardGrouping.rawValue, forKey: Key.boardGrouping)
+        defaults.set(ownAutomationOffExpanded, forKey: Key.ownAutomationOffExpanded)
+        defaults.set(reviewingAutomationOffExpanded, forKey: Key.reviewingAutomationOffExpanded)
         persistenceStore.save(conflictReceipts, forKey: Key.conflictReceipts)
         persistenceStore.save(reReviewReceipts, forKey: Key.reReviewReceipts)
         persistenceStore.save(reReviewDraftBaselines, forKey: Key.reReviewDraftBaselines)
@@ -377,6 +383,8 @@ final class SettingsManager {
             Key.automationGloballyEnabled: true,
             Key.confirmGlobalAutomationChanges: true,
             Key.boardGrouping: MRBoardGrouping.withoutAutomation.rawValue,
+            Key.ownAutomationOffExpanded: true,
+            Key.reviewingAutomationOffExpanded: true,
             Key.onboardingCompleted: false,
             Key.launchAtLoginPreference: true,
             Key.hasLaunchedBefore: false,
@@ -397,6 +405,8 @@ final class SettingsManager {
         static let pendingTodoAcknowledgements = "pendingTodoAcknowledgements"
         static let boardPins = "boardPins"
         static let boardGrouping = "boardGrouping"
+        static let ownAutomationOffExpanded = "board.own.automationOffExpanded"
+        static let reviewingAutomationOffExpanded = "board.reviewing.automationOffExpanded"
         static let mrLifecycleLedger = "mrLifecycleLedger"
         static let autoRemoveFinishedMRs = "autoRemoveFinishedMRs"
         static let showMergedMRCompletions = "showMergedMRCompletions"

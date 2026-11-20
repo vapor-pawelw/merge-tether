@@ -22,6 +22,22 @@ struct CommandCenterBoardView: View {
         let account: GlabService.AuthedHost?
         var id: MergeRequestAttentionMonitor.Item.ID { item.id }
     }
+    enum LaneEntry: Identifiable {
+        enum ID: Hashable {
+            case card(MergeRequestAttentionMonitor.Item.ID)
+            case automationOff
+        }
+
+        case card(MergeRequestBoardSnapshot.Row, startsDrafts: Bool)
+        case automationOff(count: Int, attentionCount: Int)
+
+        var id: ID {
+            switch self {
+            case let .card(row, _): .card(row.id)
+            case .automationOff: .automationOff
+            }
+        }
+    }
     @State private var selected: Selection?
     @State private var compactLane: Lane = .own
     @State private var detailPopoverPresented = false
@@ -91,18 +107,52 @@ struct CommandCenterBoardView: View {
         })
     }
 
-    private func laneCards(_ rows: [MergeRequestBoardSnapshot.Row], removable: Bool = false) -> some View {
-        let inactiveAttentionCount = rows.filter { row in
-            activity(row) == .inactive && row.needsAttention
-                && MRCardPresentation(row: row, monitor: monitor, allowsRemoval: removable).humanAction != nil
-        }.count
-        return ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-            VStack(spacing: 10) {
-                activityDivider(activity(row), previous: index > 0 ? activity(rows[index - 1]) : nil,
-                    attentionCount: inactiveAttentionCount)
-                card(row, removable: removable)
+    static func laneEntries(_ rows: [MergeRequestBoardSnapshot.Row], automationOffExpanded: Bool,
+                            activity: (MergeRequestBoardSnapshot.Row) -> MRBoardActivity.Group,
+                            hasHumanAction: (MergeRequestBoardSnapshot.Row) -> Bool) -> [LaneEntry] {
+        let groupedRows = rows.map { (row: $0, group: activity($0)) }
+        let inactiveRows = groupedRows.compactMap { $0.group == .inactive ? $0.row : nil }
+        var entries: [LaneEntry] = []
+        var addedAutomationOffHeader = false
+        var previousGroup: MRBoardActivity.Group?
+        for (row, group) in groupedRows {
+            defer { previousGroup = group }
+            if group == .inactive, !addedAutomationOffHeader {
+                let attentionCount = inactiveRows.count { $0.needsAttention && hasHumanAction($0) }
+                entries.append(.automationOff(count: inactiveRows.count, attentionCount: attentionCount))
+                addedAutomationOffHeader = true
             }
-            .transition(cardTransition)
+            guard group != .inactive || automationOffExpanded else { continue }
+            entries.append(.card(row, startsDrafts: group == .drafts && previousGroup != .drafts))
+        }
+        return entries
+    }
+
+    private func laneCards(_ rows: [MergeRequestBoardSnapshot.Row], removable: Bool,
+                           automationOffExpanded: Binding<Bool>) -> some View {
+        let entries = Self.laneEntries(rows, automationOffExpanded: automationOffExpanded.wrappedValue, activity: activity) { row in
+            MRCardPresentation(row: row, monitor: monitor, allowsRemoval: removable).humanAction != nil
+        }
+        return ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+            switch entry {
+            case let .card(row, startsDrafts):
+                VStack(spacing: 10) {
+                    if startsDrafts {
+                        sectionHeading(.DraftMR.sectionTitle)
+                            .padding(.top, index == 0 ? 2 : 14)
+                            .padding(.horizontal, 4)
+                    }
+                    card(row, removable: removable)
+                }
+                .transition(cardTransition)
+            case let .automationOff(count, attentionCount):
+                MRDetailDisclosureButton(isExpanded: automationOffExpanded) {
+                    sectionHeading(.BoardActivity.inactiveSection, count: count, attentionCount: attentionCount)
+                }
+                .foregroundStyle(.secondary)
+                .padding(.top, index == 0 ? 2 : 14)
+                .padding(.horizontal, 4)
+            }
         }
     }
 
@@ -112,23 +162,22 @@ struct CommandCenterBoardView: View {
             isFinished: MergeRequestFinishedState(row.item.mergeRequest) != nil).group
     }
 
-    @ViewBuilder private func activityDivider(_ group: MRBoardActivity.Group, previous: MRBoardActivity.Group?,
-                                              attentionCount: Int) -> some View {
-        if group != previous, group == .inactive || group == .drafts {
-            HStack(spacing: 10) {
-                Text(group == .inactive ? .BoardActivity.inactiveSection : .DraftMR.sectionTitle)
-                    .font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                if group == .inactive, attentionCount > 0 {
-                    Text(verbatim: "·").foregroundStyle(.secondary)
-                    Text(.BoardActivity.attentionCount(attentionCount))
-                        .foregroundStyle(.orange)
-                }
-                Rectangle().fill(.secondary.opacity(0.16)).frame(height: 0.5)
+    private func sectionHeading(_ title: LocalizedStringResource, count: Int? = nil, attentionCount: Int = 0) -> some View {
+        HStack(spacing: 10) {
+            Text(title)
+            if let count {
+                Text(verbatim: "·").accessibilityHidden(true)
+                Text(.BoardActivity.mergeRequestCount(count)).monospacedDigit()
             }
-            .font(.caption.weight(.medium))
-            .padding(.top, previous == nil ? 2 : 14)
-            .padding(.horizontal, 4)
+            if attentionCount > 0 {
+                Text(verbatim: "·").accessibilityHidden(true)
+                Text(.BoardActivity.attentionCount(attentionCount))
+                    .foregroundStyle(.orange)
+            }
+            Rectangle().fill(.secondary.opacity(0.16)).frame(height: 0.5).accessibilityHidden(true)
         }
+        .font(.caption.weight(.medium))
+        .foregroundStyle(.secondary)
     }
 
     private var cardTransition: AnyTransition {
@@ -139,6 +188,16 @@ struct CommandCenterBoardView: View {
         let reviewing = lane == .reviewing
         let rows = reviewing ? board.reviewed : board.own
         let cardIDs = rows.map(\.id)
+        let settings = monitor.settings
+        let expansionKey = reviewing ? \SettingsManager.reviewingAutomationOffExpanded : \SettingsManager.ownAutomationOffExpanded
+        let automationOffExpanded = Binding(
+            get: { settings[keyPath: expansionKey] },
+            set: { expanded in
+                settings[keyPath: expansionKey] = expanded
+                settings.save()
+            }
+        )
+        let animation: Animation? = reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12)
         return VStack(spacing: 0) {
             HStack {
                 if compact {
@@ -166,13 +225,14 @@ struct CommandCenterBoardView: View {
                               message: reviewing ? .Board.boardLaneReviewingEmpty : .Board.boardLaneOwnEmpty,
                               symbol: lane.symbol)
                     }
-                    laneCards(rows, removable: reviewing)
+                    laneCards(rows, removable: reviewing, automationOffExpanded: automationOffExpanded)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 10).padding(.horizontal, 1)
                 .opacity(dimUnverifiedContent && !cardIDs.isEmpty ? 0.55 : 1)
-                .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: cardIDs)
-                .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: rows.map { $0.item.dependencies })
+                .animation(animation, value: cardIDs)
+                .animation(animation, value: rows.map { $0.item.dependencies })
+                .animation(animation, value: automationOffExpanded.wrappedValue)
             }
             .id(lane)
         }

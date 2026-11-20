@@ -12,6 +12,29 @@
         }
       }
     },
+    "mergeRequestCount.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld MR"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld MRs"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "attentionCount.%lld": {
       "extractionState": "manual",
       "localizations": {

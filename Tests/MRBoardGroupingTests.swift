@@ -60,6 +60,24 @@ struct MRBoardGroupingTests {
         #expect(SettingsManager(defaults: defaults).boardGrouping == .drafts)
     }
 
+    @Test(arguments: [true, false])
+    func automationOffSectionsRememberIndependentExpansionAcrossRestart(_ ownExpanded: Bool) throws {
+        let suite = "MRBoardAutomationOffExpansion.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        #expect(settings.ownAutomationOffExpanded && settings.reviewingAutomationOffExpanded)
+
+        settings.ownAutomationOffExpanded = ownExpanded
+        settings.reviewingAutomationOffExpanded = !ownExpanded
+        #expect(settings.save())
+
+        let restartedDefaults = try #require(UserDefaults(suiteName: suite))
+        let restored = SettingsManager(defaults: restartedDefaults)
+        #expect(restored.ownAutomationOffExpanded == ownExpanded)
+        #expect(restored.reviewingAutomationOffExpanded == !ownExpanded)
+    }
+
     @Test func legacyAndUnknownGroupingPreferencesUseTheDefaultWithoutChangingAutomation() throws {
         let suite = "MRBoardGroupingFallbackTests.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -78,6 +96,30 @@ struct MRBoardGroupingTests {
          "web_url":"https://\(host)/g/p/-/merge_requests/\(iid)","state":"\(state)","draft":\(draft),
          "source_branch":"feature","target_branch":"main","labels":[]}
         """.utf8))
+    }
+
+    @Test(arguments: [true, false])
+    func automationOffHeaderCountsAllInactiveRowsWhileOnlyShowingThemWhenExpanded(_ expanded: Bool) throws {
+        let rows = try (1...4).map { iid in
+            let request = try request(iid, draft: false)
+            let item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: iid),
+                title: request.title, url: request.webURL, needsDiscussion: iid != 4, mergeRequest: request)
+            return MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        }
+        let entries = CommandCenterBoardView.laneEntries(rows, automationOffExpanded: expanded,
+            activity: { $0.id.iid == 1 ? .regular : .inactive }, hasHumanAction: { $0.id.iid != 3 })
+
+        let expectedEntries: [CommandCenterBoardView.LaneEntry.ID] = expanded
+            ? [.card(rows[0].id), .automationOff, .card(rows[1].id), .card(rows[2].id), .card(rows[3].id)]
+            : [.card(rows[0].id), .automationOff]
+        #expect(entries.map(\.id) == expectedEntries)
+        let header = try #require(entries.first { $0.id == .automationOff })
+        guard case let .automationOff(count, attentionCount) = header else {
+            Issue.record("Missing Automation off header")
+            return
+        }
+        #expect(count == 3)
+        #expect(attentionCount == 1)
     }
 
     @Test func changingTheSecondarySectionKeepsFinishedFirstAndPreservedRanksWithinTheirCurrentGroup() throws {
