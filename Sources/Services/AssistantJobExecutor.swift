@@ -121,6 +121,13 @@ enum AssistantJobExecutor {
             """ : """
             On someone else's MR, save warranted private review findings even when no incoming reviewer reply is owed.
             Review-only findings do not use author-follow-up sealing. Preserve the review's scope and separate publication permissions.
+
+            In a thread whose first non-system note was written by someone else, default to no participation.
+            Draft a reply only when direct evidence shows that a proposed solution, argument or factual claim is wrong
+            in a way that could materially affect a technical or review decision. Cite the decisive evidence and explain
+            why the error matters. Skip the reply if the thread already contains the correction.
+            Confirmations of fixes, acknowledgements, minor corrections and uncertain disagreements belong in the review
+            verdict or run result. This limit applies to human and bot threads and overrides broader reply guidance.
             """
         let instructions = handoff.prompt + """
 

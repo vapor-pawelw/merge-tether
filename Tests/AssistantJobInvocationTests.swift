@@ -14,6 +14,16 @@ struct AssistantJobInvocationTests {
         #expect(!instructions.contains("If anything remains wrong or cannot be verified, leave the thread unresolved and save/update"))
     }
 
+    @Test
+    func duoVerdictInstructionsLeaveReplyDecisionsToTheReviewPolicy() {
+        let instructions = ReviewVerdictStore.recordingInstructions(
+            host: "gitlab.example.org", projectID: 7, iid: 11, username: "me", runID: UUID())
+
+        #expect(instructions.contains("only when evidence disproves its claims and the entire thread has no remaining concern"))
+        #expect(instructions.contains("Leave Duo's thread open."))
+        #expect(!instructions.contains("An optional private reply"))
+    }
+
     @Test(arguments: [false, true])
     func feedbackInstructionsRequireAReplyInEachThreadWithoutRepeatingDeliveredFixes(_ push: Bool) {
         let instructions = AssistantAutomationRunner.MRWorkflow.followUp.instructions(
@@ -94,6 +104,12 @@ struct AssistantJobInvocationTests {
         #expect(instructions.contains("In generatedDrafts, list only private drafts you actually created"))
         #expect(instructions.contains("Do not list untouched, user-created or merely observed drafts"))
         #expect(instructions.contains("If no incoming reviewer reply is owed, skip drafting and sealing") == authored)
+        #expect(instructions.contains("In a thread whose first non-system note was written by someone else") == !authored)
+        #expect(instructions.contains("only when direct evidence shows that a proposed solution, argument or factual claim is wrong") == !authored)
+        #expect(instructions.contains("could materially affect a technical or review decision") == !authored)
+        #expect(instructions.contains("Skip the reply if the thread already contains the correction") == !authored)
+        #expect(instructions.contains("Confirmations of fixes, acknowledgements, minor corrections and uncertain disagreements") == !authored)
+        #expect(instructions.contains("This limit applies to human and bot threads") == !authored)
         if !authored { #expect(instructions.contains("save warranted private review findings")) }
         #expect(instructions.contains("never replaces a follow-up seal"))
         #expect(instructions.contains("as {id,bodySHA256,extraContext,proposedSolution}"))
