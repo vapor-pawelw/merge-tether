@@ -206,6 +206,57 @@ struct ReviewingContextTests {
         #expect(activity.otherOpenThreadCount == 1)
     }
 
+    @Test func openThreadStatusNamesUniqueRootAuthorsAndExcludesRepliesAndClosedThreads() throws {
+        var item = try item()
+        item.reviewingProgress = .waitingForOtherDiscussions
+        let ownReply = GitLabMergeRequestDiscussion.Note(id: 31,
+            author: .init(id: 3, username: "sam", name: "Sam", avatarURL: nil),
+            system: false, resolvable: false, resolved: nil, resolvedBy: nil)
+        item.reviewingActivity = ReviewingActivity(discussions: [
+            .init(notes: [note(9, user: 8, system: true), note(10, user: 9), note(11, user: 7)]),
+            .init(notes: [note(20, user: 9)]),
+            .init(notes: [note(30, user: 10), ownReply]),
+            .init(notes: [note(40, user: 11)]),
+            .init(notes: [note(50, user: 12, resolved: true)]),
+            .init(notes: [note(60, user: 3)])
+        ], reviewerID: 3, authorID: 7)
+        let context = ReviewingContext(row: row(item))
+        #expect(context.status == .waitingForOtherDiscussions)
+        #expect(context.statusPeopleMessage?.people.map(\.username) == ["user9", "user10"])
+        #expect(context.statusPeopleMessage?.text == "Open review threads from @user9, @user10 and 1 other")
+    }
+
+    @Test(arguments: [1, 2])
+    func openThreadAuthorsReachThePhoneWithTheirProfile(_ threads: Int) throws {
+        var item = try item()
+        let avatar = try #require(URL(string: "https://gitlab.example.test/avatar/sam.png"))
+        let root = GitLabMergeRequestDiscussion.Note(id: 10,
+            author: .init(id: 3, username: "sam", name: "Sam Reviewer", avatarURL: avatar),
+            system: false, resolvable: true, resolved: false, resolvedBy: nil)
+        item.reviewingProgress = .current
+        item.reviewingActivity = ReviewingActivity(discussions: Array(repeating: .init(notes: [root]), count: threads),
+            reviewerID: 3, authorID: 7)
+        let snapshot = row(item)
+        let model = MRCardPresentation(row: snapshot, reviewingContext: ReviewingContext(row: snapshot),
+            allowsRemoval: true, assistantReady: true)
+        let phone = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "sam@host"), model: model)
+        let expected = threads == 1 ? "Open review thread from Sam Reviewer" : "Open review threads from Sam Reviewer"
+        #expect(model.status == expected)
+        #expect(phone.presentation?.status == expected)
+        #expect(phone.presentation?.statusPeopleMessage?.people == [.init(name: "Sam Reviewer", username: "sam", avatarURL: avatar)])
+    }
+
+    @Test func openThreadStatusKeepsItsCountWhenAThreadAuthorIsMissing() throws {
+        var item = try item()
+        item.reviewingProgress = .current
+        item.reviewingActivity = ReviewingActivity(discussions: [
+            .init(notes: [note(10, user: nil), note(11, user: 3)])
+        ], reviewerID: 3, authorID: 7)
+        let context = ReviewingContext(row: row(item))
+        #expect(context.statusPeopleMessage == nil)
+        #expect(String(localized: context.statusMessage) == "1 open review thread")
+    }
+
     @Test func aKnownEmptyReviewHasAnExplicitManualAction() throws {
         var item = try item()
         item.reviewingActivity = ReviewingActivity(discussions: [], reviewerID: 3, authorID: 7)

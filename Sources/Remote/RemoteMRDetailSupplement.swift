@@ -54,7 +54,7 @@ import MergeTetherRemote
             details.feedback.append(.init(label: String(localized: .AuthorFeedback.authorFeedbackTitle), value: String(localized: phase)))
             for finding in feedback.displayFindings {
                 let fallback: LocalizedStringResource = switch finding.state {
-                case .waitingAcceptance: finding.waitingAcceptanceMessage(people: people)
+                case .waitingAcceptance: .AuthorFeedback.authorFeedbackWaitingAcceptance
                 case .needsChanges: .AuthorFeedback.authorFeedbackNeedsChanges
                 case .needsVerification: .AuthorFeedback.authorFeedbackNeedsVerification
                 case .needsReply: .AuthorFeedback.authorFeedbackReplyNeeded
@@ -64,15 +64,23 @@ import MergeTetherRemote
                 }
                 let clean = feedback.phase == .complete && feedback.pendingDraftCount == 0
                     && feedback.replyNoteIDs.isEmpty && feedback.followUpNoteIDs.isEmpty && feedback.codeReviewRequests.isEmpty
+                let peopleMessage: RemotePeopleMessage? = if finding.manualDecision != nil { nil }
+                    else {
+                        (clean ? finding.resolutionWaitPeopleMessage(people: people) : nil)
+                            ?? (finding.state == .waitingAcceptance ? finding.waitingAcceptancePeopleMessage(people: people) : nil)
+                    }
                 let state: LocalizedStringResource = finding.manualDecision != nil ? .AuthorFeedback.authorFeedbackManualDecision
-                    : clean ? finding.resolutionWaitMessage(people: people) ?? fallback : fallback
+                    : peopleMessage?.resource ?? fallback
                 var components = URLComponents(url: request.webURL, resolvingAgainstBaseURL: false)
                 components?.fragment = "note_\(finding.sourceNoteID ?? finding.id)"
                 let reviewer = people.person(username: finding.reviewerUsername)
+                let headline = GlabService.redactWorkflowEvidence(String(localized: state))
+                let supportingText = [AgentExplanation.summary(finding.summary), finding.reason].compactMap { $0 }
+                    .map(GlabService.redactWorkflowEvidence).joined(separator: "\n\n")
                 details.feedback.append(.init(label: people.displayName(username: finding.reviewerUsername),
-                    value: ([String(localized: state), AgentExplanation.summary(finding.summary), finding.reason].compactMap { $0 })
-                        .map(GlabService.redactWorkflowEvidence).joined(separator: "\n\n"), url: components?.url,
-                    person: reviewer.remotePerson))
+                    value: supportingText.isEmpty ? headline : headline + "\n\n" + supportingText, url: components?.url,
+                    person: reviewer.remotePerson, peopleMessage: peopleMessage,
+                    supportingText: peopleMessage != nil && !supportingText.isEmpty ? supportingText : nil))
                 if let decision = finding.manualDecision {
                     let sections: [(LocalizedStringResource, String)] = [
                         (.AuthorFeedback.authorFeedbackDecisionContext, decision.context),

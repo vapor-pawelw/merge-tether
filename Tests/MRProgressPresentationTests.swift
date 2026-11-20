@@ -194,7 +194,7 @@ struct MRProgressPresentationTests {
         let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
             allowsRemoval: false, assistantReady: true, showsReadProgress: false)
         #expect(!model.working && !model.busy && model.activity == nil)
-        #expect(model.status == String(localized: .AuthorFeedback.authorFeedbackWaitingReviewers("@reviewer")))
+        #expect(model.status == "Awaiting confirmation from @reviewer")
     }
 
     @Test(arguments: [AssistantJobExecution.State.queued, .running])

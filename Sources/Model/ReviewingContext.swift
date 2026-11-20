@@ -1,4 +1,5 @@
 import Foundation
+import MergeTetherRemote
 
 /// Read-only participation facts, computed from a complete GitLab discussion response.
 struct ReviewingActivity: Equatable, Sendable {
@@ -8,21 +9,29 @@ struct ReviewingActivity: Equatable, Sendable {
     var otherReplyCount = 0
     var isComplete = false
     var otherOpenThreadCount = 0
+    private(set) var openThreadPeople: [PersonIdentity] = []
+    private(set) var otherOpenThreadPeople: [PersonIdentity] = []
+    private(set) var otherReplyPeople: [PersonIdentity] = []
 
     init(discussions: [GitLabMergeRequestDiscussion], reviewerID: Int, authorID: Int) {
         guard reviewerID > 0, authorID > 0 else { return }
         isComplete = true
+        var openThreadAuthors: [GitLabWorkflowUser?] = []
+        var otherOpenThreadAuthors: [GitLabWorkflowUser?] = []
+        var otherReplyAuthors: [GitLabWorkflowUser?] = []
         for discussion in discussions {
             let notes = discussion.notes.filter { $0.system != true }
             let complete = notes.allSatisfy { ($0.id ?? 0) > 0 && ($0.author?.id ?? 0) > 0 }
             if !complete { isComplete = false }
             let own = notes.filter { $0.author?.id == reviewerID && ($0.id ?? 0) > 0 }
             publishedCommentCount += own.count
-            if own.contains(where: { $0.resolvable == true && $0.resolved == false }) {
+            let isOpen: (GitLabMergeRequestDiscussion.Note) -> Bool = { $0.resolvable == true && $0.resolved == false }
+            if own.contains(where: isOpen) {
                 openThreadCount += 1
-            }
-            if own.isEmpty && notes.contains(where: { $0.resolvable == true && $0.resolved == false }) {
+                openThreadAuthors.append(discussion.reviewRoot?.author)
+            } else if notes.contains(where: isOpen) {
                 otherOpenThreadCount += 1
+                otherOpenThreadAuthors.append(discussion.reviewRoot?.author)
             }
             let resolvable = notes.filter { $0.resolvable == true }
             let resolved = !resolvable.isEmpty && resolvable.allSatisfy { $0.resolved == true }
@@ -33,8 +42,24 @@ struct ReviewingActivity: Equatable, Sendable {
             guard complete, let lastOwnID = own.compactMap(\.id).max() else { continue }
             let replies = notes.filter { ($0.id ?? 0) > lastOwnID && $0.author?.id != reviewerID }
             if replies.contains(where: { $0.author?.id == authorID }) { authorReplyCount += 1 }
-            else if !replies.isEmpty { otherReplyCount += 1 }
+            else if !replies.isEmpty {
+                otherReplyCount += 1
+                otherReplyAuthors.append(contentsOf: replies.map(\.author))
+            }
         }
+        openThreadPeople = Self.uniquePeople(openThreadAuthors)
+        otherOpenThreadPeople = Self.uniquePeople(otherOpenThreadAuthors)
+        otherReplyPeople = Self.uniquePeople(otherReplyAuthors)
+    }
+
+    private static func uniquePeople(_ users: [GitLabWorkflowUser?]) -> [PersonIdentity] {
+        var seen: Set<Int> = []
+        var people: [PersonIdentity] = []
+        for user in users {
+            guard let user, user.id > 0, user.person.normalizedUsername != nil else { return [] }
+            if seen.insert(user.id).inserted { people.append(user.person) }
+        }
+        return people
     }
 }
 
@@ -101,6 +126,8 @@ struct ReviewingContext {
     var author: Todo.Author?
     var presence: Presence = .tracked
     var status: Status = .activityUnknown
+    private let presenceActor: PersonIdentity?
+    private let activity: ReviewingActivity?
 
     init(row: MergeRequestBoardSnapshot.Row, workflowState: MergeWorkflowActivityState? = nil,
          assistantReady: Bool = true, assistantChecking: Bool = false,
@@ -127,11 +154,13 @@ struct ReviewingContext {
             let actor = username.isEmpty ? nil : username
             presence = source.actionName == .approvalRequired ? .approvalRequested(actor) : .reviewRequested(actor)
         }
+        presenceActor = source?.author.person
         let review = row.latestJob.flatMap { AssistantAutomationRunner.recordsReviewVerdict(for: $0) ? $0 : nil }
         let currentReview = review.flatMap { run in
             run.expectedHeadSHA != nil && run.expectedHeadSHA == item.mergeRequest?.sha ? run : nil
         }
         let activity = item.reviewingActivity
+        self.activity = row.evidenceMatchesCatalogContext ? activity : nil
         let drafts = max(item.draftCount, item.drafts.count)
         if review?.execution?.state.isActive == true { status = .running }
         else if drafts > 0 { status = .drafts(drafts) }
@@ -195,7 +224,8 @@ struct ReviewingContext {
     }
 
     var presenceMessage: LocalizedStringResource {
-        switch presence {
+        if let presencePeopleMessage { return presencePeopleMessage.resource }
+        return switch presence {
         case .tracked: .ReviewingContext.reviewingTracked
         case .reviewRequested(let username):
             if let username { .ReviewingContext.reviewingReviewRequestedBy(username) }
@@ -206,8 +236,38 @@ struct ReviewingContext {
         }
     }
 
-    var statusMessage: LocalizedStringResource {
+    var presencePeopleMessage: RemotePeopleMessage? {
+        guard let presenceActor, presenceActor.normalizedUsername != nil else { return nil }
+        switch presence {
+        case .reviewRequested: return .init(.ReviewingContext.reviewingReviewRequestedByPrefix, people: [presenceActor])
+        case .approvalRequested: return .init(.ReviewingContext.reviewingApprovalRequestedByPrefix, people: [presenceActor])
+        case .tracked: return nil
+        }
+    }
+
+    var statusPeopleMessage: RemotePeopleMessage? {
+        guard let activity else { return nil }
         switch status {
+        case .openThreads(let count):
+            return openThreadsMessage(count, people: activity.openThreadPeople)
+        case .waitingForOtherDiscussions:
+            return openThreadsMessage(activity.otherOpenThreadCount, people: activity.otherOpenThreadPeople)
+        case .authorReplied:
+            return author.flatMap { .init(.ReviewingContext.reviewingRepliesFrom, people: [$0.person]) }
+        case .otherReplied:
+            return .init(.ReviewingContext.reviewingRepliesFrom, people: activity.otherReplyPeople)
+        default:
+            return nil
+        }
+    }
+
+    private func openThreadsMessage(_ count: Int, people: [PersonIdentity]) -> RemotePeopleMessage? {
+        .init(count == 1 ? .ReviewingContext.reviewingOpenThreadFrom : .ReviewingContext.reviewingOpenThreadsFrom, people: people)
+    }
+
+    var statusMessage: LocalizedStringResource {
+        if let statusPeopleMessage { return statusPeopleMessage.resource }
+        return switch status {
         case .activityUnknown: .ReviewingContext.reviewingActivityUnknown
         case .drafts(let count): .ReviewingContext.reviewingDrafts(count)
         case .running: .ReviewingContext.reviewingRunning

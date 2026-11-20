@@ -114,12 +114,8 @@
     "feedbackSuggestions.threadOpenedBy": {
       "extractionState": "manual",
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Thread opened by %@"
-          }
-        }
+        "en": { "stringUnit": { "state": "translated", "value": "Thread opened by" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Autor wątku:" } }
       }
     },
     "feedbackSuggestions.ignore": {

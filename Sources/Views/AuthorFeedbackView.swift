@@ -1,4 +1,5 @@
 import SwiftUI
+import MergeTetherRemote
 
 struct AuthorFeedbackView: View {
     let item: MergeRequestAttentionMonitor.Item
@@ -38,13 +39,25 @@ struct AuthorFeedbackView: View {
                             if index > 0 { Divider() }
                             VStack(alignment: .leading, spacing: 6) {
                                 if source?.id != finding.id, let url = noteURL(finding.id) {
-                                    Link(destination: url) {
-                                        Text(.FeedbackSuggestions.feedbackSuggestionsThreadOpenedBy(item.personDirectory.displayName(username: finding.reviewerUsername)))
-                                            .fontWeight(.medium)
+                                    let reviewer = item.personDirectory.person(username: finding.reviewerUsername)
+                                    HStack(spacing: 8) {
+                                        if let message = RemotePeopleMessage(.FeedbackSuggestions.feedbackSuggestionsThreadOpenedBy, people: [reviewer]) {
+                                            PeopleMessageLabel(message: message).fontWeight(.medium)
+                                        }
+                                        Spacer(minLength: 4)
+                                        Link(destination: url) { Image(systemName: "arrow.up.right.square") }
+                                            .buttonStyle(.borderless)
+                                            .accessibilityLabel(Text(.MRDiscussions.mrDiscussionsOpenInGitLab))
+                                            .help(Text(.MRDiscussions.mrDiscussionsOpenInGitLab))
                                     }
                                 }
                                 // One headline per finding; the explanation and evidence follow in quieter text.
-                                Label { Text(message(finding)).font(.callout.weight(.medium)) } icon: {
+                                Label {
+                                    Group {
+                                        if let message = peopleMessage(finding) { PeopleMessageLabel(message: message) }
+                                        else { Text(message(finding)) }
+                                    }.font(.callout.weight(.medium))
+                                } icon: {
                                     Image(systemName: symbol(finding.state)).foregroundStyle(tint(finding.state))
                                 }
                                 .labelStyle(BoardCardStatusLabelStyle())
@@ -159,17 +172,23 @@ struct AuthorFeedbackView: View {
         }
     }
 
-    private func message(_ finding: AuthorFeedbackPolicy.Finding) -> LocalizedStringResource {
-        if finding.manualDecision != nil { return .AuthorFeedback.authorFeedbackManualDecision }
+    private func peopleMessage(_ finding: AuthorFeedbackPolicy.Finding) -> RemotePeopleMessage? {
+        guard finding.manualDecision == nil else { return nil }
+        let people = item.personDirectory
         if let status = item.authorFeedbackStatus, status.phase == .complete,
            status.pendingDraftCount == 0, item.draftCount == 0, item.drafts.isEmpty,
            status.replyNoteIDs.isEmpty, status.followUpNoteIDs.isEmpty, status.codeReviewRequests.isEmpty,
            !sourceLoading, citationContext?.finding(finding, status: status) != nil,
-           let message = finding.resolutionWaitMessage(people: item.personDirectory) {
+           let message = finding.resolutionWaitPeopleMessage(people: people) {
             return message
         }
+        return finding.state == .waitingAcceptance ? finding.waitingAcceptancePeopleMessage(people: people) : nil
+    }
+
+    private func message(_ finding: AuthorFeedbackPolicy.Finding) -> LocalizedStringResource {
+        if finding.manualDecision != nil { return .AuthorFeedback.authorFeedbackManualDecision }
         return switch finding.state {
-        case .waitingAcceptance: finding.waitingAcceptanceMessage(people: item.personDirectory)
+        case .waitingAcceptance: .AuthorFeedback.authorFeedbackWaitingAcceptance
         case .needsChanges: .AuthorFeedback.authorFeedbackNeedsChanges
         case .needsVerification: .AuthorFeedback.authorFeedbackNeedsVerification
         case .needsReply: .AuthorFeedback.authorFeedbackReplyNeeded

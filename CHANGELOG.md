@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Show GitLab activity and MergeTether actions together in a compact **Event log** above **Details** on Mac. Comments can jump to their discussion. App actions show their source, with an **Automated** badge for autonomous actions. Move agent usage to its own section.
 
+- Open GitLab profiles from MR people labels on Mac and iPhone. Both apps show the people a draft replies to and render MR descriptions with inline Markdown.
+
 - Move the Mac Activity view from the board toolbar to **Window → Automation Activity** for troubleshooting across merge requests.
 
 - Remove dotted underlines from tappable person names on iPhone and show review status as an icon at the end of the person's row.
@@ -19,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Retry a failed GitLab refresh directly from the warning banner on Mac.
 
 - Use 16 pt insets and section gaps on iPhone merge request cards, with 8 pt between rows within each section.
+
+- Name the authors of open review threads and replies on Mac and iPhone. Review and feedback statuses show up to two people and count the rest. Hover or tap a name to see the person's avatar and GitLab username.
 
 - Drag the sheet handle down to dismiss iPhone MR Details and refresh with the toolbar button.
 

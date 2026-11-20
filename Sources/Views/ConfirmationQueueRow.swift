@@ -174,6 +174,7 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
         .onAppear { if initiallyExpanded { showsComments = true } }
         .onChange(of: item.drafts) { _, drafts in draftSelection.wrappedValue.reconcile(with: drafts) }
         .onChange(of: item.id) { _, _ in draftSelection.wrappedValue = DraftPublicationSelection() }
+        .environment(\.gitLabPersonSourceURL, item.url)
     }
 
     private func run(_ action: MergeRequestAttentionMonitor.ConfirmationState, operation: @escaping () async -> Void) {
@@ -209,13 +210,11 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
     private func draftContent(_ draft: GitLabDraftNote) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             if let threadID = draft.discussionID {
-                StatusFlowLayout(spacing: 6) {
-                    Text(.Menu.menuConfirmReply)
-                    ForEach(item.replyRecipients[threadID] ?? [], id: \.self) { person in
-                        PersonLabel(person: person, avatarSize: 12)
-                    }
-                }
-                .font(.caption2)
+                Group {
+                    if let message = RemotePeopleMessage(.Board.boardReplyTo, people: item.replyRecipients[threadID] ?? []) {
+                        PeopleMessageLabel(message: message)
+                    } else { Text(.Menu.menuConfirmReply) }
+                }.font(.caption2)
             }
             switch draft.kind {
             case .line(let location):

@@ -348,6 +348,7 @@ struct RemoteCardView: View {
                 RoundedRectangle(cornerRadius: 2).fill(.orange).frame(width: 4).padding(.vertical, 12).allowsHitTesting(false)
             }
         }
+        .environment(\.gitLabPersonSourceURL, card.url)
     }
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -428,11 +429,8 @@ struct RemoteCardView: View {
             if let requirements = card.presentation?.requirements, !requirements.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(Array(requirements.enumerated()), id: \.offset) { index, line in
-                        if index == 0, let people = card.presentation?.threadResolutionPeople, !people.isEmpty {
-                            ThreadResolutionWaitLabel(people: people.map {
-                                .init(name: $0.name, username: $0.username, avatarURL: $0.avatarURL)
-                            })
-                            .foregroundStyle(.primary)
+                        if index == 0, let message = requirementPeopleMessage {
+                            WaitingPeopleLabel(message: message).foregroundStyle(.primary)
                         } else {
                             Label { Text(verbatim: line).foregroundStyle(.primary) } icon: {
                                 Image(systemName: "lock").foregroundStyle(.secondary)
@@ -447,11 +445,20 @@ struct RemoteCardView: View {
                         ProgressView().controlSize(.mini)
                         if let symbol = card.presentation?.statusSymbol { Image(systemName: symbol).accessibilityHidden(true) }
                     }
-                    Text(verbatim: status).font(.subheadline)
+                    if let message = card.presentation?.statusPeopleMessage {
+                        PeopleMessageLabel(message: message).font(.subheadline)
+                    } else {
+                        Text(verbatim: status).font(.subheadline)
+                    }
                 }.foregroundStyle(.secondary)
             }
             if let drafts = card.presentation?.pendingDrafts {
-                Label { Text(verbatim: drafts).foregroundStyle(.primary) } icon: {
+                Label {
+                    Group {
+                        if let message = card.presentation?.pendingDraftsPeopleMessage { PeopleMessageLabel(message: message) }
+                        else { Text(verbatim: drafts) }
+                    }.foregroundStyle(.primary)
+                } icon: {
                     Image(systemName: "text.bubble").foregroundStyle(.secondary)
                 }
                 .font(.subheadline).fixedSize(horizontal: false, vertical: true)
@@ -474,6 +481,11 @@ struct RemoteCardView: View {
                 Label(.Remote.remoteComments, systemImage: "text.bubble").font(.caption).foregroundStyle(.tint)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+    private var requirementPeopleMessage: RemotePeopleMessage? {
+        if let message = card.presentation?.requirementPeopleMessage { return message }
+        guard let people = card.presentation?.threadResolutionPeople else { return nil }
+        return .init(.AuthorFeedback.authorFeedbackThreadResolutionWait, people: people.map(PersonIdentity.init))
     }
     private var title: some View {
         Text(verbatim: card.title)

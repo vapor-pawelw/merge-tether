@@ -327,6 +327,7 @@ private struct CommandCenterMRDetailContent: View {
                 Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
             } message: { Text(.Board.boardRemoveExplanation) }
             .sheet(item: $regenerationPresentation) { monitor.draftRegenerationSheet($0) }
+            .environment(\.gitLabPersonSourceURL, item.url)
         }
     }
 
@@ -404,7 +405,9 @@ private struct CommandCenterMRDetailContent: View {
                         } else if (needsHumanAttention || !progress.working && progress.mergeStage == nil)
                                     && !(genericAttention && showsDecisions) {
                             Label {
-                                if let status = progress.status, !progress.working {
+                                if let message = progress.statusPeopleMessage {
+                                    PeopleMessageLabel(message: message)
+                                } else if let status = progress.status, !progress.working {
                                     Text(verbatim: status)
                                 } else { Text(.CommandCenter.commandCenterStatusAttention) }
                             } icon: { Image(systemName: needsHumanAttention ? "exclamationmark.circle" : "arrow.triangle.pull") }
@@ -711,6 +714,14 @@ private struct CommandCenterMRDetailContent: View {
                                 value: request.headPipeline.map { Self.readableStatus($0.status) }
                                     ?? String(localized: .CommandCenter.commandCenterNoPipeline))
                         }
+                        if let description = request.description, !description.isEmpty {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(.CommandCenter.commandCenterDescription).font(.callout.weight(.medium))
+                                Text(SafeInlineMarkdown.render(description) ?? AttributedString(description))
+                                    .font(.callout).lineSpacing(3).textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
                     }
                     if finishedState == nil { statusReasons }
                     if finishedState == nil, !routinePolicy.isEmpty {
@@ -990,7 +1001,7 @@ private struct CommandCenterMRDetailContent: View {
             onRegenerate: regenerateDraft,
             title: .DraftPublication.draftPublicationThreads, codeContext: discussionCodeContext, onSetOrigin: originAction,
             extraContexts: current ? discussionStore.extraContexts : .empty,
-            currentUserIdentity: current ? discussionStore.currentUser : nil,
+            currentUserIdentity: current ? discussionStore.currentUser : nil, replyRecipients: item.replyRecipients,
             navigation: discussionNavigation,
             onRefresh: { refreshDiscussions(visible: true) })
     }
@@ -1037,9 +1048,9 @@ private struct CommandCenterMRDetailContent: View {
             currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,
             hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
             codeContext: discussionCodeContext, onSetOrigin: originAction, extraContexts: current ? discussionStore.extraContexts : .empty,
-            currentUserIdentity: current ? discussionStore.currentUser : nil,
-            navigation: discussionNavigation,
-            onRefresh: { refreshDiscussions(visible: true) })
+                currentUserIdentity: current ? discussionStore.currentUser : nil, replyRecipients: item.replyRecipients,
+                navigation: discussionNavigation,
+                onRefresh: { refreshDiscussions(visible: true) })
         }
     }
 

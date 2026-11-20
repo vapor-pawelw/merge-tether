@@ -278,12 +278,14 @@ import MergeTetherRemote
         let showsWaiting = ordinaryWait && !knownMergeFailure && hasCurrentCatalog && evidenceMatchesCatalogContext
         let status = String(localized: showsWaiting ? waitingStatus?.title ?? title : title)
         card.presentation?.status = status
+        card.presentation?.statusPeopleMessage = nil
         if showsWaiting, let waitingStatus, !waitingStatus.requirements.isEmpty {
             // Like the Mac card: one requirement per line, with an uncovered blocker joining the list.
             var lines = waitingStatus.requirements.map { String(localized: $0) }
             let covered: Bool = if case .prerequisite(let reason) = blocker { waitingStatus.coveredBlockers.contains(reason) } else { false }
             if !covered, !lines.contains(String(localized: title)) { lines.append(String(localized: title)) }
             card.presentation?.requirements = lines
+            card.presentation?.requirementPeopleMessage = waitingStatus.reviewerPeopleMessage
             let people = waitingStatus.threadResolutionPeople
             card.presentation?.threadResolutionPeople = people.isEmpty ? nil : people.map(\.remotePerson)
         }
@@ -552,7 +554,7 @@ import MergeTetherRemote
             ?? (model.row.isDraft ? String(localized: .Menu.menuMrDraftBadge) : nil)
         let chips: [RemoteCardChip] = model.chips.map { .init(title: String(localized: $0.title), symbol: $0.symbol) }
         let steps = model.stepChain.map { $0.steps.map { String(localized: $0) } }
-        let pendingDrafts = model.working ? nil : MRPendingDraftsSummary(item: model.row.item).map { String(localized: $0.message) }
+        let pendingDrafts = model.working ? nil : MRPendingDraftsSummary(item: model.row.item)
         card.presentation = .init(author: authorName,
             repository: card.project.split(separator: "/").last.map(String.init) ?? card.project,
             draftBadge: draftBadge,
@@ -561,10 +563,12 @@ import MergeTetherRemote
             secondaryCTA: human?.action == .retryRun ? .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewRun), destination: .assistantRuns) : nil,
             authorUsername: authorUsername, authorAvatarURL: authorAvatarURL,
             steps: steps, currentStep: model.stepChain?.current,
-            pendingDrafts: pendingDrafts, statusSymbol: model.activityEffect?.symbol,
+            pendingDrafts: pendingDrafts.map { String(localized: $0.message) }, statusSymbol: model.activityEffect?.symbol,
             approvalPeople: model.row.evidenceMatchesCatalogContext ? original.presentation?.approvalPeople : nil,
             viewerApprovalID: model.row.evidenceMatchesCatalogContext ? original.presentation?.viewerApprovalID : nil,
             assignedReviewerCount: MergeRequestApprovalProgress.assignedReviewerCount(model.row.displayRequest?.reviewers))
+        card.presentation?.statusPeopleMessage = model.statusPeopleMessage
+        card.presentation?.pendingDraftsPeopleMessage = pendingDrafts?.peopleMessage
         if model.actionsBlocked { card.actions = [] }
         return card
     }

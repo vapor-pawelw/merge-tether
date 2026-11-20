@@ -27,6 +27,7 @@ struct MRDiscussionThreadsView: View {
     var onSetOrigin: MRDiscussionOriginAction? = nil
     var extraContexts: AICommentProvenanceStore.ExtraContexts = .empty
     var currentUserIdentity: PersonIdentity? = nil
+    var replyRecipients: [String: [PersonIdentity]] = [:]
     var navigation: MRDiscussionNavigation? = nil
     let onRefresh: () -> Void
     @State private var markdownCache = MRDiscussionMarkdownCache()
@@ -68,6 +69,7 @@ struct MRDiscussionThreadsView: View {
                              : .MRDiscussions.mrDiscussionsReplyDraft)
                             .font(.caption.weight(.medium)).foregroundStyle(.secondary)
                         MRDiscussionDraftView(draft: draft, author: currentUser, markdownCache: markdownCache,
+                            replyTo: draft.discussionID.flatMap(replyMessage),
                             mergeRequestURL: mergeRequestURL, codeContext: codeContext,
                             extraContext: extraContexts.forDraft(draft),
                             selection: selection, selectionDisabled: selectionDisabled,
@@ -105,9 +107,14 @@ struct MRDiscussionThreadsView: View {
         return MRDiscussionThreadView(thread: thread, mergeRequestURL: mergeRequestURL,
                                currentUsername: currentUsername, currentUser: currentUser, markdownCache: markdownCache, initiallyExpanded: expandPendingDrafts && !thread.drafts.isEmpty,
                                selection: selection, selectionDisabled: selectionDisabled,
-                               extraContexts: extraContexts, onDelete: onDelete, onRegenerate: onRegenerate,
-                               onSetOrigin: onSetOrigin, navigation: expansion)
+                               extraContexts: extraContexts, replyTo: replyMessage(thread.id),
+                               onDelete: onDelete, onRegenerate: onRegenerate, onSetOrigin: onSetOrigin,
+                               navigation: expansion)
             .id(anchor)
+    }
+
+    private func replyMessage(_ discussionID: String) -> RemotePeopleMessage? {
+        .init(.Board.boardReplyTo, people: replyRecipients[discussionID] ?? [])
     }
 }
 
@@ -123,6 +130,7 @@ private struct MRDiscussionThreadView: View {
     let selection: Binding<DraftPublicationSelection>?
     let selectionDisabled: Bool
     var extraContexts: AICommentProvenanceStore.ExtraContexts = .empty
+    var replyTo: RemotePeopleMessage? = nil
     var onDelete: ((GitLabDraftNote) -> Void)? = nil
     var onRegenerate: ((GitLabDraftNote) -> Void)? = nil
     var onSetOrigin: MRDiscussionOriginAction? = nil
@@ -283,7 +291,7 @@ private struct MRDiscussionThreadView: View {
     private var draftRows: some View {
         ForEach(Array(thread.drafts.enumerated()), id: \.offset) { _, draft in
             MRDiscussionDraftView(draft: draft, author: currentUser, markdownCache: markdownCache,
-                                  threadLocation: thread.location,
+                                  replyTo: replyTo, threadLocation: thread.location,
                 extraContext: extraContexts.forDraft(draft),
                 selection: selection, selectionDisabled: selectionDisabled, onDelete: onDelete, onRegenerate: onRegenerate)
         }
@@ -394,6 +402,7 @@ private struct MRDiscussionDraftView: View {
     let draft: GitLabDraftNote
     let author: PersonIdentity?
     let markdownCache: MRDiscussionMarkdownCache
+    var replyTo: RemotePeopleMessage? = nil
     var threadLocation: String? = nil
     var mergeRequestURL: URL? = nil
     var codeContext: MRDiscussionCodeContext? = nil
@@ -426,6 +435,10 @@ private struct MRDiscussionDraftView: View {
                 if let onDelete { DraftDeleteButton(draft: draft, disabled: selectionDisabled, onDelete: onDelete) }
             }
             .font(.callout)
+            if let replyTo {
+                Label { PeopleMessageLabel(message: replyTo) } icon: { Image(systemName: "arrowshape.turn.up.left") }
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if let location = MRDiscussionLocation(position: draft.position), location.full != threadLocation {
                 MRDiscussionLocationLabel(location: location).textSelection(.enabled)
             }

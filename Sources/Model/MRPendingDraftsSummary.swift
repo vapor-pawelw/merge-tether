@@ -1,4 +1,5 @@
 import Foundation
+import MergeTetherRemote
 
 /// Unpublished drafts on an MR and the people whose threads they answer. Display only:
 /// it never grants publication or resolution permission.
@@ -18,13 +19,13 @@ struct MRPendingDraftsSummary: Equatable {
         }
     }
 
-    var message: LocalizedStringResource {
-        let base: LocalizedStringResource = count == 1 ? .Board.boardPendingDraftsSingle : .Board.boardPendingDrafts(count)
-        guard !awaitingReply.isEmpty else { return base }
-        let drafts = String(localized: base)
-        let names = awaitingReply.prefix(3).compactMap(\.displayName).joined(separator: ", ")
-        return awaitingReply.count > 3
-            ? .Board.boardPendingDraftsAwaitingReplyMore(drafts, names, awaitingReply.count - 3)
-            : .Board.boardPendingDraftsAwaitingReply(drafts, names)
+    private var draftCountMessage: LocalizedStringResource {
+        count == 1 ? .Board.boardPendingDraftsSingle : .Board.boardPendingDrafts(count)
     }
+
+    var peopleMessage: RemotePeopleMessage? {
+        .init(.Board.boardPendingDraftsAwaitingReplyPrefix(String(localized: draftCountMessage)), people: awaitingReply)
+    }
+
+    var message: LocalizedStringResource { peopleMessage?.resource ?? draftCountMessage }
 }

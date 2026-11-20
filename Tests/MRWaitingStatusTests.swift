@@ -76,6 +76,7 @@ import MergeTetherRemote
             waitingStatus: model.waitingStatus)
         #expect(phone.presentation?.status == model.status)
         #expect(phone.presentation?.threadResolutionPeople == nil)
+        #expect(phone.presentation?.requirementPeopleMessage?.people == [.init(name: "Alice", username: "alice")])
         #expect(phone.approvals?.received == 0 && phone.approvals?.required == 2)
         #expect(phone.dependencies?.predecessors.first?.reference == "!4")
         #expect(!phone.actions.contains { [.merge, .enqueueMerge, .resolveThreads, .publish, .approve].contains($0.kind) })
@@ -117,7 +118,7 @@ import MergeTetherRemote
         ])
         #expect(try JSONDecoder().decode(RemoteCardText.self, from: data) == card)
         #expect(card.requirements == [
-            "Feedback addressed, waiting for Alice, @bob to resolve threads",
+            "Feedback addressed, waiting for thread resolution from Alice and @bob",
             "Needs 2 more approvals",
         ])
     }
@@ -167,8 +168,8 @@ import MergeTetherRemote
         let waiting = try #require(model(row(item)).waitingStatus)
         #expect(waiting.reviewers == ["alice", "bob", "carol", "dave"])
         let title = String(localized: waiting.title)
-        #expect(title.contains("Alice, @bob, @carol and 1 more"))
-        #expect(!title.contains("@dave"))
+        #expect(title.contains("Alice, @bob and 2 others"))
+        #expect(!title.contains("@carol"))
     }
 
     @Test(arguments: ["head", "description", "discussion", "noDiscussion", "noSemantic", "failed", "checking", "publication", "reply", "code", "finding", "draft", "conflict", "pipeline", "stale", "changed", "refreshFailure", "refreshing", "manual", "rejectedReply", "reviewReadFailure", "approvalAction", "mergeAction"])

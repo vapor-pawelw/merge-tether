@@ -2,6 +2,41 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "reviewing.openThreadFrom": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Open review thread from" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Otwarty wątek review od" } }
+      }
+    },
+    "reviewing.openThreadsFrom": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Open review threads from" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Otwarte wątki review od" } }
+      }
+    },
+    "reviewing.repliesFrom": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Replies to your comments from" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Odpowiedzi na Twoje komentarze od" } }
+      }
+    },
+    "reviewing.reviewRequestedByPrefix": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Review requested by" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Prośba o review od" } }
+      }
+    },
+    "reviewing.approvalRequestedByPrefix": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Approval requested by" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Prośba o akceptację od" } }
+      }
+    },
     "reviewing.authorUnknown": {
       "extractionState": "manual",
       "localizations": {

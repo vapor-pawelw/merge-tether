@@ -343,7 +343,7 @@ struct AuthorFeedbackCoordinatorTests {
             item.observedDiscussionFingerprint = status.fingerprint
             let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
             let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row), allowsRemoval: false, assistantReady: true)
-            #expect(model.status == "Feedback addressed, waiting for @alice to resolve threads · Needs 2 more approvals")
+            #expect(model.status == "Feedback addressed, waiting for thread resolution from @alice · Needs 2 more approvals")
             #expect(!model.working && model.humanAction == nil)
             let phone = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "me@host"), model: model)
             #expect(phone.presentation?.status == model.status)

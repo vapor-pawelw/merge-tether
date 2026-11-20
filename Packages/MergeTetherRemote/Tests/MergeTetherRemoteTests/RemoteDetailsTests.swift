@@ -3,6 +3,25 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct RemoteDetailsTests {
+    @Test func gitLabProfileUsesTheMergeRequestHostAndUsername() throws {
+        let request = try #require(URL(string: "https://gitlab.example.test:8443/group/project/-/merge_requests/4?tab=notes#note_1"))
+        let person = RemotePerson(name: "Alice Example", username: " @alice.dev-2 ",
+                                  avatarURL: URL(string: "https://avatars.example.test/alice"))
+
+        #expect(person.profileURL(on: request)?.absoluteString == "https://gitlab.example.test:8443/alice.dev-2")
+    }
+
+    @Test(arguments: [nil, "", "..", "../admin", "alice/bob", "alice%2Fbob", "alice?tab=notes", "//other.test/alice"] as [String?])
+    func gitLabProfileRequiresAUsableUsername(username: String?) throws {
+        let request = try #require(URL(string: "https://gitlab.example.test/group/project/-/merge_requests/4"))
+        #expect(RemotePerson(name: "Alice Example", username: username).profileURL(on: request) == nil)
+    }
+
+    @Test(arguments: [nil, "file:///tmp/comment", "https://name:password@gitlab.example.test/project", "https:/project"] as [String?])
+    func gitLabProfileRequiresAWebOrigin(source: String?) {
+        #expect(RemotePerson(name: nil, username: "alice").profileURL(on: source.flatMap { URL(string: $0) }) == nil)
+    }
+
     @MainActor @Test func previewsKeepTheReadPendingAndPreserveCachedDiscussionsThroughFailures() throws {
         var board = board()
         let card = board.cards[0], state = RemoteDetailState()
@@ -76,6 +95,20 @@ import Testing
             }
             #expect(!current.matches(changed))
         }
+    }
+
+    @Test func olderPhonesCanStillOpenDetailsAfterPeopleMessagesAreAdded() throws {
+        var board = board()
+        board.lanes[0].cards[0].presentation = .init(repository: "p", status: "Open review thread from Alice")
+        let request = try RemoteDetailRequest(card: board.cards[0], board: board)
+        let message = RemotePeopleMessage(prefix: "Open review thread from",
+                                          people: [.init(name: "Alice", username: "alice")], remainingCount: 0)
+        board.lanes[0].cards[0].presentation?.statusPeopleMessage = message
+        let card = board.cards[0]
+        #expect(request.matches(board))
+        #expect(try JSONDecoder().decode(RemoteCard.self, from: JSONEncoder().encode(card)) == card)
+        board.lanes[0].cards[0].head = "changed"
+        #expect(!request.matches(board))
     }
 
     @MainActor @Test func presentationUpdatesDoNotInterruptAnOpenDetailsRead() throws {

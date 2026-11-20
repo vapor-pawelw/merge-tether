@@ -1,4 +1,5 @@
 import Foundation
+import MergeTetherRemote
 
 enum MergeRequestFinishedState: String {
     case merged, closed
@@ -217,7 +218,7 @@ struct MRCardPresentation {
               humanAction == nil, confirmationState != .failed, confirmationState != .changed else { return nil }
         return MRWaitingStatus(row: row)
     }
-    var neutralStatus: LocalizedStringResource? {
+    private var generalNeutralStatus: LocalizedStringResource? {
         if let finishedState { return finishedState.status }
         if waitingOnCLI {
             return cliHoldKind == .loginRequired ? .AutomationProgress.progressPausedLogin : .AutomationProgress.progressPausedLimit
@@ -229,7 +230,15 @@ struct MRCardPresentation {
         guard allowsRemoval else {
             return row.isDraft ? .AutomationProgress.progressOwnDraft : .AutomationProgress.progressMonitoring
         }
+        return nil
+    }
+    var neutralStatus: LocalizedStringResource? {
+        if let generalNeutralStatus { return generalNeutralStatus }
         return reviewingContext.status == .activityUnknown ? reviewingContext.presenceMessage : reviewingContext.statusMessage
+    }
+    var statusPeopleMessage: RemotePeopleMessage? {
+        guard !working, !refreshFailed, humanAction == nil, generalNeutralStatus == nil else { return nil }
+        return reviewingContext.status == .activityUnknown ? reviewingContext.presencePeopleMessage : reviewingContext.statusPeopleMessage
     }
     var message: String {
         guard let human = humanAction else { return "" }

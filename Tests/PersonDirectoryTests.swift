@@ -46,9 +46,10 @@ import MergeTetherRemote
 
     @Test func resolutionWaitMessagesNameKnownPeople() {
         let people = PersonDirectory([.init(name: "Alice Example", username: "alice")])
-        let message = AuthorFeedbackPolicy.resolutionWaitMessage(authors: ["@alice", "bob"], people: people)
-        let text = String(localized: try! #require(message))
-        #expect(text.contains("Alice Example, @bob"))
+        let finding = AuthorFeedbackPolicy.Finding(id: 1, discussionID: "t", reviewerID: 7, reviewerUsername: "alice",
+            state: .ready, reason: nil, waitingForReviewers: [], waitingForHumanResolution: ["@alice", "bob"])
+        let text = finding.resolutionWaitPeopleMessage(people: people)?.text ?? ""
+        #expect(text.contains("Alice Example and @bob"))
         #expect(!text.contains("@alice"))
     }
 
@@ -65,6 +66,8 @@ import MergeTetherRemote
         let legacyText = try JSONDecoder().decode(RemoteCardText.self,
             from: Data(#"{"author":"Alice","repository":"r","working":false,"chips":[]}"#.utf8))
         #expect(legacyText.authorUsername == nil && legacyText.authorAvatarURL == nil)
+        #expect(legacyText.statusPeopleMessage == nil && legacyText.requirementPeopleMessage == nil
+            && legacyText.pendingDraftsPeopleMessage == nil)
     }
 
     @Test func replyRecipientsCarryDisplayNamesAndSkipTheViewerAndSystemNotes() throws {
@@ -97,7 +100,7 @@ import MergeTetherRemote
         #expect(summary.awaitingReply == [alice, bob])
         let message = String(localized: summary.message)
         #expect(message.contains("4"))
-        #expect(message.contains("Alice Example, Bob Example"))
+        #expect(message.contains("Alice Example and Bob Example"))
         #expect(!message.contains("@"))
 
         item.drafts = [draft(1, nil)]
@@ -113,8 +116,7 @@ import MergeTetherRemote
         item.drafts = [.init(id: 1, authorID: 3, note: "Reply", discussionID: "t", position: nil)]
         item.replyRecipients = ["t": ["a", "b", "c", "d", "e"].map { (id: String) in PersonIdentity(name: "Person \(id)", username: id) }]
         let message = String(localized: try #require(MRPendingDraftsSummary(item: item)).message)
-        #expect(message.contains("Person a, Person b, Person c"))
-        #expect(!message.contains("Person d"))
-        #expect(message.contains("2"))
+        #expect(message.contains("Person a, Person b and 3 others"))
+        #expect(!message.contains("Person c"))
     }
 }

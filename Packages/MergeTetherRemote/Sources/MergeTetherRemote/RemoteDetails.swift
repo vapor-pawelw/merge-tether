@@ -26,7 +26,11 @@ public struct RemoteDetailRequest: Codable, Equatable, Sendable {
     /// action links and discussion destinations, the pending-drafts line and reply recipients,
     /// and before those the author identity. Phones may also omit the automatic approval note.
     static func digests(_ card: RemoteCard) -> Set<String> {
-        var withoutActions = card
+        var withoutPeopleMessages = card
+        withoutPeopleMessages.presentation?.statusPeopleMessage = nil
+        withoutPeopleMessages.presentation?.requirementPeopleMessage = nil
+        withoutPeopleMessages.presentation?.pendingDraftsPeopleMessage = nil
+        var withoutActions = withoutPeopleMessages
         withoutActions.primaryCTA?.actionID = nil
         withoutActions.presentation?.secondaryCTA?.actionID = nil
         var withoutDrafts = withoutActions
@@ -35,7 +39,7 @@ public struct RemoteDetailRequest: Codable, Equatable, Sendable {
         var legacy = withoutDrafts
         legacy.presentation?.authorUsername = nil
         legacy.presentation?.authorAvatarURL = nil
-        let currentVersions = [card, withoutActions, withoutDrafts, legacy]
+        let currentVersions = [card, withoutPeopleMessages, withoutActions, withoutDrafts, legacy]
         let versions = currentVersions + currentVersions.map { version in
             var version = version
             version.presentation?.approvalPeople = nil
@@ -70,6 +74,19 @@ public struct RemotePerson: Codable, Equatable, Sendable {
     public init(name: String?, username: String?, avatarURL: URL? = nil) {
         self.name = name; self.username = username; self.avatarURL = avatarURL
     }
+
+    public func profileURL(on source: URL?) -> URL? {
+        let handle = (username ?? "").trimmingCharacters(in: .whitespacesAndNewlines).drop(while: { $0 == "@" })
+        guard handle.wholeMatch(of: /[A-Za-z0-9][A-Za-z0-9_.-]*/) != nil, !handle.hasSuffix("."),
+              let source, var parts = URLComponents(url: source, resolvingAgainstBaseURL: false),
+              ["http", "https"].contains(parts.scheme?.lowercased() ?? ""),
+              let host = parts.host, !host.isEmpty, parts.user == nil, parts.password == nil else { return nil }
+        parts.path = "/" + handle
+        parts.query = nil
+        parts.fragment = nil
+        return parts.url
+    }
+
     func clipped(_ text: (String, Int) -> String) -> Self {
         .init(name: name.map { text($0, 512) }, username: username.map { text($0, 256) }, avatarURL: avatarURL)
     }
@@ -81,8 +98,12 @@ public struct RemoteDetailField: Codable, Equatable, Sendable {
     public let url: URL?
     /// When set, the label names this person and the phone shows them with an avatar.
     public var person: RemotePerson?
-    public init(label: String, value: String, url: URL? = nil, person: RemotePerson? = nil) {
+    public var peopleMessage: RemotePeopleMessage?
+    public var supportingText: String?
+    public init(label: String, value: String, url: URL? = nil, person: RemotePerson? = nil,
+                peopleMessage: RemotePeopleMessage? = nil, supportingText: String? = nil) {
         self.label = label; self.value = value; self.url = url; self.person = person
+        self.peopleMessage = peopleMessage; self.supportingText = supportingText
     }
 }
 
@@ -262,7 +283,7 @@ public struct RemoteMRDetails: Codable, Equatable, Sendable {
 
     public var avatarThumbnailURLs: [URL] {
         let fields = metadata + feedback + (usage ?? [])
-        let people = fields.compactMap(\.person)
+        let people = fields.compactMap(\.person) + fields.flatMap { $0.peopleMessage?.people ?? [] }
         let reviewers = (approvals?.people ?? []).compactMap(\.avatarURL)
         let commenters = (threads ?? []).flatMap(\.notes).compactMap(\.avatarURL)
         return RemoteAvatarThumbnail.eligibleURLs(people.compactMap(\.avatarURL) + reviewers + commenters)
@@ -311,8 +332,15 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
             }
             details.metadata = list(details.metadata, 30).map { .init(label: text($0.label, 256), value: text($0.value, 4_000), url: $0.url,
                                                                      person: $0.person?.clipped(text)) }
-            details.feedback = list(details.feedback, 40).map { .init(label: text($0.label, 256), value: text($0.value, 4_000), url: $0.url,
-                                                                     person: $0.person?.clipped(text)) }
+            details.feedback = list(details.feedback, 40).map { field in
+                let message = field.peopleMessage.map {
+                    RemotePeopleMessage(prefix: text($0.prefix, 512), people: list($0.people, 2).map { $0.clipped(text) },
+                                        remainingCount: $0.remainingCount)
+                }
+                return .init(label: text(field.label, 256), value: text(field.value, 4_000), url: field.url,
+                             person: field.person?.clipped(text), peopleMessage: message,
+                             supportingText: field.supportingText.map { text($0, 4_000) })
+            }
             details.policy = list(details.policy, 20).map { text($0, 2_000) }
             details.rules = details.rules.map { list($0, 20).map { text($0, 2_000) } }
             details.automation = details.automation.map { .init(active: $0.active, summary: text($0.summary, 512)) }

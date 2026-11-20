@@ -172,6 +172,7 @@ struct RemoteCardDetail: View {
             .sheet(item: $regenerationPresentation) { model.draftRegenerationSheet($0) }
             .onChange(of: model.state.board?.account) { _, _ in regenerationPresentation = nil }
             .onDisappear { model.cancelApproval(); model.cancelDetails() }
+            .environment(\.gitLabPersonSourceURL, current.url)
         }
     }
 

@@ -1,6 +1,27 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "authorFeedback.waitingReviewersPrefix": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Awaiting confirmation from" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Oczekiwanie na potwierdzenie od" } }
+      }
+    },
+    "authorFeedback.waitingAcceptancePrefix": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Awaiting approval or explicit confirmation of the fix from" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Oczekiwanie na akceptację lub wyraźne potwierdzenie poprawki od" } }
+      }
+    },
+    "authorFeedback.waitingAcceptance": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Waiting for approval or explicit confirmation of the fix." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Oczekiwanie na akceptację lub wyraźne potwierdzenie poprawki." } }
+      }
+    },
     "authorFeedback.manualDecision": {
       "extractionState": "manual",
       "localizations": {
@@ -145,17 +166,6 @@
         }
       }
     },
-    "authorFeedback.waitingAcceptance.%@": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Waiting for %@ to approve or explicitly confirm the fix."
-          }
-        }
-      }
-    },
     "authorFeedback.needsChanges": {
       "extractionState": "manual",
       "localizations": {
@@ -288,28 +298,6 @@
         }
       }
     },
-    "authorFeedback.waitingReviewers.%@": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Awaiting confirmation from %@"
-          }
-        }
-      }
-    },
-    "authorFeedback.waitingReviewersMore.%@.%lld": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Awaiting confirmation from %@ and %lld more"
-          }
-        }
-      }
-    },
     "authorFeedback.waitingSummary.%@.%@": {
       "extractionState": "manual",
       "localizations": {
@@ -317,28 +305,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ · %@"
-          }
-        }
-      }
-    },
-    "authorFeedback.waitingThreadAuthors.%@": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Feedback addressed, waiting for %@ to resolve threads"
-          }
-        }
-      }
-    },
-    "authorFeedback.waitingThreadAuthorsMore.%@.%lld": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Feedback addressed, waiting for %@ and %lld more to resolve threads"
           }
         }
       }
@@ -351,16 +317,11 @@
             "state": "translated",
             "value": "Feedback addressed, waiting for thread resolution from"
           }
-        }
-      }
-    },
-    "authorFeedback.threadResolutionPeopleMore.%lld": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
+        },
+        "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "and %lld more"
+            "value": "Uwagi uwzględnione. Oczekiwanie na zamknięcie wątków przez"
           }
         }
       }

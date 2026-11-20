@@ -1,4 +1,5 @@
 import SwiftUI
+import MergeTetherRemote
 
 /// A GitLab person as the UI shows them: display name first, the @username only on request.
 struct PersonIdentity: Equatable, Hashable, Sendable {
@@ -24,6 +25,7 @@ struct PersonIdentity: Equatable, Hashable, Sendable {
     /// Falls back to the bare username when GitLab returned no display name.
     var displayName: String? { trimmedName ?? normalizedUsername }
     var handle: String? { normalizedUsername.map { "@" + $0 } }
+    var messageName: String? { trimmedName ?? handle }
 
     /// The display name followed by the handle, so assistive technologies keep both.
     var accessibilityName: String? {
@@ -40,15 +42,32 @@ struct PersonIdentity: Equatable, Hashable, Sendable {
     }
 }
 
-/// Avatar and display name. macOS reveals the @username on hover; iOS on tap, styled as a link.
+private struct GitLabPersonSourceURLKey: EnvironmentKey {
+    static let defaultValue: URL? = nil
+}
+
+extension EnvironmentValues {
+    var gitLabPersonSourceURL: URL? {
+        get { self[GitLabPersonSourceURLKey.self] }
+        set { self[GitLabPersonSourceURLKey.self] = newValue }
+    }
+}
+
+/// Avatar and display name with GitLab identity details on hover or tap.
 struct PersonLabel: View {
     let person: PersonIdentity
     var avatarSize: CGFloat = 16
     var showsAvatar = true
+    var showsHandleWhenUnnamed = false
     /// Shown when GitLab returned neither a name nor a username.
     var fallback: Text? = nil
 
+    @Environment(\.gitLabPersonSourceURL) private var sourceURL
     @State private var showsHandle = false
+
+    private var profileURL: URL? {
+        RemotePerson(name: person.name, username: person.username).profileURL(on: sourceURL)
+    }
 
     var body: some View {
         if let name = person.displayName {
@@ -64,35 +83,40 @@ struct PersonLabel: View {
     private func content(_ name: String) -> some View {
         HStack(spacing: 5) {
             if showsAvatar { PersonAvatar(url: person.avatarURL, size: avatarSize, initials: person.initials).accessibilityHidden(true) }
-            Text(verbatim: name).lineLimit(1)
+            Text(verbatim: showsHandleWhenUnnamed ? person.messageName ?? name : name).lineLimit(1)
         }
     }
 
     @ViewBuilder private func labeled(_ name: String) -> some View {
         #if os(macOS)
-        content(name)
+        Group {
+            if let profileURL {
+                Link(destination: profileURL) { content(name).foregroundStyle(Color.accentColor) }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(Text(verbatim: person.accessibilityName ?? name))
+                    .accessibilityHint(Text(.Board.boardPersonOpenProfile))
+            } else {
+                content(name)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Text(verbatim: person.accessibilityName ?? name))
+            }
+        }
             .contentShape(Rectangle())
             .onHover { showsHandle = $0 && person.handle != nil }
             .popover(isPresented: $showsHandle, arrowEdge: .bottom) {
                 if let handle = person.handle { handlePopover(name, handle: handle) }
             }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Text(verbatim: person.accessibilityName ?? name))
         #else
         if let handle = person.handle {
             Button { showsHandle = true } label: {
-                HStack(spacing: 5) {
-                    if showsAvatar { PersonAvatar(url: person.avatarURL, size: avatarSize, initials: person.initials).accessibilityHidden(true) }
-                    Text(verbatim: name).lineLimit(1)
-                        .foregroundStyle(.tint)
-                }
+                content(name).foregroundStyle(Color.accentColor)
             }
             .buttonStyle(.borderless)
             .accessibilityLabel(Text(verbatim: person.accessibilityName ?? name))
             .accessibilityHint(Text(.Board.boardPersonUsernameHint))
             .popover(isPresented: $showsHandle) {
                 handlePopover(name, handle: handle)
-                .presentationCompactAdaptation(.popover)
+                    .presentationCompactAdaptation(.popover)
             }
         } else {
             content(name)
@@ -107,41 +131,89 @@ struct PersonLabel: View {
             PersonAvatar(url: person.avatarURL, size: 36, initials: person.initials).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: name).font(.headline)
-                Text(verbatim: handle).font(.callout.monospaced()).foregroundStyle(Color.secondary)
-                    .textSelection(.enabled)
+                #if os(iOS)
+                if let profileURL {
+                    Link(destination: profileURL) {
+                        Label { Text(verbatim: handle) } icon: { Image(systemName: "arrow.up.right.square") }
+                            .foregroundStyle(Color.accentColor)
+                            .frame(minHeight: 44)
+                    }
+                    .font(.callout.monospaced())
+                    .accessibilityHint(Text(.Board.boardPersonOpenProfile))
+                } else {
+                    handleText(handle)
+                }
+                #else
+                handleText(handle)
+                #endif
             }
         }
         .foregroundStyle(Color.primary)
         .padding(14)
     }
+
+    private func handleText(_ handle: String) -> some View {
+        Text(verbatim: handle).font(.callout.monospaced()).foregroundStyle(Color.secondary)
+            .textSelection(.enabled)
+    }
 }
 
-struct ThreadResolutionWaitLabel: View {
-    let people: [PersonIdentity]
+extension PersonIdentity {
+    init(_ remote: RemotePerson) {
+        self.init(name: remote.name, username: remote.username, avatarURL: remote.avatarURL)
+    }
+}
 
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Image(systemName: "lock").foregroundStyle(.secondary).frame(width: 14)
-                .accessibilityHidden(true)
-            content
-        }
+extension RemotePeopleMessage {
+    init?(_ prefix: LocalizedStringResource, people: [PersonIdentity]) {
+        guard !people.isEmpty else { return nil }
+        self.init(prefix: String(localized: prefix),
+                  people: people.prefix(2).map { .init(name: $0.name, username: $0.normalizedUsername, avatarURL: $0.avatarURL) },
+                  remainingCount: max(0, people.count - 2))
     }
 
-    private var content: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(.AuthorFeedback.authorFeedbackThreadResolutionWait)
-                .fixedSize(horizontal: false, vertical: true)
-            StatusFlowLayout(spacing: 6) {
-                ForEach(people.prefix(3), id: \.self) { person in
-                    PersonLabel(person: person, avatarSize: 14)
+    fileprivate var conjunction: String { String(localized: .Board.boardPeopleAnd) }
+    fileprivate var others: String { String(localized: .Board.boardPeopleOthers(remainingCount)) }
+
+    var resource: LocalizedStringResource {
+        let names = people.prefix(2).compactMap { PersonIdentity($0).messageName }
+        let list = if remainingCount > 0 { names.joined(separator: ", ") + " " + others }
+            else { names.joined(separator: " " + conjunction + " ") }
+        return .Board.boardPeopleMessage(prefix, list)
+    }
+
+    var text: String { String(localized: resource) }
+}
+
+struct PeopleMessageLabel: View {
+    let message: RemotePeopleMessage
+
+    var body: some View {
+        StatusFlowLayout(spacing: 4) {
+            Text(verbatim: message.prefix).fixedSize(horizontal: false, vertical: true)
+            ForEach(Array(message.people.prefix(2).enumerated()), id: \.offset) { index, person in
+                HStack(spacing: index == 0 ? 0 : 4) {
+                    if index == 1, message.remainingCount == 0 { Text(verbatim: message.conjunction) }
+                    PersonLabel(person: .init(person), showsAvatar: false, showsHandleWhenUnnamed: true)
                         .fontWeight(.semibold)
                         .foregroundStyle(Color.accentColor)
-                }
-                if people.count > 3 {
-                    Text(.AuthorFeedback.authorFeedbackThreadResolutionPeopleMore(people.count - 3))
-                        .foregroundStyle(.secondary)
+                    if index == 0, message.remainingCount > 0 { Text(verbatim: ",") }
                 }
             }
+            if message.remainingCount > 0 { Text(verbatim: message.others) }
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+struct WaitingPeopleLabel: View {
+    let message: RemotePeopleMessage
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "lock").foregroundStyle(.secondary).frame(width: 14)
+                .accessibilityHidden(true)
+            PeopleMessageLabel(message: message)
         }
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import MergeTetherRemote
 
 struct AuthorFeedbackAttempt: Codable, Hashable {
     let target: MRAutomationScope.Target
@@ -42,13 +43,16 @@ struct AuthorFeedbackPolicy {
         var automaticResolutionSuppressed = false
         var waitingForHumanResolution: [String] = []
         var canResolve: Bool { state == .ready && discussionID != nil && !automaticResolutionSuppressed }
-        var resolutionWaitMessage: LocalizedStringResource? { resolutionWaitMessage(people: .init()) }
-        func resolutionWaitMessage(people: PersonDirectory) -> LocalizedStringResource? {
-            guard !automaticResolutionSuppressed, [.waitingAcceptance, .ready, .disabled].contains(state) else { return nil }
-            return AuthorFeedbackPolicy.resolutionWaitMessage(authors: waitingForHumanResolution, people: people)
+        var threadResolutionHandles: [String] {
+            guard !automaticResolutionSuppressed, [.waitingAcceptance, .ready, .disabled].contains(state) else { return [] }
+            return AuthorFeedbackPolicy.normalizedHandles(waitingForHumanResolution)
         }
-        func waitingAcceptanceMessage(people: PersonDirectory) -> LocalizedStringResource {
-            .AuthorFeedback.authorFeedbackWaitingAcceptance(people.displayNames(waitingForReviewers))
+        func resolutionWaitPeopleMessage(people: PersonDirectory) -> RemotePeopleMessage? {
+            .init(.AuthorFeedback.authorFeedbackThreadResolutionWait, people: threadResolutionHandles.map(people.person(username:)))
+        }
+        func waitingAcceptancePeopleMessage(people: PersonDirectory) -> RemotePeopleMessage? {
+            .init(.AuthorFeedback.authorFeedbackWaitingAcceptancePrefix,
+                  people: AuthorFeedbackPolicy.normalizedHandles(waitingForReviewers).map(people.person(username:)))
         }
     }
 
@@ -100,14 +104,6 @@ struct AuthorFeedbackPolicy {
         // GitLab's BOT_USER_TYPES, retaining the existing group_bot compatibility alias.
         private static let automatedTypes: Set<String> = ["alert_bot", "project_bot", "group_bot", "support_bot", "visual_review_bot",
             "security_bot", "automation_bot", "security_policy_bot", "admin_bot", "service_account", "duo_code_review_bot", "orbit_bot"]
-    }
-
-    static func resolutionWaitMessage(authors: [String], people: PersonDirectory = .init()) -> LocalizedStringResource? {
-        let names = normalizedHandles(authors)
-        guard !names.isEmpty else { return nil }
-        let shown = people.displayNames(Array(names.prefix(3)))
-        return names.count > 3 ? .AuthorFeedback.authorFeedbackWaitingThreadAuthorsMore(shown, names.count - 3)
-            : .AuthorFeedback.authorFeedbackWaitingThreadAuthors(shown)
     }
 
     static func normalizedHandles(_ values: [String]) -> [String] {

@@ -63,6 +63,19 @@ public struct RemoteCardChip: Codable, Equatable, Sendable {
     public init(title: String, symbol: String) { self.title = title; self.symbol = symbol }
 }
 
+/// The named people in a status line, plus the count of people omitted from the line.
+public struct RemotePeopleMessage: Codable, Equatable, Sendable {
+    public let prefix: String
+    public let people: [RemotePerson]
+    public let remainingCount: Int
+
+    public init(prefix: String, people: [RemotePerson], remainingCount: Int) {
+        self.prefix = prefix
+        self.people = people
+        self.remainingCount = remainingCount
+    }
+}
+
 public struct RemoteCardText: Codable, Equatable, Sendable {
     public var author: String?
     /// Optional so older paired installations keep decoding snapshots.
@@ -71,6 +84,7 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
     public var repository: String
     public var draftBadge: String?
     public var status: String?
+    public var statusPeopleMessage: RemotePeopleMessage?
     /// Additive marker for active AI work; absent for deterministic reads and older hosts.
     public var statusSymbol: String?
     public var nextStep: String?
@@ -79,6 +93,7 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
     public var secondaryCTA: RemoteCardCTA?
     /// Merge requirements, one per line; `status` keeps the joined sentence for older phones.
     public var requirements: [String]?
+    public var requirementPeopleMessage: RemotePeopleMessage?
     /// When present, the first requirement is a thread resolution wait for these people.
     public var threadResolutionPeople: [RemotePerson]?
     /// The automation order behind `nextStep`, with the current step's index.
@@ -86,6 +101,7 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
     public var currentStep: Int?
     /// Unpublished drafts and who still has no published reply; older phones ignore it.
     public var pendingDrafts: String?
+    public var pendingDraftsPeopleMessage: RemotePeopleMessage?
     public var approvalPeople: [RemoteApprovalPerson]?
     public var viewerApprovalID: Int?
     /// GitLab's reviewer assignments, independent of approval or discussion participation.
@@ -213,7 +229,11 @@ public struct RemoteBoard: Codable, Equatable, Sendable {
         let presentations = cards.compactMap(\.presentation)
         let authors = presentations.compactMap(\.authorAvatarURL)
         let approvers = presentations.flatMap { ($0.approvalPeople ?? []).compactMap(\.avatarURL) }
-        let people = presentations.flatMap { $0.threadResolutionPeople ?? [] }
+        let people = presentations.flatMap { presentation -> [RemotePerson] in
+            let messages = [presentation.statusPeopleMessage, presentation.requirementPeopleMessage,
+                            presentation.pendingDraftsPeopleMessage].compactMap { $0 }
+            return messages.flatMap(\.people) + (presentation.threadResolutionPeople ?? [])
+        }
         let recipients = cards.flatMap(\.drafts).flatMap { $0.replyRecipients ?? [] }
         return RemoteAvatarThumbnail.eligibleURLs(authors + approvers + (people + recipients).compactMap(\.avatarURL))
     }

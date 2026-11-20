@@ -109,6 +109,9 @@ private struct CommandCenterMRCardContent: View {
                                 BoardWaitingRequirements(waiting: waiting, isMuted: isMuted)
                             }
                             .font(.callout)
+                        } else if let message = presentation.statusPeopleMessage {
+                            PeopleMessageLabel(message: message)
+                                .font(.callout).foregroundStyle(isMuted ? Color.secondary : Color.primary)
                         } else if humanAction == nil, let status = neutralStatus {
                             Text(status).font(.callout).foregroundStyle(isMuted ? Color.secondary : Color.primary).lineLimit(2)
                                 .help(Text(reviewingContext.presenceMessage)
@@ -119,7 +122,12 @@ private struct CommandCenterMRCardContent: View {
                     .font(.caption).foregroundStyle(.secondary)
                 }
                 if !presentation.working, let drafts = MRPendingDraftsSummary(item: item) {
-                    Label { Text(drafts.message).foregroundStyle(isMuted ? Color.secondary : Color.primary) } icon: {
+                    Label {
+                        Group {
+                            if let message = drafts.peopleMessage { PeopleMessageLabel(message: message) }
+                            else { Text(drafts.message) }
+                        }.foregroundStyle(isMuted ? Color.secondary : Color.primary)
+                    } icon: {
                         Image(systemName: "text.bubble").foregroundStyle(.secondary)
                     }
                     .labelStyle(BoardCardStatusLabelStyle())
@@ -195,6 +203,7 @@ private struct CommandCenterMRCardContent: View {
         .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
             Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
         } message: { Text(.Board.boardRemoveExplanation) }
+        .environment(\.gitLabPersonSourceURL, row.displayURL)
     }
 
     private var metadataHeader: some View {
@@ -593,10 +602,9 @@ struct BoardWaitingRequirements: View {
     var isMuted = false
 
     var body: some View {
-        let people = waiting.threadResolutionPeople
         ForEach(Array(waiting.requirements.enumerated()), id: \.offset) { index, line in
-            if index == 0, !people.isEmpty {
-                ThreadResolutionWaitLabel(people: people)
+            if index == 0, let message = waiting.reviewerPeopleMessage {
+                WaitingPeopleLabel(message: message)
                     .foregroundStyle(isMuted ? Color.secondary : Color.primary)
             } else {
                 BoardRequirementLine(text: line, isMuted: isMuted)

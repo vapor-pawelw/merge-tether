@@ -1,4 +1,5 @@
 import Foundation
+import MergeTetherRemote
 
 /// Display facts only. Waiting never grants merge, approval, publication or resolution permission.
 @MainActor struct MRWaitingStatus {
@@ -47,18 +48,11 @@ import Foundation
                   status.fingerprint == fingerprint, !status.needsAttention, status.pendingDraftCount == 0,
                   status.followUpNoteIDs.isEmpty, status.replyNoteIDs.isEmpty, status.codeReviewRequests.isEmpty,
                   status.findings.allSatisfy({ [.waitingAcceptance, .ready].contains($0.state)
-                      || $0.state == .disabled && $0.resolutionWaitMessage != nil }) else { return nil }
-            humanResolutionAuthors = AuthorFeedbackPolicy.normalizedHandles(status.findings.filter {
-                $0.resolutionWaitMessage != nil
-            }.flatMap(\.waitingForHumanResolution))
+                      || $0.state == .disabled && !$0.threadResolutionHandles.isEmpty }) else { return nil }
+            humanResolutionAuthors = AuthorFeedbackPolicy.normalizedHandles(status.findings.flatMap(\.threadResolutionHandles))
             awaitsReviewer = status.waitingForReviewer || !humanResolutionAuthors.isEmpty
-            var handles: [String: String] = [:]
-            for value in status.findings.filter({ $0.state == .waitingAcceptance }).flatMap(\.waitingForReviewers) {
-                let name = value.trimmingCharacters(in: .whitespacesAndNewlines).drop(while: { $0 == "@" })
-                guard !name.isEmpty else { continue }
-                handles[String(name).lowercased()] = String(name)
-            }
-            reviewers = handles.values.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            reviewers = AuthorFeedbackPolicy.normalizedHandles(
+                status.findings.filter { $0.state == .waitingAcceptance }.flatMap(\.waitingForReviewers))
         } else {
             awaitsReviewer = false
             reviewers = []
@@ -102,12 +96,16 @@ import Foundation
         }
     }
 
+    var reviewerPeopleMessage: RemotePeopleMessage? {
+        guard awaitsReviewer else { return nil }
+        if !humanResolutionAuthors.isEmpty {
+            return .init(.AuthorFeedback.authorFeedbackThreadResolutionWait, people: threadResolutionPeople)
+        }
+        return .init(.AuthorFeedback.authorFeedbackWaitingReviewersPrefix, people: reviewers.map(people.person(username:)))
+    }
+
     private var reviewerRequirement: LocalizedStringResource? {
         guard awaitsReviewer else { return nil }
-        let names = people.displayNames(Array(reviewers.prefix(3)))
-        if let resolution = AuthorFeedbackPolicy.resolutionWaitMessage(authors: humanResolutionAuthors, people: people) { return resolution }
-        if reviewers.isEmpty { return .AuthorFeedback.authorFeedbackWaitingChip }
-        if reviewers.count > 3 { return .AuthorFeedback.authorFeedbackWaitingReviewersMore(names, reviewers.count - 3) }
-        return .AuthorFeedback.authorFeedbackWaitingReviewers(names)
+        return reviewerPeopleMessage?.resource ?? .AuthorFeedback.authorFeedbackWaitingChip
     }
 }

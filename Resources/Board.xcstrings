@@ -2,6 +2,49 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "board.people.message.%@.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%1$@ %2$@" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "%1$@ %2$@" } }
+      }
+    },
+    "board.people.and": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "and" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "i" } }
+      }
+    },
+    "board.replyTo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Reply to" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Odpowiedź do" } }
+      }
+    },
+    "board.people.others.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "variations": { "plural": {
+          "one": { "stringUnit": { "state": "translated", "value": "and %lld other" } },
+          "other": { "stringUnit": { "state": "translated", "value": "and %lld others" } }
+        } } },
+        "pl": { "variations": { "plural": {
+          "one": { "stringUnit": { "state": "translated", "value": "i %lld inna osoba" } },
+          "few": { "stringUnit": { "state": "translated", "value": "i %lld inne osoby" } },
+          "many": { "stringUnit": { "state": "translated", "value": "i %lld innych osób" } },
+          "other": { "stringUnit": { "state": "translated", "value": "i %lld innych osób" } }
+        } } }
+      }
+    },
+    "board.pendingDrafts.awaitingReplyPrefix.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%@ · no reply published yet to" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "%@ · brak opublikowanej odpowiedzi dla:" } }
+      }
+    },
     "board.pendingDrafts.single": {
       "extractionState": "manual",
       "localizations": {
@@ -16,18 +59,11 @@
         "pl": { "stringUnit": { "state": "translated", "value": "Nieopublikowane wersje robocze: %lld" } }
       }
     },
-    "board.pendingDrafts.awaitingReply.%@.%@": {
+    "board.person.openProfile": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "%1$@ · no reply published yet to %2$@" } },
-        "pl": { "stringUnit": { "state": "translated", "value": "%1$@ · brak opublikowanej odpowiedzi dla: %2$@" } }
-      }
-    },
-    "board.pendingDrafts.awaitingReplyMore.%@.%@.%lld": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "%1$@ · no reply published yet to %2$@ and %3$lld more" } },
-        "pl": { "stringUnit": { "state": "translated", "value": "%1$@ · brak opublikowanej odpowiedzi dla: %2$@ i %3$lld innych" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Opens the GitLab profile" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Otwiera profil w GitLabie" } }
       }
     },
     "board.person.usernameHint": {

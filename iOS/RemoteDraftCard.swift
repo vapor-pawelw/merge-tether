@@ -43,14 +43,13 @@ struct RemoteDraftCard: View {
                     .accessibilityIdentifier("remote.delete-draft.\(draft.id)")
                 }
             }
-            if let recipients = draft.replyRecipients, !recipients.isEmpty {
+            if let recipients = draft.replyRecipients,
+               let message = RemotePeopleMessage(.Board.boardReplyTo, people: recipients.map(PersonIdentity.init)) {
                 // A reply's thread ID means nothing to people; name who it answers instead.
-                StatusFlowLayout(spacing: 6) {
-                    Label(.RemoteDetail.remoteDetailReplyInThread, systemImage: "arrowshape.turn.up.left")
-                    ForEach(Array(recipients.enumerated()), id: \.offset) { _, person in
-                        PersonLabel(person: .init(name: person.name, username: person.username, avatarURL: person.avatarURL),
-                                    avatarSize: 16)
-                    }
+                Label {
+                    PeopleMessageLabel(message: message)
+                } icon: {
+                    Image(systemName: "arrowshape.turn.up.left")
                 }
                 .font(.caption).foregroundStyle(.secondary)
                 .accessibilityIdentifier("remote.draft-recipients.\(draft.id)")

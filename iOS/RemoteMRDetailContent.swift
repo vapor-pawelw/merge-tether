@@ -89,7 +89,7 @@ struct RemoteMRDetailContent: View {
                 if let description = details.description, !description.isEmpty {
                     Divider()
                     Text(.RemoteDetail.remoteDetailDescription).font(.subheadline.weight(.medium))
-                    Text(verbatim: description).font(.callout).lineSpacing(3).textSelection(.enabled)
+                    RemoteMarkdownText(source: description).font(.callout).lineSpacing(3).textSelection(.enabled)
                         .lineLimit(descriptionExpanded ? nil : 6)
                         .fixedSize(horizontal: false, vertical: true)
                     Button { descriptionExpanded.toggle() } label: {
@@ -147,7 +147,7 @@ struct RemoteMRDetailContent: View {
     @ViewBuilder private func fieldView(_ field: RemoteDetailField) -> some View {
         // A person names either the label (feedback from a reviewer) or the value (the MR author).
         let person = field.person.map { PersonIdentity(name: $0.name, username: $0.username, avatarURL: $0.avatarURL) }
-        let personIsLabel = person != nil && person?.displayName == field.label
+        let personIsLabel = person.map { $0.displayName == field.label || $0.handle == field.label } ?? false
         VStack(alignment: .leading, spacing: 5) {
             if let person, personIsLabel {
                 HStack(spacing: 8) {
@@ -165,6 +165,12 @@ struct RemoteMRDetailContent: View {
             } else { Text(verbatim: field.label).font(.subheadline.weight(.medium)).foregroundStyle(.secondary) }
             if let person, !personIsLabel {
                 PersonLabel(person: person, avatarSize: 20).font(.callout)
+            } else if let message = field.peopleMessage {
+                PeopleMessageLabel(message: message).font(.callout)
+                if let supportingText = field.supportingText {
+                    Text(verbatim: supportingText).font(.callout).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             } else {
                 Text(verbatim: field.value).font(.callout).textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -530,7 +536,7 @@ private struct RemoteOriginResumeBanner: View {
     }
 }
 
-/// Comment Markdown with the same formatting collapsed or expanded, as on the Mac.
+/// The same inline Markdown formatting used by the Mac for GitLab content.
 struct RemoteMarkdownText: View {
     let source: String
     @State private var rendered: Rendered?

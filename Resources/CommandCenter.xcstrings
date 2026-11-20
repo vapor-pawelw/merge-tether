@@ -30,6 +30,13 @@
         "pl": { "stringUnit": { "state": "translated", "value": "Aktywność automatyzacji" } }
       }
     },
+    "commandCenter.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Description" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Opis" } }
+      }
+    },
     "commandCenter.overview": {
       "extractionState": "manual",
       "localizations": {
