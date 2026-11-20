@@ -71,7 +71,39 @@ A development installation may use a separate `PRODUCT_BUNDLE_IDENTIFIER` suppli
 
 For a local installation paired with iOS, also keep a consistent certificate-backed signing identity, such as Apple Development, across rebuilds. An ad hoc signature uses a changing code hash as its designated requirement, so Keychain’s Always Allow does not carry across changed builds. Switching from an ad hoc build to a certificate-signed build can require one new Keychain approval; keep the existing pairing and its Keychain access controls.
 
-`scripts/rebuild-and-relaunch.sh` regenerates, builds and launches a Debug app from its build directory. It refuses while a MergeTether app or app-hosted test is running and prints the running executable paths; finish active work/tests and quit the intended app before retrying. It never kills another process or forces an additional instance. Use `--help` for its options. The helper uses the project's default bundle identifier and is not an installer for a custom-identifier app. Use an explicit build and copy step when preserving an existing installation, including its bundle identifier, certificate-backed signing identity and installation path. Launch that installed path once rather than also opening a scratch build.
+### Rebuild and relaunch macOS
+
+The local build scripts use the `xcodebuildmcp` CLI and the repository's pinned Tuist.
+
+```bash
+./scripts/rebuild-and-relaunch.sh
+./scripts/rebuild-and-relaunch.sh --app "$HOME/Applications/MergeTether.app"
+```
+
+The script builds Debug in a temporary directory and verifies the replacement before
+requesting that the interactive app quit. It waits up to 15 seconds for shutdown,
+then force quits an unresponsive instance. It opens the updated installation and
+restores the previous bundle if launch fails.
+
+The default path is `~/Applications/MergeTether.app`. The script also looks for the
+legacy app name and for installations in `/Applications`. Use `--app` for other
+paths or to select a particular installation. An existing installation supplies
+its bundle ID and signing identity. Keep that identity available in Keychain so
+the rebuild retains access to existing settings and pairing.
+
+### Build an IPA for SideStore
+
+```bash
+./scripts/build-sidestore-ipa.sh
+./scripts/build-sidestore-ipa.sh --build-number 35
+```
+
+With the [local relay configured](#local-relay-configuration), the script builds
+Release for iPhoneOS and uses the next build number found in `release/sidestore`
+unless you supply one. It writes the IPA, SHA-256 checksum and build manifest to
+that directory. The IPA contains an ad-hoc signed app for SideStore to re-sign
+on import. The script verifies the device executable and signature after
+extracting the final archive.
 
 ## Installation-specific runtime data
 

@@ -1,168 +1,134 @@
 #!/usr/bin/env bash
-# Regenerate, build and launch a development .app only after existing
-# MergeTether instances and app-hosted tests have finished and been closed.
-
 set -euo pipefail
-
-SCHEME="${GITLABTODOS_SCHEME:-GitLabTodos}"
-CONFIGURATION="${GITLABTODOS_CONFIGURATION:-Debug}"
-APP_NAME="${GITLABTODOS_APP_NAME:-GitLabTodos}"
-PROJECT="${GITLABTODOS_PROJECT:-GitLabTodos.xcodeproj}"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/rebuild-and-relaunch.sh [--help]
+Usage: scripts/rebuild-and-relaunch.sh [--app PATH]
 
-Generate the pinned Tuist project, build a development app and launch it.
-Refuse while an existing MergeTether app or app-hosted test process is running;
-finish active work/tests and quit the app before retrying. Nothing is killed.
-
-This helper launches the build output; it does not replace an installed app.
-For a custom installation, follow docs/building.md to preserve its bundle ID,
-preferences, signing identity and installation path.
+Build MergeTether for macOS, quit the running app (force if needed), then
+replace and open the installation. Defaults to ~/Applications/MergeTether.app
+or an existing MergeTether.app / GitLabTodos.app in ~/Applications or /Applications.
+An existing installation supplies the bundle ID and signing identity.
 
 Optional environment: GITLABTODOS_SCHEME, GITLABTODOS_CONFIGURATION,
 GITLABTODOS_APP_NAME, GITLABTODOS_PROJECT.
 USAGE
 }
 
-require_cmd() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    echo "Missing required command: $1" >&2
-    exit 1
-  fi
-}
+fail() { echo "error: $*" >&2; exit 1; }
+plist() { /usr/libexec/PlistBuddy -c "Print :$2" "$1"; }
 
-current_app_pids() {
-  pgrep -u "$(id -u)" -x GitLabTodos || true
-  if [[ "$APP_NAME" != GitLabTodos ]]; then
-    pgrep -u "$(id -u)" -x "$APP_NAME" || true
-  fi
-}
+target=""
+case "${1:-}" in
+  --help|-h) usage; exit 0 ;;
+  --app) [[ $# == 2 && -n "$2" ]] || fail "--app requires a path"; target="$2" ;;
+  "") [[ $# == 0 ]] || fail "expected --app PATH" ;;
+  *) usage >&2; exit 2 ;;
+esac
+if [[ -z "$target" ]]; then
+  target="$HOME/Applications/MergeTether.app"
+  for candidate in "$target" "$HOME/Applications/GitLabTodos.app" \
+      /Applications/MergeTether.app /Applications/GitLabTodos.app; do
+    if [[ -d "$candidate" ]]; then target="$candidate"; break; fi
+  done
+fi
+[[ "$target" == /* ]] || target="$PWD/$target"
+[[ "$target" == *.app && ! -L "$target" ]] || fail "select a local .app directory, not a symlink"
+for tool in mise xcodebuildmcp swift codesign; do
+  command -v "$tool" >/dev/null || fail "missing $tool"
+done
 
-require_no_running_app() {
-  local processes pid executable
-  processes="$(
-    while IFS= read -r pid; do
-      [[ -n "$pid" ]] || continue
-      executable="$(ps -p "$pid" -o comm= 2>/dev/null)" || continue
-      printf '  PID %s: %s\n' "$pid" "$executable"
-    done < <(current_app_pids)
-  )"
-  if [[ -n "$processes" ]]; then
-    echo "MergeTether or an app-hosted test is already running:" >&2
-    echo "$processes" >&2
-    echo "Finish active work/tests, quit that app, then retry. No process was stopped." >&2
-    exit 1
-  fi
-}
-
-repo_root() {
-  cd "$(dirname "${BASH_SOURCE[0]}")/.."
-  pwd
-}
-
-build_dir_from_xcodebuild() {
-  xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIGURATION" -showBuildSettings 2>/dev/null \
-    | sed -n 's/^[[:space:]]*CONFIGURATION_BUILD_DIR = //p' \
-    | head -n1
-}
-
-refresh_project_with_tuist() {
-  echo "Refreshing $PROJECT via Tuist..."
-  if mise x -- tuist generate --no-open; then
-    return
-  fi
-
-  echo "Tuist generate failed. Running tuist install and retrying..."
-  mise x -- tuist install
-  echo "Refreshing $PROJECT via Tuist (retry)..."
-  mise x -- tuist generate --no-open
-}
-
-ensure_build_prerequisites() {
-  local root="$1"
-
-  if [[ -d "$root/$PROJECT" ]] && command -v mise >/dev/null 2>&1; then
-    refresh_project_with_tuist
-    return
-  fi
-
-  if ! command -v mise >/dev/null 2>&1; then
-    if [[ ! -d "$root/$PROJECT" ]]; then
-      echo "Missing $PROJECT and mise is not installed. Cannot generate project files." >&2
-      exit 1
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+script_dir="$PWD/scripts"
+scheme="${GITLABTODOS_SCHEME:-GitLabTodos}"
+configuration="${GITLABTODOS_CONFIGURATION:-Debug}"
+app_name="${GITLABTODOS_APP_NAME:-GitLabTodos}"
+project="${GITLABTODOS_PROJECT:-GitLabTodos.xcodeproj}"
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/mergetether-macos.XXXXXX")"
+stage=""
+replacing=0
+locked=0
+cleanup() {
+  local result=$?
+  trap - EXIT
+  if [[ "$result" != 0 && -n "$stage" ]]; then
+    if [[ "$replacing" == 1 && ! -e "$stage/New.app" && -e "$target" ]] &&
+        ! mv "$target" "$stage/Failed.app"; then
+      echo "Could not move failed installation. Staged apps are at $stage" >&2
+      stage=""
+    elif [[ -d "$stage/Previous.app" ]] &&
+        { [[ -e "$target" || -L "$target" ]] || ! mv "$stage/Previous.app" "$target"; }; then
+      echo "Previous installation retained at $stage/Previous.app" >&2
+      stage=""
     fi
-    return
   fi
-
-  echo "Installing toolchain with mise..."
-  mise install
-  refresh_project_with_tuist
-
-  if [[ ! -d "$root/$PROJECT" ]]; then
-    echo "Still missing $PROJECT after Tuist generate." >&2
-    exit 1
-  fi
+  [[ -z "$stage" ]] || rm -rf -- "$stage"
+  rm -rf -- "$scratch"
+  [[ "$locked" == 0 ]] || rm -f -- "$lock"
+  exit "$result"
 }
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+mkdir -p build
+lock="$PWD/build/.local-build.lock"
+shlock -f "$lock" -p "$$" || fail "another local build is in progress in this checkout"
+locked=1
 
-main() {
-  case "${1:-}" in
-    --help|-h) usage; return ;;
-    "") ;;
-    *) usage >&2; exit 2 ;;
-  esac
-  if [[ $# -gt 0 ]]; then
-    usage >&2
-    exit 2
+bundle_id="com.vaporpw.GitLabTodos"
+identity="-"
+team=""
+requirement=""
+old_origin=""
+if [[ -e "$target" ]]; then
+  old_plist="$target/Contents/Info.plist"
+  [[ "$(plist "$old_plist" CFBundleExecutable)" == "$app_name" ]] ||
+    fail "existing app at $target is not the selected MergeTether product"
+  bundle_id="$(plist "$old_plist" CFBundleIdentifier)"
+  old_origin="$(plist "$old_plist" MergeTetherRelayOrigin 2>/dev/null || true)"
+  codesign --verify --strict "$target"
+  codesign -d --extract-certificates="$scratch/leaf" "$target" 2>/dev/null
+  if [[ -f "$scratch/leaf0" ]]; then
+    identity="$(shasum -a 1 "$scratch/leaf0" | cut -d ' ' -f 1)"
+    if ! security find-identity -v -p codesigning | awk -v sha="$identity" 'tolower($2) == sha { found=1 } END { exit !found }'; then
+      fail "signing identity for $target is unavailable in Keychain"
+    fi
+    team="$(codesign -dv "$target" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+    requirement="$(codesign -d -r- "$target" 2>&1 | sed -n '/^designated => /p')"
+    [[ -n "$requirement" ]] || fail "could not read the installed signing requirement"
   fi
-  require_cmd xcodebuild
-  require_cmd sed
-  require_cmd open
-  require_cmd pgrep
-  require_cmd ps
-  require_cmd id
+fi
 
-  require_no_running_app
+mise exec -- tuist generate --no-open
+generated_origin="$(plist "Derived/InfoPlists/$app_name-Info.plist" MergeTetherRelayOrigin)"
+if [[ -n "$old_origin" && -z "$generated_origin" ]]; then
+  fail "existing app uses a relay. Set the origin-only config in .mise.local.toml or TUIST_MERGETETHER_RELAY_CONFIG_FILE"
+fi
 
-  local root build_dir app_path pids
-  root="$(repo_root)"
-  cd "$root"
-  ensure_build_prerequisites "$root"
+echo "Building $scheme ($configuration)..."
+xcodebuildmcp macos build --project-path "$project" --scheme "$scheme" \
+  --configuration "$configuration" --derived-data-path "$scratch/DerivedData" --prefer-xcodebuild \
+  --extra-args "PRODUCT_BUNDLE_IDENTIFIER=$bundle_id" "CODE_SIGN_IDENTITY=$identity" \
+  "DEVELOPMENT_TEAM=$team" CODE_SIGN_STYLE=Manual
 
-  build_dir="$(build_dir_from_xcodebuild)"
-  if [[ -z "$build_dir" ]]; then
-    echo "Failed to resolve CONFIGURATION_BUILD_DIR for scheme '$SCHEME'." >&2
-    exit 1
-  fi
+built="$scratch/DerivedData/Build/Products/$configuration/$app_name.app"
+built_plist="$built/Contents/Info.plist"
+[[ "$(plist "$built_plist" CFBundleIdentifier)" == "$bundle_id" &&
+   "$(plist "$built_plist" MergeTetherRelayOrigin)" == "$generated_origin" ]] ||
+  fail "built app has unexpected bundle identity or relay configuration"
 
-  app_path="$build_dir/$APP_NAME.app"
+mkdir -p "$(dirname "$target")"
+stage="$(mktemp -d "$(dirname "$target")/.mergetether-relaunch.XXXXXX")"
+ditto "$built" "$stage/New.app"
+codesign --verify --deep --strict "$stage/New.app"
+if [[ -n "$requirement" ]]; then
+  new_requirement="$(codesign -d -r- "$stage/New.app" 2>&1 | sed -n '/^designated => /p')"
+  [[ "$new_requirement" == "$requirement" ]] || fail "built app changed the installed signing requirement"
+fi
 
-  echo "Building $SCHEME ($CONFIGURATION)..."
-  xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIGURATION" build
-
-  if [[ ! -d "$app_path" ]]; then
-    echo "Built app not found at: $app_path" >&2
-    exit 1
-  fi
-
-  require_no_running_app
-
-  echo "Launching $app_path..."
-  if ! open "$app_path"; then
-    echo "Launch failed. Inspect the app bundle and Launch Services, then retry; no fallback instance was started." >&2
-    exit 1
-  fi
-
-  sleep 1
-  pids="$(current_app_pids)"
-  if [[ -z "$pids" ]]; then
-    echo "Launch failed: no running '$APP_NAME' process found." >&2
-    exit 1
-  fi
-
-  echo "Running PID(s):"
-  echo "$pids"
-}
-
-main "$@"
+swift "$script_dir/mergetether-app-lifecycle.swift" quit "$target" "$app_name"
+if [[ -e "$target" ]]; then mv "$target" "$stage/Previous.app"; fi
+replacing=1
+mv "$stage/New.app" "$target"
+swift "$script_dir/mergetether-app-lifecycle.swift" launch "$target" "$app_name"
+echo "Running $target"
