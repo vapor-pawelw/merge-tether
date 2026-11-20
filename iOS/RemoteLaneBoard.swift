@@ -136,9 +136,9 @@ private struct RemoteLaneView: View {
     @ViewBuilder private func boardCard(_ card: RemoteCard) -> some View {
         let source = model.state.canAct() ? model.state.board?.orderSource(for: card) : nil
         let content = RemoteCardView(card: card, onOpen: { onOpen(card) }, onOpenCTA: { onOpenCTA(card, $0) },
-            actionsModel: model, orderDrag: source.map { .init(source: $0) })
-        if source != nil {
-            content.modifier(RemoteBoardOrderDropDestination(card: card, model: model))
+            actionsModel: model)
+        if let source {
+            content.modifier(RemoteBoardOrderInteraction(card: card, model: model, source: source))
         } else {
             content
         }

@@ -300,7 +300,6 @@ struct RemoteCardView: View {
     var onOpen: (() -> Void)?
     var onOpenCTA: ((RemoteCardCTA) -> Void)? = nil
     var actionsModel: RemotePhoneModel? = nil
-    var orderDrag: RemoteBoardOrderDrag? = nil
     private var primaryCTA: RemoteCardCTA? { card.primaryCTA.flatMap { $0.duplicatesCardTap ? nil : $0 } }
     private var secondaryCTA: RemoteCardCTA? { card.presentation?.secondaryCTA.flatMap { $0.duplicatesCardTap ? nil : $0 } }
     private var inboxUpdateDate: Date? { expanded ? nil : card.completionObservedAt }
@@ -435,14 +434,6 @@ struct RemoteCardView: View {
             if !expanded, card.orderGroup?.pinned == true {
                 Image(systemName: "pin.fill")
                     .accessibilityLabel(Text(.Remote.remoteBoardPinned))
-            }
-            if let orderDrag {
-                Image(systemName: "line.3.horizontal")
-                    .font(.body)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-                    .draggable(orderDrag)
-                    .accessibilityLabel(Text(.Remote.remoteBoardReorder))
             }
         }
         .font(.caption).foregroundStyle(.secondary)

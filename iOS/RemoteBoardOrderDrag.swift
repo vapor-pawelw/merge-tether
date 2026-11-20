@@ -2,7 +2,7 @@ import MergeTetherRemote
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct RemoteBoardOrderDrag: Codable, Transferable {
+private struct RemoteBoardOrderDrag: Codable, Transferable {
     let source: RemoteBoardOrderMove.Source
 
     static var transferRepresentation: some TransferRepresentation {
@@ -11,17 +11,21 @@ struct RemoteBoardOrderDrag: Codable, Transferable {
     }
 }
 
-struct RemoteBoardOrderDropDestination: ViewModifier {
+struct RemoteBoardOrderInteraction: ViewModifier {
     let card: RemoteCard
     let model: RemotePhoneModel
+    let source: RemoteBoardOrderMove.Source
     @State private var isTargeted = false
 
     func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 16)
         content
+            .contentShape([.interaction, .dragPreview], shape)
+            .draggable(RemoteBoardOrderDrag(source: source))
+            .accessibilityHint(Text(.Remote.remoteBoardReorder))
             .overlay {
                 if isTargeted {
-                    RoundedRectangle(cornerRadius: 16)
-                        .strokeBorder(Color.accentColor, lineWidth: 2)
+                    shape.strokeBorder(Color.accentColor, lineWidth: 2)
                         .allowsHitTesting(false)
                 }
             }
