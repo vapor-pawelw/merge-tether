@@ -358,9 +358,9 @@ struct RemoteCardView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(verbatim: expanded ? card.project : (card.presentation?.repository ?? card.project))
-                    .fontWeight(.medium).lineLimit(expanded ? nil : 1).truncationMode(.middle)
-                    .foregroundStyle(.tint)
+                if !card.project.isEmpty {
+                    RemoteRepositoryLabel(name: card.repositoryName, path: card.project)
+                }
                 Spacer(minLength: 4)
                 if let iid = card.mergeRequestIID {
                     Text(verbatim: "!\(iid)").monospacedDigit().fixedSize()
@@ -516,6 +516,30 @@ private struct RemoteStepChain: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 }
+private struct RemoteRepositoryLabel: View {
+    let name: String
+    let path: String
+    @State private var showingPath = false
+
+    var body: some View {
+        Button { showingPath = true } label: {
+            Text(verbatim: name)
+                .fontWeight(.medium).lineLimit(1).truncationMode(.middle)
+                .foregroundStyle(.tint)
+                .contentShape(.interaction, CardControlHitArea(anchor: .bottom))
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(Text(.Remote.remoteShowRepositoryPath))
+        .popover(isPresented: $showingPath) {
+            Text(verbatim: path).font(.callout.monospaced()).textSelection(.enabled)
+                .frame(width: 260, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(16)
+                .presentationCompactAdaptation(.popover)
+        }
+    }
+}
+
 private struct RemoteMRDependencyRow: View {
     let dependencies: RemoteMRDependencies
     var body: some View {

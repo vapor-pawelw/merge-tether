@@ -1287,6 +1287,23 @@
         }
       }
     },
+    "remote.showRepositoryPath": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show the full repository path"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pokaż pełną ścieżkę repozytorium"
+          }
+        }
+      }
+    },
     "remote.refreshGitLabBoard": {
       "extractionState": "manual",
       "localizations": {

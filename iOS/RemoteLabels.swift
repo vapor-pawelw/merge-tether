@@ -1,6 +1,12 @@
 import SwiftUI
 import MergeTetherRemote
 
+extension RemoteCard {
+    var repositoryName: String {
+        project.split(separator: "/").last?.trimmingCharacters(in: .whitespaces) ?? project
+    }
+}
+
 extension RemoteLaneID {
     var title: LocalizedStringResource {
         switch self {

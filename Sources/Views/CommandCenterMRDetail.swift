@@ -345,12 +345,17 @@ private struct CommandCenterMRDetailContent: View {
 
     private func header(_ progress: MRCardPresentation) -> some View {
         let mergeActivity = progress.mergeActivity
+        let repositoryPath = presentationRow.displayURL.gitLabProjectPath
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Text(verbatim: "!\(item.id.iid)").monospacedDigit()
                 if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
                 else if presentationRow.isDraft { BoardDraftBadge() }
-                RepositoryPathText(presentationRow.displayURL.gitLabProjectPath).lineLimit(1)
+                Text(verbatim: repositoryPath.split(separator: "/").last.map(String.init) ?? repositoryPath)
+                    .foregroundStyle(Color.accentColor)
+                    .fontWeight(.semibold)
+                    .lineLimit(1).truncationMode(.middle)
+                    .help(Text(verbatim: repositoryPath))
                 if let author = presentationRow.displayRequest?.author {
                     PersonLabel(person: author.person, avatarSize: 18)
                 }

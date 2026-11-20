@@ -132,7 +132,7 @@ struct RemoteCardDetail: View {
                 }
             }
             .navigationTitle(Text(verbatim: current.mergeRequestIID.map {
-                (current.presentation?.repository ?? current.project) + " · !\($0)"
+                current.repositoryName + " · !\($0)"
             } ?? current.title))
             .navigationBarTitleDisplayMode(.inline)
             .alert(Text(confirmation?.kind.title ?? .Remote.remoteConfirm), isPresented: Binding(
