@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Hide empty Feedback verification sections and tighten spacing between merge status, actions, and comments in Mac merge request details.
+
 - Render Markdown headings, lists, quotes, and code blocks in merge request descriptions and comments on Mac and iPhone.
 
 - Highlight merge requests that need attention with a padded inline callout, give MR cards a clearer border, and bring MR titles and repository labels closer together on Mac and iPhone.

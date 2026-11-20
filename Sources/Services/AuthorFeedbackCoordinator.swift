@@ -73,6 +73,9 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
             ?? findings.first { replyNoteIDs.contains($0.id) }
             ?? findings.first { $0.manualDecision != nil }
     }
+    var hasVisibleDetails: Bool {
+        phase != .complete || !findings.isEmpty || !codeReviewRequests.isEmpty || !followUpNoteIDs.isEmpty
+    }
     /// Repeated source concerns are presented once without hiding distinct feedback.
     var displayFindings: [AuthorFeedbackPolicy.Finding] {
         let ordered = primaryFinding.map { primary in

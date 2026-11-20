@@ -2,6 +2,38 @@ import Foundation
 import Testing
 @testable import MergeTether
 
+struct AuthorFeedbackPresentationTests {
+    @Test func aCompletedCheckWithNoFindingsHasNoDetailsToExpand() {
+        let status = AuthorFeedbackStatus(head: "head", fingerprint: "comments", phase: .complete,
+            addressedNoteIDs: [10], ignoredNoteIDs: [11])
+
+        #expect(!status.hasVisibleDetails)
+    }
+
+    @Test(arguments: [AuthorFeedbackStatus.Phase.checking, .failed, .waitingPublication])
+    func anInProgressOrFailedCheckShowsItsStatus(_ phase: AuthorFeedbackStatus.Phase) {
+        let status = AuthorFeedbackStatus(head: "head", fingerprint: "comments", phase: phase)
+
+        #expect(status.hasVisibleDetails)
+    }
+
+    @Test func findingsQuestionsAndFollowUpRemainVisibleAfterVerification() {
+        let finding = AuthorFeedbackPolicy.Finding(id: 10, discussionID: "thread", reviewerID: 2,
+            reviewerUsername: "reviewer", state: .needsChanges, reason: "Cover the retry path.", waitingForReviewers: [])
+        let question = ReReviewAssessment.CodeReviewRequest(sourceNoteID: 11, sourceQuote: "Check retries",
+            kind: .feedbackVerification, summary: "Verify the retry path.", question: "Does it handle a timeout?")
+        var status = AuthorFeedbackStatus(head: "head", fingerprint: "comments", phase: .complete, findings: [finding])
+
+        #expect(status.hasVisibleDetails)
+        status.findings = []
+        status.codeReviewRequests = [question]
+        #expect(status.hasVisibleDetails)
+        status.codeReviewRequests = []
+        status.followUpNoteIDs = [12]
+        #expect(status.hasVisibleDetails)
+    }
+}
+
 @MainActor
 struct VerifiedAuthorFeedbackTests {
     @Test(arguments: [AssistantJobExecution.State.failed, .interrupted])

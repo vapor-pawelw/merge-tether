@@ -139,6 +139,9 @@ private struct CommandCenterMRDetailContent: View {
 
     private var showsPublication: Bool { finishedState == nil && !item.drafts.isEmpty }
     private var showsDecisions: Bool { finishedState == nil && (needsHumanAttention || initialSection == .drafts || showsPublication) }
+    private var showsFeedbackDetails: Bool {
+        finishedState == nil && presentationItem.authorFeedbackStatus?.hasVisibleDetails == true
+    }
     private var initialDestinationIsReady: Bool {
         guard let anchor = pendingInitialAnchor else { return false }
         // Decisions precede comments, so their position does not depend on the discussion load.
@@ -164,7 +167,7 @@ private struct CommandCenterMRDetailContent: View {
         let presentation = MRCardPresentation(row: presentationRow, monitor: monitor, allowsRemoval: isReviewed)
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 16) {
                     header(presentation).id(Anchor.overview)
                     // The decision the user has to make leads; merge state and automation rules support it.
                     if showsDecisions {
@@ -172,24 +175,28 @@ private struct CommandCenterMRDetailContent: View {
                             humanAction: presentation.humanAction).id(Anchor.drafts)
                     }
                     if finishedState == nil {
-                        MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: presentationRow.evidenceMatchesCatalogContext,
-                            actionsBlocked: isStartingReview || isRetrying, onReviewFeedback: {
-                                feedbackExpanded = true
-                                commentsExpanded = true
-                                Task { await scroll(to: item.authorFeedbackStatus == nil ? .comments : .feedbackStatus, proxy: proxy) }
-                            }, showsExplanations: false,
-                            showsReplySources: !(showsDecisions && item.authorFeedbackStatus != nil),
-                            showsFeedbackVerification: presentationItem.authorFeedbackStatus == nil,
-                            showsStatusCard: true,
-                            textFont: .callout,
-                            coveredBlockers: shownRequirements(presentation)?.coveredBlockers ?? [],
-                            hidesBlockedActions: presentation.working, highlightedSubmission: presentation.mergeStage?.submission, statusTrailer: {
-                                MREffectivePolicySummary(row: presentationRow, monitor: monitor,
-                                    excluding: [presentation.humanAction?.explanation ?? "",
-                                        presentation.mergeStage.map { String(localized: $0.title) } ?? ""], holdsOnly: true)
-                            }, additionalActions: { _ in EmptyView() })
+                        VStack(alignment: .leading, spacing: 8) {
+                            MergeActionsView(item: item, monitor: monitor,
+                                evidenceMatchesCatalogContext: presentationRow.evidenceMatchesCatalogContext,
+                                actionsBlocked: isStartingReview || isRetrying, onReviewFeedback: {
+                                    feedbackExpanded = showsFeedbackDetails
+                                    commentsExpanded = true
+                                    Task { await scroll(to: .feedbackStatus, proxy: proxy) }
+                                }, showsExplanations: false,
+                                showsReplySources: !(showsDecisions && showsFeedbackDetails),
+                                showsFeedbackVerification: presentationItem.authorFeedbackStatus == nil,
+                                showsStatusCard: true,
+                                textFont: .callout,
+                                coveredBlockers: shownRequirements(presentation)?.coveredBlockers ?? [],
+                                hidesBlockedActions: presentation.working, highlightedSubmission: presentation.mergeStage?.submission, statusTrailer: {
+                                    MREffectivePolicySummary(row: presentationRow, monitor: monitor,
+                                        excluding: [presentation.humanAction?.explanation ?? "",
+                                            presentation.mergeStage.map { String(localized: $0.title) } ?? ""], holdsOnly: true)
+                                }, additionalActions: { _ in EmptyView() })
+                            supplementaryActions(citationContext: citationContext)
+                        }
+                        .id(Anchor.actions)
                     }
-                    if finishedState == nil { supplementaryActions(citationContext: citationContext).id(Anchor.actions) }
                     VStack(alignment: .leading, spacing: 8) {
                         discussionThreads(discussions).id(Anchor.comments)
                         Divider()
@@ -249,10 +256,13 @@ private struct CommandCenterMRDetailContent: View {
                 case .feedback:
                     if item.canConfirmReReview || item.reReviewReadiness?.hasConcreteConcerns == true {
                         pendingInitialAnchor = showsDecisions ? .drafts : .actions
-                    } else if item.authorFeedbackStatus != nil {
+                    } else if showsFeedbackDetails {
                         feedbackExpanded = true
                         pendingInitialAnchor = .feedbackStatus
-                    } else { pendingInitialAnchor = showsDecisions ? .drafts : .comments }
+                    } else {
+                        commentsExpanded = true
+                        pendingInitialAnchor = showsDecisions ? .drafts : .comments
+                    }
                 }
             }
             .task(id: initialDestinationIsReady) {
@@ -347,7 +357,8 @@ private struct CommandCenterMRDetailContent: View {
         if anchor == .assistantRuns, let focusedJobID {
             proxy.scrollTo("job/\(focusedJobID)", anchor: .top)
         } else {
-            proxy.scrollTo(anchor, anchor: .top)
+            let destination = anchor == .feedbackStatus && !showsFeedbackDetails ? Anchor.comments : anchor
+            proxy.scrollTo(destination, anchor: .top)
         }
     }
 
@@ -590,9 +601,11 @@ private struct CommandCenterMRDetailContent: View {
                 }
                 decisionActions
                 FollowUpAutomationHoldView(row: presentationRow, monitor: monitor)
-                if item.authorFeedbackStatus != nil {
-                    Divider()
-                    feedbackCheck(citationContext: citationContext).id(Anchor.feedbackStatus)
+                if showsFeedbackDetails {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Divider()
+                        feedbackCheck(citationContext: citationContext).id(Anchor.feedbackStatus)
+                    }
                 }
             }
             .font(.body).padding(14).frame(maxWidth: .infinity, alignment: .leading)
@@ -721,7 +734,7 @@ private struct CommandCenterMRDetailContent: View {
         DisclosureGroup(isExpanded: $feedbackExpanded) {
             AuthorFeedbackView(item: presentationItem, monitor: monitor, embedded: true,
                 citationContext: citationContext, sourceLoading: feedbackSourceLoading,
-                decisionUpdating: isUpdatingFeedbackDecision, onIgnoreSuggestion: presentIgnoreSuggestion).padding(.top, 8)
+                decisionUpdating: isUpdatingFeedbackDecision, onIgnoreSuggestion: presentIgnoreSuggestion).padding(.top, 6)
         } label: { Text(.CommandCenter.commandCenterFeedbackCheck).font(.callout.weight(.medium)) }
     }
 
@@ -815,7 +828,7 @@ private struct CommandCenterMRDetailContent: View {
             // Flattened: an empty wrapper would still take the parent's spacing.
             decisionActions
             FollowUpAutomationHoldView(row: presentationRow, monitor: monitor)
-            if item.authorFeedbackStatus != nil { feedbackCheck(citationContext: citationContext).id(Anchor.feedbackStatus) }
+            if showsFeedbackDetails { feedbackCheck(citationContext: citationContext).id(Anchor.feedbackStatus) }
         }
         if !item.isAuthored && !monitor.mrTodoIntents(for: item).contains(where: { $0.kind == .review }) {
             Button {
@@ -889,7 +902,7 @@ private struct CommandCenterMRDetailContent: View {
             switch action.feedbackEvidence(for: item) {
             case .finding(let finding):
                 if let status = item.authorFeedbackStatus, let source = citationContext?.finding(finding, status: status) {
-                    if !feedbackExpanded {
+                    if !showsFeedbackDetails || !feedbackExpanded {
                         MRCommentCitationView(citation: source, relation: .FeedbackSuggestions.feedbackSuggestionsSourceAssessment)
                         if let reason = finding.reason, !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             ignoreSuggestionButton(source, summary: AgentExplanation.summary(finding.summary) ?? reason, reason: reason)
