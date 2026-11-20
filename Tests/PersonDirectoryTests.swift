@@ -99,12 +99,15 @@ import MergeTetherRemote
         #expect(summary.count == 4)
         #expect(summary.awaitingReply == [alice, bob])
         let message = String(localized: summary.message)
-        #expect(message.contains("4"))
-        #expect(message.contains("Alice Example and Bob Example"))
-        #expect(!message.contains("@"))
+        #expect(message == "4 unpublished drafts for Alice Example and Bob Example")
+
+        item.drafts = [draft(1, "a")]
+        item.draftCount = 1
+        let reply = try #require(MRPendingDraftsSummary(item: item))
+        #expect(String(localized: reply.message) == "1 unpublished draft for Alice Example")
+        #expect(reply.peopleMessage?.people == [.init(name: "Alice Example", username: "alice")])
 
         item.drafts = [draft(1, nil)]
-        item.draftCount = 1
         let general = try #require(MRPendingDraftsSummary(item: item))
         #expect(general.awaitingReply.isEmpty)
         #expect(String(localized: general.message) == String(localized: .Board.boardPendingDraftsSingle))

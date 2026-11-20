@@ -46,9 +46,11 @@ private struct CommandCenterMRCardContent: View {
     var body: some View {
         let mergeActivity = presentation.mergeActivity
         let showsWorkingStatus = presentation.working && mergeActivity == nil
-        VStack(alignment: .leading, spacing: 9) {
+        let cardSpacing: CGFloat = 9
+        let repositorySpacing: CGFloat = 16
+        VStack(alignment: .leading, spacing: cardSpacing) {
             metadataHeader
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: repositorySpacing) {
                 Button(action: onDetails) {
                     BoardCardTitle(title: row.displayTitle, repositoryPath: row.displayURL.gitLabProjectPath,
                         titleColor: isMuted ? .secondary : .primary)
@@ -59,22 +61,14 @@ private struct CommandCenterMRCardContent: View {
                 BoardMRReferenceLine(iid: item.id.iid, projectID: item.id.projectID,
                     repositoryPath: row.displayURL.gitLabProjectPath, dependencies: row.displayItem.dependencies)
             }
+            .padding(.bottom, repositorySpacing - cardSpacing)
             if finishedState != nil {
                 FinishedMergeRequestStatus(item: row.displayItem, monitor: monitor)
             } else {
                 if let stage = presentation.mergeStage {
                     MRMergeStageBanner(stage: stage, startedAt: monitor.activityStartedAt(for: item, activity: mergeActivity))
                 }
-                if humanAction != nil {
-                    // The orange icon and edge carry urgency; the sentence stays high-contrast.
-                    Label { Text(verbatim: presentation.message).foregroundStyle(Color.primary) } icon: {
-                        Image(systemName: "exclamationmark.circle.fill").foregroundStyle(Color.orange)
-                    }
-                    .labelStyle(BoardCardStatusLabelStyle())
-                    .font(.callout.weight(.medium))
-                    .lineLimit(3).fixedSize(horizontal: false, vertical: true)
-                    .help(Text(verbatim: presentation.message))
-                }
+                attentionAndDrafts
                 if let retryError {
                     Label { Text(verbatim: retryError) } icon: {
                         Image(systemName: "xmark.octagon").foregroundStyle(isMuted ? Color.secondary : Color.red)
@@ -120,19 +114,6 @@ private struct CommandCenterMRCardContent: View {
                         Spacer(minLength: 6)
                     }
                     .font(.caption).foregroundStyle(.secondary)
-                }
-                if !presentation.working, let drafts = MRPendingDraftsSummary(item: item) {
-                    Label {
-                        Group {
-                            if let message = drafts.peopleMessage { PeopleMessageLabel(message: message) }
-                            else { Text(drafts.message) }
-                        }.foregroundStyle(isMuted ? Color.secondary : Color.primary)
-                    } icon: {
-                        Image(systemName: "text.bubble").foregroundStyle(.secondary)
-                    }
-                    .labelStyle(BoardCardStatusLabelStyle())
-                    .font(.callout)
-                    .fixedSize(horizontal: false, vertical: true)
                 }
                 if let chain = presentation.stepChain {
                     BoardStepChain(steps: chain.steps.map { String(localized: $0) }, current: chain.current)
@@ -204,6 +185,36 @@ private struct CommandCenterMRCardContent: View {
             Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
         } message: { Text(.Board.boardRemoveExplanation) }
         .environment(\.gitLabPersonSourceURL, row.displayURL)
+    }
+
+    @ViewBuilder private var attentionAndDrafts: some View {
+        let drafts = presentation.working ? nil : MRPendingDraftsSummary(item: item)
+        if humanAction != nil || drafts != nil {
+            VStack(alignment: .leading, spacing: 4) {
+                if humanAction != nil {
+                    // The orange icon and edge carry urgency; the sentence stays high-contrast.
+                    Label { Text(verbatim: presentation.message).foregroundStyle(Color.primary) } icon: {
+                        Image(systemName: "exclamationmark.circle.fill").foregroundStyle(Color.orange)
+                    }
+                    .font(.callout.weight(.medium))
+                    .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                    .help(Text(verbatim: presentation.message))
+                }
+                if let drafts {
+                    Label {
+                        Group {
+                            if let message = drafts.peopleMessage { PeopleMessageLabel(message: message) }
+                            else { Text(drafts.message) }
+                        }.foregroundStyle(isMuted ? Color.secondary : Color.primary)
+                    } icon: {
+                        Image(systemName: "text.bubble").foregroundStyle(.secondary)
+                    }
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .labelStyle(BoardCardStatusLabelStyle())
+        }
     }
 
     private var metadataHeader: some View {

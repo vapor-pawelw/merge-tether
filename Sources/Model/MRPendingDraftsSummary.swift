@@ -24,7 +24,7 @@ struct MRPendingDraftsSummary: Equatable {
     }
 
     var peopleMessage: RemotePeopleMessage? {
-        .init(.Board.boardPendingDraftsAwaitingReplyPrefix(String(localized: draftCountMessage)), people: awaitingReply)
+        .init(.Board.boardPendingDraftsForPeoplePrefix(String(localized: draftCountMessage)), people: awaitingReply)
     }
 
     var message: LocalizedStringResource { peopleMessage?.resource ?? draftCountMessage }

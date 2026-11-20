@@ -26,6 +26,7 @@ struct CommandCenterBoardView: View {
     @State private var compactLane: Lane = .own
     @State private var detailPopoverPresented = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
 
     private var account: GlabService.AuthedHost? {
         guard let host = monitor.glab.resolvedHost, let username = monitor.glab.currentUsername else { return nil }
@@ -48,7 +49,7 @@ struct CommandCenterBoardView: View {
                 detailSheet(selection, availableWidth: max(1, geometry.size.width - 24))
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(white: 0.95))
         .onChange(of: account) { _, _ in selected = nil }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
             if (notification.object as? NSWindow)?.identifier?.rawValue == "main" { selected = nil }

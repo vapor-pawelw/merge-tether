@@ -40,16 +40,18 @@ struct BoardActionsMenu<Content: View>: View {
 private struct BoardCardInteraction: ViewModifier {
     let onDetails: () -> Void
     @State private var isHovered = false
+    @Environment(\.colorScheme) private var colorScheme
 
     func body(content: Content) -> some View {
+        let dark = colorScheme == .dark
         content
             .background {
                 Button(action: onDetails) {
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(nsColor: .controlBackgroundColor))
+                        .fill(Color(white: dark ? 0.095 : 0.99))
                         .overlay {
                             RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.primary.opacity(isHovered ? 0.045 : 0))
+                                .fill(isHovered ? Color.primary.opacity(dark ? 0.02 : 0.045) : Color.clear)
                         }
                         .contentShape(RoundedRectangle(cornerRadius: 8))
                 }

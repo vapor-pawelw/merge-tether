@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Shorten the pending draft summary and group it with the attention message. Add more room around the repository line and distinguish card backgrounds from the Mac board in both appearances.
+
 - Show short repository names on merge request cards and in details. Hover over the name on Mac or tap it on iPhone to see the full path.
 
 - On someone else’s merge request, draft replies in other people’s threads only to correct a verified error that matters to a technical or review decision.

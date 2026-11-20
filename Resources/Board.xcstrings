@@ -38,11 +38,11 @@
         } } }
       }
     },
-    "board.pendingDrafts.awaitingReplyPrefix.%@": {
+    "board.pendingDrafts.forPeoplePrefix.%@": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "%@ · no reply published yet to" } },
-        "pl": { "stringUnit": { "state": "translated", "value": "%@ · brak opublikowanej odpowiedzi dla:" } }
+        "en": { "stringUnit": { "state": "translated", "value": "%@ for" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "%@ dla:" } }
       }
     },
     "board.pendingDrafts.single": {
@@ -56,7 +56,12 @@
       "extractionState": "manual",
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "%lld unpublished drafts" } },
-        "pl": { "stringUnit": { "state": "translated", "value": "Nieopublikowane wersje robocze: %lld" } }
+        "pl": { "variations": { "plural": {
+          "one": { "stringUnit": { "state": "translated", "value": "%lld nieopublikowana wersja robocza" } },
+          "few": { "stringUnit": { "state": "translated", "value": "%lld nieopublikowane wersje robocze" } },
+          "many": { "stringUnit": { "state": "translated", "value": "%lld nieopublikowanych wersji roboczych" } },
+          "other": { "stringUnit": { "state": "translated", "value": "%lld nieopublikowanych wersji roboczych" } }
+        } } }
       }
     },
     "board.person.openProfile": {
