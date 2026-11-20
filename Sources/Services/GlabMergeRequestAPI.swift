@@ -195,6 +195,24 @@ extension GlabService {
         try await fetchOwnDraftNotes(projectID: projectID, iid: iid, host: host, userID: userID).count
     }
 
+    func createDraftReply(projectID: Int, iid: Int, host: String, userID: Int, discussionID: String, body: String,
+                          shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws -> GitLabDraftNote {
+        guard projectID > 0, iid > 0, userID > 0, !discussionID.isEmpty,
+              !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !DraftPublicationRisk.hasQuickAction(in: body) else { throw CancellationError() }
+        let draft: GitLabDraftNote = try await mergeRequestWriteAPI(
+            "/projects/\(projectID)/merge_requests/\(iid)/draft_notes", host: host,
+            arguments: ["--method", "POST", "--raw-field", "note=\(body)",
+                "--raw-field", "in_reply_to_discussion_id=\(discussionID)", "--field", "resolve_discussion=false"],
+            timeout: 30, shouldProceed: shouldProceed
+        )
+        guard (draft.id ?? 0) > 0, draft.authorID == userID, draft.discussionID == discussionID,
+              draft.note == body, AutomaticPublicationPolicy.safeForAutomaticPublication(draft) else {
+            throw GlabError.decoding("Unexpected private draft reply response")
+        }
+        return draft
+    }
+
     /// Selective publication avoids sending unrelated human replies in the same review.
     func publishDraftNote(projectID: Int, iid: Int, draftID: Int, host: String, shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws {
         struct NoContent: Decodable {}

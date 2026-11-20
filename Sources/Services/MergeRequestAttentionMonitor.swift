@@ -380,6 +380,7 @@ final class MergeRequestAttentionMonitor {
     private var recentTodos: [Item] = []
     private var latestTodoSnapshot: (account: Account, revision: UInt64, todos: [Todo])?
     let authorFeedbackCoordinator: AuthorFeedbackCoordinator?
+    private let verifiedReplyDrafts: VerifiedAuthorReplyDrafts?
     let aiOriginCoordinator: AICommentOriginCoordinator
     let displayAIOriginCoordinator: AICommentDisplayCoordinator?
     let draftProofRecoveryCoordinator: DraftProofRecoveryCoordinator?
@@ -486,6 +487,7 @@ final class MergeRequestAttentionMonitor {
         }
         self.authorFeedbackCoordinator = settings.map { AuthorFeedbackCoordinator(settings: $0, glab: glab,
             canAutomate: canAutomate, verify: feedbackVerifier, assessmentDirectory: authorFeedbackAssessmentDirectory) }
+        self.verifiedReplyDrafts = settings.map { VerifiedAuthorReplyDrafts(settings: $0, glab: glab, directory: followUpDirectory) }
         let feedbackCoordinator = self.authorFeedbackCoordinator
         self.reReviewCoordinator = settings.map { ReReviewCoordinator(settings: $0, glab: glab,
             canAutomate: canAutomate, verify: reviewVerifier,
@@ -493,6 +495,8 @@ final class MergeRequestAttentionMonitor {
                 feedbackCoordinator?.status(projectID: request.projectID, iid: request.iid)
             }, authorFeedbackAssessment: { request, fingerprint in
                 feedbackCoordinator?.assessment(for: request, fingerprint: fingerprint)
+            }, authorFeedbackAssessmentInFlight: { request, fingerprint, activeFingerprint in
+                feedbackCoordinator?.assessmentInFlight(for: request, fingerprint: fingerprint, activeFingerprint: activeFingerprint) == true
             }) }
         reReviewCoordinator?.onChange = { [weak self] context, unanswered in
             guard let self, let account, isCurrent(account), account.host == context.host,
@@ -511,6 +515,16 @@ final class MergeRequestAttentionMonitor {
         }
         authorFeedbackCoordinator?.onNeedsWork = { [weak self] request, notes, fingerprint, residual in
             await self?.onAuthorFeedbackNeedsWork?(request, notes, fingerprint, residual)
+        }
+        authorFeedbackCoordinator?.prepareVerifiedReplies = { [weak self] request, discussions, assessment, notes, user, host, proceed in
+            guard let self, let account, isCurrent(account), account.host == host, account.username == user.username,
+                  let verifiedReplyDrafts else { return [] }
+            let id = Item.ID(projectID: request.projectID, iid: request.iid)
+            return await verifiedReplyDrafts.prepare(request: request, discussions: discussions, assessment: assessment,
+                owedNoteIDs: notes, user: user, host: host) { [weak self] in
+                    guard let self else { return false }
+                    return proceed() && isCurrent(account) && !hasActiveWorker(for: id, account: account) && !isConfirming(id)
+                }
         }
         authorFeedbackCoordinator?.onRemoteChange = { [weak self] in
             guard let self else { return }
@@ -1206,7 +1220,7 @@ final class MergeRequestAttentionMonitor {
                         return (updated, draftCount != nil && (!(item.isAuthored || hasDrafts) || discussions != nil), feedback, discussions, contextDraftIDs, recoveryRequest, recoveryReadStartedAt)
                     }
                 }
-                for await (var item, success, feedback, discussions, contextDraftIDs, recoveryRequest, recoveryReadStartedAt) in group {
+                for await (var item, success, feedback, discussions, workerDraftIDs, recoveryRequest, recoveryReadStartedAt) in group {
                     guard isCurrent(account), revision == glab.accountRevision else { return }
                     settings?.observeCommentReview(item.drafts.filter { publishedDrafts[item.id]?.contains($0) != true },
                         for: commentReviewTarget(item.id, account: account), revision: reviewRevisions[item.id] ?? 0)
@@ -1225,6 +1239,15 @@ final class MergeRequestAttentionMonitor {
                         item.mergeRequest = latest
                     }
                     let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: item.id.projectID, iid: item.id.iid)
+                    let verifiedReplyIDs = Set(item.drafts.compactMap { draft -> Int? in
+                        guard item.isAuthored, let request = recoveryRequest, let discussions,
+                              verifiedReplyDrafts?.receipt(for: draft, request: request, discussions: discussions, user: user, host: host) != nil else { return nil }
+                        return draft.id
+                    })
+                    let contextDraftIDs = workerDraftIDs.union(verifiedReplyIDs)
+                    if !verifiedReplyIDs.isEmpty, contextDraftIDs.count == item.drafts.count {
+                        item.requiresDiscussionRecheck = false
+                    }
                     if feedbackDecision == nil, success, let request = item.mergeRequest, let discussions {
                         await scheduleAIOriginChecks(request: request, drafts: item.drafts, discussions: discussions,
                             account: account, user: user)
@@ -1235,6 +1258,7 @@ final class MergeRequestAttentionMonitor {
                         let receipts = publicationReceipts(projectID: item.id.projectID, iid: item.id.iid,
                             host: host, username: user.username)
                         let candidates = item.drafts.filter { draft in
+                            guard draft.id.map(verifiedReplyIDs.contains) != true else { return false }
                             guard let request = item.mergeRequest,
                                   settings.automation.scope.permits(request, host: host, username: user.username) else { return false }
                             return settings.publicationPolicy(for: lifecycleTarget).couldAllow(
@@ -1244,8 +1268,10 @@ final class MergeRequestAttentionMonitor {
                         }
                         let verificationCandidates = item.mergeRequest.map { request in
                             DraftReplyRepair.preparationAllowed(request, configuration: settings.automation)
-                                ? item.drafts.filter { AutomaticPublicationPolicy.sourceNotes(for: $0,
-                                    discussions: discussions, userID: user.id)?.isEmpty == false }
+                                ? item.drafts.filter {
+                                    $0.id.map(verifiedReplyIDs.contains) != true
+                                        && AutomaticPublicationPolicy.sourceNotes(for: $0, discussions: discussions, userID: user.id)?.isEmpty == false
+                                }
                                 : candidates
                         } ?? candidates
                         if feedbackDecision == nil,
@@ -1282,7 +1308,8 @@ final class MergeRequestAttentionMonitor {
                     item.automaticDraftIDs = []
                     item.automaticPublicationPolicy = nil
                     if success, let settings, let request = item.mergeRequest,
-                       agentWorks.contains(work), settings.automation.scope.permits(request, host: host, username: user.username),
+                       (agentWorks.contains(work) || !verifiedReplyIDs.isEmpty),
+                       settings.automation.scope.permits(request, host: host, username: user.username),
                        item.isAuthored || (!item.awaitingRemoteVerification && !item.requiresDiscussionRecheck) {
                         let policy = settings.publicationPolicy(for: lifecycleTarget)
                         if policy.mode != .manual {
@@ -1575,10 +1602,19 @@ final class MergeRequestAttentionMonitor {
         let origin: AICommentProvenanceStore.Publication?
         let review: ReviewVerdictStore.Publication?
         let request: GitLabMergeRequest?
+        let authorReply: VerifiedReplyPublication?
+    }
+
+    private struct VerifiedReplyPublication: Sendable {
+        let draft: GitLabDraftNote
+        let discussions: [GitLabMergeRequestDiscussion]
+        let sourceNoteID: Int
+        let appReceipt: VerifiedAuthorReplyDrafts.Receipt?
     }
 
     private func captureGeneratedPublication(_ drafts: [GitLabDraftNote], id: Item.ID, account: Account,
-        user: GitLabAuthenticatedUser, before: [GitLabMergeRequestDiscussion]? = nil) async -> PublicationEvidence? {
+        user: GitLabAuthenticatedUser, before: [GitLabMergeRequestDiscussion]? = nil,
+        automatic: Bool = false) async -> PublicationEvidence? {
         let context = AICommentProvenanceStore.Context(host: account.host, username: account.username, userID: user.id,
             projectID: id.projectID, iid: id.iid)
         let generation = accountGeneration, revision = glab.accountRevision
@@ -1617,9 +1653,30 @@ final class MergeRequestAttentionMonitor {
                 return ReviewVerdictStore.capturePublication(drafts, verdict: verdict,
                     before: discussions, reviewedDrafts: reviewedDrafts, user: user, in: verdictDirectory)
             }
-            guard publication != nil || review != nil else { return nil }
-            return .init(origin: publication, review: review, request: request)
+            let reply = automatic && drafts.count == 1 ? request.flatMap {
+                verifiedReplyPublication(drafts[0], request: $0, discussions: discussions, user: user, work: work)
+            } : nil
+            guard publication != nil || review != nil || reply != nil else { return nil }
+            return .init(origin: publication, review: review, request: request, authorReply: reply)
         } catch { return nil }
+    }
+
+    private func verifiedReplyPublication(_ draft: GitLabDraftNote, request: GitLabMergeRequest,
+                                          discussions: [GitLabMergeRequestDiscussion], user: GitLabAuthenticatedUser,
+                                          work: AssistantAutomationRunner.MergeRequestWork) -> VerifiedReplyPublication? {
+        guard request.author.id == user.id, let draftID = draft.id else { return nil }
+        if let receipt = verifiedReplyDrafts?.receipt(for: draft, request: request, discussions: discussions, user: user, host: work.host),
+           let sourceID = receipt.sourceNoteIDs.first {
+            return .init(draft: draft, discussions: discussions, sourceNoteID: sourceID, appReceipt: receipt)
+        }
+        guard let settings, let proof = Self.followUpReceipt(for: draft, request: request, discussions: discussions,
+            host: work.host, user: user, verdictDirectory: verdictDirectory,
+            receipts: publicationReceipts(projectID: work.projectID, iid: work.iid, host: work.host, username: user.username)),
+              let sourceID = FollowUpVerificationStore.coveredFeedbackNoteID(for: proof, draftID: draftID,
+                work: work, username: user.username, settings: settings, in: followUpDirectory),
+              AutomaticPublicationPolicy.sourceNotes(for: draft, discussions: discussions, userID: user.id)?.map(\.id) == [sourceID]
+        else { return nil }
+        return .init(draft: draft, discussions: discussions, sourceNoteID: sourceID, appReceipt: nil)
     }
 
     private func recordPublication(_ publication: PublicationEvidence?, id: Item.ID,
@@ -1639,6 +1696,13 @@ final class MergeRequestAttentionMonitor {
             let authenticated = try await glab.fetchAuthenticatedUser(host: account.host, expectedUsername: account.username)
             let discussions = try await glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
             guard authenticated == user, current() else { return }
+            if let reply = publication.authorReply, let priorRequest = publication.request,
+               let live = try? await glab.fetchMergeRequest(projectID: id.projectID, iid: id.iid, host: account.host),
+               current(), live.sha == priorRequest.sha,
+               live.draftProofRecoveryContextFingerprint == priorRequest.draftProofRecoveryContextFingerprint {
+                noteID = authorFeedbackCoordinator?.recordVerifiedPublication(draft: reply.draft, sourceNoteID: reply.sourceNoteID,
+                    request: live, user: user, host: account.host, before: reply.discussions, after: discussions)
+            }
             if let review = publication.review {
                 let request = try await glab.fetchMergeRequest(projectID: id.projectID, iid: id.iid, host: account.host)
                 guard current(), MRAttentionRecord.sameContext(publication.request, request),
@@ -1742,7 +1806,7 @@ final class MergeRequestAttentionMonitor {
         guard let settings else { return }
         for item in items where !item.drafts.isEmpty && earlier[item.id] == item.drafts && (id == nil || id == item.id) {
             let work = AssistantAutomationRunner.MergeRequestWork(host: account.host, projectID: item.id.projectID, iid: item.id.iid)
-            guard agentWorks.contains(work), !hasActiveWorker(for: item.id, account: account), let request = item.mergeRequest,
+            guard (agentWorks.contains(work) || item.isAuthored), !hasActiveWorker(for: item.id, account: account), let request = item.mergeRequest,
                   permitsAutomaticPublication(of: request, account: account)
             else { continue }
             let checkedDraftIDs: Set<Int> = Set(item.drafts.compactMap { draft in
@@ -1808,13 +1872,14 @@ final class MergeRequestAttentionMonitor {
                       permitsAutomaticPublication(of: request, account: account)
                 else { break }
                 let liveDiscussions = try await glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
-                let origin = await captureGeneratedPublication([draft], id: id, account: account, user: user, before: liveDiscussions)
+                let origin = await captureGeneratedPublication([draft], id: id, account: account, user: user,
+                    before: liveDiscussions, automatic: true)
                 let latest = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
                 guard latest.contains(draft), let draftID = draft.id, qualifies(draft, in: liveDiscussions),
                       isCurrent(account), settings.publicationPolicy(for: reviewTarget) == policy,
                       permitsAutomaticPublication(of: request, account: account) else { continue }
                 guard let admitted = await automaticPublicationAdmission(draft, id: id, account: account,
-                    request: request, policy: policy, generation: generation, revision: revision) else { continue }
+                    request: request, policy: policy, generation: generation, revision: revision, authorReply: origin?.authorReply) else { continue }
                 attemptedPublish = true
                 try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID,
                     host: account.host, shouldProceed: admitted)
@@ -2266,7 +2331,7 @@ final class MergeRequestAttentionMonitor {
             guard policy.mode == .all || policy.mode == .filtered else { return }
             // Live evidence may narrow this frozen preview, never add an ID.
             for draft in current where draft.id.map(checkedDraftIDs.contains) == true {
-                let origin = await captureGeneratedPublication([draft], id: id, account: account, user: user)
+                let origin = await captureGeneratedPublication([draft], id: id, account: account, user: user, automatic: true)
                 let latest = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
                 guard latest.contains(draft), let draftID = draft.id, isCurrent(account),
                       settings.publicationPolicy(for: reviewTarget) == policy,
@@ -2274,7 +2339,8 @@ final class MergeRequestAttentionMonitor {
                       permitsAutomaticPublication(of: request, account: account),
                       AICommentAssessmentStore.safeForAutomaticPublication(draft),
                       let admitted = await automaticPublicationAdmission(draft, id: id, account: account,
-                        request: request, policy: policy, generation: generation, revision: revision) else { continue }
+                        request: request, policy: policy, generation: generation, revision: revision,
+                        authorReply: origin?.authorReply) else { continue }
                 attemptedPublish = true
                 try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID,
                     host: account.host, shouldProceed: admitted)
@@ -2309,12 +2375,12 @@ final class MergeRequestAttentionMonitor {
     /// the same envelope when the transport is ready to launch the individual PUT.
     private func automaticPublicationAdmission(_ draft: GitLabDraftNote, id: Item.ID, account: Account,
         request: GitLabMergeRequest, policy: AutomaticPublicationPolicy,
-        generation: Int, revision: UInt64) async -> (@MainActor @Sendable () -> Bool)? {
+        generation: Int, revision: UInt64, authorReply: VerifiedReplyPublication?) async -> (@MainActor @Sendable () -> Bool)? {
         guard let settings, let user, !draftRegeneration.isHeldForAutomaticPublication(draft, in: id) else { return nil }
         let configuration = settings.automation
         let target = commentReviewTarget(id, account: account)
         guard await permitsAssistantAutomation(for: account),
-              await permitsAutomaticPublication(draft, id: id, account: account),
+              await permitsAutomaticPublication(draft, id: id, account: account, appReceipt: authorReply?.appReceipt),
               isCurrent(account), settings.automation == configuration,
               settings.publicationPolicy(for: target) == policy,
               permitsAutomaticPublication(of: request, account: account),
@@ -2332,6 +2398,7 @@ final class MergeRequestAttentionMonitor {
                 && self.openItems.first(where: { $0.id == id })?.mergeRequest?.semanticContextFingerprint == request.semanticContextFingerprint
                 && ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, user: user, in: self.verdictDirectory) == proofVerdict
                 && self.publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: account.username) == proofReceipts
+                && self.appReplyAdmissionIsCurrent(authorReply, request: request, user: user, host: account.host)
                 && settings.commentReviewRevision(for: self.commentReviewTarget(id, account: account)) == reviewRevision
                 && settings.reviewParticipationPreferences.revision(host: account.host, username: account.username) == participationRevision
                 && self.permitsAutomaticPublication(of: request, account: account)
@@ -2339,6 +2406,13 @@ final class MergeRequestAttentionMonitor {
                 && !self.hasActiveWorker(for: id, account: account)
         }
         return admitted() ? admitted : nil
+    }
+
+    private func appReplyAdmissionIsCurrent(_ publication: VerifiedReplyPublication?, request: GitLabMergeRequest,
+                                            user: GitLabAuthenticatedUser, host: String) -> Bool {
+        guard let publication, let expected = publication.appReceipt else { return true }
+        return verifiedReplyDrafts?.receipt(for: publication.draft, request: request, discussions: publication.discussions,
+            user: user, host: host) == expected
     }
 
     /// How many current drafts automation would newly publish if `becomingAI` counted as AI comments.
@@ -2448,7 +2522,8 @@ final class MergeRequestAttentionMonitor {
 
     /// Every automatic publication needs current discussion evidence. Author replies
     /// additionally need this run's exact draft and remote source content.
-    private func permitsAutomaticPublication(_ draft: GitLabDraftNote, id: Item.ID, account: Account) async -> Bool {
+    private func permitsAutomaticPublication(_ draft: GitLabDraftNote, id: Item.ID, account: Account,
+                                             appReceipt: VerifiedAuthorReplyDrafts.Receipt?) async -> Bool {
         guard let user, !hasActiveWorker(for: id, account: account),
               openItems.first(where: { $0.id == id })?.mergeRequest != nil else { return false }
         var permitted = false
@@ -2461,6 +2536,11 @@ final class MergeRequestAttentionMonitor {
         }
         let live = try? await glab.fetchMergeRequest(projectID: id.projectID, iid: id.iid, host: account.host)
         let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
+        if let appReceipt, let live, let discussions, isCurrent(account),
+           verifiedReplyDrafts?.receipt(for: draft, request: live, discussions: discussions, user: user, host: account.host) == appReceipt {
+            permitted = await permitsVerifiedAppReply(appReceipt, request: live, id: id, account: account, user: user)
+            return permitted
+        }
         guard isCurrent(account), Self.draftContextIsCurrent(request: live, drafts: [draft], discussions: discussions,
             host: account.host, user: user, verdictDirectory: verdictDirectory,
             followUpReceipts: publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: user.username)) else {
@@ -2544,6 +2624,35 @@ final class MergeRequestAttentionMonitor {
             Log.monitor.error("Author follow-up is awaiting remote verification: \(String(describing: error), privacy: .private)")
             return blocked()
         }
+    }
+
+    private func permitsVerifiedAppReply(_ receipt: VerifiedAuthorReplyDrafts.Receipt, request: GitLabMergeRequest,
+                                         id: Item.ID, account: Account, user: GitLabAuthenticatedUser) async -> Bool {
+        guard let settings, let project = request.sourceProjectID else { return false }
+        let target = commentReviewTarget(id, account: account)
+        let policy = settings.publicationPolicy(for: target)
+        let host = account.host
+        let revision = glab.accountRevision
+        let draft = receipt.draft
+        do {
+            async let currentUser = glab.fetchAuthenticatedUser(host: host, expectedUsername: account.username)
+            async let currentMR = glab.fetchMergeRequest(projectID: id.projectID, iid: id.iid, host: host)
+            async let currentSource = glab.fetchBranchHeadSHA(projectID: project, branch: request.sourceBranch, host: host)
+            async let currentDiscussions = glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: host)
+            let (liveUser, live, head, discussions) = try await (currentUser, currentMR, currentSource, currentDiscussions)
+            guard isCurrent(account), revision == glab.accountRevision, liveUser == user, head == receipt.sourceHead,
+                  verifiedReplyDrafts?.receipt(for: draft, request: live, discussions: discussions, user: user, host: host) == receipt
+            else { return false }
+            let evidence = await publicationNoteEvidence(in: discussions, policy: policy, host: host,
+                projectID: id.projectID, iid: id.iid)
+            let drafts = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: host, userID: user.id)
+            return isCurrent(account) && revision == glab.accountRevision && settings.publicationPolicy(for: target) == policy
+                && permitsAutomaticPublication(of: live, account: account) && !hasActiveWorker(for: id, account: account)
+                && drafts.filter { $0.id == draft.id || $0.discussionID == receipt.discussionID } == [draft]
+                && verifiedReplyDrafts?.receipt(for: draft, request: live, discussions: discussions, user: user, host: host) == receipt
+                && policy.allows(draft, request: live, discussions: discussions, userID: user.id,
+                    host: host, aiNoteIDs: evidence.ai, botNoteIDs: evidence.bots)
+        } catch { return false }
     }
 
     func approve(_ id: Item.ID) async {
@@ -2933,8 +3042,10 @@ final class MergeRequestAttentionMonitor {
             $0.invalidateChangedDiscussionSnapshot(head: request.sha, fingerprint: ReviewVerdict.fingerprint(discussions),
                 semanticContextFingerprint: request.semanticContextFingerprint)
         }
+        authorFeedbackCoordinator?.refresh(request: request, discussions: discussions, drafts: drafts.count,
+            host: account.host, user: user)
         await requestReReviewsIfReady(for: request, feedback: ReReviewFeedback(discussions: discussions, authorID: user.id),
-                                      draftCount: drafts.count, account: account, user: user)
+                                      draftCount: drafts.count, account: account, user: user, discussions: discussions)
     }
 
     private func reReviewContext(_ id: Item.ID, account: Account) -> ReReviewCoordinator.Context {

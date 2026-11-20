@@ -4,6 +4,68 @@ import Testing
 
 @MainActor
 struct ReReviewCoordinatorTests {
+    @Test(arguments: [true, false])
+    func reReviewWaitsForMatchingAuthorAssessmentAndOnlyFallsBackWithoutAResult(_ authorSucceeds: Bool) async throws {
+        let fixture = try Fixture()
+        defer { fixture.close() }
+        fixture.settings.automation.autoVerifyReReview = true
+        let request = try fixture.request()
+        let discussions = try fixture.discussions()
+        let fingerprint = try fixture.fingerprint()
+        let activeFingerprint = try #require(ReviewVerdict.fingerprint(GitLabMergeRequestDiscussion.activeForReview(discussions)))
+        let feedback = try fixture.feedback()
+        let verified = ReReviewAssessment(notes: [.init(noteID: 40, state: .addressed,
+            reason: "Current remote code and the published reply address this feedback.")])
+        var authorInFlight = true
+        var authorAssessment: ReReviewAssessment?
+        var standaloneCalls = 0
+        let coordinator = ReReviewCoordinator(settings: fixture.settings, glab: fixture.glab,
+            canAutomate: { _ in true }, verify: { _, _, _ in
+                standaloneCalls += 1
+                return verified
+            }, authorFeedbackAssessment: { _, _ in authorAssessment },
+            authorFeedbackAssessmentInFlight: { candidate, full, active in
+                authorInFlight && candidate.sha == request.sha && full == fingerprint && active == activeFingerprint
+            })
+        defer { coordinator.reset() }
+
+        await coordinator.refresh(for: request, feedback: feedback, draftCount: 0,
+            context: fixture.context, user: fixture.user, discussions: discussions)
+
+        #expect(coordinator.status(for: fixture.context, authorID: fixture.user.id).state == .checking)
+        #expect(!coordinator.isVerifying)
+        #expect(fixture.gitlab.text("requested").isEmpty)
+
+        authorInFlight = false
+        if authorSucceeds { authorAssessment = verified }
+        await coordinator.refresh(for: request, feedback: feedback, draftCount: 0,
+            context: fixture.context, user: fixture.user, discussions: discussions)
+        try await fixture.gitlab.waitFor("requested")
+
+        #expect(standaloneCalls == (authorSucceeds ? 0 : 1))
+        #expect(fixture.gitlab.text("requested") == "review\n")
+    }
+
+    @Test func anInFlightAuthorAssessmentForThePreviousDiscussionDoesNotDelayReReview() async throws {
+        let fixture = try Fixture()
+        defer { fixture.close() }
+        fixture.settings.automation.autoVerifyReReview = true
+        let oldFingerprint = try fixture.fingerprint()
+        fixture.gitlab.write("discussions", Fixture.discussionsJSON.replacingOccurrences(of: "Please fix", with: "Please fix the missing assertion"))
+        let coordinator = ReReviewCoordinator(settings: fixture.settings, glab: fixture.glab,
+            canAutomate: { _ in true }, verify: { _, _, _ in
+                fixture.gitlab.write("verified-edited-discussion")
+                return .init(notes: [.init(noteID: 40, state: .blocking, reason: "An assertion remains missing.")])
+            }, authorFeedbackAssessmentInFlight: { _, currentFingerprint, _ in currentFingerprint == oldFingerprint })
+        defer { coordinator.reset() }
+
+        await coordinator.refresh(for: try fixture.request(), feedback: try fixture.feedback(), draftCount: 0,
+            context: fixture.context, user: fixture.user)
+        try await fixture.gitlab.waitFor("verified-edited-discussion")
+
+        #expect(fixture.gitlab.text("requested").isEmpty)
+    }
+
     @Test(arguments: [ReReviewAssessment.Note.State.uncertain, .blocking])
     func currentAuthorAssessmentSupersedesAnOlderStandaloneVerdict(_ initialState: ReReviewAssessment.Note.State) async throws {
         let fixture = try Fixture()

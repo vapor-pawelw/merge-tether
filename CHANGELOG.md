@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Prepare a standard private reply when verified feedback on your MR only needs acknowledgement. Reuse current feedback verification during re-review and after a verified reply is published.
+
 - Copy a GitLab merge request link from the button beside the pin on Mac cards and in Details, with a brief confirmation.
 
 - Open a conversation draft in T3 Code from a merge request on Mac, with the MR link and title ready in the composer.

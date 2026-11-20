@@ -510,6 +510,17 @@ extension FollowUpVerificationStore {
             input: receiptReadInput(work: work, username: username, settings: settings, in: directory), in: directory)
     }
 
+    @MainActor
+    static func coveredFeedbackNoteID(for proof: FollowUpVerification, draftID: Int,
+                                      work: AssistantAutomationRunner.MergeRequestWork, username: String,
+                                      settings: SettingsManager, in directory: URL = directory) -> Int? {
+        let matching = recoveryRecords(work: work, username: username, settings: settings, in: directory)
+            .filter { $0.proof == proof }
+        guard matching.count == 1 else { return nil }
+        return matching.first?.assessment.drafts
+            .first { $0.draftID == draftID && $0.state == .valid }?.coveredFeedbackNoteID
+    }
+
     nonisolated private static func recoveryRecords(work: AssistantAutomationRunner.MergeRequestWork, username: String,
                                                     input: ReceiptReadInput, in directory: URL) -> [RecoveryRecord] {
         let origins = recoveryOrigins(work: work, username: username, input: input, in: directory)

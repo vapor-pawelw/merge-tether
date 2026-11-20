@@ -28,7 +28,10 @@ enum ReReviewVerifier {
             ], "required": ["referencedNoteIDs", "noIndependentExpectation"]]
         fields["reviewerOptOut"] = ["type": ["object", "null"], "additionalProperties": false,
             "properties": ["sourceQuote": ["type": "string", "minLength": 1, "maxLength": 500]], "required": ["sourceQuote"]]
-        item["required"] = (item["required"] as? [String] ?? []) + ["ignoredDecisionIDs", "reviewSummaryCoverage", "reviewerOptOut"]
+        fields["addressedReplyAcknowledgementSafe"] = ["type": "boolean"]
+        item["required"] = (item["required"] as? [String] ?? []) + [
+            "ignoredDecisionIDs", "reviewSummaryCoverage", "reviewerOptOut", "addressedReplyAcknowledgementSafe"
+        ]
         notes["minItems"] = noteIDs.count
         notes["maxItems"] = noteIDs.count
         item["properties"] = fields
@@ -412,6 +415,13 @@ enum ReReviewVerifier {
             the concrete concern. Do not classify the report itself as a second concrete finding merely
             because it repeats a finding's question. Verify its coverage or any independent expectation.
             Purpose never makes an unsafe thread safe and never grants reviewer acceptance.
+            Set addressedReplyAcknowledgementSafe true only for an addressed concreteCodeReviewFeedback note
+            when current code independently proves the requested correction, the reviewer only asked for that
+            correction, and the exact standard reply "Thanks for flagging this. The issue is addressed in the
+            current changes." fully answers the thread. Require an unresolved review discussion containing
+            only that published non-system note and no remaining question, condition, acknowledgement of a
+            contrary decision, request for evidence, or opt-out. A report from a previous agent cannot prove
+            the correction. Return false if the current evidence is incomplete or any other reply is needed.
             reviewerOptOut is a participant's explicit refusal of review participation or further review
             contact. Supply an exact sourceQuote from that SAME external note, otherwise null. Never infer
             this from identity, job title, silence, a resolved thread or somebody else's preference.
@@ -687,7 +697,7 @@ enum ReReviewVerifier {
                         missingEvidence: GlabService.redactWorkflowEvidence($0.missingEvidence),
                         question: GlabService.redactWorkflowEvidence($0.question),
                         mergeImpact: GlabService.redactWorkflowEvidence($0.mergeImpact))
-                })
+                }, addressedReplyAcknowledgementSafe: note.addressedReplyAcknowledgementSafe)
         }, completedBlockedRunIDs: assessment.completedBlockedRunIDs,
            codeReviewRequests: assessment.codeReviewRequests.map { requests in requests.map { request in
                .init(sourceNoteID: request.sourceNoteID, sourceQuote: GlabService.redactWorkflowEvidence(request.sourceQuote),

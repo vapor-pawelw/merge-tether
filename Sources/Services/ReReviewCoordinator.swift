@@ -33,6 +33,7 @@ final class ReReviewCoordinator {
         var state: ReReviewReadiness
         var assessment: ReReviewAssessment?
         var usesSharedAssessment = false
+        var waitsForSharedAssessment = false
         var readRetryAfter: Date?
 
         var presentedState: ReReviewReadiness {
@@ -64,6 +65,7 @@ final class ReReviewCoordinator {
     private let now: ReadOnlyAssessmentRetry.Clock
     private let authorFeedbackStatus: @MainActor (GitLabMergeRequest) -> AuthorFeedbackStatus?
     private let authorFeedbackAssessment: @MainActor (GitLabMergeRequest, String) -> ReReviewAssessment?
+    private let authorFeedbackAssessmentInFlight: @MainActor (GitLabMergeRequest, String, String) -> Bool
     var onChange: ((Context, Bool) -> Void)?
     var onRefreshRequested: ((Context, GitLabAuthenticatedUser) async -> Void)?
 
@@ -72,6 +74,7 @@ final class ReReviewCoordinator {
          verify: @escaping Verify,
          authorFeedbackStatus: @escaping @MainActor (GitLabMergeRequest) -> AuthorFeedbackStatus? = { _ in nil },
          authorFeedbackAssessment: @escaping @MainActor (GitLabMergeRequest, String) -> ReReviewAssessment? = { _, _ in nil },
+         authorFeedbackAssessmentInFlight: @escaping @MainActor (GitLabMergeRequest, String, String) -> Bool = { _, _, _ in false },
          retryWait: @escaping ReadOnlyAssessmentRetry.Wait = ReadOnlyAssessmentRetry.wait,
          now: @escaping ReadOnlyAssessmentRetry.Clock = { Date() }) {
         self.settings = settings
@@ -82,6 +85,7 @@ final class ReReviewCoordinator {
         self.now = now
         self.authorFeedbackStatus = authorFeedbackStatus
         self.authorFeedbackAssessment = authorFeedbackAssessment
+        self.authorFeedbackAssessmentInFlight = authorFeedbackAssessmentInFlight
     }
 
     var isVerifying: Bool { !reReviewTasks.isEmpty }
@@ -210,7 +214,8 @@ final class ReReviewCoordinator {
             runtimeScope = (host, username, glab.accountRevision, scope)
         } else { runtimeScope = nil }
         currentReviewerIDs = currentReviewerIDs.filter { isCurrent($0.key) }
-        for context in Array(reReviewTasks.keys) {
+        let waiting = reReviewChecks.filter { $0.value.waitsForSharedAssessment }.keys
+        for context in Set(reReviewTasks.keys).union(waiting) {
             guard manualReReviewApprovals[context] == nil else { continue }
             if isCurrent(context), runtimePermitsReReview(context) { continue }
             reReviewTasks.removeValue(forKey: context)?.task.cancel()
@@ -323,11 +328,14 @@ final class ReReviewCoordinator {
         let activeIgnored = settings.feedbackSuggestionDecisions.applicable(in: activeDiscussions, for: target)
         let hasActiveFeedback = activeDiscussions.flatMap(\.notes).contains { $0.system != true && $0.author?.id != user.id }
         let onlyResolvedFeedback = !hasActiveFeedback && discussions.contains(where: \.isResolvedForReview)
-        let sharedAssessment = authorFeedbackAssessment(request, fingerprint).flatMap { assessment in
-            (try? assessment.reviewers(in: discussions, authorID: user.id, ignoredSuggestions: activeIgnored,
-                excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: context.username))) != nil
-                ? assessment : nil
-        } ?? (onlyResolvedFeedback ? ReReviewAssessment(notes: []) : nil)
+        func currentAuthorAssessment() -> ReReviewAssessment? {
+            authorFeedbackAssessment(request, fingerprint).flatMap { assessment in
+                (try? assessment.reviewers(in: discussions, authorID: user.id, ignoredSuggestions: activeIgnored,
+                    excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: context.username))) != nil
+                    ? assessment : nil
+            }
+        }
+        var sharedAssessment = currentAuthorAssessment() ?? (onlyResolvedFeedback ? ReReviewAssessment(notes: []) : nil)
         let key = reReviewKey(request, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context)
         func markReviewerReadFailed() {
             guard !Task.isCancelled, isCurrent(context), runtimePermitsReReview(context),
@@ -397,10 +405,13 @@ final class ReReviewCoordinator {
         for reviewerID in earlierReviewers {
             candidates[reviewerID] = max(candidates[reviewerID] ?? 0, history.activities[reviewerID]?.noteID ?? 1, 1)
         }
-        if let sharedAssessment {
+        func adoptSharedAssessment(_ assessment: ReReviewAssessment) {
             reReviewTasks.removeValue(forKey: context)?.task.cancel()
             reReviewChecks[context] = .init(key: key, fingerprint: fingerprint, state: .checking,
-                assessment: sharedAssessment, usesSharedAssessment: true)
+                assessment: assessment, usesSharedAssessment: true)
+        }
+        if let sharedAssessment {
+            adoptSharedAssessment(sharedAssessment)
         } else if reReviewChecks[context]?.usesSharedAssessment == true {
             reReviewChecks.removeValue(forKey: context)
         }
@@ -433,6 +444,11 @@ final class ReReviewCoordinator {
             notify(context, unanswered: feedback.hasUnansweredFeedback)
             return
         }
+        // Reviewer reads may outlast the author verifier. Prefer its freshly completed result.
+        if sharedAssessment == nil, let completed = currentAuthorAssessment() {
+            sharedAssessment = completed
+            adoptSharedAssessment(completed)
+        }
         let manual = manualReReviewApprovals[context] == key && sharedAssessment?.readiness.hasConcreteConcerns != true
         var recipients = pendingReviewers
         if !manual {
@@ -445,6 +461,18 @@ final class ReReviewCoordinator {
                 }
                 notify(context, unanswered: feedback.hasUnansweredFeedback)
                 return
+            }
+            if reReviewChecks[context]?.assessment == nil, authorFeedbackAssessmentInFlight(request, fingerprint, activeFingerprint) {
+                if reReviewChecks[context]?.waitsForSharedAssessment != true {
+                    reReviewTasks.removeValue(forKey: context)?.task.cancel()
+                    reReviewChecks[context] = .init(key: key, fingerprint: fingerprint, state: .checking,
+                        waitsForSharedAssessment: true)
+                    notify(context, unanswered: feedback.hasUnansweredFeedback)
+                }
+                return
+            }
+            if reReviewChecks[context]?.waitsForSharedAssessment == true {
+                reReviewChecks.removeValue(forKey: context)
             }
             let readRetryIsDue = reReviewChecks[context]?.readRetryAfter.map { now() >= $0 } == true
             if reReviewChecks[context]?.key != key || (readRetryIsDue && reReviewTasks[context] == nil) {

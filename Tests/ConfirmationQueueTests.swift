@@ -484,7 +484,7 @@ import MergeTetherRemote
         }
 
         /// Explicit positive precondition; raw delivery proofs and unrequested sibling drafts remain unassessed.
-        func assessFollowUpClaims(draftIDs: [Int]? = nil) throws {
+        func assessFollowUpClaims(draftIDs: [Int]? = nil, coveredFeedbackNoteID: Int? = nil) throws {
             let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.org", projectID: 1, iid: 2)
             let path = FollowUpVerificationStore.recordURL(kind: "follow-up-verifications", work: work, username: "me", in: folder)
             let origin = try JSONDecoder().decode(FollowUpVerification.self, from: Data(contentsOf: path))
@@ -498,7 +498,8 @@ import MergeTetherRemote
                 semanticContext: request.semanticContextFingerprint, recoveryContext: request.draftProofRecoveryContextFingerprint,
                 draftIDs: ids)
             let assessment = DraftProofRecoveryVerifier.Assessment(drafts: ids.map {
-                .init(draftID: $0, state: .valid, reason: "Independent fixture assessment supports this exact reply")
+                .init(draftID: $0, state: .valid, reason: "Independent fixture assessment supports this exact reply",
+                    coveredFeedbackNoteID: coveredFeedbackNoteID)
             })
             try FollowUpVerificationStore.persistRecovery(.init(version: 3,
                 attemptID: AICommentAssessmentStore.digest(identity.uuidString), assessmentID: identity,
@@ -611,6 +612,22 @@ import MergeTetherRemote
                 gitlab.append("re-review.log", "requested\n")
                 if gitlab.has("fail-review-request") { return InMemoryGitLab.output(code: 1) }
                 return InMemoryGitLab.output(#"{"data":{"mergeRequestReviewerRereview":{"mergeRequest":{"iid":"2"},"errors":[]}}}"#)
+            case "/projects/1/merge_requests/2/draft_notes" where request.method == "POST":
+                let note = try #require(request.arguments.first { $0.hasPrefix("note=") }).dropFirst("note=".count)
+                let thread = try #require(request.arguments.first { $0.hasPrefix("in_reply_to_discussion_id=") })
+                    .dropFirst("in_reply_to_discussion_id=".count)
+                let draft: [String: Any] = ["id": 12, "author_id": 3, "note": String(note), "discussion_id": String(thread)]
+                try gitlab.editArray("drafts.json") { $0.append(draft) }
+                gitlab.append("created-drafts.log", "\(thread)\n")
+                if gitlab.has("echo-created-reply-on-publication") {
+                    var discussions = try #require(JSONSerialization.jsonObject(with: gitlab.data("discussions.json")) as? [[String: Any]])
+                    let index = try #require(discussions.firstIndex { $0["id"] as? String == String(thread) })
+                    var notes = try #require(discussions[index]["notes"] as? [[String: Any]])
+                    notes.append(["id": 41, "author": ["id": 3], "body": String(note), "system": false])
+                    discussions[index]["notes"] = notes
+                    try JSONSerialization.data(withJSONObject: discussions).store(in: gitlab, as: "published-discussions.json")
+                }
+                return .init(stdout: try JSONSerialization.data(withJSONObject: draft), stderr: "", exitCode: 0)
             case let path where path.contains("/draft_notes/") && path.hasSuffix("/publish"):
                 if gitlab.has("fail-publish") { return InMemoryGitLab.output(code: 1) }
                 let id = Int(path.split(separator: "/").dropLast().last!)!
@@ -4238,6 +4255,67 @@ import MergeTetherRemote
         try await harness.poll()
         #expect(harness.log("re-review.log") == "requested\n")
         #expect(harness.monitor.currentOpenItems.first?.draftCount == 0)
+    }
+
+    @Test(arguments: [false, true])
+    func publishedVerifiedReplyReusesFeedbackUnlessAnotherCommentArrived(_ newFeedback: Bool) async throws {
+        let harness = try makeHarness(assistantWorked: true, authored: true)
+        defer { harness.cleanUp() }
+        try prepareAuthoredFeedback(harness)
+        harness.settings.automation.autoReReviewEnabled = false
+        harness.settings.automation.publicationMode = .aiReplies
+        let finding = #"{"id":40,"author":{"id":8},"body":"AI finding","system":false,"resolvable":true,"resolved":false}"#
+        let reply = #"{"id":41,"author":{"id":3},"body":"Fixed","system":false}"#
+        let incoming = newFeedback ? #",{"id":42,"author":{"id":8},"body":"What about the retry case?","system":false}"# : ""
+        try harness.assess(noteID: 40, body: "AI finding")
+        try harness.write("discussions.json", #"[{"id":"abc","notes":[\#(finding)]}]"#)
+        try harness.write("published-discussions.json", #"[{"id":"abc","notes":[\#(finding),\#(reply)\#(incoming)]}]"#)
+        try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Fixed","discussion_id":"abc"}]"#)
+        try harness.verifyFollowUpDrafts()
+        try harness.assessFollowUpClaims(coveredFeedbackNoteID: 40)
+        try await completeSharedAuthorFeedback(harness)
+        try await harness.poll()
+        let coordinator = try #require(harness.monitor.authorFeedbackCoordinator)
+        let before = harness.log("verification.log").split(separator: "\n").count
+        try await harness.poll()
+        try await harness.poll()
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: harness.gitlab.data("request.json"))
+        let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: harness.gitlab.data("discussions.json"))
+        let fingerprint = try #require(ReviewVerdict.fingerprint(threads))
+        let deadline = ContinuousClock.now + .seconds(5)
+        while coordinator.assessment(for: request, fingerprint: fingerprint) == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let assessment = try #require(coordinator.assessment(for: request, fingerprint: fingerprint))
+        #expect(harness.log("selected.log").split(separator: "\n").count == 1)
+        #expect(harness.log("verification.log").split(separator: "\n").count == before + (newFeedback ? 1 : 0))
+        if !newFeedback { #expect(assessment.notes.first?.publishedReplyNoteID == 41) }
+    }
+
+    @Test func appAcknowledgesAnAlreadyAddressedFindingWithoutStartingAnotherAgent() async throws {
+        let harness = try makeHarness(assistantWorked: false, authored: true,
+            assessment: .init(notes: [.init(noteID: 40, state: .addressed, reason: "The correction is already delivered",
+                informationalPurpose: .concreteCodeReviewFeedback, addressedReplyAcknowledgementSafe: true)]))
+        defer { harness.cleanUp() }
+        try prepareAuthoredFeedback(harness)
+        try harness.write("drafts.json", "[]")
+        try harness.write("echo-created-reply-on-publication", "true")
+        try harness.assess(noteID: 40, body: "Review feedback")
+        harness.settings.automation.authorFeedback.isEnabled = true
+        harness.settings.automation.publicationMode = .aiReplies
+        let coordinator = try #require(harness.monitor.authorFeedbackCoordinator)
+        var workerRequests: [Set<Int>] = []
+        coordinator.onNeedsWork = { _, notes, _, _ in workerRequests.append(notes) }
+        let deadline = ContinuousClock.now + .seconds(10)
+        repeat {
+            try await harness.poll()
+            try await Task.sleep(for: .milliseconds(10))
+        } while harness.log("re-review.log").isEmpty && ContinuousClock.now < deadline
+        #expect(harness.log("created-drafts.log") == "abc\n")
+        #expect(harness.log("selected.log").split(separator: "\n").count == 1)
+        #expect(harness.log("re-review.log") == "requested\n")
+        #expect(harness.log("verification.log") == "verified\n")
+        #expect(workerRequests.isEmpty)
     }
 
     @Test func publishAllStillPublishesSafeRepliesAlongsideUnsafeDrafts() async throws {

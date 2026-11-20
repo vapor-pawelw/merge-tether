@@ -34,10 +34,22 @@ struct DraftProofRecoveryTests {
     @Test func onlyTheExactAppAuthenticatedAssessmentCanAuthorizePublication() async throws {
         let f = try Fixture()
         defer { f.clean() }
+        f.claimsOverride = [.init(draftID: 12, state: .valid, reason: "The draft completely answers this finding",
+            coveredFeedbackNoteID: 10)]
         let coordinator = f.coordinator()
         coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
         try await f.settle(coordinator)
         #expect(f.publication().count == 1)
+        let proof = try #require(f.publication().first)
+        func coveredNote(in proof: FollowUpVerification, draftID: Int = 12) -> Int? {
+            FollowUpVerificationStore.coveredFeedbackNoteID(for: proof, draftID: draftID, work: f.work,
+                username: "me", settings: f.settings, in: f.folder)
+        }
+        #expect(coveredNote(in: proof) == 10)
+        #expect(coveredNote(in: proof, draftID: 13) == nil)
+        var changedProof = proof
+        changedProof.discussionFingerprint = String(repeating: "0", count: 64)
+        #expect(coveredNote(in: changedProof) == nil)
         let folder = FollowUpVerificationStore.recordURL(kind: "follow-up-proof-recoveries",
             work: f.work, username: "me", in: f.folder).deletingPathExtension()
         let paths = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
@@ -47,6 +59,7 @@ struct DraftProofRecoveryTests {
         // Copying the app's payload without its authentication cannot substitute a verifier result.
         try payload.write(to: path)
         #expect(f.publication().isEmpty)
+        #expect(coveredNote(in: proof) == nil)
         try sealed.write(to: path)
         #expect(f.publication().count == 1)
         let envelopeObject = try JSONSerialization.jsonObject(with: sealed)
@@ -54,6 +67,15 @@ struct DraftProofRecoveryTests {
         envelope["payload"] = Data("rewritten assessment".utf8).base64EncodedString()
         try JSONSerialization.data(withJSONObject: envelope).write(to: path)
         #expect(f.publication().isEmpty)
+    }
+
+    @Test(arguments: [("valid", 0), ("valid", -1), ("invalid", 10), ("uncertain", 10)])
+    func coveredFeedbackRequiresAValidDraftAndPositiveNoteID(_ state: String, _ noteID: Int) throws {
+        let json = #"{"drafts":[{"draftID":12,"state":"\#(state)","reason":"Checked current reply","coveredFeedbackNoteID":\#(noteID)}]}"#
+        let assessment = try JSONDecoder().decode(DraftProofRecoveryVerifier.Assessment.self, from: Data(json.utf8))
+        #expect(throws: DraftProofRecoveryVerifier.Failure.self) {
+            try DraftProofRecoveryVerifier.validate(assessment, draftIDs: [12])
+        }
     }
 
     @Test func anUnsignedHistoricalAssessmentOffersVerificationRetryWithoutPromotingItsClaims() async throws {
@@ -241,7 +263,8 @@ struct DraftProofRecoveryTests {
             import json,sys,pathlib
             args=sys.argv[1:]
             pathlib.Path(__file__+'.started').write_text('yes')
-            result={'drafts':[{'draftID':12,'state':'valid','reason':'Exact current source and reply verified.','summary':'Current proof supports this reply.'}]}
+            result={'drafts':[{'draftID':12,'state':'valid','reason':'Exact current source and reply verified.',
+                              'summary':'Current proof supports this reply.','coveredFeedbackNoteID':10}]}
             if args[0]=='exec': json.dump(result,open(args[args.index('-o')+1],'w'))
             else: print(json.dumps({'is_error':False,'structured_output':result}))
             """.utf8).write(to: script)
@@ -257,6 +280,7 @@ struct DraftProofRecoveryTests {
         input.configuration = f.settings.automation
         let result = try await DraftProofRecoveryVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
         #expect(result.drafts.first?.state == .valid)
+        #expect(result.drafts.first?.coveredFeedbackNoteID == 10)
         try FileManager.default.removeItem(atPath: script.path + ".started")
         f.settings.automation.scope.setManualChoice(.paused, for: target)
         input.configuration = f.settings.automation

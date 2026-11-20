@@ -66,6 +66,8 @@ struct ReReviewAssessment: Codable, Sendable {
         var reviewSummaryCoverage: ReviewSummaryCoverage? = nil
         var reviewerOptOut: ReviewerOptOut? = nil
         var manualDecision: ManualDecision? = nil
+        /// The verified correction fully answers this finding; only a standard acknowledgement is owed.
+        var addressedReplyAcknowledgementSafe: Bool? = nil
 
         var needsAutomaticWork: Bool {
             state == .blocking || state == .uncertain && manualDecision == nil

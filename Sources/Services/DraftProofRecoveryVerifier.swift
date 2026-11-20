@@ -19,6 +19,7 @@ enum DraftProofRecoveryVerifier {
             let state: State
             let reason: String
             var summary: String? = nil
+            var coveredFeedbackNoteID: Int? = nil
         }
         let drafts: [Draft]
     }
@@ -27,7 +28,10 @@ enum DraftProofRecoveryVerifier {
         guard !draftIDs.isEmpty, draftIDs.count <= 100, Set(draftIDs).count == draftIDs.count,
               draftIDs.allSatisfy({ $0 > 0 }), assessment.drafts.count == draftIDs.count,
               Set(assessment.drafts.map(\.draftID)) == Set(draftIDs),
-              assessment.drafts.allSatisfy({ !$0.reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.reason.count <= 1200 })
+              assessment.drafts.allSatisfy({ draft in
+                  !draft.reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && draft.reason.count <= 1200
+                      && (draft.coveredFeedbackNoteID.map { draft.state == .valid && $0 > 0 } ?? true)
+              })
         else { throw Failure.invalidEvidence }
     }
 
@@ -80,11 +84,12 @@ enum DraftProofRecoveryVerifier {
         let fields: [String: Any] = ["draftID": ["type": "integer", "enum": ids],
             "state": ["type": "string", "enum": ["valid", "invalid", "uncertain"]],
             "reason": ["type": "string", "minLength": 1, "maxLength": 1200],
-            "summary": ["type": "string", "minLength": 1, "maxLength": 200]]
+            "summary": ["type": "string", "minLength": 1, "maxLength": 200],
+            "coveredFeedbackNoteID": ["type": ["integer", "null"], "minimum": 1]]
         let schema: [String: Any] = ["type": "object", "additionalProperties": false, "required": ["drafts"],
             "properties": ["drafts": ["type": "array", "minItems": ids.count, "maxItems": ids.count,
                 "items": ["type": "object", "additionalProperties": false,
-                    "required": ["draftID", "state", "reason", "summary"], "properties": fields]]]]
+                    "required": ["draftID", "state", "reason", "summary", "coveredFeedbackNoteID"], "properties": fields]]]]
         let schemaData = try JSONSerialization.data(withJSONObject: schema, options: [.sortedKeys])
         let prompt = """
             \(AgentExplanation.instructions(for: "summary"))
@@ -129,6 +134,10 @@ enum DraftProofRecoveryVerifier {
             reply accurately addresses its source discussion without concealing outstanding work.
             invalid: a concrete claim is contradicted, or the draft falsely asserts completion/delivery/testing.
             uncertain: a claim cannot be established, evidence is unavailable, or context changed.
+            Set coveredFeedbackNoteID only for a valid draft that completely answers exactly one actionable
+            external note in its own discussion. Use that note's live ID. The response and verified current
+            evidence must leave no part of that note's request unanswered. Use null for clarifications,
+            partial replies, multiple addressed notes, or missing or ambiguous evidence.
             Use invalid/uncertain for any unsupported part; do not repair or rewrite drafts. Give a concise English
             reason (at most 1200 characters) naming the inspected source/test or precise missing evidence so a human
             can decide the next step. Return exactly one result for each supplied draft ID, no duplicates.
@@ -176,7 +185,10 @@ enum DraftProofRecoveryVerifier {
     }
 
     private static func redacted(_ assessment: Assessment) -> Assessment {
-        .init(drafts: assessment.drafts.map { .init(draftID: $0.draftID, state: $0.state, reason: GlabService.redactWorkflowEvidence($0.reason), summary: $0.summary.map(GlabService.redactWorkflowEvidence)) })
+        .init(drafts: assessment.drafts.map {
+            .init(draftID: $0.draftID, state: $0.state, reason: GlabService.redactWorkflowEvidence($0.reason),
+                summary: $0.summary.map(GlabService.redactWorkflowEvidence), coveredFeedbackNoteID: $0.coveredFeedbackNoteID)
+        })
     }
     @MainActor private static var processEnvironment: [String: String] {
         var environment = AssistantCLI.environment

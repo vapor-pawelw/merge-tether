@@ -5,6 +5,10 @@
       "extractionState": "manual",
       "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Comment publication" } } }
     },
+    "automaticActions.verifiedReplyAcknowledgement": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Thanks for flagging this. The issue is addressed in the current changes." } } }
+    },
     "automaticActions.merge": {
       "extractionState": "manual",
       "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Auto-merge" } } }
