@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
-- Put Refresh from GitLab and Open in GitLab above the title in Mac merge request details.
+- Show Refresh from GitLab and Open in GitLab as icons in the Mac merge request details header, with Open next to Copy link.
 
 - Give the merge request description its own card in Details on Mac and iPhone.
 

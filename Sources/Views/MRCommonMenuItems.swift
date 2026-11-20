@@ -3,8 +3,11 @@ import AppKit
 import SwiftUI
 
 struct GitLabRefreshButton: View {
+    enum Placement { case labeled, header }
+
     let monitor: TodoMonitorService
     var itemID: MergeRequestAttentionMonitor.Item.ID? = nil
+    var placement: Placement = .labeled
     var afterRefresh: @MainActor () async -> Void = {}
     @State private var refreshing = false
 
@@ -19,9 +22,15 @@ struct GitLabRefreshButton: View {
                 await afterRefresh()
             }
         } label: {
-            Label { Text(.MRFreshness.mrFreshnessRefresh) } icon: {
-                if refreshing { ProgressView().controlSize(.mini) }
-                else { Image(systemName: "arrow.clockwise") }
+            if placement == .header {
+                BoardCardActionIcon(systemName: "arrow.clockwise")
+                    .opacity(refreshing ? 0 : 1)
+                    .overlay { if refreshing { ProgressView().controlSize(.mini) } }
+            } else {
+                Label { Text(.MRFreshness.mrFreshnessRefresh) } icon: {
+                    if refreshing { ProgressView().controlSize(.mini) }
+                    else { Image(systemName: "arrow.clockwise") }
+                }
             }
         }
         .disabled(refreshing)

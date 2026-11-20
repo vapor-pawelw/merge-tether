@@ -392,23 +392,23 @@ private struct CommandCenterMRDetailContent: View {
                     BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
                         username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
                         settings: monitor.settings)
+                    GitLabRefreshButton(monitor: monitor, itemID: item.id, placement: .header) {
+                        if let target = discussionTarget { await discussionStore.refresh(target: target, glab: monitor.glab) }
+                    }
+                    .buttonStyle(.plain)
+                    .boardHeaderControlHover()
+                    .accessibilityLabel(Text(.MRFreshness.mrFreshnessRefresh))
                     CopyMergeRequestLinkButton(url: item.url, placement: .header)
+                    Link(destination: item.url) { BoardCardActionIcon(systemName: "arrow.up.right.square") }
+                        .buttonStyle(.plain)
+                        .boardHeaderControlHover()
+                        .help(Text(.CommandCenter.commandCenterOpenGitLab))
+                        .accessibilityLabel(Text(.CommandCenter.commandCenterOpenGitLab))
                     headerMenu
                 }
             }
             .font(.callout).foregroundStyle(.secondary)
             .zIndex(1)
-            HStack(spacing: 8) {
-                GitLabRefreshButton(monitor: monitor, itemID: item.id) {
-                    if let target = discussionTarget { await discussionStore.refresh(target: target, glab: monitor.glab) }
-                }
-                Link(destination: item.url) {
-                    Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
-                }
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .frame(maxWidth: .infinity, alignment: .trailing)
             VStack(alignment: .leading, spacing: 4) {
                 Text(verbatim: presentationRow.displayTitle).font(.title2.weight(.semibold))
                     .lineLimit(3).textSelection(.enabled)
