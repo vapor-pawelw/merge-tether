@@ -38,6 +38,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Drag the sheet handle down to dismiss iPhone MR Details and refresh with the toolbar button.
 
+- Simplify the iPhone pairing sheet and show the full relay address beneath its caption.
+
 - Make iPhone discussion cards easier to distinguish from the section background in MR Details.
 
 - Expand or collapse iPhone discussion threads by tapping the comment card, including the area around the chevron.

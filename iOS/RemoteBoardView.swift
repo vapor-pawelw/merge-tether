@@ -3,6 +3,7 @@ import MergeTetherRemote
 
 struct RemoteBoardView: View {
     @Bindable var model: RemotePhoneModel
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var pairingSheet = false
     @State private var selected: RemoteCardSelection?
     @State private var showingInbox = false
@@ -97,7 +98,11 @@ struct RemoteBoardView: View {
             } message: {
                 Text(.Remote.remotePairingTrust) + Text(verbatim: "\n" + (model.pairingCandidate?.origin.absoluteString ?? ""))
             }
-            .sheet(isPresented: $pairingSheet) { NavigationStack { RemotePairingView(model: model) }.presentationDetents([.medium, .large]) }
+            .sheet(isPresented: $pairingSheet) {
+                RemotePairingView(model: model)
+                    .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.height(300), .large])
+                    .presentationDragIndicator(.visible)
+            }
             .sheet(item: $regenerationPresentation) { model.draftRegenerationSheet($0) }
             .onChange(of: model.pairingRevision) {
                 pairingSheet = false; selected = nil; showingInbox = false; pendingInboxCard = nil

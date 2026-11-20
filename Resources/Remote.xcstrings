@@ -103,13 +103,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open the phone button in MergeTether on your Mac and scan its code."
+            "value": "Tap the phone icon in MergeTether on your Mac."
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Otwórz przycisk telefonu w MergeTether na Macu i zeskanuj kod."
+            "value": "Kliknij ikonę telefonu w MergeTether na Macu."
           }
         }
       }
@@ -1368,6 +1368,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Telefon jest sparowany. Utworzenie nowego kodu odbierze mu dostęp i wymaga ponownego parowania."
+          }
+        }
+      }
+    },
+    "remote.relay.address": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relay address"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adres relaya"
           }
         }
       }

@@ -6,38 +6,99 @@ struct RemotePairingView: View {
     @State private var link = ""
     @State private var scanning = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
-        VStack(spacing: 22) {
-            Image(systemName: "laptopcomputer.and.iphone").font(.system(size: 60)).foregroundStyle(.tint)
-            Text(.Remote.remotePair).font(.title2.bold())
-            if let origin = model.relayConfiguration.origin {
-                Text(.Remote.remoteRelayConfigured).font(.headline)
-                Text(verbatim: origin.absoluteString).font(.caption).textSelection(.enabled)
-                Text(.Remote.remoteRelayOwnership).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                Text(.Remote.remotePairHelp).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                if DataScannerViewController.isSupported {
-                    Button(.Remote.remoteScan) { scanning = true }.buttonStyle(.borderedProminent)
+        let origin = model.relayConfiguration.origin
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label {
+                        Text(.Remote.remotePair).accessibilityAddTraits(.isHeader)
+                    } icon: {
+                        Image(systemName: "laptopcomputer.and.iphone").foregroundStyle(.tint)
+                    }
+                    .font(.title2.bold())
+
+                    if origin != nil {
+                        Text(.Remote.remotePairHelp).foregroundStyle(.secondary)
+                    }
                 }
-                SecureField(.Remote.remotePaste, text: $link).textInputAutocapitalization(.never).autocorrectionDisabled().textFieldStyle(.roundedBorder)
-                Button(.Remote.remoteConnect) { model.offerPairing(link) }.buttonStyle(.bordered).disabled(link.isEmpty)
-            } else {
-                Text(model.relayConfiguration.status == .missing ? .Remote.remoteRelayMissing : .Remote.remoteRelayInvalid)
-                    .foregroundStyle(.secondary).multilineTextAlignment(.center)
+
+                if origin != nil {
+                    pairingControls
+                } else {
+                    Text(model.relayConfiguration.status == .missing ? .Remote.remoteRelayMissing : .Remote.remoteRelayInvalid)
+                        .foregroundStyle(.secondary)
+                }
+
+                if model.relayMismatch {
+                    Text(.Remote.remoteRelayMismatch).font(.footnote).foregroundStyle(.orange)
+                } else if model.error {
+                    Text(.Remote.remoteInvalidPairing).font(.footnote).foregroundStyle(.red)
+                }
+
+                if let origin {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(.Remote.remoteRelayAddress).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text(verbatim: origin.absoluteString)
+                            .font(.footnote)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                }
             }
-            if model.relayMismatch { Text(.Remote.remoteRelayMismatch).font(.caption).foregroundStyle(.orange) }
-            else if model.error { Text(.Remote.remoteInvalidPairing).font(.caption).foregroundStyle(.red) }
-        }.padding(28)
-            .alert(Text(.Remote.remotePair), isPresented: Binding(
-                get: { model.pairingCandidate != nil }, set: { if !$0 { model.pairingCandidate = nil } }
-            )) {
-                Button(.Remote.remoteConnect) { if model.acceptPairing() { dismiss() } }
-                Button(.Remote.remoteCancel, role: .cancel) { model.pairingCandidate = nil }
-            } message: {
-                Text(.Remote.remotePairingTrust) + Text(verbatim: "\n" + (model.pairingCandidate?.origin.absoluteString ?? ""))
+            .frame(maxWidth: 440, alignment: .leading)
+            .padding(24)
+            .frame(maxWidth: .infinity)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .alert(Text(.Remote.remotePair), isPresented: Binding(
+            get: { model.pairingCandidate != nil }, set: { if !$0 { model.pairingCandidate = nil } }
+        )) {
+            Button(.Remote.remoteConnect) { if model.acceptPairing() { dismiss() } }
+            Button(.Remote.remoteCancel, role: .cancel) { model.pairingCandidate = nil }
+        } message: {
+            Text(.Remote.remotePairingTrust) + Text(verbatim: "\n" + (model.pairingCandidate?.origin.absoluteString ?? ""))
+        }
+        .sheet(isPresented: $scanning) {
+            RemoteQRScanner { value in scanning = false; model.offerPairing(value) }.ignoresSafeArea()
+        }
+    }
+
+    private var pairingControls: some View {
+        let manualLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 4))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return VStack(spacing: 12) {
+            if DataScannerViewController.isSupported {
+                Button { scanning = true } label: {
+                    Label(.Remote.remoteScan, systemImage: "qrcode.viewfinder").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
             }
-            .sheet(isPresented: $scanning) {
-                RemoteQRScanner { value in scanning = false; model.offerPairing(value) }.ignoresSafeArea()
+
+            manualLayout {
+                SecureField(.Remote.remotePaste, text: $link)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(minHeight: 44)
+                    .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 12))
+                Button { model.offerPairing(link) } label: {
+                    Text(.Remote.remoteConnect)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(link.isEmpty ? Color.secondary : Color.accentColor)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(link.isEmpty)
             }
+        }
+        .controlSize(.large)
     }
 }
 
