@@ -6,12 +6,11 @@ struct CommandCenterMRCard: View {
     let monitor: TodoMonitorService
     var allowsRemoval = false
     var onAttention: ((CommandCenterMRDetailSection) -> Void)? = nil
-    var drag: BoardCardDrag? = nil
     let onDetails: () -> Void
 
     var body: some View {
         CommandCenterMRCardContent(row: row, monitor: monitor, allowsRemoval: allowsRemoval,
-            onAttention: onAttention, drag: drag, onDetails: onDetails,
+            onAttention: onAttention, onDetails: onDetails,
             presentation: .init(row: row, monitor: monitor, allowsRemoval: allowsRemoval))
     }
 }
@@ -21,7 +20,6 @@ private struct CommandCenterMRCardContent: View {
     let monitor: TodoMonitorService
     var allowsRemoval = false
     var onAttention: ((CommandCenterMRDetailSection) -> Void)? = nil
-    var drag: BoardCardDrag? = nil
     let onDetails: () -> Void
     @State private var isStarting = false
     @State private var pendingPrimary: (title: LocalizedStringResource, cta: MRActionCTA?)?
@@ -243,7 +241,6 @@ private struct CommandCenterMRCardContent: View {
                     })
             }
             HStack(spacing: 0) {
-                if let drag { BoardCardReorderHandle(drag: drag, title: row.displayTitle) }
                 if finishedState == nil, let scopeTarget {
                     BoardAutomationToggle(monitor: monitor, target: scopeTarget,
                         projectPath: item.url.gitLabProjectPath, isDraft: isDraft,

@@ -108,11 +108,11 @@ struct CommandCenterBoardView: View {
         } : nil
         let content = CommandCenterMRCard(row: row, monitor: monitor, allowsRemoval: removable, onAttention: { section in
             selected = Selection(item: row.item, section: section, account: account)
-        }, drag: drag, onDetails: {
+        }, onDetails: {
             selected = Selection(item: row.item, section: .overview, account: account)
         })
         if let drag {
-            content.modifier(BoardCardDropDestination(target: drag.target, monitor: monitor))
+            content.modifier(BoardCardReorderInteraction(drag: drag, monitor: monitor))
         } else {
             content
         }
