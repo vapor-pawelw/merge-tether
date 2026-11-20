@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 struct ManualDiscussionResolutionTests {
     @Test func consciousManualResolutionDoesNotNeedReviewerApprovalButNeedsAnAnsweredVerifiedConcern() throws {

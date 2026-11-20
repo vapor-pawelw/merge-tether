@@ -4,9 +4,9 @@
 # verify the GitHub release + Homebrew tap.
 #
 # Env vars:
-#   GITLABTODOS_RELEASE_REPO        — override release repo (default below).
-#   GITLABTODOS_HOMEBREW_TAP_REPO   — when set, verifies the Homebrew cask
-#                                     at Casks/gitlab-todos.rb in that repo.
+#   MERGETETHER_RELEASE_REPO        — override release repo (default below).
+#   MERGETETHER_HOMEBREW_TAP_REPO   — when set, verifies the Homebrew cask
+#                                     at Casks/mergetether.rb in that repo.
 #                                     When unset, Homebrew verification is
 #                                     skipped gracefully.
 #
@@ -293,8 +293,8 @@ if release.get('tagName') != tag or release.get('isDraft') is not False or relea
 if manifest.get('version') != version or manifest.get('distributable') is not True or manifest.get('build') != expected_build:
     sys.exit('Release manifest does not describe a distributable artifact set for the requested version/build.')
 assets = release.get('assets', [])
-required = [(['GitLabTodos-' + version + '.dmg', 'GitLabTodos.dmg']),
-            (['GitLabTodos-' + version + '.zip', 'GitLabTodos.zip'])]
+required = [(['MergeTether-' + version + '.dmg', 'MergeTether.dmg']),
+            (['MergeTether-' + version + '.zip', 'MergeTether.zip'])]
 if platform == 'all':
     required.append(['MergeTetheriOS-' + version + '.ipa'])
 selected = []
@@ -323,7 +323,7 @@ report_incomplete_release() {
 
 read_homebrew_cask() {
   local tap_repo="$1"
-  gh api -H "Accept: application/vnd.github.raw" "repos/${tap_repo}/contents/Casks/gitlab-todos.rb"
+  gh api -H "Accept: application/vnd.github.raw" "repos/${tap_repo}/contents/Casks/mergetether.rb"
 }
 
 verify_homebrew_version() {
@@ -429,10 +429,10 @@ main() {
   source_repo="$(normalize_owner_repo "$source_repo")"
 
   local release_repo
-  release_repo="${GITLABTODOS_RELEASE_REPO:-$DEFAULT_RELEASE_REPO}"
+  release_repo="${MERGETETHER_RELEASE_REPO:-$DEFAULT_RELEASE_REPO}"
 
   local tap_repo
-  tap_repo="${GITLABTODOS_HOMEBREW_TAP_REPO:-}"
+  tap_repo="${MERGETETHER_HOMEBREW_TAP_REPO:-}"
 
   local branch latest_tag default_version version tag release_date
   branch="$(git branch --show-current)"
@@ -643,19 +643,19 @@ main() {
     echo "- Changelog commit: ${changelog_commit}"
     echo "- Tag: ${tag}"
     echo "- GitHub release: ${release_url}"
-    echo "- Homebrew tap: (skipped — set GITLABTODOS_HOMEBREW_TAP_REPO to enable)"
+    echo "- Homebrew tap: (skipped — set MERGETETHER_HOMEBREW_TAP_REPO to enable)"
     return 0
   fi
 
   local expected_cask_url
-  expected_cask_url="https://github.com/${release_repo}/releases/download/${tag}/GitLabTodos.dmg"
+  expected_cask_url="https://github.com/${release_repo}/releases/download/${tag}/MergeTether.dmg"
 
   echo "Verifying Homebrew tap update in ${tap_repo}..."
   local cask_sha
   cask_sha="$(wait_for_homebrew_update "$tap_repo" "$version" "$expected_cask_url" || true)"
   if [[ -z "$cask_sha" ]]; then
     echo "Release completed, but Homebrew tap did not update to ${version} in time." >&2
-    echo "Check manually: https://github.com/${tap_repo}/blob/main/Casks/gitlab-todos.rb" >&2
+    echo "Check manually: https://github.com/${tap_repo}/blob/main/Casks/mergetether.rb" >&2
     exit 1
   fi
 
@@ -664,7 +664,7 @@ main() {
   echo "- Changelog commit: ${changelog_commit}"
   echo "- Tag: ${tag}"
   echo "- GitHub release: ${release_url}"
-  echo "- Homebrew cask: https://github.com/${tap_repo}/blob/main/Casks/gitlab-todos.rb"
+  echo "- Homebrew cask: https://github.com/${tap_repo}/blob/main/Casks/mergetether.rb"
   echo "- Homebrew sha256: ${cask_sha}"
 }
 

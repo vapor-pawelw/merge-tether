@@ -29,7 +29,7 @@ class LocalBuildScriptsTests(unittest.TestCase):
 import os, pathlib, plistlib
 plists = pathlib.Path("Derived/InfoPlists")
 plists.mkdir(parents=True, exist_ok=True)
-for app in ["GitLabTodos", "MergeTetheriOS"]:
+for app in ["MergeTether", "MergeTetheriOS"]:
     (plists / (app + "-Info.plist")).write_bytes(plistlib.dumps(
         {"MergeTetherRelayOrigin": os.environ.get("FIXTURE_ORIGIN", "")}))
 """)
@@ -48,7 +48,8 @@ for app in ["GitLabTodos", "MergeTetheriOS"]:
         original = app / "Contents/Info.plist"
         original.parent.mkdir(parents=True)
         original.write_bytes(plistlib.dumps({"CFBundleIdentifier": "com.vaporpw.MergeTether",
-                                             "CFBundleExecutable": "GitLabTodos",
+                                             "CFBundleExecutable": "PreviousExecutable",
+                                             "CFBundleName": "MergeTether",
                                              "LSMinimumSystemVersion": "14.0"}))
         self.executable("codesign", "pass")
         self.executable("xcodebuildmcp", """
@@ -57,15 +58,16 @@ args = sys.argv[1:]
 with open(os.environ["CALLS"], "a") as log: log.write("build\\n")
 if os.environ.get("FAIL_BUILD"): sys.exit(1)
 assert "PRODUCT_BUNDLE_IDENTIFIER=com.vaporpw.MergeTether" in args
-plist = pathlib.Path(args[args.index("--derived-data-path") + 1]) / "Build/Products/Debug/GitLabTodos.app/Contents/Info.plist"
+plist = pathlib.Path(args[args.index("--derived-data-path") + 1]) / "Build/Products/Debug/MergeTether.app/Contents/Info.plist"
 plist.parent.mkdir(parents=True)
 plist.write_bytes(plistlib.dumps({"CFBundleIdentifier": "com.vaporpw.MergeTether",
-                                 "CFBundleExecutable": "GitLabTodos", "LSMinimumSystemVersion": "14.0",
+                                 "CFBundleExecutable": "MergeTether", "LSMinimumSystemVersion": "14.0",
                                  "MergeTetherRelayOrigin": "", "NewBuild": True}))
 """)
         self.executable("swift", """
 import os, pathlib, plistlib, sys
-operation, app = sys.argv[2:4]
+operation, app, executable, previous = sys.argv[2:6]
+assert executable == "MergeTether" and previous == "PreviousExecutable"
 with open(os.environ["CALLS"], "a") as log: log.write(operation + "\\n")
 with (pathlib.Path(app) / "Contents/Info.plist").open("rb") as f:
     assert bool(plistlib.load(f).get("NewBuild")) == (operation == "launch")
@@ -92,6 +94,7 @@ if operation == "launch" and os.environ.get("FAIL_LAUNCH"): sys.exit(1)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.calls.read_text().splitlines(), ["build", "quit", "launch"])
         self.assertTrue(plistlib.loads(original.read_bytes()).get("NewBuild"))
+        self.assertEqual(plistlib.loads(original.read_bytes())["CFBundleExecutable"], "MergeTether")
 
     def test_sidestore_verifies_extracted_payload_before_publishing(self):
         subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)

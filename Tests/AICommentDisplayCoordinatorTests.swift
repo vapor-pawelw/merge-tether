@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 import MergeTetherRemote
-@testable import GitLabTodos
+@testable import MergeTether
 
 @MainActor struct AICommentDisplayCoordinatorTests {
     @Test func independentPersistedOriginObserversCoexistAndCanBeRemoved() async throws {

@@ -10,5 +10,5 @@ enum Log {
     static let onboarding = Logger(subsystem: subsystem, category: "onboarding")
     static let update = Logger(subsystem: subsystem, category: "update")
 
-    private static let subsystem = "com.vaporpw.GitLabTodos"
+    private static let subsystem = "com.vaporpw.MergeTether"
 }

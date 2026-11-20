@@ -104,7 +104,7 @@ def select_paths(repo, paths):
     missing = [suite for suite in suites if not (repo / "Tests" / f"{suite}.swift").is_file()]
     if missing:
         return full_plan(paths, f"Selection references missing suites: {', '.join(sorted(missing))}")
-    return dict(mode="targeted" if suites else "none", suites=[f"GitLabTodosTests/{suite}" for suite in sorted(suites)],
+    return dict(mode="targeted" if suites else "none", suites=[f"MergeTetherTests/{suite}" for suite in sorted(suites)],
                 tasks=[task for task in TASKS if task in tasks], paths=paths, reasons=reasons)
 
 

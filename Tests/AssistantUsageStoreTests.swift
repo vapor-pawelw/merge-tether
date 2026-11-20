@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 @Suite("Assistant usage persistence")
 struct AssistantUsageStoreTests {
@@ -397,7 +397,7 @@ struct AssistantUsageStoreTests {
     func defaultTestStoreIsolation() async {
         #expect(Bundle.allBundles.contains { $0.bundleURL.pathExtension == "xctest" })
         let file = await AssistantUsageStore.shared.file
-        #expect(!file.path.contains("Library/Application Support/com.vaporpw.GitLabTodos/Assistant Usage"))
+        #expect(!file.path.contains("Library/Application Support/com.vaporpw.MergeTether/Assistant Usage"))
     }
 
     @Test("Compacted UTC hour totals sum consistently into UTC month ranges")

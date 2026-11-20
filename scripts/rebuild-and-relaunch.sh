@@ -7,17 +7,18 @@ Usage: scripts/rebuild-and-relaunch.sh [--app PATH]
 
 Build MergeTether for macOS, quit the running app (force if needed), then
 replace and open the installation. Defaults to ~/Applications/MergeTether.app
-or an existing MergeTether.app / GitLabTodos.app in ~/Applications or /Applications.
+or an existing installation in ~/Applications or /Applications.
 An existing installation supplies the bundle ID and signing identity.
 
-Optional environment: GITLABTODOS_SCHEME, GITLABTODOS_CONFIGURATION,
-GITLABTODOS_APP_NAME, GITLABTODOS_PROJECT.
+Optional environment: MERGETETHER_SCHEME, MERGETETHER_CONFIGURATION,
+MERGETETHER_APP_NAME, MERGETETHER_PROJECT.
 USAGE
 }
 
 fail() { echo "error: $*" >&2; exit 1; }
 plist() { /usr/libexec/PlistBuddy -c "Print :$2" "$1"; }
 
+release_bundle_id="com.vaporpw.MergeTether"
 target=""
 case "${1:-}" in
   --help|-h) usage; exit 0 ;;
@@ -27,8 +28,7 @@ case "${1:-}" in
 esac
 if [[ -z "$target" ]]; then
   target="$HOME/Applications/MergeTether.app"
-  for candidate in "$target" "$HOME/Applications/GitLabTodos.app" \
-      /Applications/MergeTether.app /Applications/GitLabTodos.app; do
+  for candidate in "$target" /Applications/MergeTether.app; do
     if [[ -d "$candidate" ]]; then target="$candidate"; break; fi
   done
 fi
@@ -40,10 +40,10 @@ done
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 script_dir="$PWD/scripts"
-scheme="${GITLABTODOS_SCHEME:-GitLabTodos}"
-configuration="${GITLABTODOS_CONFIGURATION:-Debug}"
-app_name="${GITLABTODOS_APP_NAME:-GitLabTodos}"
-project="${GITLABTODOS_PROJECT:-GitLabTodos.xcodeproj}"
+scheme="${MERGETETHER_SCHEME:-MergeTether}"
+configuration="${MERGETETHER_CONFIGURATION:-Debug}"
+app_name="${MERGETETHER_APP_NAME:-MergeTether}"
+project="${MERGETETHER_PROJECT:-MergeTether.xcodeproj}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/mergetether-macos.XXXXXX")"
 stage=""
 replacing=0
@@ -75,14 +75,16 @@ lock="$PWD/build/.local-build.lock"
 shlock -f "$lock" -p "$$" || fail "another local build is in progress in this checkout"
 locked=1
 
-bundle_id="com.vaporpw.GitLabTodos"
+bundle_id="$release_bundle_id"
 identity="-"
 team=""
 requirement=""
 old_origin=""
+old_executable="$app_name"
 if [[ -e "$target" ]]; then
   old_plist="$target/Contents/Info.plist"
-  [[ "$(plist "$old_plist" CFBundleExecutable)" == "$app_name" ]] ||
+  old_executable="$(plist "$old_plist" CFBundleExecutable)"
+  [[ "$old_executable" == "$app_name" || "$(plist "$old_plist" CFBundleName)" == "$app_name" ]] ||
     fail "existing app at $target is not the selected MergeTether product"
   bundle_id="$(plist "$old_plist" CFBundleIdentifier)"
   old_origin="$(plist "$old_plist" MergeTetherRelayOrigin 2>/dev/null || true)"
@@ -126,9 +128,9 @@ if [[ -n "$requirement" ]]; then
   [[ "$new_requirement" == "$requirement" ]] || fail "built app changed the installed signing requirement"
 fi
 
-swift "$script_dir/mergetether-app-lifecycle.swift" quit "$target" "$app_name"
+swift "$script_dir/mergetether-app-lifecycle.swift" quit "$target" "$app_name" "$old_executable"
 if [[ -e "$target" ]]; then mv "$target" "$stage/Previous.app"; fi
 replacing=1
 mv "$stage/New.app" "$target"
-swift "$script_dir/mergetether-app-lifecycle.swift" launch "$target" "$app_name"
+swift "$script_dir/mergetether-app-lifecycle.swift" launch "$target" "$app_name" "$old_executable"
 echo "Running $target"

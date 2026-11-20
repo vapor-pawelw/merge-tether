@@ -4,7 +4,7 @@ import Foundation
 /// Runtime storage follows preferences' installation identity. The interactive
 /// instance lock and operator-owned relay configuration deliberately stay shared.
 struct InstallationStorage: Sendable {
-    static let releaseBundleIdentifier = "com.vaporpw.GitLabTodos"
+    static let releaseBundleIdentifier = "com.vaporpw.MergeTether"
     static let current = InstallationStorage(bundleIdentifier: Bundle.main.bundleIdentifier)
     static let environmentKey = "MERGETETHER_STORAGE_ROOT"
 

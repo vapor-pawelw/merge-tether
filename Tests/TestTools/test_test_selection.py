@@ -27,7 +27,7 @@ class TestSelectionTests(unittest.TestCase):
     def test_usage_change_runs_its_tests_without_unrelated_workflows(self):
         plan = self.selector.select_paths(REPO, ["Sources/Model/AssistantUsage.swift"])
         self.assertEqual(plan["mode"], "targeted")
-        self.assertEqual(plan["suites"], [f"GitLabTodosTests/{suite}" for suite in sorted(self.selector.GROUPS["usage"])])
+        self.assertEqual(plan["suites"], [f"MergeTetherTests/{suite}" for suite in sorted(self.selector.GROUPS["usage"])])
 
     def test_view_actions_are_not_assumed_to_be_visual_only(self):
         plan = self.selector.select_paths(REPO, ["Sources/Views/InboxAttentionActions.swift"])
@@ -42,7 +42,7 @@ class TestSelectionTests(unittest.TestCase):
 
     def test_test_only_edit_runs_the_suite_and_deleted_test_falls_back(self):
         plan = self.selector.select_paths(REPO, ["Tests/AssistantUsageTests.swift"])
-        self.assertEqual(plan["suites"], ["GitLabTodosTests/AssistantUsageTests"])
+        self.assertEqual(plan["suites"], ["MergeTetherTests/AssistantUsageTests"])
         self.assertEqual(self.selector.select_paths(REPO, ["Tests/DeletedTests.swift"])["mode"], "full")
 
     def test_tooling_only_changes_run_python_without_building_app(self):
@@ -60,8 +60,8 @@ class TestSelectionTests(unittest.TestCase):
     def test_usage_changes_include_store_runner_and_presentation_consumers(self):
         plan = self.selector.select_paths(REPO, ["Sources/Model/AssistantUsage.swift"])
         self.assertEqual(plan["mode"], "targeted")
-        self.assertIn("GitLabTodosTests/AssistantUsageStoreTests", plan["suites"])
-        self.assertIn("GitLabTodosTests/AssistantUsageRunnerTests", plan["suites"])
+        self.assertIn("MergeTetherTests/AssistantUsageStoreTests", plan["suites"])
+        self.assertIn("MergeTetherTests/AssistantUsageRunnerTests", plan["suites"])
 
     def test_remote_package_change_includes_app_consumers_and_package_tests(self):
         plan = self.selector.select_paths(REPO, ["Packages/MergeTetherRemote/Sources/MergeTetherRemote/Models.swift"])
@@ -70,7 +70,7 @@ class TestSelectionTests(unittest.TestCase):
 
     def test_runner_full_and_manual_plans_are_explicit_and_do_not_start_xcode(self):
         for arguments, mode in [(["--full"], "full"),
-                                (["--only-testing", "GitLabTodosTests/AssistantUsageTests"], "targeted")]:
+                                (["--only-testing", "MergeTetherTests/AssistantUsageTests"], "targeted")]:
             result = subprocess.run([sys.executable, str(REPO / "scripts/run-tests.py"), "--plan", *arguments],
                                     capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)

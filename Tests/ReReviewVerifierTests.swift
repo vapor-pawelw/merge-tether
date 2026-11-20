@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 @Suite("Headless re-review verification")
 struct ReReviewVerifierTests {

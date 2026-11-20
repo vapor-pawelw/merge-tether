@@ -5,7 +5,7 @@ from pathlib import Path
 import plistlib
 import re
 
-RELEASE_BUNDLE_IDENTIFIER = "com.vaporpw.GitLabTodos"
+RELEASE_BUNDLE_IDENTIFIER = "com.vaporpw.MergeTether"
 ENVIRONMENT_KEY = "MERGETETHER_STORAGE_ROOT"
 
 

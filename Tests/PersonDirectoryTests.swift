@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 import MergeTetherRemote
-@testable import GitLabTodos
+@testable import MergeTether
 
 @Suite struct PersonDirectoryTests {
     @Test func identityPrefersTheDisplayNameAndKeepsTheHandleForHover() {

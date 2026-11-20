@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 struct WorkerExecutionTimeoutTests {
     @Test(arguments: [1, 30, 90, 1_440])

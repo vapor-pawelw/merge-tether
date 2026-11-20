@@ -6,8 +6,8 @@ macOS GitLab inbox and MR automation. Read [README.md](README.md) for behavior,
 
 ## Compatibility
 
-- Preserve the release bundle identifier, minimum macOS version, and legacy
-  `GitLabTodos` target/cask names unless the task explicitly changes compatibility.
+- The macOS release bundle identifier is `com.vaporpw.MergeTether`. Preserve it
+  and the minimum macOS version unless the task explicitly changes them.
   A local installation may use a different identifier; preserve its settings on rebuild.
   Paired local installations also need a stable certificate-backed signing identity;
   ad hoc rebuilds invalidate Keychain’s remembered approval.
@@ -16,7 +16,9 @@ macOS GitLab inbox and MR automation. Read [README.md](README.md) for behavior,
   Follow [the local relay build guide](docs/building.md#local-relay-configuration);
   verify both app origins and keep operator credentials out of artifacts.
 - Tuist owns the generated Xcode project. Use the version pinned in `mise.toml`;
-  regenerate deliberately after project-graph changes. Do not commit generated projects.
+  regenerate deliberately after project-graph changes. Open `MergeTether.xcworkspace`
+  and use the `MergeTether` scheme for macOS or `MergeTetheriOS` for iOS.
+  Do not commit generated projects.
 - Keep dependencies in-tree and the app unsandboxed: authenticated `glab` is a subprocess.
 
 ## Expensive mistakes to avoid
@@ -65,7 +67,7 @@ macOS GitLab inbox and MR automation. Read [README.md](README.md) for behavior,
 - Use `python3 scripts/run-tests.py --plan` to inspect the affected checks, then run
   `python3 scripts/run-tests.py`. It includes branch, staged, unstaged and untracked
   changes; shared or unmapped changes require the full suite. See [the build guide](docs/building.md#choosing-verification-scope).
-- During iteration, use repeatable `--only-testing GitLabTodosTests/SuiteName` for
+- During iteration, use repeatable `--only-testing MergeTetherTests/SuiteName` for
   the regression and affected callers. Use `--build-only` only after confirming a
   change is purely visual; view actions and state changes need behavioral tests.
   Add `--reuse-build` during iteration; finish without it to remove scratch builds.

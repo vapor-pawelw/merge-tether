@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 @Suite("Application launch isolation")
 struct ApplicationLaunchModeTests {
@@ -13,7 +13,7 @@ struct ApplicationLaunchModeTests {
 
     @Test func realInjectedTestHostWithEmptyConfigurationPathUsesHeadlessStartup() {
         let environment = [
-            "XCTestBundlePath": "Contents/PlugIns/GitLabTodosTests.xctest",
+            "XCTestBundlePath": "Contents/PlugIns/MergeTetherTests.xctest",
             "XCTestSessionIdentifier": "00000000-0000-0000-0000-000000000001",
             "XCTestConfigurationFilePath": "",
             "XCInjectBundleInto": "unused",

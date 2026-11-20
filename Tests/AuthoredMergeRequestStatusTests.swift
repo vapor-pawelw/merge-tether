@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 struct AuthoredMergeRequestStatusTests {
     @Test func skippedDependencyChecksDoNotInventWarningsOrPermitSubmission() throws {
@@ -310,7 +310,7 @@ struct AuthoredMergeRequestStatusTests {
             """.utf8).write(to: executable)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
 
-        let suite = "GitLabTodosTests-\(UUID())"
+        let suite = "MergeTetherTests-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsManager(defaults: defaults)

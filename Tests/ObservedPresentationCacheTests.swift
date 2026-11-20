@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import os
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 final class DeferredPresentationNotifications: Sendable {
     private let pending = OSAllocatedUnfairLock(initialState: [@MainActor @Sendable () -> Void]())

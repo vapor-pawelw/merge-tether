@@ -1,7 +1,7 @@
 import Foundation
 import MergeTetherRemote
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 @MainActor
 struct FeedbackSuggestionDecisionActionTests {

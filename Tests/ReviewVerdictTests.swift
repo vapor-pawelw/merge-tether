@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 @Suite struct ReviewVerdictTests {
     private let head = "0123456789012345678901234567890123456789"

@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 @MainActor
 struct MergeRequestLinkCopyTests {

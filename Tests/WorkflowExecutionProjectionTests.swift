@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 struct WorkflowExecutionProjectionTests {
     @Test(arguments: ["running", "mismatched", "unexecuted"])

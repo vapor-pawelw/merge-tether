@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 struct MRActionEffectTests {
     private static let aiSymbols: Set<String> = ["sparkles", "sparkle.magnifyingglass"]

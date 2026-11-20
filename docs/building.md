@@ -13,15 +13,15 @@ From the repo root:
 
 ```bash
 mise install           # installs the pinned Tuist version from mise.toml
-mise exec -- tuist generate --no-open  # generates GitLabTodos.xcodeproj
-open GitLabTodos.xcworkspace
+mise exec -- tuist generate --no-open  # generates MergeTether.xcodeproj
+open MergeTether.xcworkspace
 ```
 
-`GitLabTodos.xcodeproj` is generated — it is intentionally git-ignored. Re-run `tuist generate` whenever `Project.swift`, `Sources/**`, `Resources/**`, or `Tests/**` change in a way that affects the project graph (new files, new targets, new resources).
+`MergeTether.xcodeproj` is generated — it is intentionally git-ignored. Re-run `tuist generate` whenever `Project.swift`, `Sources/**`, `Resources/**`, or `Tests/**` change in a way that affects the project graph (new files, new targets, new resources).
 
 ## Running
 
-Build and run the `GitLabTodos` scheme from Xcode. MergeTether is a regular Dock application with a resizable main window. Closing the window keeps background monitoring active until the app is quit. The release bundle identifier and legacy target/scheme names remain unchanged.
+Build and run the `MergeTether` scheme from Xcode. MergeTether is a regular Dock application with a resizable main window. Closing the window keeps background monitoring active until the app is quit.
 
 Manual GitLab management requires authenticated `glab`. Agent automation additionally requires a compatible, signed-in Codex CLI or Claude CLI.
 
@@ -56,8 +56,8 @@ an operator's local configuration has no shared relay; companion access stays di
 ```bash
 mise exec -- tuist generate --no-open
 xcodebuild \
-  -project GitLabTodos.xcodeproj \
-  -scheme GitLabTodos \
+  -project MergeTether.xcodeproj \
+  -scheme MergeTether \
   -configuration Debug \
   -destination "platform=macOS" \
   build
@@ -67,7 +67,7 @@ The built `.app` bundle lives under the Xcode DerivedData path printed at the en
 
 ## Local installation identity
 
-A development installation may use a separate `PRODUCT_BUNDLE_IDENTIFIER` supplied to the build command. Preserve that identifier on later rebuilds so preferences and permissions stay attached to the same installation. Keep the release identifier unchanged. The main window replaces the old popover; the menu bar now provides an attention indicator and app actions.
+A development installation may use a separate `PRODUCT_BUNDLE_IDENTIFIER` supplied to the build command. Preserve that identifier on later rebuilds so preferences and permissions stay attached to the same installation. The macOS release uses `com.vaporpw.MergeTether`. The main window replaces the old popover; the menu bar now provides an attention indicator and app actions.
 
 For a local installation paired with iOS, also keep a consistent certificate-backed signing identity, such as Apple Development, across rebuilds. An ad hoc signature uses a changing code hash as its designated requirement, so Keychain’s Always Allow does not carry across changed builds. Switching from an ad hoc build to a certificate-signed build can require one new Keychain approval; keep the existing pairing and its Keychain access controls.
 
@@ -85,8 +85,8 @@ requesting that the interactive app quit. It waits up to 15 seconds for shutdown
 then force quits an unresponsive instance. It opens the updated installation and
 restores the previous bundle if launch fails.
 
-The default path is `~/Applications/MergeTether.app`. The script also looks for the
-legacy app name and for installations in `/Applications`. Use `--app` for other
+The default path is `~/Applications/MergeTether.app`. The script also looks for
+`/Applications/MergeTether.app`. Use `--app` for other
 paths or to select a particular installation. An existing installation supplies
 its bundle ID and signing identity. Keep that identity available in Keychain so
 the rebuild retains access to existing settings and pairing.
@@ -109,7 +109,7 @@ extracting the final archive.
 
 Runtime files use `~/Library/Application Support/<actual-bundle-identifier>/` for
 assistant runs/preparation, evidence, pipeline reservations, usage and worker
-checkpoints. The release identity remains `com.vaporpw.GitLabTodos`. A development
+checkpoints. The release identity is `com.vaporpw.MergeTether`. A development
 copy with another identifier gets its own new writes, matching its preferences.
 The app passes `MERGETETHER_STORAGE_ROOT` explicitly to bundled helpers; a helper
 run directly from an app bundle can derive the same identity from `Info.plist`.
@@ -260,7 +260,7 @@ test-command wall time; rebuilding unchanged code is usually much cheaper.
 python3 scripts/run-tests.py --full --reuse-build
 # Make the scoped change, then run affected suites (the flag is repeatable):
 python3 scripts/run-tests.py --reuse-build \
-  --only-testing GitLabTodosTests/AssistantJobCoordinatorTests
+  --only-testing MergeTetherTests/AssistantJobCoordinatorTests
 # Comparable full run, then automatically remove the reused scratch build:
 python3 scripts/run-tests.py --full
 ```
@@ -338,10 +338,10 @@ The selected artifact inventory is exactly two macOS archives, one iOS archive, 
 
 | Platform | Distribution artifacts |
 | --- | --- |
-| macOS | `GitLabTodos-<version>.dmg`, `GitLabTodos-<version>.zip` |
+| macOS | `MergeTether-<version>.dmg`, `MergeTether-<version>.zip` |
 | iOS | `MergeTetheriOS-<version>.ipa` |
 
-Each artifact has a `.sha256` file. `release/release-manifest.json` records the version, build, platform inventory and SHA-256 hashes after every selected platform passes. Legacy macOS artifact names and bundle identifiers remain unchanged. The script uses and removes an owned `.release-build.*` scratch directory, preserving other build directories and previous artifacts. Read the command exit status and manifest version/build before using outputs; preserved artifacts from an earlier run are not evidence that a failed run succeeded.
+Each artifact has a `.sha256` file. `release/release-manifest.json` records the version, build, platform inventory and SHA-256 hashes after every selected platform passes. The script uses and removes an owned `.release-build.*` scratch directory, preserving other build directories and previous artifacts. Read the command exit status and manifest version/build before using outputs; preserved artifacts from an earlier run are not evidence that a failed run succeeded.
 
 For local inspection without distribution credentials or network notarization, opt in explicitly:
 
@@ -360,6 +360,6 @@ Releases are tag-driven: pushing a `v*` tag triggers the Release workflow. Confi
 - `IOS_PROFILE_BASE64`: the existing distribution `.mobileprovision` for the iOS bundle.
 - `NOTARY_API_PRIVATE_KEY`, `NOTARY_KEY_ID`, `NOTARY_ISSUER_ID`: an eligible App Store Connect notarization API key and its identifiers.
 
-Configure repository variables `APPLE_TEAM_ID`, `MACOS_RELEASE_IDENTITY`, `IOS_RELEASE_IDENTITY` (exact certificate names or SHA-1 fingerprints), and `IOS_EXPORT_METHOD` (one of the supported distribution methods). The workflow fails with the missing configuration name without printing its value. It imports only into its temporary runner keychain, derives export options from the configured profile, injects the tag version and workflow run number through build settings, verifies the three-artifact inventory and hashes, and removes temporary credential files/keychain on exit. It retains `GitLabTodos.dmg`/`.zip` names on GitHub for the existing Homebrew cask; the published manifest and checksums use those same names. The iOS IPA remains a separate versioned asset. Relay deployment is separate from both app artifacts.
+Configure repository variables `APPLE_TEAM_ID`, `MACOS_RELEASE_IDENTITY`, `IOS_RELEASE_IDENTITY` (exact certificate names or SHA-1 fingerprints), and `IOS_EXPORT_METHOD` (one of the supported distribution methods). The workflow fails with the missing configuration name without printing its value. It imports only into its temporary runner keychain, derives export options from the configured profile, injects the tag version and workflow run number through build settings, verifies the three-artifact inventory and hashes, and removes temporary credential files/keychain on exit. It publishes `MergeTether.dmg` and `MergeTether.zip` on GitHub with matching names in the manifest and checksums. The Homebrew workflow publishes the `mergetether` cask and registers the previous token as an upgrade alias. The iOS IPA remains a separate versioned asset. Relay deployment is separate from both app artifacts.
 
-`scripts/release-interactive.sh` is a **publication command**: it promotes Unreleased notes, commits and pushes them, and pushes an annotated tag. Run it only when publication is explicitly requested. Noninteractive invocation requires both `--version X.Y.Z` and `--yes`; `--platform all` is the default release inventory, while `--platform macos` supports an explicitly macOS-only release. It waits for the workflow and verifies a matching, published release record, its repository/tag URL, exactly one nonempty required asset per platform, and a matching distributable `release-manifest.json` with the selected version, successful workflow run number, artifact inventory and SHA-256 evidence. A draft release, missing IPA, missing release or pushed tag alone is incomplete and exits nonzero with a release URL and inspection command. Inspect the existing tag/run before retrying; do not restart publication by pushing the tag again. Optional Homebrew verification remains controlled by `GITLABTODOS_HOMEBREW_TAP_REPO`.
+`scripts/release-interactive.sh` is a **publication command**: it promotes Unreleased notes, commits and pushes them, and pushes an annotated tag. Run it only when publication is explicitly requested. Noninteractive invocation requires both `--version X.Y.Z` and `--yes`; `--platform all` is the default release inventory, while `--platform macos` supports an explicitly macOS-only release. It waits for the workflow and verifies a matching, published release record, its repository/tag URL, exactly one nonempty required asset per platform, and a matching distributable `release-manifest.json` with the selected version, successful workflow run number, artifact inventory and SHA-256 evidence. A draft release, missing IPA, missing release or pushed tag alone is incomplete and exits nonzero with a release URL and inspection command. Inspect the existing tag/run before retrying; do not restart publication by pushing the tag again. Optional Homebrew verification remains controlled by `MERGETETHER_HOMEBREW_TAP_REPO`.

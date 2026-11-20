@@ -12,7 +12,7 @@ final class SingleInstanceLock {
     deinit { close(descriptor) }
 
     static func acquire(in directory: URL = FileManager.default.homeDirectoryForCurrentUser
-        .appending(path: "Library/Application Support/com.vaporpw.GitLabTodos", directoryHint: .isDirectory)
+        .appending(path: "Library/Application Support/com.vaporpw.MergeTether", directoryHint: .isDirectory)
     ) throws -> SingleInstanceLock? {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])

@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 /// Stateful external boundary for workflow tests. No executable or network is used.
 /// Evidence-store/persistence tests may still keep their own files on disk.

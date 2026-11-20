@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 struct AutomationPresetProfilesTests {
     @Test(arguments: [AutomationPreset.manual, .safe, .trusted, .full], [false, true])

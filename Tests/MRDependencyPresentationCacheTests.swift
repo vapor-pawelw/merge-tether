@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 struct MRDependencyPresentationCacheTests {
     private let account = MRDependencyPresentationCache.Account(host: "gitlab.example.test", username: "author7", revision: 7)

@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 struct DraftPublicationSelectionTests {
     @Test(arguments: ["/merge", "Reply\n  /approve", "```\n/close\n```", "Reply\r\n\t/merge"])

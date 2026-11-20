@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 struct AssistantAutomaticRetryPolicyTests {
     private let time = Date(timeIntervalSince1970: 1_000)

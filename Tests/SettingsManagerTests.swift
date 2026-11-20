@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 @MainActor
 @Suite("SettingsManager")
@@ -319,7 +319,7 @@ struct SettingsManagerTests {
     }
 
     private func makeDefaults() -> UserDefaults {
-        let suiteName = "GitLabTodosTests-\(UUID().uuidString)"
+        let suiteName = "MergeTetherTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         return defaults

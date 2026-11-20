@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 @Suite("To-do automation")
 struct TodoAutomationTests {
@@ -61,7 +61,7 @@ struct TodoAutomationTests {
     @MainActor
     @Test("existing installations opt in explicitly and completed launches survive reload")
     func settingsRoundTrip() throws {
-        let name = "GitLabTodosTests-\(UUID())"
+        let name = "MergeTetherTests-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let settings = SettingsManager(defaults: defaults)
@@ -106,7 +106,7 @@ struct TodoAutomationTests {
     @Test("Codex follow-up permissions and remote-proof order are explicit without requiring an MR skill", arguments: [true, false])
     func codexFollowUpUsesLocalGitLabRead(pushAllowed: Bool) async throws {
         let todo = try makeTodo(action: "mentioned", author: "me", fragment: "#note_42")
-        let suite = "GitLabTodosTests-\(UUID())"
+        let suite = "MergeTetherTests-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -180,7 +180,7 @@ struct TodoAutomationTests {
     @MainActor
     @Test func claudeFollowUpRecordsTheSelectedCodingModelAndEffort() async throws {
         let todo = try makeTodo(action: "mentioned", author: "me", fragment: "#note_42")
-        let suite = "GitLabTodosTests-\(UUID())"
+        let suite = "MergeTetherTests-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsManager(defaults: defaults)
@@ -212,7 +212,7 @@ struct TodoAutomationTests {
     @Test(arguments: [true, false])
     func reviewAcknowledgementWaitsForSuccessfulExecution(manual: Bool) async throws {
         let todo = try makeTodo(action: "review_requested", author: "anna")
-        let name = "GitLabTodosTests-\(UUID())"
+        let name = "MergeTetherTests-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let settings = SettingsManager(defaults: defaults)
@@ -239,7 +239,7 @@ struct TodoAutomationTests {
     @MainActor
     @Test func queuedManualAssistantTaskDoesNotAcknowledgeTodo() async throws {
         let todo = try makeTodo(action: "review_requested", author: "anna")
-        let name = "GitLabTodosTests-\(UUID())"
+        let name = "MergeTetherTests-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let settings = SettingsManager(defaults: defaults)
@@ -254,7 +254,7 @@ struct TodoAutomationTests {
     @MainActor
     @Test func automaticShellRequiresCLIWhileManualShellCanRun() async throws {
         let todo = try makeTodo(action: "review_requested", author: "anna")
-        let name = "GitLabTodosTests-\(UUID())"
+        let name = "MergeTetherTests-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let settings = SettingsManager(defaults: defaults)
@@ -395,7 +395,7 @@ struct TodoAutomationTests {
     func shellReceipt() async throws {
         let todo = try makeTodo(action: "review_requested", author: "anna")
         let repeatRequest = try makeTodo(action: "review_requested", author: "anna", id: 43)
-        let name = "GitLabTodosTests-\(UUID())"
+        let name = "MergeTetherTests-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let settings = SettingsManager(defaults: defaults)
@@ -517,7 +517,7 @@ struct TodoAutomationTests {
     func manualDispatch() async throws {
         let todo = try makeTodo(action: "review_requested", author: "anna")
         let event = try #require(TodoAutomationEvent(todo: todo, username: "me"))
-        let name = "GitLabTodosTests-\(UUID())"
+        let name = "MergeTetherTests-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let settings = SettingsManager(defaults: defaults)
@@ -572,7 +572,7 @@ struct TodoAutomationTests {
             """.utf8).write(to: executable)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
 
-        let name = "GitLabTodosTests-\(UUID())"
+        let name = "MergeTetherTests-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let settings = SettingsManager(defaults: defaults)

@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 import UserNotifications
-@testable import GitLabTodos
+@testable import MergeTether
 
 @MainActor
 @Suite struct HumanAttentionNotificationTests {

@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 struct AttentionAutomationTests {
     @MainActor @Test(arguments: [AuthorFeedbackPolicy.State.ready, .disabled])

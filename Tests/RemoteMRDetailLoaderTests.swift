@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 import MergeTetherRemote
-@testable import GitLabTodos
+@testable import MergeTether
 
 @MainActor @Suite struct RemoteMRDetailLoaderTests {
     @Test(arguments: ["approved", "reset", "commented", "own"])

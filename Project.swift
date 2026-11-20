@@ -26,7 +26,7 @@ let relayOrigin: String = {
 
 
 let project = Project(
-    name: "GitLabTodos",
+    name: "MergeTether",
     options: .options(
         automaticSchemesOptions: .enabled(),
         developmentRegion: "en"
@@ -84,10 +84,10 @@ let project = Project(
             ])
         ),
         .target(
-            name: "GitLabTodos",
+            name: "MergeTether",
             destinations: [.mac],
             product: .app,
-            bundleId: "com.vaporpw.GitLabTodos",
+            bundleId: "com.vaporpw.MergeTether",
             deploymentTargets: .macOS("14.0"),
             infoPlist: .extendingDefault(with: [
                 "LSUIElement": .boolean(false),
@@ -107,15 +107,15 @@ let project = Project(
             dependencies: [.target(name: "MergeTetherRemote")]
         ),
         .target(
-            name: "GitLabTodosTests",
+            name: "MergeTetherTests",
             destinations: [.mac],
             product: .unitTests,
-            bundleId: "com.vaporpw.GitLabTodosTests",
+            bundleId: "com.vaporpw.MergeTetherTests",
             deploymentTargets: .macOS("14.0"),
             sources: ["Tests/**/*.swift", "iOS/RemotePhoneModel.swift"],
             resources: ["Tests/Fixtures/**"],
             dependencies: [
-                .target(name: "GitLabTodos"),
+                .target(name: "MergeTether"),
                 .target(name: "MergeTetherRemote"),
             ]
         ),

@@ -1,16 +1,16 @@
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 @Suite("Installation storage")
 struct InstallationStorageTests {
-    @Test("release defaults remain compatible and custom installations have isolated runtime roots")
+    @Test("release defaults use the release identifier and custom installations have isolated runtime roots")
     func roots() {
         let home = URL(fileURLWithPath: "/tmp/storage-test-home")
         let release = InstallationStorage(bundleIdentifier: nil, home: home)
-        let local = InstallationStorage(bundleIdentifier: "com.vaporpw.MergeTether", home: home)
-        #expect(release.root.path == "/tmp/storage-test-home/Library/Application Support/com.vaporpw.GitLabTodos")
-        #expect(local.root.path == "/tmp/storage-test-home/Library/Application Support/com.vaporpw.MergeTether")
+        let local = InstallationStorage(bundleIdentifier: "com.test.local", home: home)
+        #expect(release.root.path == "/tmp/storage-test-home/Library/Application Support/com.vaporpw.MergeTether")
+        #expect(local.root.path == "/tmp/storage-test-home/Library/Application Support/com.test.local")
         #expect(local.evidence.path == local.root.appending(path: "Automation Evidence").path)
         #expect(local.runs != release.runs)
         #expect(local.pipelineWork != release.pipelineWork)

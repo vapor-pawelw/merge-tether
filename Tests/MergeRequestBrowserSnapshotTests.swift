@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 struct MergeRequestBrowserSnapshotTests {
     private let host = "gitlab.example.org"

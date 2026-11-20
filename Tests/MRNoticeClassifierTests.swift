@@ -1,7 +1,7 @@
 import Foundation
 import Darwin
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 @MainActor
 @Suite(.serialized)
@@ -13,7 +13,7 @@ struct MRNoticeClassifierTests {
         let fixture = try Fixture(host: host, projectID: projectID)
         defer { fixture.cleanUp() }
         let usageFile = await AssistantUsageStore.shared.file
-        try #require(!usageFile.path.contains("Library/Application Support/com.vaporpw.GitLabTodos/Assistant Usage"))
+        try #require(!usageFile.path.contains("Library/Application Support/com.vaporpw.MergeTether/Assistant Usage"))
 
         let result = try await MRNoticeClassifier.run(request: fixture.request, discussions: fixture.discussions,
             user: .init(id: 3, username: "me"), noteID: 10, assistant: assistant,

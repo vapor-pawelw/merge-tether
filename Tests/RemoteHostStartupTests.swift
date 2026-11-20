@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import MergeTetherRemote
 import Security
-@testable import GitLabTodos
+@testable import MergeTether
 
 @MainActor
 struct RemoteHostStartupTests {

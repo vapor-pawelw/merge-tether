@@ -89,12 +89,12 @@ fi
 
 mise exec -- tuist generate --no-open
 origin="$(plist Derived/InfoPlists/MergeTetheriOS-Info.plist MergeTetherRelayOrigin)"
-mac_origin="$(plist Derived/InfoPlists/GitLabTodos-Info.plist MergeTetherRelayOrigin)"
+mac_origin="$(plist Derived/InfoPlists/MergeTether-Info.plist MergeTetherRelayOrigin)"
 [[ -n "$origin" && "$origin" == "$mac_origin" ]] ||
   fail "configure the same external origin-only relay for both apps before building the IPA"
 
 echo "Building MergeTetheriOS (Release, build $build)..."
-xcodebuildmcp device build --project-path GitLabTodos.xcodeproj --scheme MergeTetheriOS \
+xcodebuildmcp device build --project-path MergeTether.xcodeproj --scheme MergeTetheriOS \
   --configuration Release --derived-data-path "$scratch/DerivedData" --prefer-xcodebuild \
   --extra-args CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO "CURRENT_PROJECT_VERSION=$build" ARCHS=arm64
 

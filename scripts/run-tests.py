@@ -296,7 +296,7 @@ def run_tests(args, root):
         metadata["untracked_sha256"] = {name: hashlib.sha256(
             os.fsencode(os.readlink(name)) if Path(name).is_symlink() else Path(name).read_bytes()).hexdigest()
             for name in untracked if not Path(name).is_dir() or Path(name).is_symlink()}
-        project = repo / "GitLabTodos.xcodeproj/project.pbxproj"
+        project = repo / "MergeTether.xcodeproj/project.pbxproj"
         metadata["generated_project_sha256"] = hashlib.sha256(project.read_bytes()).hexdigest() if project.exists() else None
         metadata["tuist_requirement"] = (repo / "mise.toml").read_text().strip()
         if args.selection["mode"] != "none" or "remote" in args.selection["tasks"]:
@@ -324,7 +324,7 @@ def run_tests(args, root):
                     break
             if code:
                 return code
-            base = ["xcodebuild", "-project", str(repo / "GitLabTodos.xcodeproj"), "-scheme", "GitLabTodos",
+            base = ["xcodebuild", "-project", str(repo / "MergeTether.xcodeproj"), "-scheme", "MergeTether",
                     "-configuration", "Debug", "-destination", "platform=macOS", "-derivedDataPath", str(derived),
                     "-parallel-testing-enabled", "NO"]
             actions = [] if args.selection["mode"] == "none" else [("build", "build-for-testing"), ("test", "test-without-building")]

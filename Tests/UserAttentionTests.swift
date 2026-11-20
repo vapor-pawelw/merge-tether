@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 @Suite struct UserAttentionTests {
     private func snapshot(_ token: String, automatic: Bool = false, working: Bool = false) -> UserAttentionSnapshot {

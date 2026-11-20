@@ -26,7 +26,7 @@ enum MergeTetherMain {
                     alert.runModal()
                     return
                 }
-                GitLabTodosApp.main()
+                MergeTetherApp.main()
             }
         } catch {
             Log.monitor.error("Cannot acquire MergeTether instance lock: \(error.localizedDescription, privacy: .private)")
@@ -46,7 +46,7 @@ private final class MergeTetherTestHostDelegate: NSObject, NSApplicationDelegate
 }
 
 @MainActor
-final class GitLabTodosAppDelegate: NSObject, NSApplicationDelegate {
+final class MergeTetherAppDelegate: NSObject, NSApplicationDelegate {
     let monitor = TodoMonitorService()
     let avatarCache = AvatarCache()
     let updates = UpdateService()
@@ -81,8 +81,8 @@ final class GitLabTodosAppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-struct GitLabTodosApp: App {
-    @NSApplicationDelegateAdaptor(GitLabTodosAppDelegate.self) private var appDelegate
+struct MergeTetherApp: App {
+    @NSApplicationDelegateAdaptor(MergeTetherAppDelegate.self) private var appDelegate
 
     var body: some Scene {
         Window(String(localized: .CommandCenter.commandCenterTitle), id: "main") {

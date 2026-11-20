@@ -31,14 +31,14 @@ class InstallationStorageTests(unittest.TestCase):
             contents = Path(temporary) / "Local.app/Contents"
             helper = contents / "Resources/Automation/installation_storage.py"
             helper.parent.mkdir(parents=True)
-            (contents / "Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": "com.vaporpw.MergeTether"}))
+            (contents / "Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": "com.test.local"}))
             self.assertEqual(storage_root(helper=helper, home=Path(temporary)),
-                Path(temporary) / "Library/Application Support/com.vaporpw.MergeTether")
+                Path(temporary) / "Library/Application Support/com.test.local")
 
     def test_unbundled_helper_preserves_release_default(self):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(storage_root(helper=Path("/tmp/helper.py"), home=Path("/tmp/home")),
-                Path("/tmp/home/Library/Application Support/com.vaporpw.GitLabTodos"))
+                Path("/tmp/home/Library/Application Support/com.vaporpw.MergeTether"))
 
     def test_malformed_bundled_identity_does_not_fall_back_to_release(self):
         with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {}, clear=True):

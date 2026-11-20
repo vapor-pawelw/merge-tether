@@ -229,7 +229,7 @@ cloud copy of the inbox. The Mac remains the source of truth.
 
 ## Verification
 
-Generate the Tuist project, build the `GitLabTodos` and `MergeTetheriOS` schemes,
+Generate the Tuist project, build the `MergeTether` and `MergeTetheriOS` schemes,
 and isolate the macOS test runner as described in [building.md](building.md).
 
 ```bash

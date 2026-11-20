@@ -7,7 +7,7 @@ on:
 
 env:
   RELEASE_REPO: ${{ github.repository }}
-  APP_NAME: GitLabTodos
+  APP_NAME: MergeTether
 
 permissions:
   contents: write
@@ -134,7 +134,7 @@ jobs:
           root = pathlib.Path('release')
           manifest = json.loads((root / 'release-manifest.json').read_text())
           version = os.environ['RELEASE_VERSION']
-          expected = {f'GitLabTodos-{version}.dmg', f'GitLabTodos-{version}.zip', f'MergeTetheriOS-{version}.ipa'}
+          expected = {f'MergeTether-{version}.dmg', f'MergeTether-{version}.zip', f'MergeTetheriOS-{version}.ipa'}
           assert manifest['distributable'] is True
           assert manifest['version'] == version and manifest['build'] == os.environ['RELEASE_BUILD_NUMBER']
           assert len(manifest['artifacts']) == 3 and {item['name'] for item in manifest['artifacts']} == expected
@@ -146,7 +146,7 @@ jobs:
                   digest = hasher.hexdigest()
               assert digest == item['sha256'], 'Artifact digest mismatch'
               if item['platform'] == 'macos':
-                  item['name'] = 'GitLabTodos' + pathlib.Path(item['name']).suffix
+                  item['name'] = 'MergeTether' + pathlib.Path(item['name']).suffix
               (root / (item['name'] + '.sha256')).write_text(digest + '  ' + item['name'] + '\n')
           (root / 'release-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
           PYTHON
@@ -210,19 +210,19 @@ jobs:
             if [ "$HAS_NOTES" = "true" ]; then
               gh release edit "$TAG" --repo "$RELEASE_REPO" --notes-file "$NOTES_FILE"
             fi
-            gh release upload "$TAG" --repo "$RELEASE_REPO" --clobber "${APP_NAME}.dmg" "${APP_NAME}.zip" "release/MergeTetheriOS-${VERSION}.ipa" release/release-manifest.json release/GitLabTodos.dmg.sha256 release/GitLabTodos.zip.sha256 "release/MergeTetheriOS-${VERSION}.ipa.sha256"
+            gh release upload "$TAG" --repo "$RELEASE_REPO" --clobber "${APP_NAME}.dmg" "${APP_NAME}.zip" "release/MergeTetheriOS-${VERSION}.ipa" release/release-manifest.json release/MergeTether.dmg.sha256 release/MergeTether.zip.sha256 "release/MergeTetheriOS-${VERSION}.ipa.sha256"
           elif [ "$HAS_NOTES" = "true" ]; then
             gh release create "$TAG" \
               --repo "$RELEASE_REPO" \
               --title "$TAG" \
               --notes-file "$NOTES_FILE" \
-              "${APP_NAME}.dmg" "${APP_NAME}.zip" "release/MergeTetheriOS-${VERSION}.ipa" release/release-manifest.json release/GitLabTodos.dmg.sha256 release/GitLabTodos.zip.sha256 "release/MergeTetheriOS-${VERSION}.ipa.sha256"
+              "${APP_NAME}.dmg" "${APP_NAME}.zip" "release/MergeTetheriOS-${VERSION}.ipa" release/release-manifest.json release/MergeTether.dmg.sha256 release/MergeTether.zip.sha256 "release/MergeTetheriOS-${VERSION}.ipa.sha256"
           else
             gh release create "$TAG" \
               --repo "$RELEASE_REPO" \
               --title "$TAG" \
               --generate-notes \
-              "${APP_NAME}.dmg" "${APP_NAME}.zip" "release/MergeTetheriOS-${VERSION}.ipa" release/release-manifest.json release/GitLabTodos.dmg.sha256 release/GitLabTodos.zip.sha256 "release/MergeTetheriOS-${VERSION}.ipa.sha256"
+              "${APP_NAME}.dmg" "${APP_NAME}.zip" "release/MergeTetheriOS-${VERSION}.ipa" release/release-manifest.json release/MergeTether.dmg.sha256 release/MergeTether.zip.sha256 "release/MergeTetheriOS-${VERSION}.ipa.sha256"
           fi
 
       - name: Remove temporary distribution credentials
@@ -243,6 +243,9 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ vars.HOMEBREW_TAP_ENABLED == 'true' }}
     steps:
+      - name: Checkout cask template
+        uses: actions/checkout@v4
+
       - name: Wait for release assets
         run: sleep 10
 
@@ -251,7 +254,7 @@ jobs:
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           VERSION="${TAG#v}"
-          ASSET_URL="https://github.com/${{ env.RELEASE_REPO }}/releases/download/${TAG}/GitLabTodos.dmg"
+          ASSET_URL="https://github.com/${{ env.RELEASE_REPO }}/releases/download/${TAG}/MergeTether.dmg"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "asset_url=$ASSET_URL" >> "$GITHUB_OUTPUT"
@@ -259,8 +262,8 @@ jobs:
       - name: Download release asset and compute SHA256
         id: sha
         run: |
-          curl -sSL "${{ steps.release.outputs.asset_url }}" -o GitLabTodos.dmg
-          SHA=$(sha256sum GitLabTodos.dmg | awk '{print $1}')
+          curl -sSL "${{ steps.release.outputs.asset_url }}" -o MergeTether.dmg
+          SHA=$(sha256sum MergeTether.dmg | awk '{print $1}')
           echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
           echo "SHA256: $SHA"
 
@@ -276,16 +279,31 @@ jobs:
           VERSION="${{ steps.release.outputs.version }}"
           SHA="${{ steps.sha.outputs.sha256 }}"
           ASSET_URL="${{ steps.release.outputs.asset_url }}"
-          sed -i "s/version \".*\"/version \"$VERSION\"/" homebrew-tap/Casks/gitlab-todos.rb
-          sed -i "s/sha256 \".*\"/sha256 \"$SHA\"/" homebrew-tap/Casks/gitlab-todos.rb
-          sed -i "s|url \".*\".*|url \"$ASSET_URL\"|" homebrew-tap/Casks/gitlab-todos.rb
-          cat homebrew-tap/Casks/gitlab-todos.rb
+          cp dist/homebrew/mergetether.rb homebrew-tap/Casks/mergetether.rb
+          sed -i "s/version \".*\"/version \"$VERSION\"/" homebrew-tap/Casks/mergetether.rb
+          sed -i "s/sha256 \".*\"/sha256 \"$SHA\"/" homebrew-tap/Casks/mergetether.rb
+          sed -i "s|url \".*\".*|url \"$ASSET_URL\"|" homebrew-tap/Casks/mergetether.rb
+          cat homebrew-tap/Casks/mergetether.rb
 
       - name: Commit and push cask update
         working-directory: homebrew-tap
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Casks/gitlab-todos.rb
-          git commit -m "Update gitlab-todos to ${{ steps.release.outputs.version }}"
+          python3 - <<'PYTHON'
+          import json
+          from pathlib import Path
+
+          path = Path("cask_renames.json")
+          renames = json.loads(path.read_text()) if path.exists() else {}
+          for token, target in renames.items():
+              if target == "gitlab-todos":
+                  renames[token] = "mergetether"
+          renames["gitlab-todos"] = "mergetether"
+          path.write_text(json.dumps(renames, indent=2, sort_keys=True) + "\n")
+          PYTHON
+          git rm --ignore-unmatch Casks/gitlab-todos.rb
+          git add Casks/mergetether.rb cask_renames.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Update mergetether to ${{ steps.release.outputs.version }}"
           git push

@@ -448,7 +448,7 @@ Prepared diff and discussion excerpts filter common credential patterns. Worker 
 A manually started task can reserve an MR before attempting a fix by creating the same local directory atomically. Use the same installation storage root as the running app; the fallback below is the release installation. Replace the host, project ID and MR IID:
 
 ```sh
-mergetether_storage_root="${MERGETETHER_STORAGE_ROOT:-$HOME/Library/Application Support/com.vaporpw.GitLabTodos}"
+mergetether_storage_root="${MERGETETHER_STORAGE_ROOT:-$HOME/Library/Application Support/com.vaporpw.MergeTether}"
 claim="$mergetether_storage_root/Pipeline Work/host-gitlab.example.org/project-123/mr-456/active"
 mkdir -p "$(dirname "$claim")"
 mkdir "$claim" || exit 1

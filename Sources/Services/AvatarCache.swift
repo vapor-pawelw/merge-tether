@@ -14,7 +14,7 @@ actor AvatarCache {
     init() {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        self.diskDirectory = caches.appendingPathComponent("com.vaporpw.GitLabTodos/avatars", isDirectory: true)
+        self.diskDirectory = caches.appendingPathComponent("com.vaporpw.MergeTether/avatars", isDirectory: true)
         try? FileManager.default.createDirectory(at: self.diskDirectory, withIntermediateDirectories: true)
 
         let config = URLSessionConfiguration.ephemeral

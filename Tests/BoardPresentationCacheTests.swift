@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import os
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 @MainActor
 struct BoardPresentationCacheTests {

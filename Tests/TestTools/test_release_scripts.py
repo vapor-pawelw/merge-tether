@@ -28,8 +28,8 @@ class ReleaseScriptFixture(unittest.TestCase):
         shutil.copyfile(REPO / "Project.swift", self.root / "Project.swift")
         self.env = dict(os.environ, PATH=f"{self.bin}:/usr/bin:/bin", HOME=str(self.root),
                         TMPDIR=str(self.root), PYTHONDONTWRITEBYTECODE="1",
-                        GITLABTODOS_RELEASE_REPO="fixture/release",
-                        GITLABTODOS_HOMEBREW_TAP_REPO="", TUIST_MERGETETHER_RELAY_CONFIG_FILE="")
+                        MERGETETHER_RELEASE_REPO="fixture/release",
+                        MERGETETHER_HOMEBREW_TAP_REPO="", TUIST_MERGETETHER_RELAY_CONFIG_FILE="")
 
     def executable(self, name, body):
         path = self.bin / name
@@ -78,12 +78,12 @@ if 'archive' in args:
 elif ios:
     app = pathlib.Path(args[args.index('-derivedDataPath') + 1]) / 'Build/Products/Release-iphoneos/MergeTetheriOS.app'
 else:
-    app = pathlib.Path(args[args.index('-derivedDataPath') + 1]) / 'Build/Products/Release/GitLabTodos.app'
+    app = pathlib.Path(args[args.index('-derivedDataPath') + 1]) / 'Build/Products/Release/MergeTether.app'
 info_path = app / ('Info.plist' if ios else 'Contents/Info.plist')
 info_path.parent.mkdir(parents=True)
 info = {'CFBundleShortVersionString': settings['MARKETING_VERSION'],
         'CFBundleVersion': settings['CURRENT_PROJECT_VERSION'],
-        'CFBundleIdentifier': 'com.vaporpw.MergeTether.iOS' if ios else 'com.vaporpw.GitLabTodos',
+        'CFBundleIdentifier': 'com.vaporpw.MergeTether.iOS' if ios else 'com.vaporpw.MergeTether',
         'LSMinimumSystemVersion': '14.0'}
 if os.environ.get('WRONG_VERSION'): info['CFBundleShortVersionString'] = '0.1.0'
 if os.environ.get('WRONG_BUILD'): info['CFBundleVersion'] = '1'
@@ -126,10 +126,10 @@ if os.environ.get('STAPLE_FAIL') and 'stapler' in sys.argv: sys.exit(1)
 
     def packaged_info(self, version, unsigned=False):
         release = self.root / "release" / ("unsigned" if unsigned else "")
-        with zipfile.ZipFile(release / f"GitLabTodos-{version}.zip") as archive:
-            info = plistlib.loads(archive.read("GitLabTodos.app/Contents/Info.plist"))
-        self.assertEqual(info, json.loads((release / f"GitLabTodos-{version}.dmg").read_text()))
-        self.assertEqual(info["CFBundleIdentifier"], "com.vaporpw.GitLabTodos")
+        with zipfile.ZipFile(release / f"MergeTether-{version}.zip") as archive:
+            info = plistlib.loads(archive.read("MergeTether.app/Contents/Info.plist"))
+        self.assertEqual(info, json.loads((release / f"MergeTether-{version}.dmg").read_text()))
+        self.assertEqual(info["CFBundleIdentifier"], "com.vaporpw.MergeTether")
         self.assertEqual(info["LSMinimumSystemVersion"], "14.0")
         return info
 
@@ -346,7 +346,7 @@ elif a[:2] == ['run', 'watch']: sys.exit(1 if os.environ.get('WATCH_FAIL') else 
 elif a[:2] == ['run', 'view']: print('456')
 elif a[:2] == ['release', 'view']:
     if os.environ.get('ASSET_ERROR'): sys.exit(1)
-    assets = os.environ.get('ASSETS', 'GitLabTodos-9.8.7.dmg,GitLabTodos-9.8.7.zip,MergeTetheriOS-9.8.7.ipa')
+    assets = os.environ.get('ASSETS', 'MergeTether-9.8.7.dmg,MergeTether-9.8.7.zip,MergeTetheriOS-9.8.7.ipa')
     print(json.dumps({'tagName': os.environ.get('RELEASE_TAG', 'v9.8.7'),
                       'isDraft': bool(os.environ.get('RELEASE_DRAFT')),
                       'url': os.environ.get('RELEASE_URL', 'https://github.com/fixture/release/releases/tag/v9.8.7'),
@@ -356,7 +356,7 @@ elif a[:2] == ['release', 'view']:
 elif a[:2] == ['release', 'download']:
     if os.environ.get('NO_MANIFEST'): sys.exit(1)
     target = pathlib.Path(a[a.index('--dir') + 1]) / 'release-manifest.json'
-    assets = os.environ.get('ASSETS', 'GitLabTodos-9.8.7.dmg,GitLabTodos-9.8.7.zip,MergeTetheriOS-9.8.7.ipa').split(',')
+    assets = os.environ.get('ASSETS', 'MergeTether-9.8.7.dmg,MergeTether-9.8.7.zip,MergeTetheriOS-9.8.7.ipa').split(',')
     target.write_text(json.dumps({'version': os.environ.get('MANIFEST_VERSION', '9.8.7'), 'build': os.environ.get('MANIFEST_BUILD', '456'),
                                  'distributable': not bool(os.environ.get('MANIFEST_UNSIGNED')),
                                  'artifacts': [{'name': name, 'sha256': 'a' * 64} for name in assets]}))
@@ -402,13 +402,13 @@ else: sys.exit('unexpected gh fixture call: ' + repr(a))
         self.assert_workflow_incomplete("missing_release", "Workflow 'Release' is not configured")
 
     def test_missing_zip_is_not_a_successful_release(self):
-        self.env["ASSETS"] = "GitLabTodos.dmg"
+        self.env["ASSETS"] = "MergeTether.dmg"
         result = self.publish()
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn("Release complete.", result.stdout)
 
     def test_missing_dmg_is_not_a_successful_release(self):
-        self.env["ASSETS"] = "GitLabTodos.zip"
+        self.env["ASSETS"] = "MergeTether.zip"
         result = self.publish()
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn("Release complete.", result.stdout)
@@ -420,13 +420,13 @@ else: sys.exit('unexpected gh fixture call: ' + repr(a))
         self.assertNotIn("Release complete.", result.stdout)
 
     def test_versioned_assets_remain_supported(self):
-        self.env["ASSETS"] = "GitLabTodos-9.8.7.dmg,GitLabTodos-9.8.7.zip,MergeTetheriOS-9.8.7.ipa"
+        self.env["ASSETS"] = "MergeTether-9.8.7.dmg,MergeTether-9.8.7.zip,MergeTetheriOS-9.8.7.ipa"
         result = self.publish()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Release complete.", result.stdout)
 
     def test_stable_mac_assets_with_separate_versioned_ipa_remain_supported(self):
-        self.env["ASSETS"] = "GitLabTodos.dmg,GitLabTodos.zip,MergeTetheriOS-9.8.7.ipa"
+        self.env["ASSETS"] = "MergeTether.dmg,MergeTether.zip,MergeTetheriOS-9.8.7.ipa"
         result = self.publish()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
@@ -460,13 +460,13 @@ else: sys.exit('unexpected gh fixture call: ' + repr(a))
                 self.env.pop(key)
 
     def test_missing_ios_distribution_artifact_is_not_complete(self):
-        self.env["ASSETS"] = "GitLabTodos-9.8.7.dmg,GitLabTodos-9.8.7.zip"
+        self.env["ASSETS"] = "MergeTether-9.8.7.dmg,MergeTether-9.8.7.zip"
         result = self.publish()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("MergeTetheriOS-9.8.7.ipa", result.stderr)
 
     def test_unsigned_ios_zip_is_not_an_installable_release_artifact(self):
-        self.env["ASSETS"] = "GitLabTodos-9.8.7.dmg,GitLabTodos-9.8.7.zip,MergeTetheriOS-9.8.7-unsigned-device.zip"
+        self.env["ASSETS"] = "MergeTether-9.8.7.dmg,MergeTether-9.8.7.zip,MergeTetheriOS-9.8.7-unsigned-device.zip"
         result = self.publish()
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("Release complete.", result.stdout)
@@ -563,11 +563,11 @@ pathlib.Path('mise-arguments.json').write_text(json.dumps(sys.argv[1:]))
         self.assertEqual((self.root / "Project.swift").read_bytes(), original)
 
     def prepare_inventory(self):
-        self.env.update(RELEASE_VERSION="9.8.7", RELEASE_BUILD_NUMBER="456", APP_NAME="GitLabTodos")
+        self.env.update(RELEASE_VERSION="9.8.7", RELEASE_BUILD_NUMBER="456", APP_NAME="MergeTether")
         release = self.root / "release"
         release.mkdir()
         artifacts = []
-        for name in ["GitLabTodos-9.8.7.dmg", "GitLabTodos-9.8.7.zip", "MergeTetheriOS-9.8.7.ipa"]:
+        for name in ["MergeTether-9.8.7.dmg", "MergeTether-9.8.7.zip", "MergeTetheriOS-9.8.7.ipa"]:
             content = ("fixture: " + name).encode()
             (release / name).write_bytes(content)
             artifacts.append({"name": name, "sha256": hashlib.sha256(content).hexdigest(),
@@ -582,8 +582,8 @@ pathlib.Path('mise-arguments.json').write_text(json.dumps(sys.argv[1:]))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         manifest = json.loads((release / "release-manifest.json").read_text())
         self.assertEqual({a["name"] for a in manifest["artifacts"]},
-                         {"GitLabTodos.dmg", "GitLabTodos.zip", "MergeTetheriOS-9.8.7.ipa"})
-        for name in ["GitLabTodos.dmg", "GitLabTodos.zip"]:
+                         {"MergeTether.dmg", "MergeTether.zip", "MergeTetheriOS-9.8.7.ipa"})
+        for name in ["MergeTether.dmg", "MergeTether.zip"]:
             digest = hashlib.sha256((self.root / name).read_bytes()).hexdigest()
             self.assertEqual((release / (name + ".sha256")).read_text(), digest + "  " + name + "\n")
 
@@ -593,14 +593,14 @@ pathlib.Path('mise-arguments.json').write_text(json.dumps(sys.argv[1:]))
         (release / "release-manifest.json").write_text(json.dumps(manifest))
         result = self.run_step("Verify distribution inventory and retain stable macOS names")
         self.assertNotEqual(result.returncode, 0)
-        self.assertFalse((self.root / "GitLabTodos.dmg").exists())
+        self.assertFalse((self.root / "MergeTether.dmg").exists())
 
     def test_ci_rejects_changed_artifact_digest(self):
         release, _ = self.prepare_inventory()
         (release / "MergeTetheriOS-9.8.7.ipa").write_bytes(b"unexpected payload")
         result = self.run_step("Verify distribution inventory and retain stable macOS names")
         self.assertNotEqual(result.returncode, 0)
-        self.assertFalse((self.root / "GitLabTodos.dmg").exists())
+        self.assertFalse((self.root / "MergeTether.dmg").exists())
 
     def test_ci_prepares_and_removes_only_temporary_distribution_credentials(self):
         self.env.update(RUNNER_TEMP=str(self.root), APPLE_TEAM_ID="TEAM123", IOS_EXPORT_METHOD="release-testing",

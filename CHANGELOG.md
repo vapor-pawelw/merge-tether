@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Use MergeTether for the macOS app, Xcode project and schemes, release downloads, and Homebrew cask. New macOS installations use the bundle identifier `com.vaporpw.MergeTether`. Local rebuilds retain the installed bundle identity and pairing.
+
 - Prepare a standard private reply when verified feedback on your MR only needs acknowledgement. Reuse current feedback verification during re-review and after a verified reply is published.
 
 - Copy a GitLab merge request link from the button beside the pin on Mac cards and in Details, with a brief confirmation.
@@ -443,7 +445,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Publish eligible replies to verified GitLab Duo feedback or high-confidence AI comments selectively; keep uncertain replies private and reject automatic quick actions.
 - Request another review only after relevant feedback is addressed and unpublished replies no longer block it. Bind manual confirmation to current content.
 - Organize automation settings by checkpoints, agent, scope and workflow; save scope immediately without later agent changes overwriting it.
-- Preserve the release bundle identifier, macOS 14 minimum and legacy GitLabTodos target/cask names.
+- Preserve the release bundle identifier, macOS 14 minimum and the previous target/cask names.
 - Refresh public documentation and use the retro painted-style MergeTether icon.
 
 ### Fixed

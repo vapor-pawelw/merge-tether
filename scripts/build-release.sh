@@ -196,11 +196,11 @@ if [[ "$MACOS" -eq 1 ]]; then
     if [[ "$UNSIGNED" -eq 0 ]]; then
         SIGNING_SETTINGS=("CODE_SIGN_IDENTITY=${SIGNING_IDENTITY}" "DEVELOPMENT_TEAM=${TEAM_ID}" CODE_SIGN_STYLE=Manual ENABLE_HARDENED_RUNTIME=YES OTHER_CODE_SIGN_FLAGS=--timestamp)
     fi
-    xcodebuild -project GitLabTodos.xcodeproj -scheme GitLabTodos -configuration Release \
+    xcodebuild -project MergeTether.xcodeproj -scheme MergeTether -configuration Release \
         -destination 'platform=macOS' -derivedDataPath "$SCRATCH/macOS" \
         "${COMMON_SETTINGS[@]}" "${SIGNING_SETTINGS[@]}" clean build
-    APP="$SCRATCH/macOS/Build/Products/Release/GitLabTodos.app"
-    validate_bundle "$APP/Contents/Info.plist" com.vaporpw.GitLabTodos
+    APP="$SCRATCH/macOS/Build/Products/Release/MergeTether.app"
+    validate_bundle "$APP/Contents/Info.plist" com.vaporpw.MergeTether
     if [[ "$UNSIGNED" -eq 0 ]]; then
         verify_signature "$APP" 'Developer ID Application: '
         ditto -c -k --keepParent "$APP" "$SCRATCH/notarization.zip"
@@ -209,7 +209,7 @@ if [[ "$MACOS" -eq 1 ]]; then
         xcrun stapler validate "$APP" || fail "app notarization ticket validation failed"
         spctl --assess --type execute "$APP" || fail "Gatekeeper rejected the notarized app"
     fi
-    ZIP_NAME="GitLabTodos-${VERSION}.zip" DMG_NAME="GitLabTodos-${VERSION}.dmg"
+    ZIP_NAME="MergeTether-${VERSION}.zip" DMG_NAME="MergeTether-${VERSION}.dmg"
     ditto -c -k --keepParent "$APP" "$SCRATCH/artifacts/$ZIP_NAME"
     hdiutil create -volname MergeTether -srcfolder "$APP" -ov -format UDZO "$SCRATCH/artifacts/$DMG_NAME" >/dev/null
     if [[ "$UNSIGNED" -eq 0 ]]; then
@@ -224,7 +224,7 @@ if [[ "$MACOS" -eq 1 ]]; then
 fi
 if [[ "$IOS" -eq 1 ]]; then
     if [[ "$UNSIGNED" -eq 1 ]]; then
-        xcodebuild -project GitLabTodos.xcodeproj -scheme MergeTetheriOS -configuration Release \
+        xcodebuild -project MergeTether.xcodeproj -scheme MergeTetheriOS -configuration Release \
             -destination 'generic/platform=iOS' -derivedDataPath "$SCRATCH/iOS" \
             "${COMMON_SETTINGS[@]}" CODE_SIGN_IDENTITY= CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO clean build
         IOS_APP="$SCRATCH/iOS/Build/Products/Release-iphoneos/MergeTetheriOS.app"
@@ -232,7 +232,7 @@ if [[ "$IOS" -eq 1 ]]; then
         IOS_NAME="MergeTetheriOS-${VERSION}-unsigned-device.zip"
         ditto -c -k --keepParent "$IOS_APP" "$SCRATCH/artifacts/$IOS_NAME"
     else
-        xcodebuild -project GitLabTodos.xcodeproj -scheme MergeTetheriOS -configuration Release \
+        xcodebuild -project MergeTether.xcodeproj -scheme MergeTetheriOS -configuration Release \
             -destination 'generic/platform=iOS' -derivedDataPath "$SCRATCH/iOS" -archivePath "$SCRATCH/iOS.xcarchive" \
             "${COMMON_SETTINGS[@]}" "CODE_SIGN_IDENTITY=${IOS_SIGNING_IDENTITY}" "DEVELOPMENT_TEAM=${TEAM_ID}" \
             CODE_SIGN_STYLE=Manual "MERGETETHER_IOS_PROVISIONING_PROFILE=${IOS_PROFILE}" archive

@@ -23,9 +23,9 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
-guard CommandLine.arguments.count == 4 else { fail("expected quit|launch, app path and executable name") }
+guard CommandLine.arguments.count == 5 else { fail("expected quit|launch, app path and new and installed executable names") }
 let appURL = URL(fileURLWithPath: CommandLine.arguments[2]).resolvingSymlinksInPath()
-let executableNames = Set(["GitLabTodos", CommandLine.arguments[3]])
+let executableNames = Set(CommandLine.arguments[3...4])
 
 switch CommandLine.arguments[1] {
 case "quit":

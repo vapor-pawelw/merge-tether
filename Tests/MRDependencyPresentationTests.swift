@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 struct MRDependencyPresentationTests {
     @Test(arguments: ["gitlab.example.test", "gitlab.example.test:8443"])

@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 struct ManualMergeRequestReviewTests {
     private let target = ManualReviewTarget(host: "gitlab.example.org", username: "reviewer", projectID: 7, iid: 12,

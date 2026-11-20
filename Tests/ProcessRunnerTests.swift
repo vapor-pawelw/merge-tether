@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 import Testing
-@testable import GitLabTodos
+@testable import MergeTether
 
 @Suite("ProcessRunner")
 struct ProcessRunnerTests {
