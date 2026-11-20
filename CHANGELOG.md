@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Put Refresh from GitLab and Open in GitLab above the title in Mac merge request details.
+
 - Give the merge request description its own card in Details on Mac and iPhone.
 
 - Hide empty Feedback verification sections and tighten spacing between merge status, actions, and comments in Mac merge request details.

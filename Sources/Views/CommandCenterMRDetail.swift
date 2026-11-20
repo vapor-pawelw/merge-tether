@@ -398,6 +398,17 @@ private struct CommandCenterMRDetailContent: View {
             }
             .font(.callout).foregroundStyle(.secondary)
             .zIndex(1)
+            HStack(spacing: 8) {
+                GitLabRefreshButton(monitor: monitor, itemID: item.id) {
+                    if let target = discussionTarget { await discussionStore.refresh(target: target, glab: monitor.glab) }
+                }
+                Link(destination: item.url) {
+                    Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .frame(maxWidth: .infinity, alignment: .trailing)
             VStack(alignment: .leading, spacing: 4) {
                 Text(verbatim: presentationRow.displayTitle).font(.title2.weight(.semibold))
                     .lineLimit(3).textSelection(.enabled)
@@ -464,11 +475,11 @@ private struct CommandCenterMRDetailContent: View {
                let reason = status.dependencyReadiness.holdReason {
                 Text(reason).font(.callout).foregroundStyle(.secondary)
             }
-            HStack(spacing: 10) {
-                if finishedState != nil {
-                    Button { monitor.acknowledgeFinishedMergeRequest(item) } label: { Text(.MRLifecycle.seen) }
-                        .buttonStyle(.bordered).help(Text(.MRLifecycle.seenHelp))
-                } else {
+            if finishedState != nil {
+                Button { monitor.acknowledgeFinishedMergeRequest(item) } label: { Text(.MRLifecycle.seen) }
+                    .buttonStyle(.bordered).help(Text(.MRLifecycle.seenHelp))
+            } else if monitor.canMarkMergeRequestReady(item) || presentationItem.authorFeedbackStatus != nil {
+                HStack(spacing: 10) {
                     MarkMergeRequestReadyButton(item: item, monitor: monitor).buttonStyle(.bordered)
                     if let feedback = presentationItem.authorFeedbackStatus {
                         Button {
@@ -482,14 +493,6 @@ private struct CommandCenterMRDetailContent: View {
                         .mrActionHelp(.verifyFeedback)
                     }
                 }
-                GitLabRefreshButton(monitor: monitor, itemID: item.id) {
-                    if let target = discussionTarget { await discussionStore.refresh(target: target, glab: monitor.glab) }
-                }
-                .buttonStyle(.borderless)
-                Link(destination: item.url) {
-                    Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
-                }
-                .buttonStyle(.bordered)
             }
         }
     }
