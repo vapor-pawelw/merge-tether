@@ -52,11 +52,11 @@ struct CopyMergeRequestLinkButton: View {
         switch placement {
         case .menu:
             Button(action: copy) {
-                Label { Text(.CommandCenter.commandCenterCopyLink) } icon: { Image(systemName: "doc.on.doc") }
+                Label { Text(.CommandCenter.commandCenterCopyLink) } icon: { Image(systemName: "link") }
             }
         case .header:
             Button(action: copy) {
-                BoardCardActionIcon(systemName: feedback.confirmationID == nil ? "doc.on.doc" : "checkmark")
+                BoardCardActionIcon(systemName: "link")
                     .foregroundStyle(feedback.confirmationID == nil ? Color.secondary : Color.accentColor)
             }
             .buttonStyle(.plain)

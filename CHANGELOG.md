@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Prepare a standard private reply when verified feedback on your MR only needs acknowledgement. Reuse current feedback verification during re-review and after a verified reply is published.
 
-- Copy a GitLab merge request link from the button beside the pin on Mac cards and in Details, with a brief confirmation.
+- Copy a GitLab merge request link using the link icon beside the pin on Mac cards and in Details, with a brief confirmation.
 
 - Show up to three lines of the Markdown description below the merge request title in Details on Mac and iPhone. Click or tap anywhere in the description to expand or collapse it.
 
