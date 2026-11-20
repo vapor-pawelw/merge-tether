@@ -70,6 +70,7 @@ let project = Project(
             ]),
             sources: ["iOS/**/*.swift", "Sources/Views/StatusFlowLayout.swift", "Sources/Views/PersonLabel.swift",
                       "Sources/Views/ExtraContextMarkdown.swift", "Sources/Views/DraftRegenerationSheet.swift",
+                      "Sources/Views/MergeRequestDescription.swift",
                       "Sources/Views/ApprovalBadgeColor.swift"],
             resources: ["Resources/MergeActions.xcstrings", "Resources/Remote.xcstrings", "Resources/Board.xcstrings",
                         "Resources/MRHumanAction.xcstrings", "Resources/AuthorFeedback.xcstrings", "Resources/MRDependencies.xcstrings",

@@ -8,7 +8,6 @@ struct RemoteMRDetailContent: View {
     var onCommentOrigin: ((RemoteCommentOriginRequest) -> Void)? = nil
     @Environment(\.colorScheme) private var colorScheme
     @State private var showingApprovals = false
-    @State private var descriptionExpanded = false
     /// Holds that stop work lead; saved rules sit with the reference data, as on the Mac.
     private var rules: [String] { details.rules ?? [] }
     private var visiblePolicy: [String] { card.visiblePolicy(details.policy.filter { !rules.contains($0) }) }
@@ -87,17 +86,6 @@ struct RemoteMRDetailContent: View {
             section(.RemoteDetail.remoteDetailOverview) {
                 ForEach(Array(details.metadata.enumerated()), id: \.offset) { _, field in
                     fieldView(field)
-                }
-                if let description = details.description, !description.isEmpty {
-                    Divider()
-                    Text(.RemoteDetail.remoteDetailDescription).font(.subheadline.weight(.medium))
-                    RemoteMarkdownText(source: description).font(.callout).lineSpacing(3).textSelection(.enabled)
-                        .lineLimit(descriptionExpanded ? nil : 6)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Button { descriptionExpanded.toggle() } label: {
-                        Text(descriptionExpanded ? .RemoteDetail.remoteDetailShowLess : .RemoteDetail.remoteDetailShowMore)
-                            .frame(minHeight: 44)
-                    }.font(.callout)
                 }
                 if let automation = details.automation {
                     Divider()

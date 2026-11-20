@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Copy a GitLab merge request link from the button beside the pin on Mac cards and in Details, with a brief confirmation.
 
+- Show up to three lines of the Markdown description below the merge request title in Details on Mac and iPhone. Click or tap anywhere in the description to expand or collapse it.
+
 - Open a conversation draft in T3 Code from a merge request on Mac, with the MR link and title ready in the composer.
 
 - Shorten the pending draft summary and group it with the attention message. Add more room around the repository line and distinguish card backgrounds from the Mac board in both appearances.

@@ -57,7 +57,8 @@ struct RemoteCardDetail: View {
                     // Lazy: off-screen sections are not laid out again on each board update.
                     LazyVStack(alignment: .leading, spacing: 16) {
                         VStack(alignment: .leading, spacing: 10) {
-                            RemoteCardView(card: headerCard(shown), expanded: true, branches: shown?.branches)
+                            RemoteCardView(card: headerCard(shown), expanded: true, branches: shown?.branches,
+                                mergeRequestDescription: shown?.description)
                                 .id(RemoteCardCTA.Destination.overview)
                             if current.id.hasPrefix("mr:") { detailReadStatus(shown) }
                         }

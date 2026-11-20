@@ -386,6 +386,9 @@ private struct CommandCenterMRDetailContent: View {
             .zIndex(1)
             Text(verbatim: presentationRow.displayTitle).font(.title2.weight(.semibold))
                 .lineLimit(3).textSelection(.enabled).padding(.top, 2)
+            MergeRequestDescription(source: presentationRow.displayRequest?.description,
+                title: .CommandCenter.commandCenterDescription, expandHint: .CommandCenter.commandCenterShowAll,
+                collapseHint: .CommandCenter.commandCenterShowLess)
             if let stage = progress.mergeStage {
                 MRMergeStageBanner(stage: stage, startedAt: monitor.activityStartedAt(for: item, activity: mergeActivity))
             }
@@ -720,14 +723,6 @@ private struct CommandCenterMRDetailContent: View {
                             metadata(.CommandCenter.commandCenterPipeline,
                                 value: request.headPipeline.map { Self.readableStatus($0.status) }
                                     ?? String(localized: .CommandCenter.commandCenterNoPipeline))
-                        }
-                        if let description = request.description, !description.isEmpty {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(.CommandCenter.commandCenterDescription).font(.callout.weight(.medium))
-                                Text(SafeInlineMarkdown.render(description) ?? AttributedString(description))
-                                    .font(.callout).lineSpacing(3).textSelection(.enabled)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
                         }
                     }
                     if finishedState == nil { statusReasons }

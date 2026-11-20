@@ -291,6 +291,7 @@ struct RemoteCardView: View {
     let card: RemoteCard
     var expanded = false
     var branches: RemoteDetailBranches? = nil
+    var mergeRequestDescription: String? = nil
     var onOpen: (() -> Void)?
     var onOpenCTA: ((RemoteCardCTA) -> Void)? = nil
     var actionsModel: RemotePhoneModel? = nil
@@ -367,6 +368,10 @@ struct RemoteCardView: View {
                 }
             }.font(.caption).foregroundStyle(.secondary)
             title
+            if expanded {
+                MergeRequestDescription(source: mergeRequestDescription, title: .RemoteDetail.remoteDetailDescription,
+                    expandHint: .RemoteDetail.remoteDetailShowMore, collapseHint: .RemoteDetail.remoteDetailShowLess)
+            }
             if card.presentation?.author != nil || card.presentation?.draftBadge != nil || card.id.hasPrefix("mr:") {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 8) {
