@@ -354,34 +354,26 @@ struct RemoteCardView: View {
         .modifier(RemoteCardInteraction(onOpen: onOpen))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("remote.card.\(card.id)")
-        .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5).allowsHitTesting(false) }
-        .overlay(alignment: .leading) {
-            if card.needsAttention == true {
-                RoundedRectangle(cornerRadius: 2).fill(.orange).frame(width: 4).padding(.vertical, 12).allowsHitTesting(false)
-            }
+        .overlay {
+            RoundedRectangle(cornerRadius: 16).strokeBorder(.primary.opacity(0.14), lineWidth: 1)
+                .allowsHitTesting(false)
         }
         .environment(\.gitLabPersonSourceURL, card.url)
     }
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                if !card.project.isEmpty {
-                    RemoteRepositoryLabel(name: card.repositoryName, path: card.project)
-                }
-                Spacer(minLength: 4)
-                if let iid = card.mergeRequestIID {
-                    Text(verbatim: "!\(iid)").monospacedDigit().fixedSize()
-                }
-            }.font(.caption).foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 4) {
-                title
-                if expanded, let branches {
-                    Label { Text(verbatim: branches.source + " → " + branches.target) } icon: {
-                        Image(systemName: "arrow.triangle.branch")
+            VStack(alignment: .leading, spacing: 6) {
+                repositoryReference
+                VStack(alignment: .leading, spacing: 4) {
+                    title
+                    if expanded, let branches {
+                        Label { Text(verbatim: branches.source + " → " + branches.target) } icon: {
+                            Image(systemName: "arrow.triangle.branch")
+                        }
+                        .font(.caption.monospaced()).foregroundStyle(.secondary)
+                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel(Text(.RemoteDetail.remoteDetailBranches(branches.source, branches.target)))
                     }
-                    .font(.caption.monospaced()).foregroundStyle(.secondary)
-                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                    .accessibilityLabel(Text(.RemoteDetail.remoteDetailBranches(branches.source, branches.target)))
                 }
             }
             if expanded {
@@ -403,6 +395,18 @@ struct RemoteCardView: View {
                 .font(.caption).foregroundStyle(.secondary)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+    private var repositoryReference: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if !card.project.isEmpty {
+                RemoteRepositoryLabel(name: card.repositoryName, path: card.project)
+            }
+            Spacer(minLength: 4)
+            if let iid = card.mergeRequestIID {
+                Text(verbatim: "!\(iid)").monospacedDigit().fixedSize()
+            }
+        }
+        .font(.caption).foregroundStyle(.secondary)
     }
     @ViewBuilder
     private var author: some View {
@@ -436,14 +440,18 @@ struct RemoteCardView: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 8) {
             if !card.detail.isEmpty {
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    if card.needsAttention == true { Image(systemName: "exclamationmark.circle.fill").accessibilityHidden(true) }
-                    Text(verbatim: card.detail).lineLimit(expanded ? nil : 2)
+                if card.needsAttention == true {
+                    MergeRequestAttentionCallout(message: card.detail)
+                        .font((expanded ? Font.callout : .subheadline).weight(.medium))
+                        .lineLimit(expanded ? nil : 2)
+                } else {
+                    Text(verbatim: card.detail)
+                        .font(expanded ? .callout : .subheadline)
+                        .lineLimit(expanded ? nil : 2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .modifier(MRDetailStatusCard(isPresented: expanded))
                 }
-                .font(expanded ? .callout : .subheadline)
-                .foregroundStyle(card.needsAttention == true ? .orange : .secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .modifier(MRDetailStatusCard(isPresented: expanded))
             }
             if let date = inboxUpdateDate {
                 InboxUpdateTimestamp(date: date)

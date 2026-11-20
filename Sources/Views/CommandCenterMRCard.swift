@@ -47,10 +47,9 @@ private struct CommandCenterMRCardContent: View {
         let mergeActivity = presentation.mergeActivity
         let showsWorkingStatus = presentation.working && mergeActivity == nil
         let cardSpacing: CGFloat = 9
-        let repositorySpacing: CGFloat = 16
         VStack(alignment: .leading, spacing: cardSpacing) {
             metadataHeader.zIndex(1)
-            VStack(alignment: .leading, spacing: repositorySpacing) {
+            VStack(alignment: .leading, spacing: 6) {
                 Button(action: onDetails) {
                     BoardCardTitle(title: row.displayTitle, repositoryPath: row.displayURL.gitLabProjectPath,
                         titleColor: isMuted ? .secondary : .primary)
@@ -61,7 +60,7 @@ private struct CommandCenterMRCardContent: View {
                 BoardMRReferenceLine(iid: item.id.iid, projectID: item.id.projectID,
                     repositoryPath: row.displayURL.gitLabProjectPath, dependencies: row.displayItem.dependencies)
             }
-            .padding(.bottom, repositorySpacing - cardSpacing)
+            .padding(.bottom, 7)
             if finishedState != nil {
                 FinishedMergeRequestStatus(item: row.displayItem, monitor: monitor)
             } else {
@@ -173,12 +172,9 @@ private struct CommandCenterMRCardContent: View {
         .controlSize(.small)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.12), lineWidth: 0.5))
-        .overlay(alignment: .leading) {
-            if humanAction != nil {
-                RoundedRectangle(cornerRadius: 2).fill(.orange.opacity(0.65)).frame(width: 3)
-                    .padding(.vertical, 10)
-            }
+        .overlay {
+            RoundedRectangle(cornerRadius: 8).strokeBorder(.primary.opacity(0.14), lineWidth: 1)
+                .allowsHitTesting(false)
         }
         .boardCardInteraction(onDetails: onDetails)
         .contextMenu { menuItems }
@@ -193,13 +189,10 @@ private struct CommandCenterMRCardContent: View {
         if humanAction != nil || drafts != nil {
             VStack(alignment: .leading, spacing: 4) {
                 if humanAction != nil {
-                    // The orange icon and edge carry urgency; the sentence stays high-contrast.
-                    Label { Text(verbatim: presentation.message).foregroundStyle(Color.primary) } icon: {
-                        Image(systemName: "exclamationmark.circle.fill").foregroundStyle(Color.orange)
-                    }
-                    .font(.callout.weight(.medium))
-                    .lineLimit(3).fixedSize(horizontal: false, vertical: true)
-                    .help(Text(verbatim: presentation.message))
+                    MergeRequestAttentionCallout(message: presentation.message)
+                        .font(.callout.weight(.medium))
+                        .lineLimit(3)
+                        .help(Text(verbatim: presentation.message))
                 }
                 if let drafts {
                     Label {
