@@ -22,6 +22,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Give the information below attention messages more room and bring action buttons closer to the rest of the merge request card.
 
+- Explain when an interrupted review needs to run on the latest commit.
+
 - Show how long ago an Inbox update arrived in gray beside **Seen** on Mac and iPhone. Click or tap its timestamp to switch between relative time and the full date and time.
 
 - Use MergeTether for the macOS app, Xcode project and schemes, release downloads, and Homebrew cask. New macOS installations use the bundle identifier `com.vaporpw.MergeTether`. Local rebuilds retain the installed bundle identity and pairing.

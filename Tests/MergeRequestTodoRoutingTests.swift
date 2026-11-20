@@ -1234,6 +1234,46 @@ import Testing
         #expect(launches == 1)
     }
 
+    @Test func interruptedReviewOnAnOlderCommitExplainsWhyTheLatestRevisionNeedsReview() async throws {
+        // given
+        let f = try fixture(); defer { f.cleanup() }
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: f.gitlab.data("mr"))
+        let oldHead = String(repeating: "b", count: 40)
+        let rawError = String(describing: CancellationError())
+        let job = AssistantAutomationRunner.Handoff(id: UUID(),
+            key: .init(assistant: .codex, work: .init(host: target.host, projectID: 7, iid: 11),
+                username: target.username, workspace: "", access: .gitLabRead),
+            title: "Review", prompt: "Review", createdAt: Date(), allowsPush: false,
+            execution: .init(state: .interrupted, error: rawError), taskPrompt: "Review",
+            mergeRequestURL: request.webURL, workflow: .review, manual: false, expectedHeadSHA: oldHead)
+        let intent = MRTodoIntent(id: UUID(), target: target, kind: .review, state: .failed,
+            todoIDs: [], noteIDs: [], sourceEvents: [], request: request, headSHA: oldHead,
+            jobID: job.id, error: rawError, updatedAt: Date())
+        f.settings.assistantHandoffs = [job]
+        f.settings.mrActionIntents = [intent]
+        let item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 7, iid: 11),
+            title: request.title, url: request.webURL, mergeRequest: request)
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true },
+            launcher: { replacement, manual in
+                #expect(manual && replacement.headSHA == request.sha)
+                return UUID()
+            })
+
+        // when
+        let action = try #require(MRHumanAction(row: .init(item: item, latestJob: job, intents: [intent]), assistantReady: true))
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+
+        // then
+        let explanation = "The previous review was interrupted. Review the latest commit."
+        #expect(action.explanation == explanation)
+        #expect(action.retryIntent?.id == intent.id)
+        #expect(f.settings.mrActionIntents.first?.error == explanation)
+        #expect(f.settings.mrActionIntents.first?.jobID == job.id)
+        await router.run(intent.id, manual: true)
+        #expect(f.settings.mrActionIntents.first?.state == .running)
+        #expect(f.settings.mrActionIntents.first?.headSHA == request.sha)
+    }
+
     @Test(arguments: ["enabled", "paused", "overridden", "stopped"])
     func rejectedReviewGetsOneRecoveryAfterItsDraftIsPublished(_ scenario: String) async throws {
         let f = try fixture(); defer { f.cleanup() }

@@ -24,6 +24,21 @@ struct MRTodoIntent: Codable, Identifiable, Sendable {
     /// The reserved job ID also records that this request has spent its recovery attempt.
     var reviewRecoveryJobID: UUID? = nil
 
+    func failureExplanation(currentHead: String?, execution: AssistantJobExecution? = nil) -> String? {
+        let diagnostic = if let execution {
+            execution.attentionExplanation ?? execution.error ?? execution.summary
+        } else { error }
+        let interruptedReview = kind == .review && execution?.state == .interrupted
+            && execution?.cancellationOrigin != .user
+        if diagnostic.map(AssistantJobExecutor.ExecutionError.isCancellationDiagnostic) == true
+            || (diagnostic == nil && interruptedReview) {
+            let headChanged = kind == .review && (currentHead ?? request.sha).map { $0 != headSHA } == true
+            return String(localized: headChanged ? .MRHumanAction.mrHumanActionReviewInterruptedHeadChanged
+                : .MRHumanAction.mrHumanActionInterruptedRun)
+        }
+        return diagnostic.map(GlabService.redactWorkflowEvidence)
+    }
+
     var isAwaitingFollowUpVerification: Bool {
         kind == .followUp && (state == .verifying || (state == .running && jobID == nil))
     }
