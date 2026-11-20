@@ -19,7 +19,7 @@ final class SettingsManager {
     var automaticWritesAllowed: Bool { automaticActionsAllowed && automation.hasAutomaticActionConsent }
     var automaticPublicWritesAllowed: Bool { automaticActionsAllowed && automation.hasAutomaticPublicActionConsent }
     private static let conveniencePersistenceKeys: Set<String> = [
-        "automationEvents", "boardPins", "lastSeenTodoIDs"
+        "automationEvents", "boardPins", "boardManualOrder", "lastSeenTodoIDs"
     ]
 
     func recordPersistenceFailure(_ key: String) { persistenceStore.recordFailure(key) }
@@ -95,9 +95,19 @@ final class SettingsManager {
     var boardPins: Set<BoardCardPin>
     var ownAutomationOffExpanded: Bool
     var reviewingAutomationOffExpanded: Bool
+    var boardOrderingMethod: MRBoardOrderingMethod
+    var promoteBoardAttention: Bool
+    private(set) var boardManualOrder: MRBoardManualOrder
     var boardGrouping: MRBoardGrouping = .withoutAutomation
     var effectiveBoardGrouping: MRBoardGrouping { boardGrouping.effective(for: configuredAutomation) }
     var mrLifecycleLedger = MergeRequestLifecycleLedger()
+
+    func saveBoardManualOrder(_ order: MRBoardManualOrder) {
+        guard boardManualOrder != order else { return }
+        boardManualOrder = order
+        save()
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let store = DurableSettingsStore(defaults: defaults)
@@ -136,6 +146,9 @@ final class SettingsManager {
         boardPins = store.load(Key.boardPins, fallback: [])
         ownAutomationOffExpanded = defaults.bool(forKey: Key.ownAutomationOffExpanded)
         reviewingAutomationOffExpanded = defaults.bool(forKey: Key.reviewingAutomationOffExpanded)
+        boardOrderingMethod = defaults.string(forKey: Key.boardOrderingMethod).flatMap(MRBoardOrderingMethod.init(rawValue:)) ?? .manual
+        promoteBoardAttention = defaults.bool(forKey: Key.promoteBoardAttention)
+        boardManualOrder = store.load(Key.boardManualOrder, fallback: .init())
         mrLifecycleLedger = store.load(Key.mrLifecycleLedger, fallback: .init())
         conflictReceipts = store.load(Key.conflictReceipts, fallback: [])
         reReviewReceipts = store.load(Key.reReviewReceipts, fallback: [:])
@@ -207,6 +220,7 @@ final class SettingsManager {
         saveHistory(mrActionIntents, forKey: Key.mrActionIntents)
         persistenceStore.save(routedMRTodoReceipts, forKey: Key.routedMRTodoReceipts)
         persistenceStore.save(boardPins, forKey: Key.boardPins)
+        persistenceStore.save(boardManualOrder, forKey: Key.boardManualOrder)
         persistenceStore.save(mrLifecycleLedger, forKey: Key.mrLifecycleLedger)
         defaults.removeObject(forKey: Key.autoRemoveFinishedMRs)
         defaults.removeObject(forKey: Key.showMergedMRCompletions)
@@ -214,6 +228,8 @@ final class SettingsManager {
         defaults.set(boardGrouping.rawValue, forKey: Key.boardGrouping)
         defaults.set(ownAutomationOffExpanded, forKey: Key.ownAutomationOffExpanded)
         defaults.set(reviewingAutomationOffExpanded, forKey: Key.reviewingAutomationOffExpanded)
+        defaults.set(boardOrderingMethod.rawValue, forKey: Key.boardOrderingMethod)
+        defaults.set(promoteBoardAttention, forKey: Key.promoteBoardAttention)
         persistenceStore.save(conflictReceipts, forKey: Key.conflictReceipts)
         persistenceStore.save(reReviewReceipts, forKey: Key.reReviewReceipts)
         persistenceStore.save(reReviewDraftBaselines, forKey: Key.reReviewDraftBaselines)
@@ -385,6 +401,8 @@ final class SettingsManager {
             Key.boardGrouping: MRBoardGrouping.withoutAutomation.rawValue,
             Key.ownAutomationOffExpanded: true,
             Key.reviewingAutomationOffExpanded: true,
+            Key.boardOrderingMethod: MRBoardOrderingMethod.manual.rawValue,
+            Key.promoteBoardAttention: true,
             Key.onboardingCompleted: false,
             Key.launchAtLoginPreference: true,
             Key.hasLaunchedBefore: false,
@@ -407,6 +425,9 @@ final class SettingsManager {
         static let boardGrouping = "boardGrouping"
         static let ownAutomationOffExpanded = "board.own.automationOffExpanded"
         static let reviewingAutomationOffExpanded = "board.reviewing.automationOffExpanded"
+        static let boardOrderingMethod = "boardOrderingMethod"
+        static let promoteBoardAttention = "promoteBoardAttention"
+        static let boardManualOrder = "boardManualOrder"
         static let mrLifecycleLedger = "mrLifecycleLedger"
         static let autoRemoveFinishedMRs = "autoRemoveFinishedMRs"
         static let showMergedMRCompletions = "showMergedMRCompletions"

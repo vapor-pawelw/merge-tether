@@ -13,9 +13,23 @@ import Foundation
         }
         let attention = userAttention
         let baseline = projector.board(humanAttention: attention)
+        if settings.boardOrderingMethod == .manual, let host = glab.resolvedHost, let username = glab.currentUsername {
+            return baseline.applyingManualOrder(settings.boardManualOrder, host: host, username: username,
+                pinnedCards: settings.boardPins)
+        }
         let positions = boardPolicyOrder.positions(for: boardOrderingEntries(baseline))
         return baseline.preservingOrder(positions, host: glab.resolvedHost, username: glab.currentUsername,
             pinnedCards: settings.boardPins)
+    }
+
+    func moveBoardCard(_ source: MRAutomationScope.Target, to destination: MRAutomationScope.Target,
+                       accountRevision: UInt64) -> Bool {
+        guard settings.boardOrderingMethod == .manual, glab.accountRevision == accountRevision,
+              boardRefreshState == .current else { return false }
+        var order = settings.boardManualOrder
+        guard order.move(source, to: destination, in: boardSnapshot.manualOrderEntries) else { return false }
+        settings.saveBoardManualOrder(order)
+        return true
     }
 
     var inboxItems: [MergeRequestBoardSnapshot.OtherCard] {

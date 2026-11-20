@@ -12,6 +12,7 @@ struct MergeRequestBoardSnapshot {
         /// Compatibility only; fresh command guards still decide every action.
         var evidenceMatchesCatalogContext = true
         var isEligibleForAutomaticMerge = false
+        var manualOrderEntry: MRBoardManualOrder.Entry? = nil
         var displayRequest: GitLabMergeRequest? { catalog?.facts.request ?? item.mergeRequest }
         var displayTitle: String { catalog?.facts.title ?? item.title }
         var displayURL: URL { catalog?.facts.url ?? item.url }
@@ -250,17 +251,53 @@ struct MergeRequestBoardSnapshot {
     func preservingOrder(_ positions: [MergeRequestAttentionMonitor.Item.ID: Int], host: String?, username: String?,
                          pinnedCards: Set<BoardCardPin>) -> Self {
         guard !positions.isEmpty else { return self }
-        return .init(reordering: self, positions: positions, host: host, username: username, pinnedCards: pinnedCards)
+        return .init(reordering: self,
+            own: Self.ordered(own, host: host, username: username, pinnedCards: pinnedCards,
+                preservedOrder: positions, automation: automation, grouping: grouping),
+            reviewed: Self.ordered(reviewed, draftsLast: true, host: host, username: username, pinnedCards: pinnedCards,
+                preservedOrder: positions, automation: automation, grouping: grouping),
+            otherMergeRequests: Self.ordered(otherMergeRequests, host: host, username: username, pinnedCards: pinnedCards,
+                preservedOrder: positions, automation: automation, grouping: grouping))
     }
 
-    private init(reordering original: Self, positions: [MergeRequestAttentionMonitor.Item.ID: Int],
-                 host: String?, username: String?, pinnedCards: Set<BoardCardPin>) {
-        own = Self.ordered(original.own, host: host, username: username, pinnedCards: pinnedCards,
-            preservedOrder: positions, automation: original.automation, grouping: original.grouping)
-        reviewed = Self.ordered(original.reviewed, draftsLast: true, host: host, username: username, pinnedCards: pinnedCards,
-            preservedOrder: positions, automation: original.automation, grouping: original.grouping)
-        otherMergeRequests = Self.ordered(original.otherMergeRequests, host: host, username: username, pinnedCards: pinnedCards,
-            preservedOrder: positions, automation: original.automation, grouping: original.grouping)
+    var manualOrderEntries: [MRBoardManualOrder.Entry] {
+        own.compactMap(\.manualOrderEntry) + reviewed.compactMap(\.manualOrderEntry)
+    }
+
+    func applyingManualOrder(_ order: MRBoardManualOrder, host: String, username: String,
+                             pinnedCards: Set<BoardCardPin>) -> Self {
+        guard let automation else { return self }
+        return .init(reordering: self, own: ordered(own, reviewing: false),
+            reviewed: ordered(reviewed, reviewing: true), otherMergeRequests: otherMergeRequests)
+
+        func ordered(_ rows: [Row], reviewing: Bool) -> [Row] {
+            var fixed: [Row] = []
+            var movable: [MRAutomationScope.Target: Row] = [:]
+            for var row in rows {
+                guard let request = row.displayRequest, request.state == "opened",
+                      row.displayURL.isGitLabMergeRequest(host: host, iid: row.id.iid),
+                      let pin = BoardCardPin.mergeRequest(host: host, username: username,
+                          projectID: row.id.projectID, iid: row.id.iid) else {
+                    fixed.append(row)
+                    continue
+                }
+                let target = MRAutomationScope.Target(host: host, username: username, projectID: row.id.projectID, iid: row.id.iid)
+                let isDraft = row.isDraft || request.detailedMergeStatus == "draft_status"
+                let enabled = automation.hasEnabledAutomation && automation.scope.resolve(target, isDraft: isDraft).active
+                row.manualOrderEntry = .init(target: target,
+                    group: .init(reviewing: reviewing, automationEnabled: enabled, pinned: pinnedCards.contains(pin)),
+                    needsAttention: row.needsAttention)
+                movable[target] = row
+            }
+            let ranks = order.ranked(movable.values.compactMap(\.manualOrderEntry))
+            return fixed + ranks.compactMap { movable[$0.target] }
+        }
+    }
+
+    private init(reordering original: Self, own: [Row], reviewed: [Row], otherMergeRequests: [Row]) {
+        self.own = own
+        self.reviewed = reviewed
+        self.otherMergeRequests = otherMergeRequests
         proposals = original.proposals
         otherTodos = original.otherTodos
         completions = original.completions

@@ -101,6 +101,72 @@
           }
         }
       }
+    },
+    "activeSection": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation on"
+          }
+        }
+      }
+    },
+    "orderingMethod": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge request ordering"
+          }
+        }
+      }
+    },
+    "manualOrdering": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manual (drag and drop)"
+          }
+        }
+      }
+    },
+    "automaticOrdering": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic"
+          }
+        }
+      }
+    },
+    "promoteAttention": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move cards to the top when they need attention"
+          }
+        }
+      }
+    },
+    "reorderCard": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Drag to reorder"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

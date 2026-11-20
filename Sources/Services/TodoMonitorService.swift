@@ -373,15 +373,16 @@ final class TodoMonitorService {
     }
 
     private func observeUserAttentionChanges() {
-        let input = withObservationTracking {
+        let (input, fresh) = withObservationTracking {
             let input = pendingUserAttention
             _ = settings.notificationsEnabled
-            _ = freshUserAttention
             _ = glab.resolvedHost
             _ = glab.currentUsername
             _ = glab.accountRevision
             _ = settings.reviewParticipationPreferences
-            return input
+            _ = settings.boardOrderingMethod
+            _ = settings.promoteBoardAttention
+            return (input, freshUserAttention)
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.observeUserAttentionChanges()
@@ -390,8 +391,14 @@ final class TodoMonitorService {
         }
         synchronizeLocalAutomationAuthors()
         boardAttentionPresenter.updateAttention(input)
-        boardPolicyOrder.observe(boardOrderingEntries(boardSnapshot))
-        boardSnapshotCache.invalidate()
+        if settings.boardOrderingMethod == .automatic {
+            boardPolicyOrder.observe(boardOrderingEntries(boardSnapshot))
+            boardSnapshotCache.invalidate()
+        } else if fresh {
+            var order = settings.boardManualOrder
+            order.observe(boardSnapshot.manualOrderEntries, promotesAttention: settings.promoteBoardAttention)
+            settings.saveBoardManualOrder(order)
+        }
     }
 
     private func observeMRActivityChanges() {
@@ -1153,8 +1160,10 @@ final class TodoMonitorService {
     func automationConfigurationChanged(previous: AutomationSettings) {
         let current = settings.automation
         guard previous != current else { return }
-        boardPolicyOrder.policyChanged(from: previous.ignoringGlobalSuspension, to: current.ignoringGlobalSuspension,
-            grouping: settings.boardGrouping)
+        if settings.boardOrderingMethod == .automatic {
+            boardPolicyOrder.policyChanged(from: previous.ignoringGlobalSuspension, to: current.ignoringGlobalSuspension,
+                grouping: settings.boardGrouping)
+        }
         boardSnapshotCache.invalidate()
         let scopeOnly = previous.preservingScope(from: current) == current
         let host = glab.resolvedHost ?? "", username = glab.currentUsername ?? ""

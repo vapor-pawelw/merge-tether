@@ -16,6 +16,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Expand or collapse **Automation off** in each Mac board column and restore that choice after restarting. The header shows the total number of merge requests and how many need attention.
 
+- Drag merge requests to reorder them within Automation on or Automation off on Mac. Manual ordering is the default and saves positions across launches. Cards that start needing attention move to the top of their pin group unless you turn off that preference in Settings. The iPhone board follows the Mac order on refresh.
+
 - Highlight merge requests that need attention with a padded inline callout, give MR cards a clearer border, and bring MR titles and repository labels closer together on Mac and iPhone.
 
 - Give the information below attention messages more room and bring action buttons closer to the rest of the merge request card.

@@ -6,11 +6,12 @@ struct CommandCenterMRCard: View {
     let monitor: TodoMonitorService
     var allowsRemoval = false
     var onAttention: ((CommandCenterMRDetailSection) -> Void)? = nil
+    var drag: BoardCardDrag? = nil
     let onDetails: () -> Void
 
     var body: some View {
         CommandCenterMRCardContent(row: row, monitor: monitor, allowsRemoval: allowsRemoval,
-            onAttention: onAttention, onDetails: onDetails,
+            onAttention: onAttention, drag: drag, onDetails: onDetails,
             presentation: .init(row: row, monitor: monitor, allowsRemoval: allowsRemoval))
     }
 }
@@ -20,6 +21,7 @@ private struct CommandCenterMRCardContent: View {
     let monitor: TodoMonitorService
     var allowsRemoval = false
     var onAttention: ((CommandCenterMRDetailSection) -> Void)? = nil
+    var drag: BoardCardDrag? = nil
     let onDetails: () -> Void
     @State private var isStarting = false
     @State private var pendingPrimary: (title: LocalizedStringResource, cta: MRActionCTA?)?
@@ -32,7 +34,8 @@ private struct CommandCenterMRCardContent: View {
     private var isDraft: Bool { row.isDraft }
     private var finishedState: MergeRequestFinishedState? { .init(row.displayRequest) }
     private var isMuted: Bool {
-        monitor.boardActivity(projectID: item.id.projectID, iid: item.id.iid, url: item.url,
+        if let entry = row.manualOrderEntry { return !entry.group.automationEnabled }
+        return monitor.boardActivity(projectID: item.id.projectID, iid: item.id.iid, url: item.url,
             isDraft: isDraft, isFinished: finishedState != nil).isMuted
     }
     private var scopeTarget: MRAutomationScope.Target? {
@@ -240,6 +243,7 @@ private struct CommandCenterMRCardContent: View {
                     })
             }
             HStack(spacing: 0) {
+                if let drag { BoardCardReorderHandle(drag: drag, title: row.displayTitle) }
                 if finishedState == nil, let scopeTarget {
                     BoardAutomationToggle(monitor: monitor, target: scopeTarget,
                         projectPath: item.url.gitLabProjectPath, isDraft: isDraft,

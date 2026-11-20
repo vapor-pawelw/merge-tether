@@ -99,6 +99,11 @@ let project = Project(
                 "CFBundleShortVersionString": .string("$(MARKETING_VERSION)"),
                 "CFBundleVersion": .string("$(CURRENT_PROJECT_VERSION)"),
                 "NSHumanReadableCopyright": .string("Copyright © 2026 vaporpw. MIT License."),
+                "UTExportedTypeDeclarations": .array([.dictionary([
+                    "UTTypeIdentifier": .string("com.vaporpw.mergetether.board-card"),
+                    "UTTypeConformsTo": .array([.string("public.data")]),
+                    "UTTypeDescription": .string("MergeTether board card"),
+                ])]),
             ]),
             sources: ["Sources/**"],
             resources: [

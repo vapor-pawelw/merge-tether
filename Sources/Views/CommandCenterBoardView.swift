@@ -6,6 +6,7 @@ struct CommandCenterBoardView: View {
     let board: MergeRequestBoardSnapshot
     var refreshState: BoardRefreshState = .current
     private var dimUnverifiedContent: Bool { refreshState != .current }
+    private var usesManualOrder: Bool { monitor.settings.boardOrderingMethod == .manual }
     private enum Lane: Hashable {
         case own, reviewing
 
@@ -25,15 +26,17 @@ struct CommandCenterBoardView: View {
     enum LaneEntry: Identifiable {
         enum ID: Hashable {
             case card(MergeRequestAttentionMonitor.Item.ID)
-            case automationOff
+            case automationOn, automationOff
         }
 
         case card(MergeRequestBoardSnapshot.Row, startsDrafts: Bool)
+        case automationOn
         case automationOff(count: Int, attentionCount: Int)
 
         var id: ID {
             switch self {
             case let .card(row, _): .card(row.id)
+            case .automationOn: .automationOn
             case .automationOff: .automationOff
             }
         }
@@ -99,15 +102,24 @@ struct CommandCenterBoardView: View {
         .onPreferenceChange(BoardDetailPopoverPresentedKey.self) { detailPopoverPresented = $0 }
     }
 
-    private func card(_ row: MergeRequestBoardSnapshot.Row, removable: Bool = false) -> some View {
-        CommandCenterMRCard(row: row, monitor: monitor, allowsRemoval: removable, onAttention: { section in
+    @ViewBuilder private func card(_ row: MergeRequestBoardSnapshot.Row, removable: Bool) -> some View {
+        let drag = refreshState == .current ? row.manualOrderEntry.map {
+            BoardCardDrag(target: $0.target, accountRevision: monitor.glab.accountRevision)
+        } : nil
+        let content = CommandCenterMRCard(row: row, monitor: monitor, allowsRemoval: removable, onAttention: { section in
             selected = Selection(item: row.item, section: section, account: account)
-        }, onDetails: {
+        }, drag: drag, onDetails: {
             selected = Selection(item: row.item, section: .overview, account: account)
         })
+        if let drag {
+            content.modifier(BoardCardDropDestination(target: drag.target, monitor: monitor))
+        } else {
+            content
+        }
     }
 
     static func laneEntries(_ rows: [MergeRequestBoardSnapshot.Row], automationOffExpanded: Bool,
+                            showsAutomationOn: Bool = false,
                             activity: (MergeRequestBoardSnapshot.Row) -> MRBoardActivity.Group,
                             hasHumanAction: (MergeRequestBoardSnapshot.Row) -> Bool) -> [LaneEntry] {
         let groupedRows = rows.map { (row: $0, group: activity($0)) }
@@ -117,6 +129,9 @@ struct CommandCenterBoardView: View {
         var previousGroup: MRBoardActivity.Group?
         for (row, group) in groupedRows {
             defer { previousGroup = group }
+            if showsAutomationOn, group == .regular, previousGroup != .regular {
+                entries.append(.automationOn)
+            }
             if group == .inactive, !addedAutomationOffHeader {
                 let attentionCount = inactiveRows.count { $0.needsAttention && hasHumanAction($0) }
                 entries.append(.automationOff(count: inactiveRows.count, attentionCount: attentionCount))
@@ -130,7 +145,8 @@ struct CommandCenterBoardView: View {
 
     private func laneCards(_ rows: [MergeRequestBoardSnapshot.Row], removable: Bool,
                            automationOffExpanded: Binding<Bool>) -> some View {
-        let entries = Self.laneEntries(rows, automationOffExpanded: automationOffExpanded.wrappedValue, activity: activity) { row in
+        let entries = Self.laneEntries(rows, automationOffExpanded: automationOffExpanded.wrappedValue,
+            showsAutomationOn: usesManualOrder, activity: activity) { row in
             MRCardPresentation(row: row, monitor: monitor, allowsRemoval: removable).humanAction != nil
         }
         return ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
@@ -145,6 +161,10 @@ struct CommandCenterBoardView: View {
                     card(row, removable: removable)
                 }
                 .transition(cardTransition)
+            case .automationOn:
+                sectionHeading(.BoardActivity.activeSection)
+                    .padding(.top, index == 0 ? 2 : 14)
+                    .padding(.horizontal, 4)
             case let .automationOff(count, attentionCount):
                 MRDetailDisclosureButton(isExpanded: automationOffExpanded) {
                     sectionHeading(.BoardActivity.inactiveSection, count: count, attentionCount: attentionCount)
@@ -157,7 +177,8 @@ struct CommandCenterBoardView: View {
     }
 
     private func activity(_ row: MergeRequestBoardSnapshot.Row) -> MRBoardActivity.Group {
-        monitor.boardActivity(projectID: row.id.projectID, iid: row.id.iid, url: row.item.url,
+        if let entry = row.manualOrderEntry { return entry.group.automationEnabled ? .regular : .inactive }
+        return monitor.boardActivity(projectID: row.id.projectID, iid: row.id.iid, url: row.item.url,
             isDraft: row.item.section == .draftMergeRequests,
             isFinished: MergeRequestFinishedState(row.item.mergeRequest) != nil).group
     }
