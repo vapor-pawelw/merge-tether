@@ -40,6 +40,7 @@ final class MRDiscussionStore {
     var discussions: [GitLabMergeRequestDiscussion] { discussionContent?.discussions ?? [] }
     var activity: [MRGitLabActivity] { discussionContent?.activity ?? [] }
     var discussionFingerprint: String? { discussionContent?.fingerprint }
+    var activeDiscussionFingerprint: String? { discussionContent?.activeFingerprint }
     @ObservationIgnored private let presentation = MRDiscussionPresentation()
     private(set) var origins: [Int: MRDiscussionSnapshot.Origin] = [:]
     /// App-only agent explanations for drafts and published notes; never part of a GitLab write.

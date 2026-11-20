@@ -119,6 +119,39 @@ struct ReReviewCoordinatorTests {
         #expect((status.state?.hasConcreteConcerns == true) == (change == "current"))
     }
 
+    @Test(arguments: ["current", "head", "title", "discussion", "resolved", "settings", "account"])
+    func discussionFeedbackRetainsTheCurrentStandaloneVerdictAfterReReviewWasRequested(_ change: String) async throws {
+        let f = try Fixture()
+        defer { f.close() }
+        f.settings.automation.autoVerifyReReview = true
+        let coordinator = f.coordinator(verify: { _, _, _ in
+            .init(notes: [.init(noteID: 40, state: .addressed, reason: "Verified the current correction.")])
+        })
+        defer { coordinator.reset() }
+
+        await coordinator.refresh(for: try f.request(), feedback: try f.feedback(), draftCount: 0, context: f.context, user: f.user)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while coordinator.isVerifying {
+            try #require(ContinuousClock.now < deadline)
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        try #require(f.gitlab.text("requested") == "review\n")
+
+        if change == "head" { f.gitlab.write("request", Fixture.requestJSON.replacingOccurrences(of: #""sha":"head""#, with: #""sha":"later""#)) }
+        if change == "title" { f.gitlab.write("request", Fixture.requestJSON.replacingOccurrences(of: #""title":"Fix""#, with: #""title":"Changed""#)) }
+        if change == "resolved" { f.gitlab.write("discussions", Fixture.discussionsJSON.replacingOccurrences(of: #""resolved":false"#, with: #""resolved":true"#)) }
+        if change == "settings" { f.settings.automation.autoVerifyReReview = false }
+        let context = change == "account"
+            ? ReReviewCoordinator.Context(host: f.context.host, username: "other", revision: f.context.revision, projectID: 1, iid: 2)
+            : f.context
+        let assessment = coordinator.discussionAssessment(for: try f.request(),
+            fingerprint: change == "discussion" ? "different comment text" : try f.fingerprint(),
+            activeFingerprint: try #require(ReviewVerdict.fingerprint(GitLabMergeRequestDiscussion.activeForReview(f.discussions()))),
+            context: context)
+
+        #expect(assessment?.notes.first?.state == (change == "current" ? .addressed : nil))
+    }
+
     @Test func withdrawnFeedbackDoesNotKeepAnOldReReviewBlockerAfterEligibilityEnds() async throws {
         let f = try Fixture()
         defer { f.close() }

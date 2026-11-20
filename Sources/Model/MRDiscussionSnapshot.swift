@@ -67,7 +67,7 @@ struct MRDiscussionSnapshot {
         let location: String?
         let origins: [Int: Origin]
         var authorKinds: [Int: AuthorFeedbackPolicy.AccountKind] = [:]
-        let feedback: Feedback
+        let feedback: Feedback?
         /// Nil means coverage is unverified; an empty array means no substantive answer is required.
         var verifiedReplyAuthors: [String]? = nil
 
@@ -176,6 +176,8 @@ struct MRDiscussionSnapshot {
             let resolvable = notes.filter { $0.resolvable == true }
             let state: State = resolvable.isEmpty ? .general
                 : resolvable.allSatisfy { $0.resolved == true } ? .resolved : .open
+            let feedback = Feedback.summarize(notes: notes.map { ($0.id, $0.author?.id) },
+                assessment: assessment, authorID: authorID)
             let position = notes.compactMap(\.position).first
             let location = MRDiscussionLocation(position: position)?.full
             var threadOrigins: [Int: Origin] = [:]
@@ -191,7 +193,7 @@ struct MRDiscussionSnapshot {
                 discussionID: discussion.id, notes: notes, drafts: pending.map(\.element), state: state,
                 location: location, origins: threadOrigins,
                 authorKinds: authorKinds.filter { id, _ in notes.contains { $0.author?.id == id } },
-                feedback: Feedback.summarize(notes: notes.map { ($0.id, $0.author?.id) }, assessment: assessment, authorID: authorID),
+                feedback: state == .resolved && feedback == .needsVerification ? nil : feedback,
                 verifiedReplyAuthors: Self.replyAuthorsCoveringFeedback(notes: notes.map(ReplyEvidence.from),
                     allNotes: allReplyEvidence, assessment: assessment, authorID: authorID)))
         }

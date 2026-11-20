@@ -2942,6 +2942,17 @@ final class MergeRequestAttentionMonitor {
             projectID: id.projectID, iid: id.iid)
     }
 
+    func discussionAssessment(for request: GitLabMergeRequest, fingerprint: String,
+                              activeFingerprint: String?) -> ReReviewAssessment? {
+        if let assessment = authorFeedbackCoordinator?.assessment(for: request, fingerprint: fingerprint) {
+            return assessment
+        }
+        guard let activeFingerprint, let account, isCurrent(account) else { return nil }
+        let id = Item.ID(projectID: request.projectID, iid: request.iid)
+        return reReviewCoordinator?.discussionAssessment(for: request, fingerprint: fingerprint,
+            activeFingerprint: activeFingerprint, context: reReviewContext(id, account: account))
+    }
+
     private func applyReReviewPresentation(_ item: inout Item, unanswered: Bool) {
         guard let account else { return }
         item.requiresCommentReview = commentReviewPending(item.id, account: account)

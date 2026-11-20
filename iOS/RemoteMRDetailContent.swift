@@ -306,7 +306,8 @@ private struct RemoteDiscussionCard: View {
                         .font(.caption.weight(.medium)).foregroundStyle(color)
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(color.opacity(0.07), in: Capsule())
-                    feedbackBadge
+                    let feedback = thread.feedback ?? .needsVerification
+                    if thread.state != .resolved || feedback != .needsVerification { feedbackBadge(feedback) }
                     if thread.showsPublishedReply {
                         Text(replyTitle).font(.caption).foregroundStyle(Color.blue)
                             .accessibilityHint(Text(.RemoteDetail.remoteDetailReplyPublishedHelp))
@@ -392,8 +393,7 @@ private struct RemoteDiscussionCard: View {
                 .font(.caption).frame(minHeight: 44)
         }
     }
-    private var feedbackBadge: some View {
-        let feedback = thread.feedback ?? .needsVerification
+    private func feedbackBadge(_ feedback: RemoteDetailThread.Feedback) -> some View {
         let title: LocalizedStringResource = switch feedback {
         case .addressed: .RemoteDetail.remoteDetailFeedbackAddressed
         case .pending: .RemoteDetail.remoteDetailFeedbackPending

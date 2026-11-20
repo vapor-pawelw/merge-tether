@@ -8,11 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Show **Proposed solution** beside agent recommendations in drafts and published discussions on Mac and iPhone. Open the label to read the agent’s reasoning and assumptions.
 
+- Rename the discussion badge **Needs verification** to **Unverified** on Mac and iPhone.
+
 - Show GitLab activity and MergeTether actions together in a compact **Event log** above **Details** on Mac. Comments can jump to their discussion. App actions show their source, with an **Automated** badge for autonomous actions. Move agent usage to its own section.
 
 - Open GitLab profiles from MR people labels on Mac and iPhone. Both apps show the people a draft replies to and render MR descriptions with inline Markdown.
 
 - Move the Mac Activity view from the board toolbar to **Window → Automation Activity** for troubleshooting across merge requests.
+
+- Display current standalone re-review results on discussions and omit the verification badge on resolved threads without a conclusive result.
 
 - Remove dotted underlines from tappable person names on iPhone and show review status as an icon at the end of the person's row.
 

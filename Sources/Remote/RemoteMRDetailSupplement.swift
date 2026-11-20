@@ -22,7 +22,8 @@ import MergeTetherRemote
         let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
         let people = request.personDirectory(approvals: item.approvalProgress, notes: item.feedback)
         let assessment = details.discussionFingerprint.flatMap {
-            monitor.attention.authorFeedbackCoordinator?.assessment(for: request, fingerprint: $0)
+            monitor.attention.discussionAssessment(for: request, fingerprint: $0,
+                activeFingerprint: details.activeDiscussionFingerprint)
         }
         applyFeedback(to: &details, assessment: assessment, authorID: request.author.id, currentUsername: username)
         if let change = monitor.commentOrigins.pending(for: target), let resumesAt = change.resumesAt {
@@ -161,7 +162,8 @@ import MergeTetherRemote
                 var thread = original
                 let feedback = MRDiscussionSnapshot.Feedback.summarize(
                     notes: thread.notes.map { (Int($0.id), $0.authorID) }, assessment: assessment, authorID: authorID)
-                thread.feedback = .init(rawValue: feedback.rawValue) ?? .needsVerification
+                thread.feedback = thread.state == .resolved && feedback == .needsVerification
+                    ? nil : .init(rawValue: feedback.rawValue)
                 let authors = MRDiscussionSnapshot.replyAuthorsCoveringFeedback(notes: thread.notes.map(evidence),
                     allNotes: allNotes, assessment: assessment, authorID: authorID)
                 if let currentUsername, !currentUsername.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

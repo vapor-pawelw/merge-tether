@@ -271,6 +271,7 @@ public struct RemoteMRDetails: Codable, Equatable, Sendable {
     public var usage: [RemoteDetailField]?
     public var truncated: Bool
     public var discussionFingerprint: String?
+    public var activeDiscussionFingerprint: String?
     public var branches: RemoteDetailBranches?
     /// A comment-origin change waiting before it lets automation publish drafts.
     public var originResume: RemoteOriginResume?
@@ -579,6 +580,7 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
             if details.threads == nil {
                 details.threads = previous.threads
                 details.discussionFingerprint = previous.discussionFingerprint
+                details.activeDiscussionFingerprint = previous.activeDiscussionFingerprint
                 if sameContent, details.draftContexts == nil {
                     details.draftContexts = previous.draftContexts
                     details.proposedSolutionDraftIDs = previous.proposedSolutionDraftIDs

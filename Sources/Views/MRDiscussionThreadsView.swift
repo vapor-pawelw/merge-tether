@@ -247,7 +247,7 @@ private struct MRDiscussionThreadView: View {
                 .fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, 7).padding(.vertical, 3)
                 .background(stateColor.opacity(thread.state == .open ? 0.055 : 0.08), in: Capsule())
-                MRDiscussionFeedbackBadge(state: thread.feedback)
+                if let feedback = thread.feedback { MRDiscussionFeedbackBadge(state: feedback) }
                 replyStatus(summary)
                 if let originBadge {
                     MRDiscussionOriginBadge(badge: originBadge, origin: containsOnlyBotComments ? .botAccount : nil,

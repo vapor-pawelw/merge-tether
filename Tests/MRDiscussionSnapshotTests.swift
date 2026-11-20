@@ -42,7 +42,7 @@ struct MRDiscussionSnapshotTests {
     }
 
     @Test(arguments: ["addressed", "informational", "blocking", "uncertain", "ignoredByUser"])
-    func feedbackStatusUsesAssessmentRatherThanResolutionReplyOrOrigin(_ state: String) throws {
+    func conclusiveFeedbackBadgesAreIndependentOfResolutionReplyAndOrigin(_ state: String) throws {
         let assessment = try JSONDecoder().decode(ReReviewAssessment.self,
             from: Data("{\"notes\":[{\"noteID\":1,\"state\":\"\(state)\",\"reason\":\"Current evidence\"}]}".utf8))
         let expected: MRDiscussionSnapshot.Feedback = switch state {
@@ -55,7 +55,8 @@ struct MRDiscussionSnapshotTests {
         for resolved in [false, true] {
             let thread = try presentationThread(notes: "[{\"id\":1,\"author\":{\"id\":7},\"resolvable\":true,\"resolved\":\(resolved)},{\"id\":2,\"author\":{\"id\":9,\"username\":\"me\"}}]",
                 origins: [1: .verifiedAssistant], assessment: assessment, authorID: 9)
-            #expect(thread.feedback == expected)
+            let displayed: MRDiscussionSnapshot.Feedback? = resolved && expected == .needsVerification ? nil : expected
+            #expect(thread.feedback == displayed)
             #expect(!thread.replySummary(currentUsername: "me").showsPublishedReply)
         }
     }
@@ -86,13 +87,20 @@ struct MRDiscussionSnapshotTests {
     }
 
     @Test func missingOrPartialAssessmentsNeverClaimFeedbackAddressed() throws {
-        let notes = #"[{"id":1,"author":{"id":7},"resolvable":true,"resolved":true},{"id":2,"author":{"id":8}},{"id":3,"author":{"id":9,"username":"me"}}]"#
+        let notes = #"[{"id":1,"author":{"id":7},"resolvable":true,"resolved":false},{"id":2,"author":{"id":8}},{"id":3,"author":{"id":9,"username":"me"}}]"#
         let partial = ReReviewAssessment(notes: [.init(noteID: 1, state: .addressed, reason: "Checked")])
         #expect(try presentationThread(notes: notes, authorID: 9).feedback == .needsVerification)
         #expect(try presentationThread(notes: notes, assessment: partial, authorID: 9).feedback == .needsVerification)
         #expect(try presentationThread(notes: notes, assessment: partial).feedback == .needsVerification)
         #expect(MRDiscussionSnapshot.Feedback.summarize(notes: [(nil, 7)], assessment: partial, authorID: 9) == .needsVerification)
         #expect(MRDiscussionSnapshot.Feedback.summarize(notes: [(1, nil)], assessment: partial, authorID: 9) == .needsVerification)
+    }
+
+    @Test func resolvedThreadWithoutAnAssessmentHasNoFeedbackBadge() throws {
+        let notes = #"[{"id":1,"author":{"id":7},"resolvable":true,"resolved":true}]"#
+        let thread = try presentationThread(notes: notes, authorID: 9)
+        #expect(thread.state == .resolved)
+        #expect(thread.feedback == nil)
     }
 
     @Test func informationalAndIgnoredFeedbackNeverBecomeCodeFixClaims() {

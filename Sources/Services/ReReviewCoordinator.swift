@@ -49,6 +49,8 @@ final class ReReviewCoordinator {
     }
 
     private var reReviewChecks: [Context: ReReviewCheck] = [:]
+    // Delivery can clear the re-review check as soon as the request has been sent.
+    private var discussionAssessments: [Context: (key: String, authorID: Int, assessment: ReReviewAssessment)] = [:]
     private var reReviewTasks: [Context: VerificationTask] = [:]
     private var currentReviewerIDs: [Context: Set<Int>] = [:]
     @ObservationIgnored private var reReviewsInProgress: Set<Context> = []
@@ -83,6 +85,15 @@ final class ReReviewCoordinator {
     }
 
     var isVerifying: Bool { !reReviewTasks.isEmpty }
+
+    func discussionAssessment(for request: GitLabMergeRequest, fingerprint: String, activeFingerprint: String,
+                              context: Context) -> ReReviewAssessment? {
+        guard isCurrent(context), request.projectID == context.projectID, request.iid == context.iid,
+              let result = discussionAssessments[context], result.authorID == request.author.id,
+              result.key == reReviewKey(request, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context)
+        else { return nil }
+        return result.assessment
+    }
 
     func status(for context: Context, authorID: Int?) -> Status {
         guard isCurrent(context) else { return .init() }
@@ -133,6 +144,7 @@ final class ReReviewCoordinator {
         reReviewTasks.values.forEach { $0.task.cancel() }
         reReviewTasks = [:]
         reReviewChecks = [:]
+        discussionAssessments = [:]
         currentReviewerIDs = [:]
         manualReReviewApprovals = [:]
     }
@@ -184,6 +196,7 @@ final class ReReviewCoordinator {
         guard isCurrent(context) else { return }
         reReviewTasks.removeValue(forKey: context)?.task.cancel()
         reReviewChecks.removeValue(forKey: context)
+        discussionAssessments.removeValue(forKey: context)
         await refreshAfterPublication(context, user: user)
     }
 
@@ -215,10 +228,12 @@ final class ReReviewCoordinator {
 
     func cancel(outsideScope scope: MRAutomationScope? = nil) {
         let affected = Set(reReviewTasks.keys).union(reReviewChecks.keys).union(currentReviewerIDs.keys)
+            .union(discussionAssessments.keys)
         for context in affected {
             if let scope, scope.resolve(context.target).active { continue }
             reReviewTasks.removeValue(forKey: context)?.task.cancel()
             reReviewChecks.removeValue(forKey: context)
+            discussionAssessments.removeValue(forKey: context)
             currentReviewerIDs.removeValue(forKey: context)
             manualReReviewApprovals.removeValue(forKey: context)
             notify(context)
@@ -485,6 +500,7 @@ final class ReReviewCoordinator {
                             excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: context.username))
                         guard isCurrentVerification() else { return }
                         reReviewChecks[context]?.assessment = assessment
+                        discussionAssessments[context] = (key, user.id, assessment)
                     } catch {
                         guard isCurrentVerification() else { return }
                         reReviewChecks[context]?.state = error as? ReReviewVerifier.VerificationError == .unavailable ? .unavailable : .failed

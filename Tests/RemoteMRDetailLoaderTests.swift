@@ -178,7 +178,7 @@ import MergeTetherRemote
         var details = RemoteMRDetails(checkedAt: .now, threads: [.init(id: "thread", state: .resolved,
             notes: [note, reply], reply: .published, draftCount: 1)])
         RemoteMRDetailSupplement.applyFeedback(to: &details, assessment: nil, authorID: 3, currentUsername: "owner")
-        #expect(details.threads?.first?.feedback == .needsVerification)
+        #expect(details.threads?.first?.feedback == nil)
         #expect(details.threads?.first?.reply == .unknown)
         let assessment = ReReviewAssessment(notes: [.init(noteID: 11, state: .addressed, reason: "Verified current source",
             publishedReplyNoteID: 12)])
@@ -187,7 +187,7 @@ import MergeTetherRemote
         #expect(details.threads?.first?.reply == .published && details.threads?.first?.draftCount == 1)
         #expect(details.threads?.first?.origin == nil)
         RemoteMRDetailSupplement.applyFeedback(to: &details, assessment: nil, authorID: 3)
-        #expect(details.threads?.first?.feedback == .needsVerification)
+        #expect(details.threads?.first?.feedback == nil)
     }
 
     private let raw = #"{"project_id":1,"iid":2,"author":{"id":3,"username":"owner","name":"Owner"},"title":"Feature","description":"Complete MR description","labels":[],"web_url":"https://gitlab.example.test/g/p/-/merge_requests/2","state":"opened","draft":false,"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_project_id":1,"target_project_id":1,"source_branch":"feature","target_branch":"main","detailed_merge_status":"mergeable","has_conflicts":false,"reviewers":[{"id":8,"username":"assigned","name":"Assigned"}]}"#

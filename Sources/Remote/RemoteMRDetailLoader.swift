@@ -105,7 +105,11 @@ import MergeTetherRemote
         }
         var details = RemoteMRDetails(checkedAt: checkedAt, metadata: metadata, description: request.description, approvals: approvals, threads: threads,
             branches: .init(source: request.sourceBranch, target: request.targetBranch))
-        details.discussionFingerprint = discussions.flatMap { ReviewVerdict.fingerprint($0) }
+        if let discussions {
+            let content = MRDiscussionContent(discussions)
+            details.discussionFingerprint = content.fingerprint
+            details.activeDiscussionFingerprint = content.activeFingerprint
+        }
         let draftContexts = Dictionary(drafts.compactMap { draft -> (Int, AICommentProvenanceStore.ExtraContexts.Entry)? in
             guard let id = draft.id, id > 0, let context = extraContexts.forDraft(draft) else { return nil }
             return (id, context)

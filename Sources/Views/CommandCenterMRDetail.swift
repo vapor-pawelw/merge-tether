@@ -983,7 +983,8 @@ private struct CommandCenterMRDetailContent: View {
         let assessment = current && discussionStore.hasLoaded && !discussionStore.hasError
             ? request.flatMap { request in
                 discussionStore.discussionFingerprint.flatMap {
-                    monitor.attention.authorFeedbackCoordinator?.assessment(for: request, fingerprint: $0)
+                    monitor.attention.discussionAssessment(for: request, fingerprint: $0,
+                        activeFingerprint: discussionStore.activeDiscussionFingerprint)
                 }
             } : nil
         return discussionStore.presentationSnapshot(target: discussionTarget, accountRevision: monitor.glab.accountRevision,
