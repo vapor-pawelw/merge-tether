@@ -22,7 +22,7 @@ struct MRAutomationScopeEditor {
 
     var isAvailable: Bool {
         let automation = settings.configuredAutomation
-        return automation.hasEnabledAutomation
+        return hasIndependentApprovalPreference || automation.hasEnabledAutomation
             || (automation.hasAutomaticPublicActionConsent && request != nil)
     }
 
@@ -32,7 +32,10 @@ struct MRAutomationScopeEditor {
 
     private var hasLegacyActionOverrides: Bool {
         summary.choice == .inherit && !settings.configuredAutomation.scope.followsActionDefaults(for: target)
-            && hasSavedActionOverrides
+            && MRAutomaticAction.allCases.contains { action in
+                (action != .approval || !hasIndependentApprovalPreference)
+                    && settings.storedActionPreference(action, for: target) != .default
+            }
     }
 
     var choice: MRAutomationPreference {
@@ -44,17 +47,24 @@ struct MRAutomationScopeEditor {
     }
 
     var boltColor: Color {
-        guard choice == .default else { return .orange }
+        guard choice == .default, !hasIndependentApprovalPreference else { return .orange }
         return summary.active ? .accentColor : .secondary
     }
 
-    var hasActionExceptions: Bool { choice == .on && hasSavedActionOverrides }
+    private var hasIndependentApprovalPreference: Bool { settings.independentApprovalPreferences[target] != nil }
+
+    var hasActionExceptions: Bool { (choice == .on && hasSavedActionOverrides) || hasIndependentApprovalPreference }
+
+    func canChoose(_ action: MRAutomaticAction) -> Bool {
+        choice == .on || (choice == .default && action == .approval && hasIndependentApprovalPreference)
+    }
 
     func displayedPreference(for action: MRAutomaticAction) -> MRAutomationPreference {
         switch choice {
         case .on: return settings.storedActionPreference(action, for: target)
         case .off: return .off
         case .default:
+            if action == .approval, let preference = settings.independentApprovalPreferences[target] { return preference }
             let automation = settings.configuredAutomation
             guard summary.active, automation.hasAutomaticPublicActionConsent else { return .off }
             let enabled = switch action {
@@ -70,7 +80,7 @@ struct MRAutomationScopeEditor {
     }
 
     func choose(_ preference: MRAutomationPreference, for action: MRAutomaticAction) async {
-        guard choice == .on else { return }
+        guard canChoose(action) else { return }
         await monitor.setAutomaticActionPreference(preference, for: action, target: target)
     }
 
@@ -183,7 +193,8 @@ struct BoardAutomationToggle: View {
             }
             .buttonStyle(.plain)
             .boardHeaderControlHover()
-            .help(Text(choice.title) + Text(verbatim: " · ") + help)
+            .help(Text(choice.title) + Text(verbatim: " · ") + help
+                + (editor.hasActionExceptions ? Text("\n") + Text(.AutomaticActions.automaticActionsExceptionsHelp) : Text("")))
             .popover(isPresented: $showingDetails, arrowEdge: .bottom) {
                 MRAutomationPopover(editor: editor, policy: policy)
                     .onExitCommand { showingDetails = false }
@@ -374,7 +385,7 @@ private struct MRAutomaticActionControl: View {
         }, set: { preference in
             Task { await editor.choose(preference, for: action) }
         }))
-        .disabled(editor.choice != .on)
+        .disabled(!editor.canChoose(action))
         .help(Text(action.help))
     }
 }

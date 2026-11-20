@@ -28,6 +28,14 @@ struct CommandCenterMRDetail: View {
         let required = row?.item.humanActionRequired ?? item.humanActionRequired ?? needsHumanAttention
         CommandCenterMRDetailContent(item: selected.item, catalogRow: row, isReviewed: selected.isReviewed,
             monitor: monitor, initialSection: initialSection, needsHumanAttention: required)
+            .overlay(alignment: .bottomTrailing) {
+                if let notice = monitor.automationToggleNotices.current,
+                   case .approvalChanged(let target, _) = notice.kind,
+                   target == monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
+                    AutomationToggleNoticeView(notice: notice) { monitor.automationToggleNotices.dismiss(notice.id) }
+                        .padding(18)
+                }
+            }
     }
 
     private var needsHumanAttention: Bool {
@@ -374,14 +382,7 @@ private struct CommandCenterMRDetailContent: View {
                     PersonLabel(person: author.person, avatarSize: 18)
                 }
                 if finishedState == nil {
-                    BoardApprovalProgressBadge(progress: presentationRow.displayItem.approvalProgress,
-                        reviewers: presentationRow.displayRequest?.reviewers ?? [],
-                        viewerUsername: monitor.glab.currentUsername,
-                        isOwnMergeRequest: presentationRow.isOwnMergeRequest(viewer: monitor.glab.currentUsername),
-                        showsOpenFindingsApproval: {
-                            guard let target, let head = presentationRow.displayRequest?.sha else { return false }
-                            return monitor.settings.hasAutomaticApprovalWithOpenFindings(for: target, head: head)
-                        })
+                    BoardMRApprovalBadge(row: presentationRow, monitor: monitor)
                 }
                 Spacer()
                 HStack(spacing: 0) {

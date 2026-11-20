@@ -9,6 +9,9 @@ public enum RemoteActionKind: String, Codable, Sendable { case publish, approve,
     // Sent only to phones that announce `commentOriginCapability`; its command carries a `RemoteCommentOriginRequest`.
     case setCommentOrigin
     case markReady
+    case personalApprove, removeApproval
+    public var isPersonalApproval: Bool { self == .personalApprove || self == .removeApproval }
+    public var requiresApprovalConfirmation: Bool { self == .approve || isPersonalApproval }
     // Sent only to clients that advertise draftRegenerationCapability.
     case startDraftRegeneration, applyDraftRegeneration, discardDraftRegeneration
 }
@@ -128,6 +131,7 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
     public var assignedReviewerCount: Int?
     /// The paired Mac confirmed automatic approval of this head while findings were open.
     public var approvedWithOpenFindings: Bool?
+    public var automaticApprovalOff: Bool?
     public init(author: String? = nil, repository: String, draftBadge: String? = nil,
                 status: String? = nil, nextStep: String? = nil, working: Bool = false,
                 chips: [RemoteCardChip] = [], secondaryCTA: RemoteCardCTA? = nil,
@@ -332,6 +336,7 @@ public struct RemoteMessage: Codable, Sendable {
     public static let cachedDetailsCapability = "detail-cache-v1"
     public static let detailOriginsCapability = "detail-origins-v1"
     public static let mrControlsCapability = "mr-controls-v1"
+    public static let personalApprovalCapability = "personal-approval-v1"
     public static let commentOriginCapability = "comment-origin-v1"
     public static let markReadyCapability = "mark-ready-v1"
     public static let draftRegenerationCapability = "draft-regeneration-v1"
@@ -377,11 +382,15 @@ public struct RemoteMessage: Codable, Sendable {
 extension RemoteBoard {
     public func forClient(supportsCommentReview: Bool, supportsMergeActions: Bool = false, supportsMRControls: Bool = false,
                           supportsCommentOrigins: Bool = false, supportsMarkReady: Bool = false,
-                          supportsDraftRegeneration: Bool = false) -> Self {
+                          supportsDraftRegeneration: Bool = false, supportsPersonalApproval: Bool = false) -> Self {
         var compatible = self
         if !supportsDraftRegeneration { compatible.draftRegeneration = nil }
         for lane in compatible.lanes.indices {
             for card in compatible.lanes[lane].cards.indices {
+                if !supportsPersonalApproval {
+                    compatible.lanes[lane].cards[card].actions.removeAll { $0.kind.isPersonalApproval }
+                    compatible.lanes[lane].cards[card].presentation?.automaticApprovalOff = nil
+                }
                 if !supportsMarkReady {
                     let removed = Set(compatible.lanes[lane].cards[card].actions.filter { $0.kind == .markReady }.map(\.id))
                     compatible.lanes[lane].cards[card].actions.removeAll { $0.kind == .markReady }

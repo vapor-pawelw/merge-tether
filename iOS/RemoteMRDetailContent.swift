@@ -4,6 +4,7 @@ import MergeTetherRemote
 struct RemoteMRDetailContent: View {
     let details: RemoteMRDetails
     let card: RemoteCard
+    var personalApproval: RemotePersonalApprovalControl? = nil
     /// Present when the Mac accepts comment-origin changes from this phone.
     var onCommentOrigin: ((RemoteCommentOriginRequest) -> Void)? = nil
     @Environment(\.colorScheme) private var colorScheme
@@ -131,7 +132,8 @@ struct RemoteMRDetailContent: View {
         }
         .sheet(isPresented: $showingApprovals) {
             RemoteApprovalDetailsView(details: details.approvals ?? .init(progress: nil), mergeRequestURL: card.url,
-                approvedWithOpenFindings: card.presentation?.approvedWithOpenFindings == true)
+                approvedWithOpenFindings: card.presentation?.approvedWithOpenFindings == true,
+                personalApproval: personalApproval, automaticApprovalOff: card.presentation?.automaticApprovalOff == true)
                 .presentationDetents([.medium, .large])
         }
     }

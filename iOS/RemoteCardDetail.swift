@@ -59,7 +59,7 @@ struct RemoteCardDetail: View {
                     LazyVStack(alignment: .leading, spacing: 16) {
                         VStack(alignment: .leading, spacing: 10) {
                             RemoteCardView(card: headerCard(shown), expanded: true, branches: shown?.branches,
-                                mergeRequestDescription: shown?.description)
+                                mergeRequestDescription: shown?.description, actionsModel: model)
                             if let verification = feedbackVerification {
                                 RemoteDetailActionButtons(actions: [verification], runningActionID: runningActionID,
                                     onAction: showConfirmation)
@@ -79,14 +79,18 @@ struct RemoteCardDetail: View {
                         }
                         draftSection(shown).id(RemoteCardCTA.Destination.drafts)
                         // Like the Mac detail, the decision and its controls lead; reference sections follow.
-                        if let result = model.state.result {
-                            Text(result.status.title).font(.callout).foregroundStyle(.secondary)
+                        if model.state.result != nil {
+                            Text(model.resultTitle).font(.callout).foregroundStyle(.secondary)
+                            if model.showsAutomaticApprovalOffResult {
+                                Text(.Board.boardApprovalsAutomationOff).font(.callout).foregroundStyle(.secondary)
+                            }
                             Button(.Remote.remoteClose) { model.state.acknowledgeResult() }
                         }
                         actionSection.id(RemoteCardCTA.Destination.actions)
                         if current.id.hasPrefix("mr:") {
                             if let details = shown {
                                 RemoteMRDetailContent(details: details, card: current,
+                                    personalApproval: current.personalApprovalControl(model: model),
                                     onCommentOrigin: hasConfirmedDiscussions && current.actions.contains { $0.kind == .setCommentOrigin } ? { request in
                                         Task { await model.setCommentOrigin(request, card: current) }
                                     } : nil)
@@ -375,7 +379,8 @@ struct RemoteCardDetail: View {
     /// Draft-level actions live on their draft cards.
     private var buttonActions: [RemoteAction] {
         (actionCard?.actions ?? []).filter {
-            $0.kind != .deleteDraft && $0.kind != .publishDraft && $0.kind != .setCommentOrigin && !$0.isAuthorFeedbackVerification
+            $0.kind != .deleteDraft && $0.kind != .publishDraft && $0.kind != .setCommentOrigin
+                && !$0.kind.isPersonalApproval && !$0.isAuthorFeedbackVerification
         }
     }
 

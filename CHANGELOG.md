@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Render Markdown headings, lists, quotes, and code blocks in merge request descriptions and comments on Mac and iPhone.
 
+- Approve or remove your approval from an MR’s approvals popover on Mac and iPhone. The removal confirmation explains that it will turn off automatic approval for that MR.
+
 - Expand or collapse **Automation off** in each Mac board column and restore that choice after restarting. The header shows the total number of merge requests and how many need attention.
 
 - Highlight merge requests that need attention with a padded inline callout, give MR cards a clearer border, and bring MR titles and repository labels closer together on Mac and iPhone.

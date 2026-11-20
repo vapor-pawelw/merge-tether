@@ -4,7 +4,7 @@ import Foundation
 struct MRAutomationEvent: Codable, Identifiable, Equatable, Sendable {
     enum Action: String, Codable, Sendable {
         case retry, review, followUp, draftReply, verification, feedbackDecision, pipeline, conflict, refresh, approval
-        case approve, publication, merge, enqueueMerge
+        case approve, removeApproval, publication, merge, enqueueMerge
     }
     enum Origin: String, Codable, Sendable { case manual, automatic }
     enum State: String, Codable, Sendable { case requested, queued, failed, completed, blocked }
@@ -34,6 +34,7 @@ struct MRAutomationEvent: Codable, Identifiable, Equatable, Sendable {
         case .refresh: .AutomationHistory.automationHistoryActionRefresh
         case .approval: .AutomationHistory.automationHistoryActionApproval
         case .approve: .AutomationHistory.automationHistoryActionApproved
+        case .removeApproval: .Board.boardApprovalsRemoved
         case .publication: .AutomationHistory.automationHistoryActionPublication
         case .merge: .AutomationHistory.automationHistoryMerged
         case .enqueueMerge: .AutomationHistory.automationHistoryActionEnqueueMerge
@@ -131,10 +132,11 @@ struct MRAutomationHistory {
 
 extension SettingsManager {
     func hasAutomaticApprovalWithOpenFindings(for target: MRAutomationScope.Target, head: String) -> Bool {
-        automationEvents.contains {
-            $0.target == target && $0.action == .approval && $0.origin == .automatic
-                && $0.state == .completed && $0.approvedHeadSHA == head
+        let latest = automationEvents.first {
+            $0.target == target && $0.state == .completed && $0.approvedHeadSHA == head
+                && [.approval, .approve, .removeApproval].contains($0.action)
         }
+        return latest?.action == .approval && latest?.origin == .automatic
     }
 
     func recordAutomationEvent(target: MRAutomationScope.Target, action: MRAutomationEvent.Action,

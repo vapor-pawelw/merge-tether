@@ -41,6 +41,7 @@ final class SettingsManager {
     var lastMenuOpenedAt: Date?
     /// Managed MRs where the user turned off automatic approval.
     var autoApproveOptOuts: Set<MRAutomationScope.Target>
+    var independentApprovalPreferences: [MRAutomationScope.Target: MRAutomationPreference]
     var autoPublishOptOuts: Set<MRAutomationScope.Target> = []
     var autoMergeOptOuts: Set<MRAutomationScope.Target> = []
     var autoMergeOptIns: Set<MRAutomationScope.Target> = []
@@ -161,6 +162,7 @@ final class SettingsManager {
 
         self.ignoredMergeRequests = store.load(Key.ignoredMergeRequests, fallback: [])
         self.autoApproveOptOuts = store.load(Key.autoApproveOptOuts, fallback: [])
+        self.independentApprovalPreferences = store.load(Key.independentApprovalPreferences, fallback: [:])
         self.autoPublishOptOuts = store.load(Key.autoPublishOptOuts, fallback: [])
         self.autoMergeOptOuts = store.load(Key.autoMergeOptOuts, fallback: [])
         self.autoMergeOptIns = store.load(Key.autoMergeOptIns, fallback: [])
@@ -243,6 +245,7 @@ final class SettingsManager {
         }
         persistenceStore.save(ignoredMergeRequests, forKey: Key.ignoredMergeRequests)
         persistenceStore.save(autoApproveOptOuts, forKey: Key.autoApproveOptOuts)
+        let approvalPreferencesSaved = persistenceStore.save(independentApprovalPreferences, forKey: Key.independentApprovalPreferences)
         persistenceStore.save(autoPublishOptOuts, forKey: Key.autoPublishOptOuts)
         persistenceStore.save(mergeSubmissions, forKey: Key.mergeSubmissions)
         persistenceStore.save(autoMergeOptOuts, forKey: Key.autoMergeOptOuts)
@@ -253,7 +256,7 @@ final class SettingsManager {
             changedHistoryKeys.formUnion([Key.assistantHandoffs, Key.workflowActivity,
                 Key.automationEvents, Key.mrActionIntents])
         }
-        let accepted = automationSaved && synchronized
+        let accepted = automationSaved && approvalPreferencesSaved && synchronized
         if accepted { acceptedAutomation = automation.ignoringGlobalSuspension }
         if automationSaved && synchronized {
             lastSavedAutomation = automation
@@ -434,6 +437,7 @@ final class SettingsManager {
         static let hasLaunchedBefore = "hasLaunchedBefore"
         static let lastMenuOpenedAt = "lastMenuOpenedAt"
         static let autoApproveOptOuts = "autoApproveOptOuts"
+        static let independentApprovalPreferences = "independentApprovalPreferences"
         static let autoPublishOptOuts = "autoPublishOptOuts"
         static let mergeSubmissions = "mergeSubmissions"
         static let autoMergeOptOuts = "autoMergeOptOuts"

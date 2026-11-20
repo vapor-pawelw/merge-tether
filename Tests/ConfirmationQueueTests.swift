@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 import Testing
 import MergeTetherRemote
 @testable import MergeTether
@@ -2090,7 +2091,7 @@ import MergeTetherRemote
         #expect(harness.monitor.currentOpenItems.first?.section == .open)
     }
 
-    @Test func identicalQuickChecksDoNotNotifyBoardEvidenceButChangedCommentsDo() async throws {
+    @Test func identicalQuickChecksDoNotNotifyDraftEvidenceButChangedCommentsDo() async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
         try harness.write("drafts.json", draftJSON)
@@ -2098,13 +2099,14 @@ import MergeTetherRemote
         try await harness.poll()
         await harness.monitor.refreshPendingDrafts()
         let changes = PendingDraftObservationChanges()
-        withObservationTracking { _ = harness.monitor.currentOpenItems } onChange: { changes.record() }
+        withObservationTracking { _ = harness.monitor.items } onChange: { changes.record() }
         await harness.monitor.refreshPendingDrafts()
         #expect(changes.count == 0)
         try harness.write("discussions.json", othersThread)
         await harness.monitor.refreshPendingDrafts()
         #expect(changes.count == 1)
         #expect(harness.monitor.currentItems.first?.requiresDiscussionRecheck == true)
+        #expect(harness.monitor.currentOpenItems.first?.requiresDiscussionRecheck == true)
     }
 
     @Test(arguments: ["cancel", "account-round-trip"])
@@ -2352,6 +2354,61 @@ import MergeTetherRemote
         try await harness.poll()
         #expect(harness.log("selected.log").isEmpty)
         #expect(harness.log("drafts.json").contains("/merge"))
+    }
+
+    @Test(arguments: [false, true])
+    func removingApprovalDisablesAutomaticApprovalInInheritedScopeAndAcrossRestart(_ losesResponse: Bool) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        harness.settings.automation.scope.setManualChoice(.inherit, for: target)
+        harness.settings.automation.applyPreset(.full, for: .codex)
+        try #require(harness.settings.save())
+        try harness.write("approvals.json", #"{"approvals_required":1,"approvals_left":0,"approved_by":[{"user":{"id":3,"username":"me"}}]}"#)
+        let original = try #require(harness.gitlab.handler)
+        harness.gitlab.handler = { call in
+            guard call.endpoint.hasSuffix("/unapprove") else { return try await original(call) }
+            #expect(harness.settings.actionPreference(.approval, for: target) == .off)
+            let response = #"{"approvals_required":1,"approvals_left":1,"approved_by":[]}"#
+            harness.gitlab.write("approvals.json", response)
+            return losesResponse ? InMemoryGitLab.output(code: 1) : InMemoryGitLab.output(response)
+        }
+        try await harness.poll()
+
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: harness.gitlab.data("request.json"))
+        #expect(harness.monitor.autoApproveApplies(to: request, host: host, username: "me"))
+        let result = await harness.monitor.changePersonalApproval(.remove, for: request, accountRevision: harness.glab.accountRevision)
+        #expect(result == .completed)
+        #expect(harness.gitlab.requests.filter { $0.method == "POST" }.map(\.endpoint) == ["/projects/1/merge_requests/2/unapprove"])
+        #expect(!harness.monitor.autoApproveApplies(to: request, host: host, username: "me"))
+        let restarted = SettingsManager(defaults: harness.defaults)
+        #expect(restarted.actionPreference(.approval, for: target) == .off)
+        #expect(!restarted.permitsAutomaticAction(.approval, for: request, target: target))
+        #expect(restarted.automation.scope[target] == .inherit)
+        #expect(restarted.actionPreference(.commentPublication, for: target) == .default)
+        let service = TodoMonitorService(settings: restarted, glab: harness.glab)
+        defer { service.stopTimer() }
+        let editor = MRAutomationScopeEditor(monitor: service, target: target)
+        #expect(editor.choice == .default && editor.boltColor == .orange)
+        #expect(editor.displayedPreference(for: .approval) == .off && editor.canChoose(.approval))
+        await editor.choose(.default, for: .approval)
+        #expect(restarted.permitsAutomaticAction(.approval, for: request, target: target))
+    }
+
+    @Test(arguments: [false, true])
+    func personalApprovalChecksTheDisplayedRevisionAndWorksWithoutAnAssistantVerdict(_ stale: Bool) async throws {
+        let harness = try makeHarness(assistantWorked: false, consent: .disabled)
+        defer { harness.cleanUp() }
+        try harness.write("approvals.json", #"{"approvals_required":1,"approvals_left":1,"approved_by":[],"user_can_approve":true}"#)
+        try await harness.poll()
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: harness.gitlab.data("request.json"))
+        if stale {
+            try harness.write("request.json", harness.gitlab.text("request.json")
+                .replacingOccurrences(of: head, with: String(repeating: "f", count: 40)))
+        }
+        let result = await harness.monitor.changePersonalApproval(.approve, for: request, accountRevision: harness.glab.accountRevision)
+        #expect(result == (stale ? .changed : .completed))
+        #expect(harness.log("approve.log").contains("sha=\(head)") == !stale)
     }
 
     @Test func manualApprovalNeedsANoObjectionsVerdictForTheCurrentHead() async throws {

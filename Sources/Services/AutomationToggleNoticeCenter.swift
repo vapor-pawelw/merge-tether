@@ -8,6 +8,7 @@ final class AutomationToggleNoticeCenter {
     enum Kind: Equatable, Sendable {
         case global(active: Bool)
         case mergeRequest(iid: Int, projectPath: String?, active: Bool)
+        case approvalChanged(target: MRAutomationScope.Target, removed: Bool)
     }
 
     struct Notice: Identifiable, Equatable, Sendable {

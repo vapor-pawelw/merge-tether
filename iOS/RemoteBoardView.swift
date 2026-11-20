@@ -134,10 +134,14 @@ struct RemoteBoardView: View {
                 RemoteCardDetail(model: model, original: selection.card, initialSelection: selection)
                     .presentationDragIndicator(.visible)
             }
-            .alert(Text(model.state.result?.status.title ?? .Remote.remoteCompleted), isPresented: Binding(
+            .alert(Text(model.resultTitle), isPresented: Binding(
                 get: { selected == nil && model.state.result != nil },
                 set: { if !$0, selected == nil { model.state.acknowledgeResult() } }
-            )) { Button(.Remote.remoteClose) { model.state.acknowledgeResult() } }
+            )) {
+                Button(.Remote.remoteClose) { model.state.acknowledgeResult() }
+            } message: {
+                if model.showsAutomaticApprovalOffResult { Text(.Board.boardApprovalsAutomationOff) }
+            }
         }
     }
 
@@ -447,7 +451,9 @@ struct RemoteCardView: View {
                 RemoteApprovalProgressBadge(progress: card.approvals, people: card.presentation?.approvalPeople,
                     viewerApprovalID: card.presentation?.viewerApprovalID,
                     assignedReviewerCount: card.presentation?.assignedReviewerCount,
-                    approvedWithOpenFindings: card.presentation?.approvedWithOpenFindings == true)
+                    approvedWithOpenFindings: card.presentation?.approvedWithOpenFindings == true,
+                    personalApproval: card.personalApprovalControl(model: actionsModel),
+                    automaticApprovalOff: card.presentation?.automaticApprovalOff == true)
             }
         }
     }

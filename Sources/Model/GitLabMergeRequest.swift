@@ -7,6 +7,8 @@ struct MergeRequestApprovalProgress: Equatable, Sendable {
     var requirementsSatisfied: Bool? = nil
     var reviewHistory = MergeRequestReviewHistory()
     var approvalDates: [Int: Date] = [:]
+    var currentApproverIDs: Set<Int>? = nil
+    var userCanApprove: Bool? = nil
     var isSatisfied: Bool { completed > 0 && (requirementsSatisfied ?? (required == 0 || completed >= required)) }
     init?(completed: Int, required: Int, approvedBy: [Todo.Author] = []) {
         guard required >= 0, completed >= 0 else { return nil }
@@ -84,6 +86,9 @@ struct GitLabMergeRequestApprovalCounts: Decodable, Sendable {
     private let projectID: Int?
     private let iid: Int?
     private let approvedBy: [Approver]?
+    let userCanApprove: Bool?
+
+    var approverIDs: Set<Int>? { approvedBy.map { Set($0.map(\.user.id).filter { $0 > 0 }) } }
 
     private struct Approver: Decodable, Sendable {
         let user: User
@@ -104,21 +109,44 @@ struct GitLabMergeRequestApprovalCounts: Decodable, Sendable {
     enum CodingKeys: String, CodingKey {
         case required = "approvals_required", remaining = "approvals_left", projectID = "project_id", iid
         case approvedBy = "approved_by"
+        case userCanApprove = "user_can_approve"
     }
     func progress(projectID: Int, iid: Int) -> MergeRequestApprovalProgress? {
         guard projectID > 0, iid > 0, self.projectID == nil || self.projectID == projectID,
-              self.iid == nil || self.iid == iid, let required, let remaining,
-              required >= 0, remaining >= 0, remaining <= required else { return nil }
-        let received = Set((approvedBy ?? []).map(\.user.id).filter { $0 > 0 }).count
-        var result = MergeRequestApprovalProgress(completed: approvedBy == nil ? required - remaining : received, required: required,
-                     approvedBy: (approvedBy ?? []).compactMap(\.user.author))
-        result?.requirementsSatisfied = remaining == 0
+              self.iid == nil || self.iid == iid else { return nil }
+        let requiredCount: Int
+        let remainingCount: Int
+        if let required, let remaining, required >= 0, remaining >= 0, remaining <= required {
+            requiredCount = required
+            remainingCount = remaining
+        } else if required == nil, remaining == nil, userCanApprove != nil, approvedBy != nil {
+            // Community Edition exposes the approvers and eligibility but no required counts.
+            requiredCount = 0
+            remainingCount = 0
+        } else { return nil }
+        var result = MergeRequestApprovalProgress(completed: approverIDs?.count ?? requiredCount - remainingCount,
+            required: requiredCount, approvedBy: (approvedBy ?? []).compactMap(\.user.author))
+        result?.requirementsSatisfied = remainingCount == 0
+        result?.currentApproverIDs = approverIDs
+        result?.userCanApprove = userCanApprove
         for approver in approvedBy ?? [] {
             guard let date = MergeRequestReviewHistory.date(approver.approvedAt) else { continue }
             let previous = result?.approvalDates[approver.user.id] ?? .distantPast
             result?.approvalDates[approver.user.id] = max(previous, date)
         }
         return result
+    }
+}
+
+enum PersonalMRApproval: Equatable {
+    case approve, remove
+
+    var title: LocalizedStringResource {
+        self == .approve ? .Board.boardApprovalsApprove : .Board.boardApprovalsRemove
+    }
+
+    var confirmation: LocalizedStringResource {
+        self == .approve ? .Board.boardApprovalsApproveHelp : .Board.boardApprovalsRemoveHelp
     }
 }
 

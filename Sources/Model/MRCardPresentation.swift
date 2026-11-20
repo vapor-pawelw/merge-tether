@@ -264,6 +264,7 @@ struct MRCardPresentation {
     private var progress: (title: LocalizedStringResource, effect: MRActionEffect?) {
         if confirmationState == .publishing { return (.AutomationProgress.progressPublishing, nil) }
         if confirmationState == .approving { return (.AutomationProgress.progressApproving, nil) }
+        if confirmationState == .removingApproval { return (.Board.boardApprovalsRemoving, nil) }
         if confirmationState == .deleting { return (.CommentReview.commentReviewDeleting, nil) }
         if confirmationState == .finishingCommentReview { return (.CommentReview.commentReviewFinishing, nil) }
         if automaticMergeProgress { return (.AutomationProgress.progressMerging, nil) }

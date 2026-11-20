@@ -25,6 +25,21 @@ import Testing
         #expect(try RemoteDetailRequest(card: legacy, board: board, presentationIndependent: true).matches(board))
     }
 
+    @Test(arguments: [RemoteActionKind.personalApprove, .removeApproval])
+    func personalApprovalActionsRequireThePhoneCapability(_ kind: RemoteActionKind) throws {
+        let approval = RemoteAction(id: "approve", kind: .approve, token: "legacy")
+        let personal = RemoteAction(id: kind.rawValue, kind: kind, token: "checked")
+        var card = RemoteCard(id: "mr:1:2", title: "Feature", project: "g/p", url: nil, actions: [approval, personal],
+            presentation: .init(repository: "p"))
+        card.presentation?.automaticApprovalOff = true
+        let board = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [.init(id: .reviewed, cards: [card])])
+        let compatible = board.forClient(supportsCommentReview: true, supportsMRControls: true).cards[0]
+        #expect(compatible.actions == [approval])
+        #expect(compatible.presentation?.automaticApprovalOff == nil)
+        #expect(board.forClient(supportsCommentReview: true, supportsPersonalApproval: true).cards[0] == card)
+        #expect(personal.suppressibleConfirmationID == nil)
+    }
+
     @Test func olderPhonesNeverReceiveMarkReadyOrItsExecutableCTA() throws {
         let action = try JSONDecoder().decode(RemoteAction.self,
             from: Data(#"{"id":"markReady","kind":"markReady","token":"checked"}"#.utf8))

@@ -42,6 +42,7 @@ extension RemoteConnection: RemoteHostTransport {}
     private var phoneSupportsDetailPreviews = false
     private var phoneSupportsOriginUpdates = false
     private var phoneSupportsMRControls = false
+    private var phoneSupportsPersonalApproval = false
     private var phoneSupportsCommentOrigins = false
     private var phoneSupportsMarkReady = false
     private var phoneSupportsDraftRegeneration = false
@@ -178,6 +179,7 @@ extension RemoteConnection: RemoteHostTransport {}
         phoneSupportsDetailPreviews = false
         phoneSupportsOriginUpdates = false
         phoneSupportsMRControls = false
+        phoneSupportsPersonalApproval = false
         phoneSupportsCommentOrigins = false
         phoneSupportsMarkReady = false
         phoneSupportsDraftRegeneration = false
@@ -245,6 +247,7 @@ extension RemoteConnection: RemoteHostTransport {}
             phoneSupportsDetailAvatars = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.detailAvatarsCapability) == true
             phoneSupportsDetailPreviews = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.detailPreviewCapability) == true
             phoneSupportsMRControls = message.capabilities?.contains(RemoteMessage.mrControlsCapability) == true
+            phoneSupportsPersonalApproval = message.capabilities?.contains(RemoteMessage.personalApprovalCapability) == true
             phoneSupportsMarkReady = message.capabilities?.contains(RemoteMessage.markReadyCapability) == true
             phoneSupportsDraftRegeneration = message.capabilities?.contains(RemoteMessage.draftRegenerationCapability) == true
             phoneSupportsCommentOrigins = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.commentOriginCapability) == true
@@ -264,6 +267,7 @@ extension RemoteConnection: RemoteHostTransport {}
             if !fresh { board.partial = true }
             do { try await active.send(.init(type: .snapshot, challenge: challenge, board: board,
                 capabilities: [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability, RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability,
+                               RemoteMessage.personalApprovalCapability,
                                RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability, RemoteMessage.detailPreviewCapability,
                                RemoteMessage.cachedDetailsCapability, RemoteMessage.draftRegenerationCapability])) }
             catch { failed = true; try? await active.send(.init(type: .unavailable)); return }
@@ -579,7 +583,8 @@ extension RemoteConnection: RemoteHostTransport {}
         }
         return board.forClient(supportsCommentReview: phoneSupportsCommentReview, supportsMergeActions: phoneSupportsMergeActions,
             supportsMRControls: phoneSupportsMRControls, supportsCommentOrigins: phoneSupportsCommentOrigins,
-            supportsMarkReady: phoneSupportsMarkReady, supportsDraftRegeneration: phoneSupportsDraftRegeneration)
+            supportsMarkReady: phoneSupportsMarkReady, supportsDraftRegeneration: phoneSupportsDraftRegeneration,
+            supportsPersonalApproval: phoneSupportsPersonalApproval)
     }
 
     private func draftRegenerationControl(isPartial: Bool) -> RemoteDraftRegenerationControl? {
@@ -760,6 +765,15 @@ extension RemoteConnection: RemoteHostTransport {}
             guard let head = card.head else { return .changed }
             if await monitor.attention.approveRemotely(item.id, expectedHead: head) { return .completed }
             return monitor.attention.confirmationStates[item.id] == .failed ? .uncertain : .changed
+        case .personalApprove, .removeApproval:
+            guard phoneSupportsPersonalApproval, let request = item.mergeRequest else { return .changed }
+            let change: PersonalMRApproval = action.kind == .personalApprove ? .approve : .remove
+            switch await monitor.changePersonalApproval(change, for: request, accountRevision: monitor.glab.accountRevision) {
+            case .completed: return .completed
+            case .changed: return .changed
+            case .failed: return .failed
+            case .uncertain: return .uncertain
+            }
         case .prepare:
             guard action.id == "prepare" else { return .changed }
             await monitor.handleFeedbackManually(for: item)

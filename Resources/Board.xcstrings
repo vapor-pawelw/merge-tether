@@ -2,6 +2,62 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "board.approvals.approve": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Approve" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Zatwierdź" } }
+      }
+    },
+    "board.approvals.approveHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Approve this revision in GitLab as the signed-in user." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Zatwierdź tę wersję w GitLabie jako zalogowany użytkownik." } }
+      }
+    },
+    "board.approvals.remove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Remove approval" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Cofnij zatwierdzenie" } }
+      }
+    },
+    "board.approvals.removeWarningTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Remove approval and turn off automatic approval?" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Cofnąć zatwierdzenie i wyłączyć automatyczne zatwierdzanie?" } }
+      }
+    },
+    "board.approvals.removeHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Automatic approval will stay off for this merge request until you turn it back on from the Automation popover on your Mac." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Automatyczne zatwierdzanie tego merge requesta pozostanie wyłączone, dopóki nie włączysz go ponownie w menu Automatyzacja na Macu." } }
+      }
+    },
+    "board.approvals.removed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Approval removed" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Zatwierdzenie cofnięte" } }
+      }
+    },
+    "board.approvals.removing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Removing approval…" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Cofanie zatwierdzenia…" } }
+      }
+    },
+    "board.approvals.automationOff": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Automatic approval is off for this merge request." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Automatyczne zatwierdzanie tego merge requesta jest wyłączone." } }
+      }
+    },
     "board.people.message.%@.%@": {
       "extractionState": "manual",
       "localizations": {

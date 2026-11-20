@@ -6,8 +6,8 @@ struct AutomationToggleNoticeView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: active ? "bolt.fill" : "bolt.slash")
-                .foregroundStyle(active ? Color.accentColor : Color.secondary)
+            Image(systemName: symbol)
+                .foregroundStyle(color)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
                 switch notice.kind {
@@ -23,6 +23,14 @@ struct AutomationToggleNoticeView: View {
                         Text(verbatim: "\(projectPath) !\(iid)")
                             .font(.caption).foregroundStyle(.secondary)
                             .lineLimit(1).truncationMode(.middle)
+                    }
+                case .approvalChanged(let target, let removed):
+                    Text(removed ? .Board.boardApprovalsRemoved : .Board.boardApprovalsApproved).font(.headline)
+                    if removed {
+                        Text(.Board.boardApprovalsAutomationOff).font(.subheadline)
+                    }
+                    if let iid = target.iid {
+                        Text(verbatim: "!\(iid)").font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -43,9 +51,17 @@ struct AutomationToggleNoticeView: View {
         }
     }
 
-    private var active: Bool {
+    private var symbol: String {
         switch notice.kind {
-        case .global(let active), .mergeRequest(_, _, let active): active
+        case .global(let active), .mergeRequest(_, _, let active): active ? "bolt.fill" : "bolt.slash"
+        case .approvalChanged(_, let removed): removed ? "minus.circle" : "checkmark.seal"
+        }
+    }
+
+    private var color: Color {
+        switch notice.kind {
+        case .global(let active), .mergeRequest(_, _, let active): active ? .accentColor : .secondary
+        case .approvalChanged(_, let removed): removed ? .orange : .accentColor
         }
     }
 }

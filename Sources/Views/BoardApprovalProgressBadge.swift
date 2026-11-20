@@ -1,16 +1,27 @@
 import SwiftUI
 
 struct BoardApprovalProgressBadge: View {
+    struct Action {
+        let change: PersonalMRApproval
+        let isBusy: Bool
+        let perform: () async -> MergeRequestAttentionMonitor.PersonalApprovalResult
+    }
+
     let progress: MergeRequestApprovalProgress?
     var reviewers: [Todo.Author]? = nil
     /// Signed-in username; the viewer's own approval is shown only on MRs they review.
     var viewerUsername: String? = nil
     var isOwnMergeRequest = true
     var showsOpenFindingsApproval: () -> Bool = { false }
+    var personalAction: Action? = nil
+    var automaticApprovalOff = false
     @State private var showingPeople = false
+    @State private var pinned = false
     @State private var badgeHovered = false
     @State private var peopleHovered = false
     @State private var hoverTask: Task<Void, Never>?
+    @State private var pendingAction: Action?
+    @State private var actionError: LocalizedStringResource?
 
     private var people: [MergeRequestApprovalProgress.Participant] {
         let reviewers = reviewers ?? []
@@ -53,8 +64,11 @@ struct BoardApprovalProgressBadge: View {
 
     var body: some View {
         let assigned = assignedReviewerCount
-        if progress.map({ $0.required > 0 || $0.completed > 0 }) ?? true || viewerApproval != nil || assigned != nil {
-            Button { hoverTask?.cancel(); showingPeople = true } label: {
+        let confirmationTitle: LocalizedStringResource = pendingAction?.change == .remove
+            ? .Board.boardApprovalsRemoveWarningTitle : .Board.boardApprovalsApprove
+        if personalAction != nil || automaticApprovalOff
+            || (progress.map { $0.required > 0 || $0.completed > 0 } ?? true) || viewerApproval != nil || assigned != nil {
+            Button { hoverTask?.cancel(); pinned = true; showingPeople = true } label: {
                 HStack(spacing: 4) {
                     HStack(spacing: 3) {
                         Image(systemName: satisfied ? "checkmark.seal.fill" : "checkmark.seal").accessibilityHidden(true)
@@ -80,9 +94,30 @@ struct BoardApprovalProgressBadge: View {
                 approvalPopover.onHover { peopleHovered = $0; updateHover() }
             }
             .onChange(of: showingPeople) { _, visible in
-                if !visible { hoverTask?.cancel(); peopleHovered = false }
+                if !visible { hoverTask?.cancel(); peopleHovered = false; pinned = false }
             }
             .onDisappear { hoverTask?.cancel(); showingPeople = false }
+            .alert(Text(confirmationTitle), isPresented: Binding(
+                get: { pendingAction != nil }, set: { if !$0 { pendingAction = nil } }
+            ), presenting: pendingAction) { action in
+                Button(role: action.change == .remove ? .destructive : nil) {
+                    Task {
+                        switch await action.perform() {
+                        case .completed: break
+                        case .changed: actionError = .Menu.menuConfirmChanged
+                        case .failed, .uncertain: actionError = .Menu.menuConfirmFailed
+                        }
+                    }
+                } label: { Text(action.change.title) }
+                Button(role: .cancel) { } label: { Text(.Remote.remoteCancel) }
+            } message: { action in
+                Text(action.change.confirmation)
+            }
+            .alert(Text(actionError ?? .Menu.menuConfirmFailed), isPresented: Binding(
+                get: { actionError != nil }, set: { if !$0 { actionError = nil } }
+            )) {
+                Button(.Remote.remoteClose) { actionError = nil }
+            }
         }
     }
 
@@ -120,6 +155,24 @@ struct BoardApprovalProgressBadge: View {
                 Divider()
             }
             peopleList
+            if personalAction != nil || automaticApprovalOff {
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    if automaticApprovalOff {
+                        Text(.Board.boardApprovalsAutomationOff)
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let action = personalAction {
+                        Button(role: action.change == .remove ? .destructive : nil) {
+                            hoverTask?.cancel()
+                            pendingAction = action
+                            showingPeople = false
+                        } label: { Text(action.change.title) }
+                        .disabled(action.isBusy)
+                    }
+                }
+                .padding(12)
+            }
         }
         .frame(width: 280)
     }
@@ -168,11 +221,37 @@ struct BoardApprovalProgressBadge: View {
 
     private func updateHover() {
         hoverTask?.cancel()
+        guard !pinned else { return }
         let hovering = badgeHovered || peopleHovered
         hoverTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(hovering ? 250 : 180))
             guard !Task.isCancelled else { return }
             showingPeople = hovering
+        }
+    }
+}
+
+struct BoardMRApprovalBadge: View {
+    let row: MergeRequestBoardSnapshot.Row
+    let monitor: TodoMonitorService
+
+    var body: some View {
+        let target = monitor.scopeTarget(projectID: row.id.projectID, iid: row.id.iid, url: row.displayURL)
+        BoardApprovalProgressBadge(progress: row.displayItem.approvalProgress, reviewers: row.displayRequest?.reviewers,
+            viewerUsername: monitor.glab.currentUsername,
+            isOwnMergeRequest: row.isOwnMergeRequest(viewer: monitor.glab.currentUsername),
+            showsOpenFindingsApproval: {
+                guard let target, let head = row.displayRequest?.sha else { return false }
+                return monitor.settings.hasAutomaticApprovalWithOpenFindings(for: target, head: head)
+            }, personalAction: action,
+            automaticApprovalOff: target.flatMap { monitor.settings.independentApprovalPreferences[$0] } == .off)
+    }
+
+    private var action: BoardApprovalProgressBadge.Action? {
+        guard let request = row.displayRequest, let change = monitor.attention.personalApprovalAction(for: row) else { return nil }
+        let revision = monitor.glab.accountRevision
+        return .init(change: change, isBusy: monitor.attention.confirmationStates[row.id]?.isBusy == true) {
+            await monitor.changePersonalApproval(change, for: request, accountRevision: revision)
         }
     }
 }
