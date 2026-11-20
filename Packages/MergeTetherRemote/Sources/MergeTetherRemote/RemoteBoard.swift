@@ -191,14 +191,19 @@ public struct RemoteCard: Codable, Equatable, Identifiable, Sendable {
     public var dependencies: RemoteMRDependencies?
     public var approvals: RemoteApprovalProgress?
     public var contextRevision: String?
+    public var completionObservedAt: Date?
     public init(id: String, title: String, project: String, url: URL?, head: String? = nil,
                 detail: String = "", drafts: [RemoteDraft] = [], actions: [RemoteAction] = [],
-                needsAttention: Bool? = nil, mergeRequestIID: Int? = nil, primaryCTA: RemoteCardCTA? = nil, presentation: RemoteCardText? = nil, dependencies: RemoteMRDependencies? = nil, approvals: RemoteApprovalProgress? = nil, contextRevision: String? = nil) {
+                needsAttention: Bool? = nil, mergeRequestIID: Int? = nil, primaryCTA: RemoteCardCTA? = nil,
+                presentation: RemoteCardText? = nil, dependencies: RemoteMRDependencies? = nil,
+                approvals: RemoteApprovalProgress? = nil, contextRevision: String? = nil,
+                completionObservedAt: Date? = nil) {
         self.id = id; self.title = title; self.project = project; self.url = url; self.head = head
         self.detail = detail; self.drafts = drafts; self.actions = actions
         self.needsAttention = needsAttention; self.mergeRequestIID = mergeRequestIID; self.primaryCTA = primaryCTA; self.presentation = presentation; self.dependencies = dependencies
         self.approvals = approvals
         self.contextRevision = contextRevision
+        self.completionObservedAt = completionObservedAt
     }
 }
 

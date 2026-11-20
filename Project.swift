@@ -71,7 +71,7 @@ let project = Project(
             sources: ["iOS/**/*.swift", "Sources/Views/StatusFlowLayout.swift", "Sources/Views/PersonLabel.swift",
                       "Sources/Views/ExtraContextMarkdown.swift", "Sources/Views/DraftRegenerationSheet.swift",
                       "Sources/Views/MergeRequestDescription.swift",
-                      "Sources/Views/ApprovalBadgeColor.swift"],
+                      "Sources/Views/ApprovalBadgeColor.swift", "Sources/Views/InboxUpdateTimestamp.swift"],
             resources: ["Resources/MergeActions.xcstrings", "Resources/Remote.xcstrings", "Resources/Board.xcstrings",
                         "Resources/MRHumanAction.xcstrings", "Resources/AuthorFeedback.xcstrings", "Resources/MRDependencies.xcstrings",
                         "Resources/CommentReview.xcstrings", "Resources/FeedbackSuggestions.xcstrings", "Resources/DraftRegeneration.xcstrings",

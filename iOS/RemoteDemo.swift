@@ -115,7 +115,8 @@ import MergeTetherRemote
                 url: URL(string: "https://gitlab.example.org/example/payments-api/-/merge_requests/41"),
                 detail: "Merge request merged", actions: [.init(id: "seen", kind: .markDone, token: "preview")],
                 needsAttention: false, mergeRequestIID: 41,
-                presentation: .init(author: "Alex Example", repository: "payments-api", draftBadge: "Merged"))
+                presentation: .init(author: "Alex Example", repository: "payments-api", draftBadge: "Merged"),
+                completionObservedAt: .now.addingTimeInterval(-300))
         ]),
     ])
 

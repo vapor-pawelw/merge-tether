@@ -11,7 +11,8 @@ import MergeTetherRemote
             presentation: .init(author: completion.author?.person.displayName,
                 repository: completion.url.gitLabProjectPath.split(separator: "/").last.map(String.init) ?? "",
                 draftBadge: String(localized: state.badge),
-                authorUsername: completion.author?.username, authorAvatarURL: completion.author?.avatarURL))
+                authorUsername: completion.author?.username, authorAvatarURL: completion.author?.avatarURL),
+            completionObservedAt: completion.observedAt)
         if let token = try? RemoteDigest.token([account, try RemoteDigest.token(completion)]) {
             card.actions = [.init(id: "seen", kind: .markDone, token: token)]
         }

@@ -36,8 +36,11 @@ struct BoardMRCompletionCard: View {
                     repositoryPath: completion.url.gitLabProjectPath)
             }
             HStack(spacing: 8) {
-                Text(completion.kind == .merged ? .MRLifecycle.completionMerged : .MRLifecycle.completionClosed)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(completion.kind == .merged ? .MRLifecycle.completionMerged : .MRLifecycle.completionClosed)
+                        .foregroundStyle(.secondary)
+                    InboxUpdateTimestamp(date: completion.observedAt)
+                }
                 Spacer(minLength: 6)
                 seenButton
             }

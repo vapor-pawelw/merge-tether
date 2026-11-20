@@ -255,6 +255,19 @@ struct RemoteHostSessionTests {
         #expect(f.monitor.lifecycleCompletions.isEmpty)
     }
 
+    @Test func inboxSnapshotIncludesWhenTheMacObservedTheCompletion() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        await f.host.startupLoadTask?.value
+        let receipt = try #require(f.monitor.lifecycleCompletions.first)
+        let board = try await f.board()
+        let card = try #require(board.cards.first { $0.id == "completion:\(receipt.id)" })
+
+        let payload = try JSONEncoder().encode(card)
+        let received = try JSONDecoder().decode(RemoteCard.self, from: payload)
+        #expect(received.completionObservedAt == receipt.observedAt)
+    }
+
     @Test func inboxSeenAcknowledgesTheCompletionWithoutRefreshingGitLab() async throws {
         let f = try Fixture(); defer { f.clean() }
         await f.host.startupLoadTask?.value

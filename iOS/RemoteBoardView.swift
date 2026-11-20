@@ -297,6 +297,7 @@ struct RemoteCardView: View {
     var actionsModel: RemotePhoneModel? = nil
     private var primaryCTA: RemoteCardCTA? { card.primaryCTA.flatMap { $0.duplicatesCardTap ? nil : $0 } }
     private var secondaryCTA: RemoteCardCTA? { card.presentation?.secondaryCTA.flatMap { $0.duplicatesCardTap ? nil : $0 } }
+    private var inboxUpdateDate: Date? { expanded ? nil : card.completionObservedAt }
     private var directAction: RemoteAction? {
         guard let actionsModel else { return nil }
         let actions = actionsModel.pendingActionCard.flatMap { $0.id == card.id ? $0.actions : nil } ?? card.actions
@@ -411,7 +412,7 @@ struct RemoteCardView: View {
         }
     }
     private var hasInformation: Bool {
-        (expanded && branches != nil) || !card.detail.isEmpty
+        (expanded && branches != nil) || !card.detail.isEmpty || inboxUpdateDate != nil
             || card.presentation?.requirements?.isEmpty == false || card.visibleStatus != nil
             || card.presentation?.pendingDrafts != nil || card.dependencies != nil
             || card.presentation?.steps?.isEmpty == false || card.visibleNextStep != nil
@@ -435,6 +436,9 @@ struct RemoteCardView: View {
                 .font(expanded ? .callout : .subheadline)
                 .foregroundStyle(card.needsAttention == true ? .orange : .secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            }
+            if let date = inboxUpdateDate {
+                InboxUpdateTimestamp(date: date)
             }
             if let requirements = card.presentation?.requirements, !requirements.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {

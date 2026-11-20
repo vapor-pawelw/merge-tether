@@ -236,6 +236,27 @@
         "pl": { "stringUnit": { "state": "translated", "value": "Aktualizacje" } }
       }
     },
+    "board.inbox.update.justNow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Just now" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Przed chwilą" } }
+      }
+    },
+    "board.inbox.update.showFullDate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Show full date and time" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Pokaż pełną datę i godzinę" } }
+      }
+    },
+    "board.inbox.update.showRelativeTime": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Show time since arrival" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Pokaż czas od otrzymania aktualizacji" } }
+      }
+    },
     "board.lane.own": {
       "extractionState": "manual",
       "localizations": {
