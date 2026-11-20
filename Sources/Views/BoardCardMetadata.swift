@@ -40,6 +40,30 @@ struct BoardMRReferenceLine: View {
     }
 }
 
+struct MRRepositoryPathPopover: ViewModifier {
+    let path: String
+    var dependencyHelp: Text? = nil
+    @State private var showsPath = false
+
+    func body(content: Content) -> some View {
+        content
+            .contentShape(Rectangle())
+            .onHover { showsPath = $0 && !path.isEmpty }
+            .popover(isPresented: $showsPath, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(verbatim: path).font(.callout.monospaced())
+                    if let dependencyHelp {
+                        dependencyHelp.font(.callout)
+                    }
+                }
+                .foregroundStyle(.primary)
+                .frame(maxWidth: 360, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(12)
+            }
+    }
+}
+
 struct BoardDraftBadge: View {
     var body: some View {
         Text(.Menu.menuMrDraftBadge)
@@ -99,26 +123,31 @@ struct MRDependencyRow: View {
         }
     }
 
-    private func referenceLine(_ reference: Text, hasReference: Bool = true) -> some View {
+    @ViewBuilder private func referenceLine(_ reference: Text, hasReference: Bool = true) -> some View {
         let repository = Text(verbatim: repositoryName).foregroundStyle(Color.accentColor)
         let separator = Text(verbatim: repositoryName.isEmpty || !hasReference ? "" : " ")
         let reference = reference.monospacedDigit().foregroundStyle(.secondary)
-        return Text("\(repository)\(separator)\(reference)")
+        let line = Text("\(repository)\(separator)\(reference)")
             .font(.caption)
             .fixedSize(horizontal: false, vertical: true)
-            .help(tooltip)
+
+        if repositoryPath.isEmpty {
+            line.help(dependencyHelp ?? Text(verbatim: ""))
+        } else {
+            line.modifier(MRRepositoryPathPopover(path: repositoryPath, dependencyHelp: dependencyHelp))
+        }
     }
 
-    private var tooltip: Text {
+    private var dependencyHelp: Text? {
         let references = summary?.predecessors.map { "\($0.title)\n\($0.url.gitLabProjectPath)" } ?? []
-        let paths = ([repositoryPath].filter { !$0.isEmpty } + references).joined(separator: "\n")
+        let paths = references.joined(separator: "\n")
         if let position = summary?.stackPosition {
             let positionLabel = Text(.MRDependencies.mrDependenciesStackPosition(position))
             let positionHelp = Text(.MRDependencies.mrDependenciesPositionHelp)
             let pathsLabel = Text(verbatim: paths.isEmpty ? "" : "\n" + paths)
             return Text("\(positionLabel)\n\(positionHelp)\(pathsLabel)")
         }
-        return Text(verbatim: paths)
+        return paths.isEmpty ? nil : Text(verbatim: paths)
     }
 
     private var description: AttributedString {

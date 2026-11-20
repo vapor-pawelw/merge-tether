@@ -30,6 +30,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Fix the full repository path popover when hovering over the short name in Mac merge request details.
 
+- Show the full repository path in the same hover popover on Mac merge request cards.
+
 - On someone else’s merge request, draft replies in other people’s threads only to correct a verified error that matters to a technical or review decision.
 
 - Show **Proposed solution** beside agent recommendations in drafts and published discussions on Mac and iPhone. Open the label to read the agent’s reasoning and assumptions.

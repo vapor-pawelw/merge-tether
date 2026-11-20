@@ -39,7 +39,6 @@ struct CommandCenterMRDetail: View {
 
 private struct MRDetailRepositoryLabel: View {
     let path: String
-    @State private var showsPath = false
 
     var body: some View {
         Text(verbatim: path.split(separator: "/").last.map(String.init) ?? path)
@@ -47,16 +46,7 @@ private struct MRDetailRepositoryLabel: View {
             .fontWeight(.semibold)
             .lineLimit(1).truncationMode(.middle)
             .accessibilityLabel(Text(verbatim: path))
-            .contentShape(Rectangle())
-            .onHover { showsPath = $0 && !path.isEmpty }
-            .popover(isPresented: $showsPath, arrowEdge: .bottom) {
-                Text(verbatim: path)
-                    .font(.callout.monospaced())
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: 360, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(12)
-            }
+            .modifier(MRRepositoryPathPopover(path: path))
     }
 }
 
