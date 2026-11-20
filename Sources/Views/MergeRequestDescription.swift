@@ -15,7 +15,7 @@ struct MergeRequestDescription: View {
             } label: {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(title).font(.body.weight(.medium))
-                    Text(SafeInlineMarkdown.render(source) ?? AttributedString(source))
+                    Text(SafeMarkdown.render(source) ?? AttributedString(source))
                         .font(.callout)
                         .lineSpacing(3)
                         .lineLimit(isExpanded ? nil : 3)

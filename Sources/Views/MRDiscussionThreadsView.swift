@@ -282,7 +282,6 @@ private struct MRDiscussionThreadView: View {
                     extraContext: extraContexts.forNote(firstComment.id))
                     .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary)
                 if !isExpanded, let body = firstComment.body {
-                    // Same inline Markdown as the expanded comment.
                     Text(markdownCache.render(body) ?? AttributedString(body)).font(.callout)
                         .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary).lineLimit(2)
                         .padding(.top, 1)
@@ -706,7 +705,6 @@ private struct MRDiscussionOriginBadge: View {
     }
 }
 
-/// Native inline Markdown preserves multiline text and never loads HTML or remote images.
 private struct MRDiscussionBody: View {
     let source: String?
     let markdownCache: MRDiscussionMarkdownCache

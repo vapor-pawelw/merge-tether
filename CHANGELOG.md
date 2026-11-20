@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Render Markdown headings, lists, quotes, and code blocks in merge request descriptions and comments on Mac and iPhone.
+
 - Highlight merge requests that need attention with a padded inline callout, give MR cards a clearer border, and bring MR titles and repository labels closer together on Mac and iPhone.
 
 - Give the information below attention messages more room and bring action buttons closer to the rest of the merge request card.

@@ -533,7 +533,7 @@ private struct RemoteOriginResumeBanner: View {
     }
 }
 
-/// The same inline Markdown formatting used by the Mac for GitLab content.
+/// The same Markdown formatting used by the Mac for GitLab content.
 struct RemoteMarkdownText: View {
     let source: String
     @State private var rendered: Rendered?
@@ -548,7 +548,7 @@ struct RemoteMarkdownText: View {
         }
         .task(id: source) {
             let input = source
-            let text = await Task.detached(priority: .userInitiated) { SafeInlineMarkdown.render(input) }.value
+            let text = await Task.detached(priority: .userInitiated) { SafeMarkdown.render(input) }.value
             guard !Task.isCancelled else { return }
             rendered = Rendered(source: input, text: text)
         }

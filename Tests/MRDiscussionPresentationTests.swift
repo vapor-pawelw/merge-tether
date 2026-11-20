@@ -121,11 +121,17 @@ struct MRDiscussionPresentationTests {
 
 @MainActor
 struct MRDiscussionMarkdownCacheTests {
+    @Test func rendersHeadingsAndParagraphsInCommentBodies() {
+        let rendered = MRDiscussionMarkdownCache().render("# Feedback\n\nPlease update **this**.")
+
+        #expect(rendered.map { String($0.characters) } == "Feedback\n\nPlease update this.")
+    }
+
     @Test func reusesSanitizedMarkdownUntilItsExactSourceChanges() {
         var calls = 0
         let cache = MRDiscussionMarkdownCache(render: { source in
             calls += 1
-            return SafeInlineMarkdown.render(source)
+            return SafeMarkdown.render(source)
         })
         let source = "**Feedback** [unsafe](file:///private/local) ![image](https://example.test/image.png)"
         let rendered = cache.render(source)

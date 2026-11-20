@@ -12,7 +12,7 @@ final class MRDiscussionMarkdownCache {
     private var retainedSourceBytes = 0
 
     init(capacity: Int = 128, maximumSourceBytes: Int = 2_097_152,
-         render: @escaping (String) -> AttributedString? = SafeInlineMarkdown.render) {
+         render: @escaping (String) -> AttributedString? = SafeMarkdown.render) {
         self.capacity = max(0, capacity)
         self.maximumSourceBytes = max(0, maximumSourceBytes)
         renderSource = render
