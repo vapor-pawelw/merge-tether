@@ -1094,17 +1094,6 @@
         }
       }
     },
-    "remoteDetail.feedbackNeedsVerification": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Unverified"
-          }
-        }
-      }
-    },
     "remoteDetail.feedbackInformational": {
       "extractionState": "manual",
       "localizations": {

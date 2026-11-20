@@ -45,18 +45,17 @@ struct MRDiscussionSnapshotTests {
     func conclusiveFeedbackBadgesAreIndependentOfResolutionReplyAndOrigin(_ state: String) throws {
         let assessment = try JSONDecoder().decode(ReReviewAssessment.self,
             from: Data("{\"notes\":[{\"noteID\":1,\"state\":\"\(state)\",\"reason\":\"Current evidence\"}]}".utf8))
-        let expected: MRDiscussionSnapshot.Feedback = switch state {
+        let expected: MRDiscussionSnapshot.Feedback? = switch state {
         case "addressed": .addressed
         case "informational": .informational
         case "blocking": .pending
         case "ignoredByUser": .ignored
-        default: .needsVerification
+        default: nil
         }
         for resolved in [false, true] {
             let thread = try presentationThread(notes: "[{\"id\":1,\"author\":{\"id\":7},\"resolvable\":true,\"resolved\":\(resolved)},{\"id\":2,\"author\":{\"id\":9,\"username\":\"me\"}}]",
                 origins: [1: .verifiedAssistant], assessment: assessment, authorID: 9)
-            let displayed: MRDiscussionSnapshot.Feedback? = resolved && expected == .needsVerification ? nil : expected
-            #expect(thread.feedback == displayed)
+            #expect(thread.feedback == expected)
             #expect(!thread.replySummary(currentUsername: "me").showsPublishedReply)
         }
     }
@@ -65,10 +64,10 @@ struct MRDiscussionSnapshotTests {
         ("rejected,informational", MRDiscussionSnapshot.Feedback.addressed),
         ("addressed,rejected,informational", .addressed),
         ("blocking,rejected,informational", .pending),
-        ("uncertain,rejected,informational", .needsVerification)
+        ("uncertain,rejected,informational", nil)
     ])
     func semanticallyResolvedFeedbackIncludesRejectedConcernsWithoutANewAggregateLabel(
-        sequence: String, expected: MRDiscussionSnapshot.Feedback) throws {
+        sequence: String, expected: MRDiscussionSnapshot.Feedback?) throws {
         let states = sequence.split(separator: ",").map(String.init)
         let entries = states.enumerated().map { index, state in
             ["noteID": index + 1, "state": state, "reason": "Current source evidence"] as [String: Any]
@@ -86,14 +85,14 @@ struct MRDiscussionSnapshotTests {
         #expect(snapshot.threads.first?.feedback == expected)
     }
 
-    @Test func missingOrPartialAssessmentsNeverClaimFeedbackAddressed() throws {
+    @Test func missingOrPartialAssessmentsHaveNoFeedbackBadge() throws {
         let notes = #"[{"id":1,"author":{"id":7},"resolvable":true,"resolved":false},{"id":2,"author":{"id":8}},{"id":3,"author":{"id":9,"username":"me"}}]"#
         let partial = ReReviewAssessment(notes: [.init(noteID: 1, state: .addressed, reason: "Checked")])
-        #expect(try presentationThread(notes: notes, authorID: 9).feedback == .needsVerification)
-        #expect(try presentationThread(notes: notes, assessment: partial, authorID: 9).feedback == .needsVerification)
-        #expect(try presentationThread(notes: notes, assessment: partial).feedback == .needsVerification)
-        #expect(MRDiscussionSnapshot.Feedback.summarize(notes: [(nil, 7)], assessment: partial, authorID: 9) == .needsVerification)
-        #expect(MRDiscussionSnapshot.Feedback.summarize(notes: [(1, nil)], assessment: partial, authorID: 9) == .needsVerification)
+        #expect(try presentationThread(notes: notes, authorID: 9).feedback == nil)
+        #expect(try presentationThread(notes: notes, assessment: partial, authorID: 9).feedback == nil)
+        #expect(try presentationThread(notes: notes, assessment: partial).feedback == nil)
+        #expect(MRDiscussionSnapshot.Feedback.summarize(notes: [(nil, 7)], assessment: partial, authorID: 9) == nil)
+        #expect(MRDiscussionSnapshot.Feedback.summarize(notes: [(1, nil)], assessment: partial, authorID: 9) == nil)
     }
 
     @Test func resolvedThreadWithoutAnAssessmentHasNoFeedbackBadge() throws {
@@ -111,7 +110,7 @@ struct MRDiscussionSnapshotTests {
         #expect(MRDiscussionSnapshot.Feedback.summarize(notes: [(3, 9)], assessment: nil, authorID: 9) == .notApplicable)
         let duplicate = ReReviewAssessment(notes: [.init(noteID: 1, state: .addressed, reason: "Checked"),
             .init(noteID: 1, state: .addressed, reason: "Duplicate")])
-        #expect(MRDiscussionSnapshot.Feedback.summarize(notes: [(1, 7)], assessment: duplicate, authorID: 9) == .needsVerification)
+        #expect(MRDiscussionSnapshot.Feedback.summarize(notes: [(1, 7)], assessment: duplicate, authorID: 9) == nil)
     }
 
     @Test(arguments: [

@@ -745,7 +745,6 @@ private struct MRDiscussionFeedbackBadge: View {
         switch state {
         case .addressed: .MRDiscussions.mrDiscussionsFeedbackAddressed
         case .pending: .MRDiscussions.mrDiscussionsFeedbackPending
-        case .needsVerification: .MRDiscussions.mrDiscussionsFeedbackNeedsVerification
         case .informational: .MRDiscussions.mrDiscussionsFeedbackInformational
         case .ignored: .MRDiscussions.mrDiscussionsFeedbackIgnored
         case .partlyIgnored: .MRDiscussions.mrDiscussionsFeedbackPartlyIgnored
@@ -755,7 +754,7 @@ private struct MRDiscussionFeedbackBadge: View {
     private var color: Color {
         switch state {
         case .addressed: .green
-        case .pending, .needsVerification: .orange
+        case .pending: .orange
         case .informational, .ignored, .partlyIgnored, .notApplicable: .secondary
         }
     }
@@ -763,7 +762,6 @@ private struct MRDiscussionFeedbackBadge: View {
         switch state {
         case .addressed: "checkmark.seal"
         case .pending: "exclamationmark.bubble"
-        case .needsVerification: "questionmark.circle"
         case .informational, .notApplicable: "info.circle"
         case .ignored, .partlyIgnored: "minus.circle"
         }

@@ -66,7 +66,7 @@ import MergeTetherRemote
             authorID: 3, currentUsername: scenario == "otherAccount" ? "someoneElse" : "owner")
         let thread = try #require(details.threads?.first)
         #expect(thread.showsPublishedReply == (scenario == "informational"))
-        #expect(thread.feedback == (scenario == "stale" ? .needsVerification : .addressed))
+        #expect(thread.feedback == (scenario == "stale" ? nil : .addressed))
         #expect(thread.draftCount == (scenario == "draft" ? 1 : 0))
     }
 

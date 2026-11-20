@@ -38,20 +38,20 @@ struct MRDiscussionSnapshot {
     enum OriginBadge: Equatable, Sendable { case ai, uncertain, human }
     enum State: Equatable { case open, resolved, general }
     enum Feedback: String, Equatable, Sendable {
-        case addressed, pending, needsVerification, informational, ignored, partlyIgnored, notApplicable
+        case addressed, pending, informational, ignored, partlyIgnored, notApplicable
 
         /// The caller supplies an assessment already bound to the current head, context and discussion text.
-        static func summarize(notes: [(id: Int?, authorID: Int?)], assessment: ReReviewAssessment?, authorID: Int?) -> Self {
-            guard let authorID, authorID > 0, notes.allSatisfy({ ($0.authorID ?? 0) > 0 }) else { return .needsVerification }
+        static func summarize(notes: [(id: Int?, authorID: Int?)], assessment: ReReviewAssessment?, authorID: Int?) -> Self? {
+            guard let authorID, authorID > 0, notes.allSatisfy({ ($0.authorID ?? 0) > 0 }) else { return nil }
             let external = notes.filter { $0.authorID != authorID }
             guard !external.isEmpty else { return .notApplicable }
-            guard let assessment else { return .needsVerification }
+            guard let assessment else { return nil }
             let ids = external.compactMap(\.id)
-            guard ids.count == external.count, ids.allSatisfy({ $0 > 0 }), Set(ids).count == ids.count else { return .needsVerification }
+            guard ids.count == external.count, ids.allSatisfy({ $0 > 0 }), Set(ids).count == ids.count else { return nil }
             let verdicts = Dictionary(grouping: assessment.notes, by: \.noteID)
             let states = ids.compactMap { id in verdicts[id]?.count == 1 ? verdicts[id]?.first?.state : nil }
             if states.contains(.blocking) { return .pending }
-            guard states.count == ids.count, !states.contains(.uncertain) else { return .needsVerification }
+            guard states.count == ids.count, !states.contains(.uncertain) else { return nil }
             if states.allSatisfy({ $0 == .ignoredByUser }) { return .ignored }
             if states.contains(.ignoredByUser) { return .partlyIgnored }
             if states.allSatisfy({ $0 == .informational }) { return .informational }
@@ -193,7 +193,7 @@ struct MRDiscussionSnapshot {
                 discussionID: discussion.id, notes: notes, drafts: pending.map(\.element), state: state,
                 location: location, origins: threadOrigins,
                 authorKinds: authorKinds.filter { id, _ in notes.contains { $0.author?.id == id } },
-                feedback: state == .resolved && feedback == .needsVerification ? nil : feedback,
+                feedback: feedback,
                 verifiedReplyAuthors: Self.replyAuthorsCoveringFeedback(notes: notes.map(ReplyEvidence.from),
                     allNotes: allReplyEvidence, assessment: assessment, authorID: authorID)))
         }

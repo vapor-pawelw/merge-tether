@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Show **Proposed solution** beside agent recommendations in drafts and published discussions on Mac and iPhone. Open the label to read the agent’s reasoning and assumptions.
 
-- Rename the discussion badge **Needs verification** to **Unverified** on Mac and iPhone.
+- Show discussion feedback badges for concrete outcomes on Mac and iPhone.
 
 - Show GitLab activity and MergeTether actions together in a compact **Event log** above **Details** on Mac. Comments can jump to their discussion. App actions show their source, with an **Automated** badge for autonomous actions. Move agent usage to its own section.
 
@@ -24,7 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Remove the Activity and agent runs shortcut from the iPhone board action row. Run history remains available in MR Details.
 
-- Display current standalone re-review results on discussions and omit the verification badge on resolved threads without a conclusive result.
+- Display current standalone re-review results on discussions.
 
 - Use 16 pt insets and section gaps on iPhone merge request cards, with 8 pt between rows within each section.
 

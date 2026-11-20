@@ -312,8 +312,7 @@ private struct RemoteDiscussionCard: View {
                         .font(.caption.weight(.medium)).foregroundStyle(color)
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(color.opacity(0.07), in: Capsule())
-                    let feedback = thread.feedback ?? .needsVerification
-                    if thread.state != .resolved || feedback != .needsVerification { feedbackBadge(feedback) }
+                    if let feedback = thread.feedback { feedbackBadge(feedback) }
                     if thread.showsPublishedReply {
                         Text(replyTitle).font(.caption).foregroundStyle(Color.blue)
                             .accessibilityHint(Text(.RemoteDetail.remoteDetailReplyPublishedHelp))
@@ -398,35 +397,23 @@ private struct RemoteDiscussionCard: View {
                 .font(.caption).frame(minHeight: 44)
         }
     }
-    private func feedbackBadge(_ feedback: RemoteDetailThread.Feedback) -> some View {
-        let title: LocalizedStringResource = switch feedback {
-        case .addressed: .RemoteDetail.remoteDetailFeedbackAddressed
-        case .pending: .RemoteDetail.remoteDetailFeedbackPending
-        case .needsVerification: .RemoteDetail.remoteDetailFeedbackNeedsVerification
-        case .informational: .RemoteDetail.remoteDetailFeedbackInformational
-        case .ignored: .RemoteDetail.remoteDetailFeedbackIgnored
-        case .partlyIgnored: .RemoteDetail.remoteDetailFeedbackPartlyIgnored
-        case .notApplicable: .RemoteDetail.remoteDetailFeedbackNotApplicable
+    @ViewBuilder private func feedbackBadge(_ feedback: RemoteDetailThread.Feedback) -> some View {
+        let badge: (title: LocalizedStringResource, color: Color, symbol: String)? = switch feedback {
+        case .addressed: (.RemoteDetail.remoteDetailFeedbackAddressed, .green, "checkmark.seal")
+        case .pending: (.RemoteDetail.remoteDetailFeedbackPending, .orange, "exclamationmark.bubble")
+        case .informational: (.RemoteDetail.remoteDetailFeedbackInformational, .secondary, "info.circle")
+        case .ignored: (.RemoteDetail.remoteDetailFeedbackIgnored, .secondary, "minus.circle")
+        case .partlyIgnored: (.RemoteDetail.remoteDetailFeedbackPartlyIgnored, .secondary, "minus.circle")
+        case .notApplicable: (.RemoteDetail.remoteDetailFeedbackNotApplicable, .secondary, "info.circle")
+        case .needsVerification: nil // Older Mac hosts can still send this value.
         }
-        let color: Color = switch feedback {
-        case .addressed: .green
-        case .pending, .needsVerification: .orange
-        case .informational, .ignored, .partlyIgnored, .notApplicable: .secondary
+        if let badge {
+            let explanation: LocalizedStringResource = feedback == .addressed
+                ? .RemoteDetail.remoteDetailFeedbackAddressedHelp : .RemoteDetail.remoteDetailFeedbackHelp
+            Label(badge.title, systemImage: badge.symbol).font(.caption.weight(.medium)).foregroundStyle(badge.color)
+                .padding(.horizontal, 7).padding(.vertical, 3).background(badge.color.opacity(0.08), in: Capsule())
+                .accessibilityHint(Text(explanation))
         }
-        let symbol: String = switch feedback {
-        case .addressed: "checkmark.seal"
-        case .pending: "exclamationmark.bubble"
-        case .needsVerification: "questionmark.circle"
-        case .informational, .notApplicable: "info.circle"
-        case .ignored, .partlyIgnored: "minus.circle"
-        }
-        let explanation: LocalizedStringResource = switch feedback {
-        case .addressed: .RemoteDetail.remoteDetailFeedbackAddressedHelp
-        default: .RemoteDetail.remoteDetailFeedbackHelp
-        }
-        return Label(title, systemImage: symbol).font(.caption.weight(.medium)).foregroundStyle(color)
-            .padding(.horizontal, 7).padding(.vertical, 3).background(color.opacity(0.08), in: Capsule())
-            .accessibilityHint(Text(explanation))
     }
     private var replyTitle: LocalizedStringResource {
         switch thread.reply {

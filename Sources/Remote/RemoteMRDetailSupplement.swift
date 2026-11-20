@@ -160,10 +160,9 @@ import MergeTetherRemote
         details.threads = details.threads.map { threads in
             threads.map { original in
                 var thread = original
-                let feedback = MRDiscussionSnapshot.Feedback.summarize(
+                thread.feedback = MRDiscussionSnapshot.Feedback.summarize(
                     notes: thread.notes.map { (Int($0.id), $0.authorID) }, assessment: assessment, authorID: authorID)
-                thread.feedback = thread.state == .resolved && feedback == .needsVerification
-                    ? nil : .init(rawValue: feedback.rawValue)
+                    .flatMap { .init(rawValue: $0.rawValue) }
                 let authors = MRDiscussionSnapshot.replyAuthorsCoveringFeedback(notes: thread.notes.map(evidence),
                     allNotes: allNotes, assessment: assessment, authorID: authorID)
                 if let currentUsername, !currentUsername.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

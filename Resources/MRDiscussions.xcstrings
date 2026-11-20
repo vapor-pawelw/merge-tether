@@ -552,17 +552,6 @@
         }
       }
     },
-    "mrDiscussions.feedbackNeedsVerification": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Unverified"
-          }
-        }
-      }
-    },
     "mrDiscussions.feedbackInformational": {
       "extractionState": "manual",
       "localizations": {
