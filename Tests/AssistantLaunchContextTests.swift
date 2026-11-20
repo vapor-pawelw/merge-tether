@@ -37,6 +37,20 @@ struct AssistantLaunchContextTests {
         #expect(command.hasSuffix(AssistantLaunchContext.shellQuote(context.prompt + "\n\nExplain the change")))
     }
 
+    @Test func t3CodeDraftLinkCarriesOnlyMRContextAndPreservesSpecialCharacters() throws {
+        let context = AssistantLaunchContext(url: URL(string: "https://gitlab.example.org/team/repo/-/merge_requests/7")!,
+                                             title: "C++ & owner=team #42 100%\nŁódź 🐈")
+        let url = try #require(context.t3CodeDraftURL)
+        let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
+
+        #expect(components.scheme == "t3code")
+        #expect(components.host == "new")
+        #expect(components.path.isEmpty)
+        #expect(components.fragment == nil)
+        #expect(components.queryItems == [URLQueryItem(name: "prompt", value: context.prompt)])
+        #expect(components.percentEncodedQuery?.contains("+") == false)
+    }
+
     @MainActor @Test func desktopContextIsAnAttachmentWithOnlyMRMetadata() throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

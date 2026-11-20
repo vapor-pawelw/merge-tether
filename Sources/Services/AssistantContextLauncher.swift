@@ -4,16 +4,21 @@ import Foundation
 @MainActor
 enum AssistantContextLauncher {
     enum Destination: String, CaseIterable, Identifiable, Sendable {
-        case codexApp, claudeDesktop, codexCLI, claudeCLI
+        case codexApp, claudeDesktop, t3Code, codexCLI, claudeCLI
         var id: String { rawValue }
-        var assistant: AutomationAssistant {
-            switch self { case .codexApp, .codexCLI: .codex; case .claudeDesktop, .claudeCLI: .claude }
+        fileprivate var cliAssistant: AutomationAssistant? {
+            switch self {
+            case .codexCLI: .codex
+            case .claudeCLI: .claude
+            case .codexApp, .claudeDesktop, .t3Code: nil
+            }
         }
-        var isCLI: Bool { self == .codexCLI || self == .claudeCLI }
+        var isCLI: Bool { cliAssistant != nil }
         var label: LocalizedStringResource {
             switch self {
             case .codexApp: .AssistantContext.assistantContextCodexApp
             case .claudeDesktop: .AssistantContext.assistantContextClaudeDesktop
+            case .t3Code: .AssistantContext.assistantContextT3Code
             case .codexCLI: .AssistantContext.assistantContextCodexCLI
             case .claudeCLI: .AssistantContext.assistantContextClaudeCLI
             }
@@ -22,8 +27,17 @@ enum AssistantContextLauncher {
 
     static func availableDestinations() -> [Destination] {
         Destination.allCases.filter { destination in
-            destination.isCLI ? executable(for: destination.assistant) != nil
-                : AssistantAutomationRunner.desktopApplication(destination.assistant) != nil
+            if let assistant = destination.cliAssistant { return executable(for: assistant) != nil }
+            return desktopApplication(for: destination) != nil
+        }
+    }
+
+    private static func desktopApplication(for destination: Destination) -> URL? {
+        switch destination {
+        case .codexApp: AssistantAutomationRunner.desktopApplication(.codex)
+        case .claudeDesktop: AssistantAutomationRunner.desktopApplication(.claude)
+        case .t3Code: NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.t3tools.t3code")
+        case .codexCLI, .claudeCLI: nil
         }
     }
 
@@ -33,8 +47,8 @@ enum AssistantContextLauncher {
     }
 
     static func open(_ destination: Destination, context: AssistantLaunchContext, workspace: String, message: String = "") async throws {
-        if destination.isCLI {
-            guard let executable = executable(for: destination.assistant) else { throw LaunchError.unavailable }
+        if let assistant = destination.cliAssistant {
+            guard let executable = executable(for: assistant) else { throw LaunchError.unavailable }
             let directory = try contextDirectory(workspace: workspace)
             guard let command = context.terminalCommand(executable: executable, directory: directory, message: message)
             else { throw LaunchError.failed }
@@ -44,13 +58,19 @@ enum AssistantContextLauncher {
                 environment: AssistantCLI.environment)
             guard result.exitCode == 0 else { throw LaunchError.failed }
         } else {
-            guard let app = AssistantAutomationRunner.desktopApplication(destination.assistant) else { throw LaunchError.unavailable }
-            let attachment = try writeAttachment(context, in: contextRoot)
+            guard let app = desktopApplication(for: destination) else { throw LaunchError.unavailable }
+            let url: URL
+            if destination == .t3Code {
+                guard let draftURL = context.t3CodeDraftURL else { throw LaunchError.failed }
+                url = draftURL
+            } else {
+                // A file opens an unassigned conversation with an attachment and an empty composer.
+                // Keep the file available for the assistant to read after the user sends.
+                url = try writeAttachment(context, in: contextRoot)
+            }
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
-            // File-open starts an unassigned conversation with an attachment and an empty composer.
-            // Keep the file available: the assistant may read its local path after the user sends.
-            _ = try await NSWorkspace.shared.open([attachment], withApplicationAt: app, configuration: configuration)
+            _ = try await NSWorkspace.shared.open([url], withApplicationAt: app, configuration: configuration)
         }
     }
 

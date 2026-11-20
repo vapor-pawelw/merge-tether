@@ -12,6 +12,16 @@ struct AssistantLaunchContext: Sendable {
         """
     }
 
+    var t3CodeDraftURL: URL? {
+        var components = URLComponents()
+        components.scheme = "t3code"
+        components.host = "new"
+        components.queryItems = [URLQueryItem(name: "prompt", value: prompt)]
+        // T3 Code uses URLSearchParams, which interprets a literal plus as a space.
+        components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        return components.url
+    }
+
     func terminalCommand(executable: URL, directory: URL, message: String) -> String? {
         guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return "cd -- \(Self.shellQuote(directory.path)) && \(Self.shellQuote(executable.path)) \(Self.shellQuote(prompt + "\n\n" + message))"

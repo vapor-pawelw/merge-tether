@@ -34,6 +34,17 @@
         }
       }
     },
+    "assistant.context.t3Code": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "T3 Code"
+          }
+        }
+      }
+    },
     "assistant.context.codexCLI": {
       "extractionState": "manual",
       "localizations": {
@@ -106,7 +117,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open a separate conversation with this MR’s context. Desktop apps attach it with an empty message field. Hold Option to choose another app."
+            "value": "Open a separate conversation with this MR’s link and title. Hold Option to choose another app."
           }
         }
       }
@@ -172,7 +183,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Start a separate conversation with MR context attached. Hold Option when selecting the menu action to choose another app for one conversation."
+            "value": "Start a separate conversation with the MR’s link and title. Hold Option when selecting the menu action to choose another app for one conversation."
           }
         }
       }

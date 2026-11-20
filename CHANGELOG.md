@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Open a conversation draft in T3 Code from a merge request on Mac, with the MR link and title ready in the composer.
+
 - Shorten the pending draft summary and group it with the attention message. Add more room around the repository line and distinguish card backgrounds from the Mac board in both appearances.
 
 - Show short repository names on merge request cards and in details. Hover over the name on Mac or tap it on iPhone to see the full path.

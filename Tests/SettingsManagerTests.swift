@@ -194,15 +194,18 @@ struct SettingsManagerTests {
             discussionFingerprint: "checked", configuration: .init(settings), action: .enqueue, createdAt: date)
     }
 
-    @Test func manualConversationDestinationPersistsOnlyOnSaveAndIgnoresAutomationChoice() {
+    @Test(arguments: [AssistantContextLauncher.Destination.claudeDesktop, .t3Code])
+    func manualConversationDestinationPersistsOnlyOnSaveAndIgnoresAutomationChoice(
+        _ destination: AssistantContextLauncher.Destination
+    ) {
         let defaults = makeDefaults()
         let settings = SettingsManager(defaults: defaults)
         #expect(settings.conversationDestination == .codexApp)
-        settings.conversationDestination = .claudeDesktop
+        settings.conversationDestination = destination
         #expect(SettingsManager(defaults: defaults).conversationDestination == .codexApp)
         settings.automation.assistant = .codex
         settings.save()
-        #expect(SettingsManager(defaults: defaults).conversationDestination == .claudeDesktop)
+        #expect(SettingsManager(defaults: defaults).conversationDestination == destination)
         defaults.set("unknown-future-app", forKey: "conversationDestination")
         #expect(SettingsManager(defaults: defaults).conversationDestination == .codexApp)
     }
