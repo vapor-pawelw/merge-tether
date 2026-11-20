@@ -14,7 +14,7 @@ struct MergeRequestDescription: View {
                 isExpanded.toggle()
             } label: {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(title).font(.body.weight(.medium))
+                    Text(title).font(.body.weight(.semibold))
                     Text(SafeMarkdown.render(source) ?? AttributedString(source))
                         .font(.callout)
                         .lineSpacing(3)
@@ -27,7 +27,7 @@ struct MergeRequestDescription: View {
                         .accessibilityHidden(true)
                 }
                 .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .modifier(MRDetailStatusCard())
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
