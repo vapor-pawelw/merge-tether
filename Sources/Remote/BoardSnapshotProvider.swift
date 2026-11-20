@@ -28,8 +28,7 @@ import Foundation
               boardRefreshState == .current else { return false }
         var order = settings.boardManualOrder
         guard order.move(source, to: destination, in: boardSnapshot.manualOrderEntries) else { return false }
-        settings.saveBoardManualOrder(order)
-        return true
+        return settings.saveBoardManualOrder(order)
     }
 
     var inboxItems: [MergeRequestBoardSnapshot.OtherCard] {

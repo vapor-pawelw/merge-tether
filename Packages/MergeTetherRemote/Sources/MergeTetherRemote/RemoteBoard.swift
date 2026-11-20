@@ -212,6 +212,7 @@ public struct RemoteCard: Codable, Equatable, Identifiable, Sendable {
     public var approvals: RemoteApprovalProgress?
     public var contextRevision: String?
     public var completionObservedAt: Date?
+    public var orderGroup: RemoteBoardOrderGroup?
     public init(id: String, title: String, project: String, url: URL?, head: String? = nil,
                 detail: String = "", drafts: [RemoteDraft] = [], actions: [RemoteAction] = [],
                 needsAttention: Bool? = nil, mergeRequestIID: Int? = nil, primaryCTA: RemoteCardCTA? = nil,
@@ -337,9 +338,11 @@ public struct RemoteMessage: Codable, Sendable {
     public static let draftRegenerationCapability = "draft-regeneration-v1"
     public static let boardAvatarsCapability = "board-avatars-v1"
     public static let detailAvatarsCapability = "detail-avatars-v1"
+    public static let boardOrderCapability = "board-order-v1"
     public enum Kind: String, Codable, Sendable { case hello, snapshot, command, accepted, result, receipt, receiptResult = "receipt-result", unavailable, hostReady = "host-ready", detailRequest = "detail-request", details, cancelDetails = "cancel-details"
         case draftRegenerationRequest = "draft-regeneration-request", draftRegenerationPage = "draft-regeneration-page"
         case avatarThumbnails = "avatar-thumbnails"
+        case boardOrderRequest = "board-order-request"
     }
     public var type: Kind
     public var challenge: UUID?
@@ -354,6 +357,8 @@ public struct RemoteMessage: Codable, Sendable {
     public var draftRegenerationPage: RemoteDraftRegenerationPage?
     public var cachedAvatarURLs: [URL]?
     public var avatarThumbnails: [RemoteAvatarThumbnail]?
+    public var boardOrderMove: RemoteBoardOrderMove?
+    public var boardOrderApplied: Bool?
     /// True reads GitLab before answering. Otherwise the host returns its current board.
     public var refresh: Bool?
     public init(type: Kind, challenge: UUID? = nil, board: RemoteBoard? = nil,
@@ -362,7 +367,8 @@ public struct RemoteMessage: Codable, Sendable {
                 detailOrigins: RemoteDetailOrigins? = nil, refresh: Bool? = nil,
                 draftRegenerationRequest: RemoteDraftRegenerationPageRequest? = nil,
                 draftRegenerationPage: RemoteDraftRegenerationPage? = nil,
-                cachedAvatarURLs: [URL]? = nil, avatarThumbnails: [RemoteAvatarThumbnail]? = nil) {
+                cachedAvatarURLs: [URL]? = nil, avatarThumbnails: [RemoteAvatarThumbnail]? = nil,
+                boardOrderMove: RemoteBoardOrderMove? = nil, boardOrderApplied: Bool? = nil) {
         self.type = type; self.challenge = challenge; self.board = board; self.command = command; self.result = result
         self.refresh = refresh
         self.capabilities = capabilities
@@ -371,6 +377,8 @@ public struct RemoteMessage: Codable, Sendable {
         self.draftRegenerationRequest = draftRegenerationRequest; self.draftRegenerationPage = draftRegenerationPage
         self.cachedAvatarURLs = cachedAvatarURLs
         self.avatarThumbnails = avatarThumbnails
+        self.boardOrderMove = boardOrderMove
+        self.boardOrderApplied = boardOrderApplied
     }
 }
 

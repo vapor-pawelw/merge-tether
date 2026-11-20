@@ -110,13 +110,20 @@ private struct RemoteLaneView: View {
                     if lane.cards.isEmpty {
                         Text(.Remote.remoteEmpty).foregroundStyle(.secondary).padding(.top, 30)
                     }
-                    ForEach(lane.cards) { card in
-                        RemoteCardView(card: card, onOpen: { onOpen(card) },
-                            onOpenCTA: { onOpenCTA(card, $0) },
-                            actionsModel: model)
+                    ForEach(Array(lane.cards.enumerated()), id: \.element.id) { index, card in
+                        if let group = card.orderGroup,
+                           index == 0 || lane.cards[index - 1].orderGroup?.automationEnabled != group.automationEnabled {
+                            Text(group.automationEnabled ? .Remote.remoteBoardAutomationOn : .Remote.remoteBoardAutomationOff)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .accessibilityAddTraits(.isHeader)
+                        }
+                        boardCard(card)
                     }
                 }
                 .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: lane.cards.map(\.dependencies))
+                .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: lane.cards.map(\.id))
             }
             .scrollBounceBehavior(.always, axes: .vertical)
             .refreshable { await onRefresh?() }
@@ -124,5 +131,16 @@ private struct RemoteLaneView: View {
         .padding(14)
         .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 22))
         .accessibilityIdentifier("remote.lane.\(lane.id.rawValue)")
+    }
+
+    @ViewBuilder private func boardCard(_ card: RemoteCard) -> some View {
+        let source = model.state.canAct() ? model.state.board?.orderSource(for: card) : nil
+        let content = RemoteCardView(card: card, onOpen: { onOpen(card) }, onOpenCTA: { onOpenCTA(card, $0) },
+            actionsModel: model, orderDrag: source.map { .init(source: $0) })
+        if source != nil {
+            content.modifier(RemoteBoardOrderDropDestination(card: card, model: model))
+        } else {
+            content
+        }
     }
 }

@@ -67,6 +67,11 @@ let project = Project(
                 ])]),
                 "NSCameraUsageDescription": .string("Scan the pairing code shown by MergeTether on your Mac."),
                 "UILaunchScreen": .dictionary([:]),
+                "UTExportedTypeDeclarations": .array([.dictionary([
+                    "UTTypeIdentifier": .string("com.vaporpw.mergetether.remote-board-card"),
+                    "UTTypeConformsTo": .array([.string("public.data")]),
+                    "UTTypeDescription": .string("MergeTether board card"),
+                ])]),
             ]),
             sources: ["iOS/**/*.swift", "Sources/Views/StatusFlowLayout.swift", "Sources/Views/PersonLabel.swift",
                       "Sources/Views/ExtraContextMarkdown.swift", "Sources/Views/DraftRegenerationSheet.swift",

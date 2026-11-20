@@ -8,7 +8,7 @@ enum MRBoardOrderingMethod: String {
 struct MRBoardManualOrder: Codable, Equatable {
     typealias Target = MRAutomationScope.Target
 
-    struct Group: Equatable {
+    struct Group: Hashable {
         let reviewing: Bool
         let automationEnabled: Bool
         let pinned: Bool

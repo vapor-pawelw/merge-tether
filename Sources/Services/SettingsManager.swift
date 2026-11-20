@@ -102,10 +102,12 @@ final class SettingsManager {
     var effectiveBoardGrouping: MRBoardGrouping { boardGrouping.effective(for: configuredAutomation) }
     var mrLifecycleLedger = MergeRequestLifecycleLedger()
 
-    func saveBoardManualOrder(_ order: MRBoardManualOrder) {
-        guard boardManualOrder != order else { return }
+    @discardableResult
+    func saveBoardManualOrder(_ order: MRBoardManualOrder) -> Bool {
+        guard boardManualOrder != order else { return true }
+        guard persistenceStore.save(order, forKey: Key.boardManualOrder) else { return false }
         boardManualOrder = order
-        save()
+        return true
     }
 
     init(defaults: UserDefaults = .standard) {
