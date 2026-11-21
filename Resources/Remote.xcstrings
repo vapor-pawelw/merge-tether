@@ -1705,6 +1705,72 @@
           }
         }
       }
+    },
+    "remote.boardAutomationOn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation on"
+          }
+        }
+      }
+    },
+    "remote.boardAutomationOff": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation off"
+          }
+        }
+      }
+    },
+    "remote.boardPinned": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pinned"
+          }
+        }
+      }
+    },
+    "remote.boardReorder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Touch and hold, then drag to reorder."
+          }
+        }
+      }
+    },
+    "remote.boardOrderRejected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t move the card"
+          }
+        }
+      }
+    },
+    "remote.boardOrderRejectedHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move cards within the same section and pin group. If the order changed on your Mac, use the updated board and try again."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

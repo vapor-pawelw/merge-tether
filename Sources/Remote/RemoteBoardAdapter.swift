@@ -115,12 +115,26 @@ import MergeTetherRemote
                 title: $0.title, url: $0.url, isCurrent: $0.isCurrent) }, notice: dependencies.notice)
     }
 
-    static func board(monitor: TodoMonitorService, session: UUID, account: String) -> RemoteBoard {
+    static func boardOrderCardID(_ target: MRAutomationScope.Target) -> String {
+        "mr:\(target.projectID):\(target.iid ?? 0)"
+    }
+
+    static func board(monitor: TodoMonitorService, session: UUID, account: String,
+                      includesBoardOrder: Bool = false) -> RemoteBoard {
         let board = monitor.boardSnapshot
         let other = board.otherCards(jobs: monitor.assistantHandoffs, host: monitor.glab.resolvedHost,
             username: monitor.glab.currentUsername, pinnedCards: monitor.settings.boardPins)
         var result = project(board: board, other: other, session: session, account: account,
             intents: monitor.settings.mrActionIntents, conflictReceipts: monitor.settings.conflictReceipts)
+        var orderGroups: [String: RemoteBoardOrderGroup] = [:]
+        if includesBoardOrder {
+            for (group, entries) in Dictionary(grouping: board.manualOrderEntries, by: \.group) {
+                let ids = entries.map { boardOrderCardID($0.target) }
+                let orderGroup = RemoteBoardOrderGroup(lane: group.reviewing ? .reviewed : .own,
+                    automationEnabled: group.automationEnabled, pinned: group.pinned, cardIDs: ids)
+                for id in ids { orderGroups[id] = orderGroup }
+            }
+        }
         let rows = board.own + board.reviewed
         for lane in result.lanes.indices {
             for index in result.lanes[lane].cards.indices {
@@ -218,6 +232,7 @@ import MergeTetherRemote
                         status: MRActivity.agentStatus(.AutomationProgress.progressNotice, assistant: monitor.settings.automation.assistant),
                         working: true, statusSymbol: MRActionEffect.aiCheck.symbol)
                 }
+                card.orderGroup = orderGroups[card.id]
                 result.lanes[lane].cards[index] = card
             }
         }

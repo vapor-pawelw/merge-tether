@@ -5,10 +5,19 @@ import Testing
 @MainActor
 @Suite("SettingsManager")
 struct SettingsManagerTests {
+    @Test func existingInstallationsDefaultToManualBoardOrderWithAttentionPromotion() {
+        let defaults = makeDefaults()
+        let settings = SettingsManager(defaults: defaults)
+        settings.save()
+
+        #expect(defaults.string(forKey: "boardOrderingMethod") == "manual")
+        #expect(defaults.bool(forKey: "promoteBoardAttention"))
+    }
+
     @Test(arguments: ["automation", "mergeSubmissions", "automationReceipts", "automationAttemptReceipts",
         "authorFeedbackAttempts", "feedbackSuggestionDecisions", "pipelineRefreshAttempts",
         "pipelineClaimAssessmentAttempts", "pendingTodoAcknowledgements", "assistantHandoffs",
-        "workflowActivity", "automationEvents", "mrActionIntents", "routedMRTodoReceipts", "boardPins",
+        "workflowActivity", "automationEvents", "mrActionIntents", "routedMRTodoReceipts", "boardPins", "boardManualOrder",
         "mrLifecycleLedger", "conflictReceipts", "reReviewReceipts", "reReviewDraftBaselines",
         "pendingCommentReviews", "commentReviewProgress", "ignoredMergeRequests", "autoApproveOptOuts",
         "autoPublishOptOuts", "autoMergeOptOuts", "lastSeenTodoIDs"])
@@ -18,7 +27,7 @@ struct SettingsManagerTests {
         let corrupt = Data("{unreadable historical record".utf8)
         defaults.set(corrupt, forKey: key)
         let settings = SettingsManager(defaults: defaults)
-        let convenience = ["automationEvents", "boardPins", "lastSeenTodoIDs"].contains(key)
+        let convenience = ["automationEvents", "boardPins", "boardManualOrder", "lastSeenTodoIDs"].contains(key)
         #expect(settings.automaticActionsAllowed == convenience)
         #expect(settings.persistenceDegraded.contains(key) == !convenience)
         #expect(defaults.object(forKey: key + ".corrupt") == nil)

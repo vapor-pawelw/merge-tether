@@ -56,6 +56,26 @@ struct BoardPresentationCacheTests {
         }
     }
 
+    @Test func aDropUpdatesTheWarmFrameAndSwitchingMethodsRestoresEachOrder() throws {
+        try fixture { monitor, settings, _ in
+            for iid in [1, 2, 3] { settings.mrLifecycleLedger.record(try request(iid, title: "MR \(iid)"), for: target(iid)) }
+            let revision = monitor.glab.accountRevision
+            #expect(monitor.commandCenterDisplayFrame.board.own.map(\.id.iid) == [1, 2, 3])
+            #expect(!monitor.moveBoardCard(target(3), to: target(1), accountRevision: revision &+ 1))
+            #expect(monitor.moveBoardCard(target(3), to: target(1), accountRevision: revision))
+            #expect(monitor.commandCenterDisplayFrame.board.own.map(\.id.iid) == [3, 1, 2])
+
+            settings.boardOrderingMethod = .automatic
+            settings.save()
+            #expect(!monitor.moveBoardCard(target(2), to: target(1), accountRevision: revision))
+            #expect(monitor.commandCenterDisplayFrame.board.own.map(\.id.iid) == [1, 2, 3])
+
+            settings.boardOrderingMethod = .manual
+            settings.save()
+            #expect(monitor.commandCenterDisplayFrame.board.own.map(\.id.iid) == [3, 1, 2])
+        }
+    }
+
     private func fixture(_ body: (TodoMonitorService, SettingsManager, DeferredPresentationNotifications) throws -> Void) throws {
         let suite = "BoardPresentationCacheTests.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))

@@ -197,6 +197,43 @@ struct RemoteHostStartupTests {
 
 @MainActor
 struct RemoteHostSessionTests {
+    @Test func negotiatedBoardOrderMovesUseTheCurrentMacGroupAndReturnTheSavedOrderWithoutReadingGitLab() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        await f.host.startupLoadTask?.value
+        for iid in [21, 22, 23] {
+            let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 7, iid: iid)
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data("""
+            {"project_id":7,"iid":\(iid),"author":{"id":1,"username":"me","name":"Author"},"title":"MR \(iid)",
+             "web_url":"https://gitlab.example.test/team/repo/-/merge_requests/\(iid)","state":"opened","draft":false,
+             "source_branch":"feature","target_branch":"main","labels":[]}
+            """.utf8))
+            f.monitor.settings.mrLifecycleLedger.record(request, for: target)
+        }
+        let legacy = try await f.board()
+        #expect(legacy.cards.allSatisfy { $0.orderGroup == nil })
+        f.gitlab.requests.removeAll()
+        await f.transport.onMessage?(.init(type: .hello, challenge: UUID(), capabilities: [RemoteMessage.boardOrderCapability]))
+        let initial = try #require(f.transport.messages.last?.board)
+        let third = try #require(initial.cards.first { $0.id == "mr:7:23" })
+        let source = try #require(initial.orderSource(for: third))
+        let move = RemoteBoardOrderMove(source: source, destinationID: "mr:7:21")
+        let challenge = UUID()
+        await f.transport.onMessage?(.init(type: .boardOrderRequest, challenge: challenge, boardOrderMove: move))
+        let accepted = try #require(f.transport.messages.last)
+        let saved = try #require(accepted.board)
+        #expect(accepted.challenge == challenge && accepted.boardOrderApplied == true)
+        #expect(saved.lanes.first?.cards.map(\.id) == ["mr:7:23", "mr:7:21", "mr:7:22"])
+        #expect(f.monitor.boardSnapshot.own.map(\.id.iid) == [23, 21, 22])
+        #expect(SettingsManager(defaults: f.defaults).boardManualOrder == f.monitor.settings.boardManualOrder)
+        #expect(f.gitlab.requests.isEmpty)
+
+        let stale = UUID()
+        await f.transport.onMessage?(.init(type: .boardOrderRequest, challenge: stale, boardOrderMove: move))
+        #expect(f.transport.messages.last?.challenge == stale)
+        #expect(f.transport.messages.last?.boardOrderApplied == false)
+        #expect(f.transport.messages.last?.board?.lanes.first?.cards.map(\.id) == saved.lanes.first?.cards.map(\.id))
+    }
+
     @Test(arguments: [nil, false] as [Bool?])
     func aSnapshotHelloDoesNotStartTheInitialGitLabRefresh(_ refresh: Bool?) async throws {
         let f = try Fixture(); defer { f.clean() }

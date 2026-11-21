@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Drop merge request cards above, between or below other cards on Mac and iPhone. The insertion line marks valid positions in the card's current column, automation section and pin group.
+
+- Touch and hold anywhere on an iPhone board card, then drag it to reorder merge requests while connected to the Mac. The Mac saves moves within each automation and pin group, and the iPhone immediately displays the confirmed order.
+
 - Use 50% opacity for draft merge request titles, repository references, and status content on the Mac board. Give the Draft badge a subtle violet tint and keep the author row and action buttons at their standard opacity.
 
 - Match the Mac draft merge request styling on iPhone cards, with dimmed titles, repository references, and status content and a violet Draft badge.
@@ -25,6 +29,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Approve or remove your approval from an MR’s approvals popover on Mac and iPhone. The removal confirmation explains that it will turn off automatic approval for that MR.
 
 - Expand or collapse **Automation off** in each Mac board column and restore that choice after restarting. The header shows the total number of merge requests and how many need attention.
+
+- Drag Mac merge request cards from anywhere on their surface to reorder them within Automation on or Automation off on Mac. Manual ordering is the default and saves positions across launches. Cards that start needing attention move to the top of their pin group unless you turn off that preference in Settings. The iPhone board follows the Mac order on refresh.
 
 - Highlight merge requests that need attention with a padded inline callout, give MR cards a clearer border, and bring MR titles and repository labels closer together on Mac and iPhone.
 

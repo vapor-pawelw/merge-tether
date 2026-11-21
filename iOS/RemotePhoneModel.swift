@@ -27,6 +27,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     private var supportsCachedDetails = false
     private(set) var supportsOriginUpdates = false
     private(set) var supportsDraftRegeneration = false
+    var boardOrderMoveRejected = false
     private(set) var draftRegenerationLoadFailed = false
     private var draftRegenerationPreviewBatchID: UUID?
     private var draftRegenerationPreviewToken: String?
@@ -258,6 +259,12 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                 let previousBoard = self.state.board
                 let accepted = self.state.receive(message, now: self.now())
                 if accepted, message.type == .snapshot {
+                    if let applied = message.boardOrderApplied {
+                        self.boardOrderMoveRejected = !applied
+                    } else if self.state.board?.hostSession != previousBoard?.hostSession ||
+                        self.state.board?.account != previousBoard?.account {
+                        self.boardOrderMoveRejected = false
+                    }
                     self.avatarSnapshotChallenge = self.state.isConnected(now: self.now()) ? message.challenge : nil
                     if self.state.board?.account != previousBoard?.account {
                         self.avatarThumbnails.removeAll()
@@ -302,6 +309,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         let old = connection; connection = nil; connectionRevision = UUID()
         old?.stop(); cancelApproval(); state.disconnected(); connectingUntil = .distantPast
         avatarSnapshotChallenge = nil
+        boardOrderMoveRejected = false
         detailState.disconnect(); supportsDetails = false; supportsOriginUpdates = false
         supportsDetailContext = false; supportsDetailPreviews = false; supportsCachedDetails = false
         suspendDraftRegenerationReads()
@@ -316,7 +324,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
             capabilities: [RemoteMessage.commentReviewCapability, RemoteMessage.mergeActionsCapability, RemoteMessage.detailsCapability,
                            RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability, RemoteMessage.personalApprovalCapability,
                            RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability, RemoteMessage.detailPreviewCapability,
-                           RemoteMessage.draftRegenerationCapability, RemoteMessage.boardAvatarsCapability, RemoteMessage.detailAvatarsCapability],
+                           RemoteMessage.draftRegenerationCapability, RemoteMessage.boardAvatarsCapability,
+                           RemoteMessage.detailAvatarsCapability, RemoteMessage.boardOrderCapability],
             refresh: fromGitLab, cachedAvatarURLs: Array((state.board?.avatarThumbnailURLs ?? [])
                 .filter { avatarThumbnails[$0] != nil }.prefix(64)))) }
         catch {
@@ -326,6 +335,26 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
             }
         }
     }
+
+    func moveBoardCard(_ move: RemoteBoardOrderMove) async {
+        guard let connection, state.canAct(now: now()), let board = state.board else { return }
+        guard board.permitsOrderMove(move) else {
+            boardOrderMoveRejected = true
+            return
+        }
+        let requestState = state
+        guard let challenge = requestState.beginRefresh(force: true, now: now()) else { return }
+        do {
+            try await connection.send(.init(type: .boardOrderRequest, challenge: challenge, boardOrderMove: move))
+        } catch {
+            guard self.connection === connection, state === requestState else { return }
+            if requestState.refreshFailed(challenge: challenge) {
+                boardOrderMoveRejected = true
+                await refresh()
+            }
+        }
+    }
+
     private func receiveAvatarThumbnails(_ message: RemoteMessage) {
         guard let challenge = message.challenge, let board = state.board, let thumbnails = message.avatarThumbnails,
               thumbnails.count <= RemoteAvatarThumbnail.batchSize else { return }

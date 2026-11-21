@@ -46,6 +46,13 @@ extension RemoteConnection: RemoteHostTransport {}
     private var phoneSupportsCommentOrigins = false
     private var phoneSupportsMarkReady = false
     private var phoneSupportsDraftRegeneration = false
+    private var phoneSupportsBoardOrder = false
+    private static let boardCapabilities = [
+        RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability, RemoteMessage.detailOriginsCapability,
+        RemoteMessage.mrControlsCapability, RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability,
+        RemoteMessage.detailPreviewCapability, RemoteMessage.cachedDetailsCapability, RemoteMessage.draftRegenerationCapability,
+        RemoteMessage.boardOrderCapability, RemoteMessage.personalApprovalCapability
+    ]
     private let readAvatarThumbnail: @Sendable (URL) async -> Data?
     @ObservationIgnored private(set) var avatarTask: Task<Void, Never>?
     private var avatarChallenge: UUID?
@@ -183,6 +190,7 @@ extension RemoteConnection: RemoteHostTransport {}
         phoneSupportsCommentOrigins = false
         phoneSupportsMarkReady = false
         phoneSupportsDraftRegeneration = false
+        phoneSupportsBoardOrder = false
         regenerationPreview = nil
         clearOriginSubscription()
         detailTask?.cancel(); detailTask = nil; activeDetailRequest = nil
@@ -250,6 +258,7 @@ extension RemoteConnection: RemoteHostTransport {}
             phoneSupportsPersonalApproval = message.capabilities?.contains(RemoteMessage.personalApprovalCapability) == true
             phoneSupportsMarkReady = message.capabilities?.contains(RemoteMessage.markReadyCapability) == true
             phoneSupportsDraftRegeneration = message.capabilities?.contains(RemoteMessage.draftRegenerationCapability) == true
+            phoneSupportsBoardOrder = message.capabilities?.contains(RemoteMessage.boardOrderCapability) == true
             phoneSupportsCommentOrigins = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.commentOriginCapability) == true
             phoneSupportsOriginUpdates = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.detailOriginsCapability) == true
             if !phoneSupportsOriginUpdates { clearOriginSubscription() }
@@ -266,16 +275,22 @@ extension RemoteConnection: RemoteHostTransport {}
             var board = snapshot()
             if !fresh { board.partial = true }
             do { try await active.send(.init(type: .snapshot, challenge: challenge, board: board,
-                capabilities: [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability, RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability,
-                               RemoteMessage.personalApprovalCapability,
-                               RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability, RemoteMessage.detailPreviewCapability,
-                               RemoteMessage.cachedDetailsCapability, RemoteMessage.draftRegenerationCapability])) }
+                capabilities: Self.boardCapabilities)) }
             catch { failed = true; try? await active.send(.init(type: .unavailable)); return }
             if message.capabilities?.contains(RemoteMessage.boardAvatarsCapability) == true {
                 guard avatarChallenge == challenge else { return }
                 avatarTask = deliverAvatarThumbnails(board.avatarThumbnailURLs, challenge: challenge, session: board.hostSession,
                     excluding: message.cachedAvatarURLs ?? [], over: active) { $0.avatarChallenge == challenge }
             }
+        case .boardOrderRequest:
+            guard phoneSupportsBoardOrder, let challenge = message.challenge, let move = message.boardOrderMove else { return }
+            var board = snapshot()
+            if monitor.lastRefresh == nil { board.partial = true }
+            let applied = board.permitsOrderMove(move) && applyBoardOrderMove(move)
+            if applied { board = snapshot() }
+            do { try await active.send(.init(type: .snapshot, challenge: challenge, board: board,
+                capabilities: Self.boardCapabilities, boardOrderApplied: applied)) }
+            catch { failed = true; try? await active.send(.init(type: .unavailable)) }
         case .receipt:
             guard let command = message.command, let challenge = message.challenge, let pairing else { return }
             let result = gate.receipt(for: command, account: snapshot().account, pairingSession: pairing.sessionID)
@@ -565,7 +580,8 @@ extension RemoteConnection: RemoteHostTransport {}
             resolutionPreviews.removeAll()
             regenerationPreview = nil
         }
-        var board = RemoteBoardAdapter.board(monitor: monitor, session: hostSession, account: account)
+        var board = RemoteBoardAdapter.board(monitor: monitor, session: hostSession, account: account,
+            includesBoardOrder: phoneSupportsBoardOrder)
         if !board.partial {
             let items = monitor.boardSnapshot.own.map(\.item)
             for lane in board.lanes.indices {
@@ -585,6 +601,15 @@ extension RemoteConnection: RemoteHostTransport {}
             supportsMRControls: phoneSupportsMRControls, supportsCommentOrigins: phoneSupportsCommentOrigins,
             supportsMarkReady: phoneSupportsMarkReady, supportsDraftRegeneration: phoneSupportsDraftRegeneration,
             supportsPersonalApproval: phoneSupportsPersonalApproval)
+    }
+
+    private func applyBoardOrderMove(_ move: RemoteBoardOrderMove) -> Bool {
+        let targets = monitor.boardSnapshot.manualOrderEntries.map(\.target)
+        guard let source = targets.first(where: { RemoteBoardAdapter.boardOrderCardID($0) == move.source.cardID }),
+              let destination = targets.first(where: { RemoteBoardAdapter.boardOrderCardID($0) == move.destinationID }) else {
+            return false
+        }
+        return monitor.moveBoardCard(source, to: destination, accountRevision: monitor.glab.accountRevision)
     }
 
     private func draftRegenerationControl(isPartial: Bool) -> RemoteDraftRegenerationControl? {

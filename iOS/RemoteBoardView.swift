@@ -142,6 +142,11 @@ struct RemoteBoardView: View {
             } message: {
                 if model.showsAutomaticApprovalOffResult { Text(.Board.boardApprovalsAutomationOff) }
             }
+            .alert(Text(.Remote.remoteBoardOrderRejected), isPresented: $model.boardOrderMoveRejected) {
+                Button(.Remote.remoteClose, role: .cancel) {}
+            } message: {
+                Text(.Remote.remoteBoardOrderRejectedHelp)
+            }
         }
     }
 
@@ -439,6 +444,10 @@ struct RemoteCardView: View {
             Spacer(minLength: 4)
             if let iid = card.mergeRequestIID {
                 Text(verbatim: "!\(iid)").monospacedDigit().fixedSize()
+            }
+            if !expanded, card.orderGroup?.pinned == true {
+                Image(systemName: "pin.fill")
+                    .accessibilityLabel(Text(.Remote.remoteBoardPinned))
             }
         }
         .font(.caption).foregroundStyle(.secondary)

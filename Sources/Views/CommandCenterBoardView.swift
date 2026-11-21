@@ -1,4 +1,5 @@
 import AppKit
+import MergeTetherRemote
 import SwiftUI
 
 struct CommandCenterBoardView: View {
@@ -6,6 +7,7 @@ struct CommandCenterBoardView: View {
     let board: MergeRequestBoardSnapshot
     var refreshState: BoardRefreshState = .current
     private var dimUnverifiedContent: Bool { refreshState != .current }
+    private var usesManualOrder: Bool { monitor.settings.boardOrderingMethod == .manual }
     private enum Lane: Hashable {
         case own, reviewing
 
@@ -25,15 +27,17 @@ struct CommandCenterBoardView: View {
     enum LaneEntry: Identifiable {
         enum ID: Hashable {
             case card(MergeRequestAttentionMonitor.Item.ID)
-            case automationOff
+            case automationOn, automationOff
         }
 
         case card(MergeRequestBoardSnapshot.Row, startsDrafts: Bool)
+        case automationOn
         case automationOff(count: Int, attentionCount: Int)
 
         var id: ID {
             switch self {
             case let .card(row, _): .card(row.id)
+            case .automationOn: .automationOn
             case .automationOff: .automationOff
             }
         }
@@ -41,6 +45,7 @@ struct CommandCenterBoardView: View {
     @State private var selected: Selection?
     @State private var compactLane: Lane = .own
     @State private var detailPopoverPresented = false
+    @State private var dragSession = BoardDragSession<BoardCardDrag>()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
 
@@ -66,7 +71,10 @@ struct CommandCenterBoardView: View {
             }
         }
         .background(Color(white: colorScheme == .dark ? 0.095 : 0.99))
-        .onChange(of: account) { _, _ in selected = nil }
+        .onChange(of: account) { _, _ in
+            selected = nil
+            dragSession.finish()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
             if (notification.object as? NSWindow)?.identifier?.rawValue == "main" { selected = nil }
         }
@@ -99,15 +107,40 @@ struct CommandCenterBoardView: View {
         .onPreferenceChange(BoardDetailPopoverPresentedKey.self) { detailPopoverPresented = $0 }
     }
 
-    private func card(_ row: MergeRequestBoardSnapshot.Row, removable: Bool = false) -> some View {
-        CommandCenterMRCard(row: row, monitor: monitor, allowsRemoval: removable, onAttention: { section in
+    @ViewBuilder private func card(_ row: MergeRequestBoardSnapshot.Row, removable: Bool) -> some View {
+        let content = CommandCenterMRCard(row: row, monitor: monitor, allowsRemoval: removable, onAttention: { section in
             selected = Selection(item: row.item, section: section, account: account)
         }, onDetails: {
             selected = Selection(item: row.item, section: .overview, account: account)
         })
+        if let entry = row.manualOrderEntry, refreshState == .current {
+            let drag = BoardCardDrag(entry: entry, accountRevision: monitor.glab.accountRevision)
+            content
+                .contentShape([.interaction, .dragPreview], RoundedRectangle(cornerRadius: 8))
+                .onDrag { dragSession.begin(drag, type: BoardCardDrag.type) }
+                .accessibilityHint(Text(.BoardActivity.reorderCard))
+                .padding(.vertical, 5)
+                .modifier(dropTarget(at: entry.target))
+        } else {
+            content.padding(.vertical, 5)
+        }
+    }
+
+    private func dropTarget(at anchor: MRAutomationScope.Target, fixedInsertion: BoardOrderInsertion? = nil) -> BoardInsertionDrop {
+        func destination(_ insertion: BoardOrderInsertion) -> MRAutomationScope.Target? {
+            guard refreshState == .current, let source = dragSession.source,
+                  source.accountRevision == monitor.glab.accountRevision else { return nil }
+            return source.destination(beside: anchor, insertion: insertion, in: monitor.boardSnapshot.manualOrderEntries)
+        }
+        return .init(type: BoardCardDrag.type, fixedInsertion: fixedInsertion, allows: { destination($0) != nil }, move: {
+            guard let source = dragSession.source, let target = destination($0) else { return false }
+            defer { dragSession.finish() }
+            return monitor.moveBoardCard(source.entry.target, to: target, accountRevision: source.accountRevision)
+        })
     }
 
     static func laneEntries(_ rows: [MergeRequestBoardSnapshot.Row], automationOffExpanded: Bool,
+                            showsAutomationOn: Bool = false,
                             activity: (MergeRequestBoardSnapshot.Row) -> MRBoardActivity.Group,
                             hasHumanAction: (MergeRequestBoardSnapshot.Row) -> Bool) -> [LaneEntry] {
         let groupedRows = rows.map { (row: $0, group: activity($0)) }
@@ -117,6 +150,9 @@ struct CommandCenterBoardView: View {
         var previousGroup: MRBoardActivity.Group?
         for (row, group) in groupedRows {
             defer { previousGroup = group }
+            if showsAutomationOn, group == .regular, previousGroup != .regular {
+                entries.append(.automationOn)
+            }
             if group == .inactive, !addedAutomationOffHeader {
                 let attentionCount = inactiveRows.count { $0.needsAttention && hasHumanAction($0) }
                 entries.append(.automationOff(count: inactiveRows.count, attentionCount: attentionCount))
@@ -129,11 +165,26 @@ struct CommandCenterBoardView: View {
     }
 
     private func laneCards(_ rows: [MergeRequestBoardSnapshot.Row], removable: Bool,
-                           automationOffExpanded: Binding<Bool>) -> some View {
-        let entries = Self.laneEntries(rows, automationOffExpanded: automationOffExpanded.wrappedValue, activity: activity) { row in
+                           automationOffExpanded: Binding<Bool>, viewportHeight: CGFloat) -> some View {
+        let entries = Self.laneEntries(rows, automationOffExpanded: automationOffExpanded.wrappedValue,
+            showsAutomationOn: usesManualOrder, activity: activity) { row in
             MRCardPresentation(row: row, monitor: monitor, allowsRemoval: removable).humanAction != nil
         }
-        return ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+        return VStack(spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                laneEntries(entries, removable: removable, automationOffExpanded: automationOffExpanded)
+            }
+            if case let .card(row, _)? = entries.last, let target = row.manualOrderEntry?.target {
+                Spacer(minLength: 16)
+                    .frame(maxWidth: .infinity)
+                    .modifier(dropTarget(at: target, fixedInsertion: .after))
+            }
+        }
+        .frame(minHeight: viewportHeight, alignment: .topLeading)
+    }
+
+    private func laneEntries(_ entries: [LaneEntry], removable: Bool, automationOffExpanded: Binding<Bool>) -> some View {
+        ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
             switch entry {
             case let .card(row, startsDrafts):
                 VStack(spacing: 10) {
@@ -145,19 +196,37 @@ struct CommandCenterBoardView: View {
                     card(row, removable: removable)
                 }
                 .transition(cardTransition)
+            case .automationOn:
+                let heading = sectionHeading(.BoardActivity.activeSection)
+                    .padding(.top, index == 0 ? 2 : 14)
+                    .padding(.horizontal, 4)
+                    .padding(.bottom, 5)
+                dropBeforeNextCard(heading, entries: entries, index: index)
             case let .automationOff(count, attentionCount):
-                MRDetailDisclosureButton(isExpanded: automationOffExpanded) {
+                let heading = MRDetailDisclosureButton(isExpanded: automationOffExpanded) {
                     sectionHeading(.BoardActivity.inactiveSection, count: count, attentionCount: attentionCount)
                 }
                 .foregroundStyle(.secondary)
                 .padding(.top, index == 0 ? 2 : 14)
                 .padding(.horizontal, 4)
+                .padding(.bottom, 5)
+                dropBeforeNextCard(heading, entries: entries, index: index)
             }
         }
     }
 
+    @ViewBuilder private func dropBeforeNextCard<Heading: View>(_ heading: Heading, entries: [LaneEntry], index: Int) -> some View {
+        if entries.indices.contains(index + 1), case let .card(row, _) = entries[index + 1],
+           let target = row.manualOrderEntry?.target {
+            heading.modifier(dropTarget(at: target, fixedInsertion: .before))
+        } else {
+            heading
+        }
+    }
+
     private func activity(_ row: MergeRequestBoardSnapshot.Row) -> MRBoardActivity.Group {
-        monitor.boardActivity(projectID: row.id.projectID, iid: row.id.iid, url: row.item.url,
+        if let entry = row.manualOrderEntry { return entry.group.automationEnabled ? .regular : .inactive }
+        return monitor.boardActivity(projectID: row.id.projectID, iid: row.id.iid, url: row.item.url,
             isDraft: row.item.section == .draftMergeRequests,
             isFinished: MergeRequestFinishedState(row.item.mergeRequest) != nil).group
     }
@@ -218,21 +287,23 @@ struct CommandCenterBoardView: View {
             }
             .padding(.horizontal, 6).padding(.vertical, 10)
             Divider()
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
+            GeometryReader { viewport in
+                ScrollView {
                     if rows.isEmpty {
                         empty(reviewing ? .Board.boardEmptyReviewingTitle : .Board.boardEmptyOwnTitle,
                               message: reviewing ? .Board.boardLaneReviewingEmpty : .Board.boardLaneOwnEmpty,
                               symbol: lane.symbol)
+                    } else {
+                        laneCards(rows, removable: reviewing, automationOffExpanded: automationOffExpanded,
+                            viewportHeight: max(0, viewport.size.height - 10))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 5).padding(.horizontal, 1)
+                            .opacity(dimUnverifiedContent ? 0.55 : 1)
+                            .animation(animation, value: cardIDs)
+                            .animation(animation, value: rows.map { $0.item.dependencies })
+                            .animation(animation, value: automationOffExpanded.wrappedValue)
                     }
-                    laneCards(rows, removable: reviewing, automationOffExpanded: automationOffExpanded)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 10).padding(.horizontal, 1)
-                .opacity(dimUnverifiedContent && !cardIDs.isEmpty ? 0.55 : 1)
-                .animation(animation, value: cardIDs)
-                .animation(animation, value: rows.map { $0.item.dependencies })
-                .animation(animation, value: automationOffExpanded.wrappedValue)
             }
             .id(lane)
         }

@@ -32,6 +32,7 @@ public extension RemoteCard {
         content.presentation = nil
         content.needsAttention = nil
         content.primaryCTA = nil
+        content.orderGroup = nil
         return try? RemoteDigest.token(content)
     }
 

@@ -3,6 +3,46 @@ import Testing
 import MergeTetherRemote
 
 @MainActor @Suite struct RemotePhoneModelTests {
+    @Test(arguments: [true, false])
+    func droppingACardUsesOneChallengeAndOnlyAcceptsTheCurrentMacOrder(_ moveAccepted: Bool) async throws {
+        let f = try PhoneFixture(), model = f.model
+        let capability = RemoteMessage.boardOrderCapability
+        var board = f.board
+        let group = try #require(RemoteBoardOrderGroup(lane: .own, automationEnabled: true, pinned: false, cardIDs: ["one", "two"]))
+        var first = RemoteCard(id: "one", title: "One", project: "example", url: nil)
+        var second = RemoteCard(id: "two", title: "Two", project: "example", url: nil)
+        first.orderGroup = group
+        second.orderGroup = group
+        board.lanes = [.init(id: .own, cards: [first, second])]
+        model.connect()
+        await model.refresh()
+        await f.reply(board: board, capabilities: [capability])
+        let transport = f.transports[0]
+        #expect(transport.sent.first?.capabilities?.contains(capability) == true)
+        await model.refresh()
+        let oldChallenge = try #require(transport.sent.last?.challenge)
+        let source = try #require(board.orderSource(for: second))
+        let move = RemoteBoardOrderMove(source: source, destinationID: first.id)
+        await model.moveBoardCard(move)
+        let request = try #require(transport.sent.last)
+        #expect(request.type == .boardOrderRequest && request.boardOrderMove == move)
+        #expect(request.challenge != oldChallenge)
+        await model.moveBoardCard(move)
+        #expect(transport.sent.filter { $0.type == .boardOrderRequest }.count == 1)
+        await transport.onMessage?(.init(type: .snapshot, challenge: oldChallenge, board: board, boardOrderApplied: false))
+        #expect(!model.boardOrderMoveRejected)
+        let revised = try #require(RemoteBoardOrderGroup(lane: .own, automationEnabled: true, pinned: false, cardIDs: ["two", "one"]))
+        first.orderGroup = revised
+        second.orderGroup = revised
+        board.lanes[0].cards = [second, first]
+        await transport.onMessage?(.init(type: .snapshot, challenge: request.challenge, board: board, boardOrderApplied: moveAccepted))
+        #expect(model.state.board?.cards.map(\.id) == ["two", "one"])
+        #expect(model.boardOrderMoveRejected == !moveAccepted)
+        await model.moveBoardCard(move)
+        #expect(transport.sent.filter { $0.type == .boardOrderRequest }.count == 1)
+        #expect(model.boardOrderMoveRejected)
+    }
+
     @Test func detailCommentAvatarsArriveThroughTheCurrentRelayRequest() async throws {
         let f = try PhoneFixture(), model = f.model
         let url = try #require(URL(string: "https://gitlab.example.org/commenter"))

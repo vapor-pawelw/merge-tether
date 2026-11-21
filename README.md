@@ -19,6 +19,8 @@ See which reviews need you, what’s blocking your merges, and what Codex or Cla
 - **See what’s blocking a merge.** Check pipelines, approvals, open discussions, and merge dependencies, including stacked MRs, from the card. Open the MR for the discussion, private drafts, and activity history.
 - **Catch the decisions that need you.** The menu bar flags work that needs your input, from a reply draft ready to publish to an automation run that needs a retry. Optional macOS notifications surface the same decisions.
 
+The board defaults to manual ordering. Drag an MR above, between, or below cards in the same column, automation section, and pin group. On a paired iPhone, touch and hold a card to reorder it on both devices. Choose automatic ordering or turn off attention-based promotion in **Settings → General → Merge requests**.
+
 ## Get started
 
 MergeTether runs on **macOS 14+** and uses your signed-in `glab` account. Self-managed GitLab instances are supported through the CLI’s default host.

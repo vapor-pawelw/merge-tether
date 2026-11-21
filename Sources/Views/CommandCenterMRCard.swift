@@ -33,7 +33,8 @@ private struct CommandCenterMRCardContent: View {
     private var isDraft: Bool { row.isDraft }
     private var finishedState: MergeRequestFinishedState? { .init(row.displayRequest) }
     private var isMuted: Bool {
-        monitor.boardActivity(projectID: item.id.projectID, iid: item.id.iid, url: item.url,
+        if let entry = row.manualOrderEntry { return !entry.group.automationEnabled }
+        return monitor.boardActivity(projectID: item.id.projectID, iid: item.id.iid, url: item.url,
             isDraft: isDraft, isFinished: finishedState != nil).isMuted
     }
     private var scopeTarget: MRAutomationScope.Target? {
