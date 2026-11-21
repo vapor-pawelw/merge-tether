@@ -7,6 +7,8 @@ struct RemoteApprovalProgressBadge: View {
     var viewerApprovalID: Int? = nil
     var assignedReviewerCount: Int? = nil
     var approvedWithOpenFindings = false
+    var personalApproval: RemotePersonalApprovalControl? = nil
+    var automaticApprovalOff = false
     @State private var showingPeople = false
 
     private var details: RemoteApprovalDetails {
@@ -42,7 +44,8 @@ struct RemoteApprovalProgressBadge: View {
     }
 
     var body: some View {
-        if progress.map({ $0.required > 0 || received > 0 }) ?? true || viewer != nil || assignedReviewerCount != nil {
+        if personalApproval != nil || automaticApprovalOff
+            || (progress.map { $0.required > 0 || received > 0 } ?? true) || viewer != nil || assignedReviewerCount != nil {
             Button { showingPeople = true } label: {
                 HStack(spacing: 4) {
                     HStack(spacing: 3) {
@@ -90,14 +93,89 @@ struct RemoteApprovalProgressBadge: View {
                         ForEach(details.orderedPeople) { person in
                             RemoteApprovalPersonRow(person: person, isViewer: person.id == viewer?.id)
                         }
+                        if automaticApprovalOff {
+                            Text(.Board.boardApprovalsAutomationOff).font(.callout).foregroundStyle(.secondary)
+                        }
+                        if let personalApproval {
+                            Divider()
+                            personalApproval
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading).padding(16)
                 }
-                .frame(width: 300, height: min(380, CGFloat(max(people?.count ?? 0, 1)) * 80 + (approvedWithOpenFindings ? 120 : 60)))
+                .frame(width: 300, height: popoverHeight)
                 .presentationCompactAdaptation(.popover)
                 .accessibilityIdentifier("remote.approvals.people")
             }
         }
+    }
+
+    private var popoverHeight: CGFloat {
+        let peopleHeight = CGFloat(max(people?.count ?? 0, 1)) * 80
+        return min(380, peopleHeight + 60 + (approvedWithOpenFindings ? 60 : 0)
+            + (personalApproval != nil ? 56 : 0) + (automaticApprovalOff ? 56 : 0))
+    }
+}
+
+struct RemotePersonalApprovalControl: View {
+    let card: RemoteCard
+    let action: RemoteAction
+    let model: RemotePhoneModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var confirmation: Confirmation?
+    @State private var needsRefresh = false
+
+    private struct Confirmation {
+        let id: UUID
+        let card: RemoteCard
+        let action: RemoteAction
+        let account: String
+    }
+
+    var body: some View {
+        let confirmingKind = confirmation?.action.kind ?? action.kind
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            Button(role: action.kind == .removeApproval ? .destructive : nil) {
+                guard let board = model.state.board,
+                      let latest = board.cards.first(where: { $0.hasSameActionContext(as: card) && $0.actions.contains(action) }),
+                      let id = model.prepareApproval(card: latest, action: action) else { return }
+                confirmation = .init(id: id, card: latest, action: action, account: board.account)
+            } label: {
+                Label(action.kind.title, systemImage: action.kind == .removeApproval ? "minus.circle" : "checkmark.seal")
+                    .frame(minHeight: 44)
+            }
+            .disabled(!model.state.canAct(now: context.date))
+            .accessibilityIdentifier("remote.approvals.personalAction")
+        }
+        .alert(Text(confirmingKind == .removeApproval ? .Board.boardApprovalsRemoveWarningTitle : confirmingKind.title), isPresented: Binding(
+            get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }
+        ), presenting: confirmation) { request in
+            Button(role: request.action.kind == .removeApproval ? .destructive : nil) {
+                Task {
+                    await model.perform(card: request.card, action: request.action, approvalID: request.id,
+                        onApprovalConfirmed: { dismiss() })
+                    if model.expiredApprovalCardID == request.card.id { needsRefresh = true }
+                }
+            } label: { Text(request.action.kind.title) }
+            Button(.Remote.remoteCancel, role: .cancel) { model.cancelApproval() }
+        } message: { request in
+            Text(request.action.kind == .removeApproval ? .Board.boardApprovalsRemoveHelp : .Board.boardApprovalsApproveHelp)
+                + Text(verbatim: "\n" + request.card.project + "\n" + request.card.title + "\n")
+                + Text(.RemoteSecurity.remoteSecurityCommit) + Text(verbatim: " " + (request.card.head ?? "") + "\n")
+                + Text(.RemoteSecurity.remoteSecurityAccount) + Text(verbatim: " " + request.account)
+        }
+        if needsRefresh {
+            Button(.Remote.remoteRefresh) {
+                Task { await model.reloadAfterApprovalExpiry(cardID: card.id); needsRefresh = false }
+            }
+        }
+    }
+}
+
+extension RemoteCard {
+    func personalApprovalControl(model: RemotePhoneModel?) -> RemotePersonalApprovalControl? {
+        guard let model, let action = actions.first(where: { $0.kind.isPersonalApproval }) else { return nil }
+        return .init(card: self, action: action, model: model)
     }
 }
 

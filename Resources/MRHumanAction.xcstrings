@@ -35,6 +35,17 @@
         }
       }
     },
+    "mrHumanAction.reviewInterruptedHeadChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The previous review was interrupted. Review the latest commit."
+          }
+        }
+      }
+    },
     "mrHumanAction.publication.%lld": {
       "extractionState": "manual",
       "localizations": {

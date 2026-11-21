@@ -65,12 +65,14 @@ struct MRRepositoryPathPopover: ViewModifier {
 }
 
 struct BoardDraftBadge: View {
+    var tint: Color = .secondary
+
     var body: some View {
         Text(.Menu.menuMrDraftBadge)
             .font(.caption2.weight(.semibold))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(tint)
             .padding(.horizontal, 5).padding(.vertical, 2)
-            .background(.secondary.opacity(0.1), in: Capsule())
+            .background(tint.opacity(0.1), in: Capsule())
             .fixedSize()
     }
 }

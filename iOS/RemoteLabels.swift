@@ -33,6 +33,8 @@ extension RemoteActionKind {
         case .deleteDraft: .CommentReview.commentReviewDelete
         case .finishCommentReview: .CommentReview.commentReviewFinish
         case .approve: .Remote.remoteApprove
+        case .personalApprove: .Board.boardApprovalsApprove
+        case .removeApproval: .Board.boardApprovalsRemove
         case .markDone: .Remote.remoteMarkDone
         case .prepare: .Remote.remotePrepare
         case .handoff: .Remote.remoteHandoff
@@ -63,6 +65,16 @@ extension RemoteCommandResult.Status {
         case .failed: .Remote.remoteFailed
         case .uncertain: .Remote.remoteUncertain
         case .limit: .Remote.remoteLimit
+        }
+    }
+}
+
+extension RemotePhoneModel {
+    var resultTitle: LocalizedStringResource {
+        switch completedPersonalApproval {
+        case .removeApproval: .Board.boardApprovalsRemoved
+        case .personalApprove: .Board.boardApprovalsApproved
+        default: state.result?.status.title ?? .Remote.remoteCompleted
         }
     }
 }

@@ -202,7 +202,7 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
             Text(.Menu.menuConfirmFailed).foregroundStyle(.orange)
         case .changed:
             Text(.Menu.menuConfirmChanged).foregroundStyle(.orange)
-        case .publishing, .approving, .finishingCommentReview, nil:
+        case .publishing, .approving, .removingApproval, .finishingCommentReview, nil:
             EmptyView()
         }
     }

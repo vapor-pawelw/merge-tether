@@ -658,7 +658,8 @@ final class MergeRequestTodoRouter {
             } == true
             if let execution = job?.execution, [.failed, .blocked, .interrupted, .cancelled].contains(execution.state),
                !stoppedFollowUp {
-                update(original.id) { $0.state = .failed; $0.error = execution.attentionExplanation ?? execution.error ?? execution.summary }
+                let explanation = original.failureExplanation(currentHead: request.sha, execution: execution)
+                update(original.id) { $0.state = .failed; $0.error = explanation }
                 continue
             }
             var sameReviewedHead = false
@@ -688,7 +689,8 @@ final class MergeRequestTodoRouter {
                     update(original.id) { $0.state = .verifying; $0.error = nil }
                 }
             } else if stoppedFollowUp, let execution = job?.execution {
-                update(original.id) { $0.state = .failed; $0.error = execution.attentionExplanation ?? execution.error ?? execution.summary }
+                let explanation = original.failureExplanation(currentHead: request.sha, execution: execution)
+                update(original.id) { $0.state = .failed; $0.error = explanation }
             } else if job?.execution?.state == .succeeded {
                 let reason: LocalizedStringResource = switch original.kind {
                 case .followUp: .TodoRouting.todoRoutingFollowUpNeedsEvidence

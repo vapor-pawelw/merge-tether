@@ -245,7 +245,7 @@ struct MRHumanAction {
         if item.draftProofRecoveryChecking || row.isCheckingReadOnlyReconciliation {
             guard let intent = row.attentionIntents.first(where: { $0.state == .failed && !row.isReconciling($0) }) else { return nil }
             self.init(kind: .intent, action: .retryIntent, message: Self.intentMessage(intent),
-                      detail: intent.error.map(GlabService.redactWorkflowEvidence))
+                      detail: intent.failureExplanation(currentHead: row.displayRequest?.sha))
             retryIntent = intent
             if intent.kind == .followUp { source = .followUp(intent, item.observedDiscussionFingerprint) }
             return
@@ -312,7 +312,7 @@ struct MRHumanAction {
                       detail: Self.feedbackDetail(item), summary: Self.feedbackSummary(item))
         } else if let intent {
             self.init(kind: .intent, action: .retryIntent, message: Self.intentMessage(intent),
-                      detail: intent.error.map(GlabService.redactWorkflowEvidence))
+                      detail: intent.failureExplanation(currentHead: row.displayRequest?.sha))
             retryIntent = intent
             if intent.kind == .followUp { source = .followUp(intent, item.observedDiscussionFingerprint) }
         } else if item.hasConflict {

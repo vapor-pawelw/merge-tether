@@ -122,6 +122,7 @@ extension SettingsManager {
     }
 
     func storedActionPreference(_ action: MRAutomaticAction, for target: MRAutomationScope.Target) -> MRAutomationPreference {
+        if action == .approval, let independent = independentApprovalPreferences[target] { return independent }
         let optedOut = switch action {
         case .commentPublication: autoPublishOptOuts.contains(target)
         case .merge: autoMergeOptOuts.contains(target)
@@ -134,6 +135,7 @@ extension SettingsManager {
 
     func actionPreference(_ action: MRAutomaticAction, for target: MRAutomationScope.Target) -> MRAutomationPreference {
         if automation.scope[target] == .paused { return .off }
+        if action == .approval, let independent = independentApprovalPreferences[target] { return independent }
         if automation.scope.followsActionDefaults(for: target) { return .default }
         return storedActionPreference(action, for: target)
     }
@@ -148,6 +150,9 @@ extension SettingsManager {
 
     func setActionPreference(_ preference: MRAutomationPreference, for action: MRAutomaticAction, target: MRAutomationScope.Target) {
         guard target.iid != nil else { return }
+        if action == .approval, independentApprovalPreferences[target] != nil {
+            independentApprovalPreferences[target] = preference == .default ? nil : preference
+        }
         func update(_ targets: inout Set<MRAutomationScope.Target>, when selected: MRAutomationPreference) {
             if preference == selected { targets.insert(target) }
             else { targets.remove(target) }
@@ -174,7 +179,8 @@ extension SettingsManager {
 
     func hasAutomaticActionOptIn(host: String? = nil, username: String? = nil) -> Bool {
         MRAutomaticAction.allCases.contains { action in
-            let optedIn = action == .merge ? autoMergeOptIns : automaticActionOptIns[action] ?? []
+            var optedIn = action == .merge ? autoMergeOptIns : automaticActionOptIns[action] ?? []
+            if action == .approval { optedIn.formUnion(independentApprovalPreferences.keys) }
             return optedIn.contains { target in
                 target.iid != nil && (host == nil || host == target.host) && (username == nil || username == target.username)
                     && actionPreference(action, for: target) == .on

@@ -3,9 +3,12 @@ import Foundation
 
 extension GlabService {
     func fetchMergeRequestApprovalProgress(projectID: Int, iid: Int, host: String) async throws -> MergeRequestApprovalProgress? {
-        let counts: GitLabMergeRequestApprovalCounts = try await mergeRequestAPI(
-            "/projects/\(projectID)/merge_requests/\(iid)/approvals", host: host)
+        let counts = try await fetchMergeRequestApprovalCounts(projectID: projectID, iid: iid, host: host)
         return counts.progress(projectID: projectID, iid: iid)
+    }
+
+    func fetchMergeRequestApprovalCounts(projectID: Int, iid: Int, host: String) async throws -> GitLabMergeRequestApprovalCounts {
+        try await mergeRequestAPI("/projects/\(projectID)/merge_requests/\(iid)/approvals", host: host)
     }
 
     func fetchAuthenticatedUser(host: String, expectedUsername: String) async throws -> GitLabAuthenticatedUser {
@@ -270,31 +273,46 @@ extension GlabService {
     }
 
     /// Approves the merge request only if its head is still `headSHA`.
+    @discardableResult
     func approveMergeRequest(projectID: Int, iid: Int, headSHA: String, host: String, userID: Int,
                              willSubmit: (() -> Void)? = nil,
-                             shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws {
-        struct Approval: Decodable {
-            struct Approver: Decodable {
-                struct User: Decodable { let id: Int }
-                let user: User
-            }
-            let approvedBy: [Approver]?
+                             shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws -> MergeRequestApprovalProgress? {
+        try await submitMergeRequestApproval(projectID: projectID, iid: iid, host: host, userID: userID,
+            headToApprove: headSHA, willSubmit: willSubmit, shouldProceed: shouldProceed)
+    }
 
-            enum CodingKeys: String, CodingKey { case approvedBy = "approved_by" }
-        }
+    func removeMergeRequestApproval(from expected: GitLabMergeRequest, host: String, userID: Int,
+                                    willSubmit: @escaping () -> Void,
+                                    shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws -> MergeRequestApprovalProgress? {
+        try await submitMergeRequestApproval(projectID: expected.projectID, iid: expected.iid, host: host, userID: userID,
+            headToApprove: nil, requestToUnapprove: expected, willSubmit: willSubmit, shouldProceed: shouldProceed)
+    }
+
+    private func submitMergeRequestApproval(projectID: Int, iid: Int, host: String, userID: Int,
+                                            headToApprove: String?, requestToUnapprove: GitLabMergeRequest? = nil,
+                                            willSubmit: (() -> Void)?,
+                                            shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws -> MergeRequestApprovalProgress? {
         let currentUser: GitLabAuthenticatedUser = try await mergeRequestAPI("/user", host: host)
         guard currentUser.id == userID else { throw GlabError.notAuthenticated }
-        guard shouldProceed() else { throw CancellationError() }
-        willSubmit?()
-        let result: Approval = try await mergeRequestWriteAPI(
-            "/projects/\(projectID)/merge_requests/\(iid)/approve",
-            host: host,
-            arguments: ["--method", "POST", "--raw-field", "sha=\(headSHA)"],
-            timeout: 30, shouldProceed: shouldProceed
-        )
-        guard result.approvedBy?.contains(where: { $0.user.id == userID }) == true else {
-            throw GlabError.decoding("GitLab did not confirm the approval")
+        if let requestToUnapprove {
+            // GitLab accepts a SHA for approval only, so read the revision again before removal.
+            let current = try await fetchMergeRequest(projectID: projectID, iid: iid, host: host)
+            guard current.state == "opened", MRAttentionRecord.sameContext(current, requestToUnapprove) else {
+                throw CancellationError()
+            }
         }
+        guard shouldProceed() else { throw CancellationError() }
+        let operation = headToApprove == nil ? "unapprove" : "approve"
+        var arguments = ["--method", "POST"]
+        if let headToApprove { arguments += ["--raw-field", "sha=\(headToApprove)"] }
+        willSubmit?()
+        let result: GitLabMergeRequestApprovalCounts = try await mergeRequestWriteAPI(
+            "/projects/\(projectID)/merge_requests/\(iid)/\(operation)",
+            host: host, arguments: arguments, timeout: 30, shouldProceed: shouldProceed)
+        guard let approverIDs = result.approverIDs, approverIDs.contains(userID) == (headToApprove != nil) else {
+            throw GlabError.decoding("GitLab did not confirm the approval change")
+        }
+        return result.progress(projectID: projectID, iid: iid)
     }
 
     func fetchMergeRequestDiscussions(

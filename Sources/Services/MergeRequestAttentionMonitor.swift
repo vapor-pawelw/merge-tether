@@ -270,11 +270,11 @@ final class MergeRequestAttentionMonitor {
     }
 
     enum ConfirmationState: Equatable, Sendable {
-        case publishing, approving, deleting, finishingCommentReview, failed, changed
+        case publishing, approving, removingApproval, deleting, finishingCommentReview, failed, changed
 
         var isBusy: Bool {
             switch self {
-            case .publishing, .approving, .deleting, .finishingCommentReview: true
+            case .publishing, .approving, .removingApproval, .deleting, .finishingCommentReview: true
             case .failed, .changed: false
             }
         }
@@ -2659,6 +2659,131 @@ final class MergeRequestAttentionMonitor {
         guard let item = (items + openItems).first(where: { $0.id == id }), item.canApprove,
               let head = item.mergeRequest?.sha else { return }
         _ = await performApproval(of: id, head: head, automatic: false)
+    }
+
+    enum PersonalApprovalResult: Equatable { case completed, changed, failed, uncertain }
+
+    func personalApprovalAction(for row: MergeRequestBoardSnapshot.Row) -> PersonalMRApproval? {
+        guard let account, isCurrent(account), let user, attentionRecordsRevision == glab.accountRevision,
+              let request = row.displayRequest, request.state == "opened",
+              request.author.id != user.id, !row.isOwnMergeRequest(viewer: account.username),
+              request.sha.map(GlabService.isFullGitSHA) == true,
+              request.webURL.isGitLabMergeRequest(host: account.host, iid: request.iid),
+              let progress = row.displayItem.approvalProgress, let approverIDs = progress.currentApproverIDs else { return nil }
+        if approverIDs.contains(user.id) { return .remove }
+        return progress.userCanApprove == false ? nil : .approve
+    }
+
+    func changePersonalApproval(_ action: PersonalMRApproval, for displayed: GitLabMergeRequest,
+                                accountRevision: UInt64) async -> PersonalApprovalResult {
+        let id = Item.ID(projectID: displayed.projectID, iid: displayed.iid)
+        guard let settings, let account, isCurrent(account), let user, displayed.author.id != user.id,
+              let head = displayed.sha, GlabService.isFullGitSHA(head), displayed.state == "opened",
+              displayed.webURL.isGitLabMergeRequest(host: account.host, iid: id.iid),
+              accountRevision == glab.accountRevision, attentionRecordsRevision == accountRevision,
+              !isConfirming(id) else { return .changed }
+        let generation = accountGeneration
+        let target = commentReviewTarget(id, account: account)
+        let isCurrentSession: @MainActor @Sendable () -> Bool = {
+            generation == self.accountGeneration && accountRevision == self.glab.accountRevision
+                && self.isCurrent(account) && !Task.isCancelled
+        }
+        let busy: ConfirmationState = action == .approve ? .approving : .removingApproval
+        confirmationStates[id] = busy
+        var submitted = false
+        var needsRefresh = false
+        let previousPreference = settings.independentApprovalPreferences[target]
+        var savedRemovalPreference = false
+        defer {
+            if generation == accountGeneration, accountRevision == glab.accountRevision {
+                if confirmationStates[id] == busy { confirmationStates[id] = nil }
+                if needsRefresh { requestFeedbackRefresh() }
+            }
+            signalAutomaticActionIdle()
+        }
+
+        func confirm(_ progress: MergeRequestApprovalProgress?) {
+            approvedHeads[id] = action == .approve ? head : nil
+            failedApprovalHeads[id] = nil
+            approvalReadFailures.removeValue(forKey: id)
+            if var record = attentionRecords[id], MRAttentionRecord.sameContext(record.catalogItem?.mergeRequest, displayed) {
+                var refreshed = progress
+                if let history = record.catalog?.approvalProgress?.reviewHistory { refreshed?.reviewHistory = history }
+                record.catalog?.approvalProgress = refreshed
+                if MRAttentionRecord.sameContext(record.evidence.mergeRequest, displayed) { record.evidence.approvalProgress = refreshed }
+                attentionRecords[id] = record
+            }
+            updateItem(id, introducesAttention: false) {
+                $0.canApprove = false
+                $0.autoApproveReady = false
+                if $0.reviewingProgress == .waitingForOtherDiscussions, action == .approve { $0.reviewingProgress = .current }
+            }
+            settings.recordAutomationEvent(target: target, action: action == .approve ? .approve : .removeApproval,
+                origin: .manual, state: .completed, approvedHeadSHA: head)
+        }
+
+        do {
+            let liveUser = try await glab.fetchAuthenticatedUser(host: account.host, expectedUsername: account.username)
+            let counts = try await glab.fetchMergeRequestApprovalCounts(projectID: id.projectID, iid: id.iid, host: account.host)
+            let current = try await glab.fetchMergeRequest(projectID: id.projectID, iid: id.iid, host: account.host)
+            guard isCurrentSession(), liveUser == user, current.state == "opened",
+                  MRAttentionRecord.sameContext(current, displayed),
+                  let approvers = counts.approverIDs, approvers.contains(user.id) == (action == .remove),
+                  action == .remove || counts.userCanApprove != false else {
+                needsRefresh = true
+                return .changed
+            }
+            if action == .remove {
+                // Persist before the write so an interrupted or uncertain response cannot re-enable approval.
+                settings.independentApprovalPreferences[target] = .off
+                guard settings.save() else {
+                    settings.independentApprovalPreferences[target] = previousPreference
+                    return .failed
+                }
+                savedRemovalPreference = true
+            }
+            let canSubmit: @MainActor @Sendable () -> Bool = {
+                isCurrentSession() && (action == .approve || settings.independentApprovalPreferences[target] == .off)
+            }
+            let progress: MergeRequestApprovalProgress?
+            switch action {
+            case .approve:
+                progress = try await glab.approveMergeRequest(projectID: id.projectID, iid: id.iid, headSHA: head,
+                    host: account.host, userID: user.id, willSubmit: { submitted = true }, shouldProceed: canSubmit)
+            case .remove:
+                progress = try await glab.removeMergeRequestApproval(from: displayed, host: account.host, userID: user.id,
+                    willSubmit: { submitted = true }, shouldProceed: canSubmit)
+            }
+            guard isCurrentSession() else { return .uncertain }
+            confirm(progress)
+            needsRefresh = isLoading || progress == nil
+            return .completed
+        } catch {
+            guard isCurrentSession() else { return submitted ? .uncertain : .changed }
+            needsRefresh = true
+            let rejected: Bool
+            if case .nonZeroExit(_, let diagnostic) = error as? GlabError {
+                rejected = [400, 403, 404, 409, 422].contains { GlabError.hasHTTPStatus($0, in: diagnostic) }
+            } else {
+                rejected = (error as? GlabError) == .notAuthenticated
+            }
+            if savedRemovalPreference, !submitted || rejected, settings.independentApprovalPreferences[target] == .off {
+                settings.independentApprovalPreferences[target] = previousPreference
+                settings.save()
+            }
+            if rejected { return .failed }
+            if !submitted, error is CancellationError { return .changed }
+            if submitted,
+               let counts = try? await glab.fetchMergeRequestApprovalCounts(projectID: id.projectID, iid: id.iid, host: account.host),
+               let current = try? await glab.fetchMergeRequest(projectID: id.projectID, iid: id.iid, host: account.host),
+               isCurrentSession(), current.state == "opened", MRAttentionRecord.sameContext(current, displayed),
+               let approvers = counts.approverIDs, approvers.contains(user.id) == (action == .approve) {
+                confirm(counts.progress(projectID: id.projectID, iid: id.iid))
+                return .completed
+            }
+            Log.monitor.error("Could not change personal approval: \(String(describing: error), privacy: .private)")
+            return submitted ? .uncertain : .failed
+        }
     }
 
     enum RemotePublicationResult { case completed, changed, uncertain, partial }

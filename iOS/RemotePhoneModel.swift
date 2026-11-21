@@ -86,6 +86,17 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     }
     private var approvalConfirmation: ApprovalConfirmation?
     private(set) var expiredApprovalCardID: String?
+    private var lastPersonalApproval: (id: UUID, kind: RemoteActionKind)?
+
+    var completedPersonalApproval: RemoteActionKind? {
+        guard let result = state.result else { return nil }
+        guard result.status == .completed, let lastPersonalApproval, lastPersonalApproval.id == result.id else {
+            return nil
+        }
+        return lastPersonalApproval.kind
+    }
+
+    var showsAutomaticApprovalOffResult: Bool { completedPersonalApproval == .removeApproval }
     private var connectingUntil = Date.distantPast
     private var connectionFailed = false
     private let now: () -> Date
@@ -311,7 +322,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         guard let connection, let challenge = requestState.beginRefresh(force: force || fromGitLab, now: now()) else { return }
         do { try await connection.send(.init(type: .hello, challenge: challenge,
             capabilities: [RemoteMessage.commentReviewCapability, RemoteMessage.mergeActionsCapability, RemoteMessage.detailsCapability,
-                           RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability,
+                           RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability, RemoteMessage.personalApprovalCapability,
                            RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability, RemoteMessage.detailPreviewCapability,
                            RemoteMessage.draftRegenerationCapability, RemoteMessage.boardAvatarsCapability,
                            RemoteMessage.detailAvatarsCapability, RemoteMessage.boardOrderCapability],
@@ -407,6 +418,10 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
 
     private func finishAction(_ result: RemoteCommandResult) async {
         shouldRecoverCommand = false
+        if let command = recovery?.command, command.id == result.id,
+           let kind = RemoteActionKind(rawValue: command.actionID), kind.isPersonalApproval {
+            lastPersonalApproval = (result.id, kind)
+        }
         if result.status == .completed, let command = recovery?.command,
            command.id == result.id, command.isCompletionAcknowledgement {
             state.acknowledgeResult()
@@ -466,7 +481,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     }
     func prepareApproval(card: RemoteCard, action: RemoteAction) -> UUID? {
         cancelApproval()
-        guard connection != nil, !recoveryUnavailable, recovery == nil, action.kind == .approve, card.head != nil,
+        guard connection != nil, !recoveryUnavailable, recovery == nil, action.kind.requiresApprovalConfirmation, card.head != nil,
               state.canAct(now: now()), let board = state.board,
               board.cards.contains(where: { $0.hasSameActionContext(as: card) && $0.actions.contains(action) }) else { return nil }
         let id = UUID()
@@ -489,8 +504,9 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
               let argument = request.argument else { return }
         await perform(card: card, action: action, argument: argument)
     }
-    func perform(card: RemoteCard, action: RemoteAction, approvalID: UUID? = nil, argument: String? = nil) async {
-        if action.kind == .approve {
+    func perform(card: RemoteCard, action: RemoteAction, approvalID: UUID? = nil, argument: String? = nil,
+                 onApprovalConfirmed: (() -> Void)? = nil) async {
+        if action.kind.requiresApprovalConfirmation {
             let confirmation = approvalConfirmation
             approvalConfirmation = nil
             guard let confirmation, confirmation.id == approvalID, confirmation.card == card, confirmation.action == action,
@@ -501,6 +517,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                 return
             }
             guard board.cards.contains(where: { $0.hasSameActionContext(as: card) && $0.actions.contains(action) }) else { return }
+            onApprovalConfirmed?()
         }
         await submitCommand(card: card, action: action, argument: argument)
     }

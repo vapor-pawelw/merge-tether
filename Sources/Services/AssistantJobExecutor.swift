@@ -19,7 +19,14 @@ enum AssistantJobExecutor {
         }
 
         static func displayMessage(for diagnostic: String) -> String {
-            Self(rawValue: diagnostic.trimmingCharacters(in: .whitespacesAndNewlines))?.description ?? diagnostic
+            if isCancellationDiagnostic(diagnostic) {
+                return String(localized: .MRHumanAction.mrHumanActionInterruptedRun)
+            }
+            return Self(rawValue: diagnostic.trimmingCharacters(in: .whitespacesAndNewlines))?.description ?? diagnostic
+        }
+
+        static func isCancellationDiagnostic(_ diagnostic: String) -> Bool {
+            diagnostic.trimmingCharacters(in: .whitespacesAndNewlines) == String(describing: CancellationError())
         }
     }
     struct PersistenceUnavailable: Error, CustomStringConvertible {

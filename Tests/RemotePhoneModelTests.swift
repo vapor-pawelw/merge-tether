@@ -624,10 +624,12 @@ import MergeTetherRemote
         #expect(!model.state.canAct(now: fixture.date))
     }
 
-    @Test func approvalRequiresAnExplicitSingleUseConfirmationForTheDisplayedRequest() async throws {
+    @Test(arguments: [RemoteActionKind.approve, .personalApprove, .removeApproval])
+    func approvalRequiresAnExplicitSingleUseConfirmationForTheDisplayedRequest(_ kind: RemoteActionKind) async throws {
         let fixture = try PhoneFixture(), model = fixture.model
         model.connect(); await model.refresh()
-        let board = fixture.approvalBoard
+        var board = fixture.approvalBoard
+        board.lanes[0].cards[0].actions = [.init(id: kind.rawValue, kind: kind, token: "checked")]
         await fixture.reply(board: board)
         let card = try #require(board.cards.first), action = try #require(card.actions.first)
         await model.perform(card: card, action: action)
@@ -636,6 +638,7 @@ import MergeTetherRemote
         let transport = fixture.transports[0]
         transport.onCommand = { command in await transport.onMessage?(.init(type: .result, result: .init(id: command.id, status: .completed))) }
         await model.perform(card: card, action: action, approvalID: id)
+        #expect(model.showsAutomaticApprovalOffResult == (kind == .removeApproval))
         model.state.acknowledgeResult()
         await model.perform(card: card, action: action, approvalID: id)
         #expect(transport.sent.filter { $0.type == .command }.count == 1)

@@ -157,10 +157,14 @@ import MergeTetherRemote
                     card = self.card(item, account: account, extraActions: extras, context: context)
                     card = self.presentation(card, model: presentation)
                     if let head = card.head, let host = monitor.glab.resolvedHost,
-                       let username = monitor.glab.currentUsername, account == "\(username)@\(host)",
-                       monitor.settings.hasAutomaticApprovalWithOpenFindings(
-                        for: .init(host: host, username: username, projectID: item.id.projectID, iid: item.id.iid), head: head) {
-                        card.presentation?.approvedWithOpenFindings = true
+                       let username = monitor.glab.currentUsername, account == "\(username)@\(host)" {
+                        let target = MRAutomationScope.Target(host: host, username: username, projectID: item.id.projectID, iid: item.id.iid)
+                        if monitor.settings.hasAutomaticApprovalWithOpenFindings(for: target, head: head) {
+                            card.presentation?.approvedWithOpenFindings = true
+                        }
+                        if monitor.settings.independentApprovalPreferences[target] == .off {
+                            card.presentation?.automaticApprovalOff = true
+                        }
                     }
                     if row.displayRequest?.state == "merged" || row.displayRequest?.state == "closed" {
                         card.actions = []
@@ -176,6 +180,9 @@ import MergeTetherRemote
                     let busy = presentation.actionsBlocked
                     if busy { card.actions = [] }
                     else {
+                        if let action = personalApprovalAction(for: row, monitor: monitor, account: account) {
+                            card.actions.append(action)
+                        }
                         let jobPublication = monitor.manualReviewConsent(for: item).publicationMode
                         card = mergeActions(card, item: item, status: mergeStatus, monitor: monitor, account: account,
                             evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext)
@@ -244,6 +251,16 @@ import MergeTetherRemote
                                     statuses: [AuthoredMergeRequestStatus]) -> AuthoredMergeRequestStatus? {
         guard row.evidenceMatchesCatalogContext, let request = row.displayRequest else { return nil }
         return statuses.first { $0.matchesCurrentRequest(request) }
+    }
+
+    static func personalApprovalAction(for row: MergeRequestBoardSnapshot.Row, monitor: TodoMonitorService,
+                                       account: String) -> RemoteAction? {
+        guard row.evidenceMatchesCatalogContext, let request = row.displayRequest,
+              let change = monitor.attention.personalApprovalAction(for: row),
+              let context = contextRevision(request) else { return nil }
+        let kind: RemoteActionKind = change == .approve ? .personalApprove : .removeApproval
+        guard let token = try? RemoteDigest.token([account, context, kind.rawValue]) else { return nil }
+        return .init(id: kind.rawValue, kind: kind, token: token, confirmationText: String(localized: change.confirmation))
     }
 
     static func mergePresentation(_ original: RemoteCard, item: MergeRequestAttentionMonitor.Item,

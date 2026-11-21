@@ -205,6 +205,11 @@ commit. Its single-use confirmation expires after thirty seconds and is invalid
 after target, action, account, session or connection changes. This consent is not
 restored by a phone restart or receipt recovery.
 
+The `personal-approval-v1` capability adds **Approve** and **Remove approval** to
+the approvals popover. Both actions use the same confirmation and Mac executor.
+Removing approval also turns off automatic approval for that MR. The phone reports
+the result and shows the saved setting in the approvals popover.
+
 Supported actions include checked comment publication, SHA-bound approval,
 re-review confirmation, verification, pipeline handoff, marking a raw event done,
 preparing feedback, running existing MR intents and retrying stopped agent jobs.

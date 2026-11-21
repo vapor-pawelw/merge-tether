@@ -1,6 +1,16 @@
 import Foundation
 
 extension TodoMonitorService {
+    func changePersonalApproval(_ change: PersonalMRApproval, for request: GitLabMergeRequest,
+                                accountRevision: UInt64) async -> MergeRequestAttentionMonitor.PersonalApprovalResult {
+        let result = await attention.changePersonalApproval(change, for: request, accountRevision: accountRevision)
+        if result == .completed, glab.accountRevision == accountRevision,
+           let target = scopeTarget(projectID: request.projectID, iid: request.iid, url: request.webURL) {
+            automationToggleNotices.post(.approvalChanged(target: target, removed: change == .remove))
+        }
+        return result
+    }
+
     func setAutoMergePreference(_ preference: MRAutomationPreference, for target: MRAutomationScope.Target) async {
         await setAutomaticActionPreference(preference, for: .merge, target: target)
     }

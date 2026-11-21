@@ -26,6 +26,7 @@ private struct CommandCenterMRCardContent: View {
     @State private var finishingCommentReview = false
     @State private var retryError: String?
     @State private var confirmRemoval = false
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openSettings) private var openSettings
 
     private var item: MergeRequestAttentionMonitor.Item { row.item }
@@ -44,16 +45,76 @@ private struct CommandCenterMRCardContent: View {
     private var needsCLI: Bool { !monitor.assistantDependencies.available.contains(monitor.settings.automation.assistant) }
     private var humanAction: MRHumanAction? { presentation.humanAction }
 
+    private var contentOpacity: Double { isDraft ? 0.5 : 1 }
+
     var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            metadataHeader.zIndex(1)
+            cardContent.opacity(contentOpacity)
+            if finishedState == nil {
+                MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext,
+                    actionsBlocked: presentation.actionsBlocked || isStarting || finishingCommentReview,
+                    onReviewFeedback: { openAttention(.feedback) },
+                    showsExplanations: false, showsRecoveryActions: false, textFont: .callout,
+                    coveredBlockers: shownRequirements?.coveredBlockers ?? [],
+                    hidesBlockedActions: presentation.working, highlightedSubmission: presentation.mergeStage?.submission,
+                    statusTopPadding: humanAction == nil ? 0 : 8, statusOpacity: contentOpacity,
+                    statusTrailer: { mergeActionStatus }) { hasDirectMergeAction in
+                    if humanAction?.action == .retryRun {
+                        Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
+                            .buttonStyle(.plain)
+                    }
+                    Spacer(minLength: 6)
+                    if let pendingPrimary {
+                        primary(pendingPrimary.title, cta: pendingPrimary.cta, enabled: false) {}
+                    } else {
+                        primaryAction(hasDirectMergeAction: hasDirectMergeAction)
+                    }
+                    if presentation.showsAdditionalCommentReview || finishingCommentReview {
+                        Button {
+                            guard confirmMRAction(.finishCommentReview, title: .CommentReview.commentReviewFinish) else { return }
+                            finishingCommentReview = true
+                            Task {
+                                defer { finishingCommentReview = false }
+                                await monitor.attention.finishCommentReview(item)
+                            }
+                        } label: {
+                            MRActionProgressLabel(working: finishingCommentReview) { Text(.CommentReview.commentReviewFinish) }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(isStarting || finishingCommentReview || presentation.actionsBlocked || !item.canFinishCommentReview)
+                    }
+                }
+            }
+        }
+        .onChange(of: row.latestJob?.id) { _, _ in retryError = nil }
+        .controlSize(.small)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding([.leading, .bottom, .trailing], 16)
+        // The 16 pt avatar sits 4 pt below the top of the 24 pt header controls.
+        .padding(.top, 12)
+        .overlay {
+            RoundedRectangle(cornerRadius: 8).strokeBorder(.primary.opacity(0.14), lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .boardCardInteraction(
+            background: colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(white: 0.95),
+            onDetails: onDetails)
+        .contextMenu { menuItems }
+        .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
+            Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
+        } message: { Text(.Board.boardRemoveExplanation) }
+        .environment(\.gitLabPersonSourceURL, row.displayURL)
+    }
+
+    private var cardContent: some View {
         let mergeActivity = presentation.mergeActivity
         let showsWorkingStatus = presentation.working && mergeActivity == nil
-        let cardSpacing: CGFloat = 8
-        VStack(alignment: .leading, spacing: cardSpacing) {
-            metadataHeader.zIndex(1)
+        return VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 6) {
                 Button(action: onDetails) {
                     BoardCardTitle(title: row.displayTitle, repositoryPath: row.displayURL.gitLabProjectPath,
-                        titleColor: isMuted ? .secondary : .primary)
+                        titleColor: !isDraft && isMuted ? .secondary : .primary)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -121,54 +182,8 @@ private struct CommandCenterMRCardContent: View {
                         .font(.subheadline).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext,
-                    actionsBlocked: presentation.actionsBlocked || isStarting || finishingCommentReview,
-                    onReviewFeedback: { openAttention(.feedback) },
-                    showsExplanations: false, showsRecoveryActions: false, textFont: .callout,
-                    coveredBlockers: shownRequirements?.coveredBlockers ?? [],
-                    hidesBlockedActions: presentation.working, highlightedSubmission: presentation.mergeStage?.submission,
-                    statusTopPadding: humanAction == nil ? 0 : 8, statusTrailer: { mergeActionStatus }) { hasDirectMergeAction in
-                    if humanAction?.action == .retryRun {
-                        Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
-                            .buttonStyle(.plain)
-                    }
-                    Spacer(minLength: 6)
-                    if let pendingPrimary {
-                        primary(pendingPrimary.title, cta: pendingPrimary.cta, enabled: false) {}
-                    } else {
-                        primaryAction(hasDirectMergeAction: hasDirectMergeAction)
-                    }
-                    if presentation.showsAdditionalCommentReview || finishingCommentReview {
-                        Button {
-                            guard confirmMRAction(.finishCommentReview, title: .CommentReview.commentReviewFinish) else { return }
-                            finishingCommentReview = true
-                            Task {
-                                defer { finishingCommentReview = false }
-                                await monitor.attention.finishCommentReview(item)
-                            }
-                        } label: {
-                            MRActionProgressLabel(working: finishingCommentReview) { Text(.CommentReview.commentReviewFinish) }
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(isStarting || finishingCommentReview || presentation.actionsBlocked || !item.canFinishCommentReview)
-                    }
-                }
             }
         }
-        .onChange(of: row.latestJob?.id) { _, _ in retryError = nil }
-        .controlSize(.small)
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay {
-            RoundedRectangle(cornerRadius: 8).strokeBorder(.primary.opacity(0.14), lineWidth: 1)
-                .allowsHitTesting(false)
-        }
-        .boardCardInteraction(onDetails: onDetails)
-        .contextMenu { menuItems }
-        .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
-            Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
-        } message: { Text(.Board.boardRemoveExplanation) }
-        .environment(\.gitLabPersonSourceURL, row.displayURL)
     }
 
     @ViewBuilder private var attentionAndDrafts: some View {
@@ -219,6 +234,12 @@ private struct CommandCenterMRCardContent: View {
                 presentation.mergeStage.map { String(localized: $0.title) } ?? ""], holdsOnly: true)
     }
 
+    private var draftBadgeTint: Color {
+        colorScheme == .dark
+            ? Color(red: 0.79, green: 0.70, blue: 0.92)
+            : Color(red: 0.38, green: 0.27, blue: 0.52)
+    }
+
     private var metadataHeader: some View {
         HStack(spacing: 6) {
             if let author = ReviewingContext(row: row).author {
@@ -230,15 +251,9 @@ private struct CommandCenterMRCardContent: View {
             }
             Spacer(minLength: 4)
             if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
-            else if isDraft { BoardDraftBadge() }
+            else if isDraft { BoardDraftBadge(tint: draftBadgeTint) }
             if finishedState == nil {
-                BoardApprovalProgressBadge(progress: row.displayItem.approvalProgress, reviewers: row.displayRequest?.reviewers,
-                    viewerUsername: monitor.glab.currentUsername,
-                    isOwnMergeRequest: row.isOwnMergeRequest(viewer: monitor.glab.currentUsername),
-                    showsOpenFindingsApproval: {
-                        guard let scopeTarget, let head = row.displayRequest?.sha else { return false }
-                        return monitor.settings.hasAutomaticApprovalWithOpenFindings(for: scopeTarget, head: head)
-                    })
+                BoardMRApprovalBadge(row: row, monitor: monitor)
             }
             HStack(spacing: 0) {
                 if finishedState == nil, let scopeTarget {

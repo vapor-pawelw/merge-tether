@@ -5,10 +5,15 @@ struct RemoteApprovalDetailsView: View {
     let details: RemoteApprovalDetails
     let mergeRequestURL: URL?
     let approvedWithOpenFindings: Bool
+    let personalApproval: RemotePersonalApprovalControl?
+    let automaticApprovalOff: Bool
     @Environment(\.dismiss) private var dismiss
-    init(details: RemoteApprovalDetails, mergeRequestURL: URL? = nil, approvedWithOpenFindings: Bool = false) {
+    init(details: RemoteApprovalDetails, mergeRequestURL: URL? = nil, approvedWithOpenFindings: Bool = false,
+         personalApproval: RemotePersonalApprovalControl? = nil, automaticApprovalOff: Bool = false) {
         self.details = details; self.mergeRequestURL = mergeRequestURL
         self.approvedWithOpenFindings = approvedWithOpenFindings
+        self.personalApproval = personalApproval
+        self.automaticApprovalOff = automaticApprovalOff
     }
 
     var body: some View {
@@ -18,6 +23,10 @@ struct RemoteApprovalDetailsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         RemoteApprovalSummary(details: details)
                         if approvedWithOpenFindings { RemoteOpenFindingsApprovalNote() }
+                        if automaticApprovalOff {
+                            Text(.Board.boardApprovalsAutomationOff).font(.callout).foregroundStyle(.secondary)
+                        }
+                        if let personalApproval { personalApproval }
                     }
                     if details.truncated { Text(.RemoteDetail.remoteDetailTruncated).font(.callout).foregroundStyle(.orange) }
                     VStack(alignment: .leading, spacing: 14) {
