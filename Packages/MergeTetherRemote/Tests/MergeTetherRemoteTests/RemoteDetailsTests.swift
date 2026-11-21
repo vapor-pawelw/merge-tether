@@ -267,6 +267,27 @@ import Testing
         #expect(fitted.details?.draftContexts == nil && fitted.details?.proposedSolutionDraftIDs == nil)
     }
 
+    @Test func dependencySourcesSurviveSnapshotsAndOlderPhonesCanStillOpenDetails() throws {
+        let predecessor = #"{"reference":"!1","title":"Base","url":"https://gitlab.example.test/g/p/-/merge_requests/1","isCurrent":true"#
+        let decoder = JSONDecoder()
+        let current = try decoder.decode(RemoteMRPredecessor.self,
+            from: Data((predecessor + #", "sources":["stack","gitLab"]}"#).utf8))
+        let legacy = try decoder.decode(RemoteMRPredecessor.self, from: Data((predecessor + "}").utf8))
+        let wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(current)) as? [String: Any])
+        #expect(wire["sources"] as? [String] == ["stack", "gitLab"])
+
+        var card = RemoteCard(id: "mr:1:2", title: "Child", project: "g/p", url: nil,
+            presentation: .init(repository: "p", authorUsername: "alice"), dependencies: .init(predecessors: [current]))
+        let board = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [.init(id: .own, cards: [card])])
+        card.dependencies?.predecessors = [legacy]
+        #expect(try RemoteDetailRequest(card: card, board: board).matches(board))
+        #expect(try RemoteDetailRequest(card: card, board: board, presentationIndependent: true).matches(board))
+        card.presentation?.authorUsername = nil
+        #expect(try RemoteDetailRequest(card: card, board: board).matches(board))
+        card.dependencies?.predecessors[0].reference = "!9"
+        #expect(try !RemoteDetailRequest(card: card, board: board).matches(board))
+    }
+
     @Test func olderPhonesWithoutAuthorIdentityFieldsCanStillOpenDetails() throws {
         var card = RemoteCard(id: "mr:1:2", title: "MR", project: "g/p", url: nil)
         card.presentation = .init(author: "Alice Example", repository: "p",

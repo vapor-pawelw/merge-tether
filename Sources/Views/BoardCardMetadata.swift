@@ -34,9 +34,11 @@ struct BoardMRReferenceLine: View {
     let projectID: Int
     var repositoryPath = ""
     var dependencies: MergeRequestDependencySummary?
+    var contentOpacity = 1.0
 
     var body: some View {
-        MRDependencyRow(summary: dependencies, projectID: projectID, iid: iid, repositoryPath: repositoryPath)
+        MRDependencyRow(summary: dependencies, projectID: projectID, iid: iid, repositoryPath: repositoryPath,
+            contentOpacity: contentOpacity)
     }
 }
 
@@ -80,6 +82,7 @@ struct BoardDraftBadge: View {
 struct BoardCardAuthor: View {
     let author: Todo.Author
     var roleLabel: LocalizedStringResource? = .ReviewingContext.reviewingAuthorLabel
+    var contentOpacity = 1.0
 
     private var accessibilityLabel: Text {
         let identity = Text(verbatim: author.person.accessibilityName ?? author.username)
@@ -88,7 +91,7 @@ struct BoardCardAuthor: View {
     }
 
     var body: some View {
-        PersonLabel(person: author.person)
+        PersonLabel(person: author.person, contentOpacity: contentOpacity)
             .font(.caption).foregroundStyle(.secondary)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(accessibilityLabel)
@@ -101,6 +104,7 @@ struct MRDependencyRow: View {
     let projectID: Int
     var iid: Int? = nil
     var repositoryPath = ""
+    var contentOpacity = 1.0
 
     private var repositoryName: String {
         repositoryPath.split(separator: "/").last.map(String.init) ?? repositoryPath
@@ -121,6 +125,7 @@ struct MRDependencyRow: View {
             if let notice = summary?.notice {
                 Text(verbatim: notice).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .opacity(contentOpacity)
             }
         }
     }
@@ -132,6 +137,7 @@ struct MRDependencyRow: View {
         let line = Text("\(repository)\(separator)\(reference)")
             .font(.caption)
             .fixedSize(horizontal: false, vertical: true)
+            .opacity(contentOpacity)
 
         if repositoryPath.isEmpty {
             line.help(dependencyHelp ?? Text(verbatim: ""))

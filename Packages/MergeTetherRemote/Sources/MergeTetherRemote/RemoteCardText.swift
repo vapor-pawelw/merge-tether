@@ -27,7 +27,7 @@ public extension RemoteCard {
     }
 
     var detailContextDigest: String? {
-        var content = self
+        var content = withoutDependencySources
         content.detail = ""
         content.presentation = nil
         content.needsAttention = nil
@@ -69,5 +69,15 @@ public extension RemoteCard {
 
     private static func normalized(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters)).lowercased()
+    }
+}
+
+extension RemoteCard {
+    var withoutDependencySources: Self {
+        guard var dependencies, dependencies.predecessors.contains(where: { $0.sources != nil }) else { return self }
+        for index in dependencies.predecessors.indices { dependencies.predecessors[index].sources = nil }
+        var card = self
+        card.dependencies = dependencies
+        return card
     }
 }

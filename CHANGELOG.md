@@ -6,13 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Put the repository and MR number above the title and the author below it on Mac and iPhone board cards. A Blocked badge in the top-right corner opens a popover with links to blocking MRs and shows whether each one is earlier in the stack, an explicit GitLab dependency, or both.
+
 - Drop merge request cards above, between or below other cards on Mac and iPhone. The insertion line marks valid positions in the card's current column, automation section and pin group.
 
 - Touch and hold anywhere on an iPhone board card, then drag it to reorder merge requests while connected to the Mac. The Mac saves moves within each automation and pin group, and the iPhone immediately displays the confirmed order.
 
-- Use 50% opacity for draft merge request titles, repository references, and status content on the Mac board. Give the Draft badge a subtle violet tint and keep the author row and action buttons at their standard opacity.
+- Use 50% opacity for the author, title, repository reference, status content, background, and border of draft merge request cards on the Mac board. Give the Draft badge a subtle violet tint.
 
-- Match the Mac draft merge request styling on iPhone cards, with dimmed titles, repository references, and status content and a violet Draft badge.
+- Keep the author and repository popovers available on hover on Mac draft cards.
+
+- Match the Mac draft merge request styling on iPhone cards, including the 50% opacity and violet Draft badge.
 
 - Use 16 pt insets beside and below the content of Mac board merge request cards, matching the inset above the avatar.
 

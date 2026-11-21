@@ -61,6 +61,7 @@ struct PersonLabel: View {
     var showsHandleWhenUnnamed = false
     /// Shown when GitLab returned neither a name nor a username.
     var fallback: Text? = nil
+    var contentOpacity = 1.0
 
     @Environment(\.gitLabPersonSourceURL) private var sourceURL
     @State private var showsHandle = false
@@ -77,6 +78,7 @@ struct PersonLabel: View {
                 if showsAvatar { PersonAvatar(url: nil, size: avatarSize).accessibilityHidden(true) }
                 fallback
             }
+            .opacity(contentOpacity)
         }
     }
 
@@ -85,6 +87,7 @@ struct PersonLabel: View {
             if showsAvatar { PersonAvatar(url: person.avatarURL, size: avatarSize, initials: person.initials).accessibilityHidden(true) }
             Text(verbatim: showsHandleWhenUnnamed ? person.messageName ?? name : name).lineLimit(1)
         }
+        .opacity(contentOpacity)
     }
 
     @ViewBuilder private func labeled(_ name: String) -> some View {

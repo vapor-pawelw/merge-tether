@@ -45,7 +45,7 @@ import MergeTetherRemote
             project: item.url.gitLabProjectPath, url: item.url,
             head: item.mergeRequest?.sha, detail: detail(item), drafts: drafts)
         card.contextRevision = item.mergeRequest.flatMap(contextRevision)
-        card.dependencies = dependencyPresentation(item.dependencies, projectID: item.id.projectID)
+        card.dependencies = .init(summary: item.dependencies, projectID: item.id.projectID)
         let publishable = item.publishAllDrafts
         var kinds = extraActions.filter { $0 != .verify }
         if item.mergeRequest?.sha != nil {
@@ -106,13 +106,6 @@ import MergeTetherRemote
                 assignedReviewerCount: MergeRequestApprovalProgress.assignedReviewerCount(item.mergeRequest?.reviewers))
         }
         return card
-    }
-
-    private static func dependencyPresentation(_ summary: MergeRequestDependencySummary?, projectID: Int) -> RemoteMRDependencies? {
-        guard let dependencies = summary, dependencies.hasPresentation else { return nil }
-        return .init(stackPosition: dependencies.stackPosition,
-            predecessors: dependencies.predecessors.map { .init(reference: $0.reference(relativeTo: projectID),
-                title: $0.title, url: $0.url, isCurrent: $0.isCurrent) }, notice: dependencies.notice)
     }
 
     static func boardOrderCardID(_ target: MRAutomationScope.Target) -> String {
@@ -560,7 +553,7 @@ import MergeTetherRemote
         card.url = model.row.displayURL
         card.head = model.row.displayRequest?.sha
         card.contextRevision = model.row.displayRequest.flatMap(contextRevision)
-        card.dependencies = dependencyPresentation(model.row.displayItem.dependencies, projectID: model.row.id.projectID)
+        card.dependencies = .init(summary: model.row.displayItem.dependencies, projectID: model.row.id.projectID)
         card.approvals = model.row.displayItem.approvalProgress.flatMap {
             .init(completed: min($0.completed, $0.required), required: $0.required,
                 received: $0.completed, requirementsSatisfied: $0.requirementsSatisfied)
@@ -667,6 +660,19 @@ import MergeTetherRemote
         if item.needsMerge { reasons.append(.Remote.remoteMerge) }
         if item.requiresDiscussionRecheck || item.awaitingRemoteVerification { reasons.append(.Remote.remoteRecheck) }
         return reasons.map { String(localized: $0) }.joined(separator: " · ")
+    }
+}
+
+extension RemoteMRDependencies {
+    init?(summary: MergeRequestDependencySummary?, projectID: Int) {
+        guard let summary, summary.hasPresentation else { return nil }
+        self.init(stackPosition: summary.stackPosition, predecessors: summary.predecessors.map { predecessor in
+            var sources: [RemoteMRPredecessor.Source] = []
+            if predecessor.sources.contains(.stack) { sources.append(.stack) }
+            if predecessor.sources.contains(.gitLab) { sources.append(.gitLab) }
+            return .init(reference: predecessor.reference(relativeTo: projectID), title: predecessor.title,
+                url: predecessor.url, isCurrent: predecessor.isCurrent, sources: sources)
+        }, notice: summary.notice)
     }
 }
 
