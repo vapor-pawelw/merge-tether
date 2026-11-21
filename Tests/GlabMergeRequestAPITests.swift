@@ -1,4 +1,5 @@
 import Foundation
+import MergeTetherRemote
 import Testing
 @testable import MergeTether
 
@@ -91,6 +92,50 @@ struct GlabMergeRequestAPITests {
     }
     private let host = "gitlab.example.test"
     private let sha = "0123456789abcdef0123456789abcdef01234567"
+
+    @Test func reviewerSuggestionsSearchProjectUsersAndExcludeBlockedAccounts() async throws {
+        try await withFakeGlab { glab in
+            let matches = try await glab.searchProjectReviewers(projectID: 34, query: "a+b &", host: host)
+            #expect(matches == [.init(id: 8, name: "Alice", username: "alice")])
+        }
+    }
+
+    @Test func reviewerEditsSendOnlyTheSelectedUserAndPreserveTheOtherAssignment() async throws {
+        try await withFakeGlab { glab in
+            let request = try await glab.fetchMergeRequest(projectID: 34, iid: 12, host: host)
+            #expect(request.reviewers?.map(\.id) == [9])
+
+            try await glab.changeMergeRequestReviewer(.init(.add, reviewerID: 8, username: "alice"), of: request,
+                host: host, username: "author", shouldProceed: { true })
+            let added = try await glab.fetchMergeRequest(projectID: 34, iid: 12, host: host)
+            #expect(added.reviewers?.map(\.id) == [9, 8])
+
+            let removal = ReviewerChange(.remove, reviewerID: 8, username: "alice")
+            for _ in 0..<2 {
+                try await glab.changeMergeRequestReviewer(removal, of: added, host: host, username: "author", shouldProceed: { true })
+            }
+            let removed = try await glab.fetchMergeRequest(projectID: 34, iid: 12, host: host)
+            #expect(removed.reviewers?.map(\.id) == [9])
+            let mutationCount = try String(contentsOfFile: try #require(glab.glabPath).path + "-reviewer-writes", encoding: .utf8)
+            #expect(mutationCount == "APPEND\nREMOVE\n")
+        }
+    }
+
+    @Test func reviewerEditDoesNotWriteWithStaleAccountOrPerson() async throws {
+        try await withFakeGlab { glab in
+            let request = try await glab.fetchMergeRequest(projectID: 34, iid: 12, host: host)
+            await #expect(throws: GlabError.notAuthenticated) {
+                try await glab.changeMergeRequestReviewer(.init(.remove, reviewerID: 9, username: "bob"), of: request,
+                    host: host, username: "wrong-account", shouldProceed: { true })
+            }
+            await #expect(throws: CancellationError.self) {
+                try await glab.changeMergeRequestReviewer(.init(.remove, reviewerID: 9, username: "old-bob"), of: request,
+                    host: host, username: "author", shouldProceed: { true })
+            }
+            let executable = try #require(glab.glabPath)
+            #expect(!FileManager.default.fileExists(atPath: executable.path + "-reviewer-writes"))
+        }
+    }
 
     @Test func readsAuthoredMergeRequestsAndTheirCurrentChecks() async throws {
         try await withFakeGlab { glab in
@@ -299,6 +344,8 @@ struct GlabMergeRequestAPITests {
         "has_conflicts":false,"labels":["auto merge"],"blocking_discussions_resolved":true,
         "head_pipeline":{"status":"success","sha":"\(sha)"},"user":{"can_merge":true}}
         """
+        let alice = #"{"id":8,"username":"alice","name":"Alice","state":"active"}"#
+        let bob = #"{"id":9,"username":"bob","name":"Bob"}"#
         try Data("""
         #!/bin/sh
         set -eu
@@ -311,7 +358,27 @@ struct GlabMergeRequestAPITests {
             printf '%s\\n' '[\(request)]' '[\(request.replacingOccurrences(of: "\"iid\":12", with: "\"iid\":13"))]'
             ;;
           'api /projects/34/merge_requests/12 --hostname \(host)')
-            printf '%s' '\(request)'
+            if test -f "$0-reviewer-added"; then
+              printf '%s' '\(request.dropLast()),"reviewers":[\(bob),\(alice)]}'
+            else
+              printf '%s' '\(request.dropLast()),"reviewers":[\(bob)]}'
+            fi
+            ;;
+          'api /projects/34/users?search=a%2Bb%20%26&per_page=30 --hostname \(host)')
+            printf '%s' '[\(alice),{"id":10,"username":"blocked","name":"Blocked","state":"blocked"}]'
+            ;;
+          'api /users/8 --hostname \(host)')
+            printf '%s' '\(alice)'
+            ;;
+          'api graphql --hostname \(host) --raw-field query='*'reviewerUsernames: [$username], operationMode: $mode'*' --raw-field projectPath=group/repo --raw-field iid=12 --raw-field username=alice --raw-field mode='*)
+            mode="${14#mode=}"
+            case "$mode" in
+              APPEND) touch "$0-reviewer-added" ;;
+              REMOVE) rm "$0-reviewer-added" ;;
+              *) exit 21 ;;
+            esac
+            printf '%s\\n' "$mode" >> "$0-reviewer-writes"
+            printf '%s' '{"data":{"mergeRequestSetReviewers":{"mergeRequest":{"iid":"12"},"errors":[]}}}'
             ;;
           'api /projects/34/merge_requests/12/approval_state --hostname \(host)')
             printf '%s' '{"rules":[{"approvals_required":1,"approved":true},{"approvals_required":0,"approved":false}]}'

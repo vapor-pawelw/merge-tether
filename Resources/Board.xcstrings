@@ -2,6 +2,90 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "board.reviewers.done": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Done" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Gotowe" } }
+      }
+    },
+    "board.reviewers.edit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Edit reviewers" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Edytuj reviewerów" } }
+      }
+    },
+    "board.reviewers.add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Add reviewer" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Dodaj reviewera" } }
+      }
+    },
+    "board.reviewers.remove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Remove reviewer" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Usuń reviewera" } }
+      }
+    },
+    "board.reviewers.removePerson": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Remove reviewer @%@" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Usuń reviewera @%@" } }
+      }
+    },
+    "board.reviewers.search": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Name or @username" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Nazwa lub @login" } }
+      }
+    },
+    "board.reviewers.alreadyAssigned": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Already assigned" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Już przypisany" } }
+      }
+    },
+    "board.reviewers.noMatches": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No matching reviewers" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Brak pasujących reviewerów" } }
+      }
+    },
+    "board.reviewers.searchFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Could not search for reviewers." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Nie udało się wyszukać reviewerów." } }
+      }
+    },
+    "board.reviewers.saveFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Could not update reviewers." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Nie udało się zmienić reviewerów." } }
+      }
+    },
+    "board.reviewers.changed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The merge request changed. Refresh and try again." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Merge request się zmienił. Odśwież i spróbuj ponownie." } }
+      }
+    },
+    "board.reviewers.uncertain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "GitLab did not confirm the change. Refresh the reviewer list." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "GitLab nie potwierdził zmiany. Odśwież listę reviewerów." } }
+      }
+    },
     "board.approvals.approve": {
       "extractionState": "manual",
       "localizations": {

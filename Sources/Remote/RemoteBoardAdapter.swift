@@ -176,6 +176,10 @@ import MergeTetherRemote
                         if let action = personalApprovalAction(for: row, monitor: monitor, account: account) {
                             card.actions.append(action)
                         }
+                        if let request = row.displayRequest, monitor.canEditReviewers(of: request),
+                           let context = contextRevision(request), let token = try? RemoteDigest.token([account, context]) {
+                            card.actions.append(.init(id: RemoteActionKind.editReviewers.rawValue, kind: .editReviewers, token: token))
+                        }
                         let jobPublication = monitor.manualReviewConsent(for: item).publicationMode
                         card = mergeActions(card, item: item, status: mergeStatus, monitor: monitor, account: account,
                             evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext)

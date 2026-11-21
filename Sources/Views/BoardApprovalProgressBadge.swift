@@ -1,4 +1,5 @@
 import SwiftUI
+import MergeTetherRemote
 
 struct BoardApprovalProgressBadge: View {
     struct Action {
@@ -14,6 +15,7 @@ struct BoardApprovalProgressBadge: View {
     var isOwnMergeRequest = true
     var showsOpenFindingsApproval: () -> Bool = { false }
     var personalAction: Action? = nil
+    var reviewerEditing: ReviewerEditing? = nil
     var automaticApprovalOff = false
     @State private var showingPeople = false
     @State private var pinned = false
@@ -22,6 +24,11 @@ struct BoardApprovalProgressBadge: View {
     @State private var hoverTask: Task<Void, Never>?
     @State private var pendingAction: Action?
     @State private var actionError: LocalizedStringResource?
+    @State private var reviewerEditor = ReviewerEditorState()
+
+    private var assignedReviewers: [ReviewerCandidate] {
+        (reviewers ?? []).map { .init(id: $0.id, name: $0.name, username: $0.username) }
+    }
 
     private var people: [MergeRequestApprovalProgress.Participant] {
         let reviewers = reviewers ?? []
@@ -66,7 +73,7 @@ struct BoardApprovalProgressBadge: View {
         let assigned = assignedReviewerCount
         let confirmationTitle: LocalizedStringResource = pendingAction?.change == .remove
             ? .Board.boardApprovalsRemoveWarningTitle : .Board.boardApprovalsApprove
-        if personalAction != nil || automaticApprovalOff
+        if personalAction != nil || reviewerEditing != nil || automaticApprovalOff
             || (progress.map { $0.required > 0 || $0.completed > 0 } ?? true) || viewerApproval != nil || assigned != nil {
             Button { hoverTask?.cancel(); pinned = true; showingPeople = true } label: {
                 HStack(spacing: 4) {
@@ -94,7 +101,11 @@ struct BoardApprovalProgressBadge: View {
                 approvalPopover.onHover { peopleHovered = $0; updateHover() }
             }
             .onChange(of: showingPeople) { _, visible in
-                if !visible { hoverTask?.cancel(); peopleHovered = false; pinned = false }
+                if !visible {
+                    hoverTask?.cancel(); peopleHovered = false; pinned = false
+                    reviewerEditor.isAdding = false
+                    reviewerEditor.error = nil
+                }
             }
             .onDisappear { hoverTask?.cancel(); showingPeople = false }
             .alert(Text(confirmationTitle), isPresented: Binding(
@@ -155,7 +166,7 @@ struct BoardApprovalProgressBadge: View {
                 Divider()
             }
             peopleList
-            if personalAction != nil || automaticApprovalOff {
+            if personalAction != nil || reviewerEditing != nil || automaticApprovalOff {
                 Divider()
                 VStack(alignment: .leading, spacing: 8) {
                     if automaticApprovalOff {
@@ -170,11 +181,25 @@ struct BoardApprovalProgressBadge: View {
                         } label: { Text(action.change.title) }
                         .disabled(action.isBusy)
                     }
+                    if let reviewerEditing {
+                        if reviewerEditor.isAdding {
+                            ReviewerPicker(editing: reviewerEditing, assigned: assignedReviewers, state: reviewerEditor)
+                        } else {
+                            Button(.Board.boardReviewersAdd) {
+                                pinPeople()
+                                reviewerEditor.isAdding = true
+                            }
+                            .disabled(reviewerEditor.isSaving)
+                        }
+                    }
+                    if reviewerEditor.isSaving { ProgressView().controlSize(.small) }
+                    if let error = reviewerEditor.error { Text(error).font(.caption).foregroundStyle(.secondary) }
                 }
                 .padding(12)
             }
         }
         .frame(width: 280)
+        .modifier(ReviewerRemovalConfirmation(state: reviewerEditor, editing: reviewerEditing))
     }
 
     private var peopleList: some View {
@@ -187,13 +212,14 @@ struct BoardApprovalProgressBadge: View {
                     Text(.Board.boardApprovalsNoPeople).font(.callout).padding(12)
                 }
                 ForEach(people) { person in
-                    HStack(spacing: 6) {
+                    let assigned = reviewerEditing == nil ? nil : assignedReviewers.first { $0.id == person.id }
+                    BoardApprovalPersonRow(reviewer: assigned, editor: reviewerEditor, onSelect: pinPeople) {
                         PersonLabel(person: person.author.person, avatarSize: 20)
                             .font(.callout).foregroundStyle(.primary)
                         if person.id == viewerApproval?.author.id {
                             Text(.Board.boardApprovalsViewerSuffix).font(.callout).foregroundStyle(.secondary)
                         }
-                        Spacer(minLength: 18)
+                    } status: {
                         switch person.status {
                         case .approved:
                             Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
@@ -210,13 +236,16 @@ struct BoardApprovalProgressBadge: View {
                         case .assigned: EmptyView()
                         }
                     }
-                    .padding(.vertical, 8).padding(.horizontal, 12)
-                    .accessibilityElement(children: .combine)
                 }
             }
         }
         .scrollBounceBehavior(.basedOnSize)
         .frame(height: min(360, CGFloat(max(people.count, 1)) * 36 + (progress == nil ? 48 : 0)))
+    }
+
+    private func pinPeople() {
+        hoverTask?.cancel()
+        pinned = true
     }
 
     private func updateHover() {
@@ -228,6 +257,31 @@ struct BoardApprovalProgressBadge: View {
             guard !Task.isCancelled else { return }
             showingPeople = hovering
         }
+    }
+}
+
+private struct BoardApprovalPersonRow<Name: View, Status: View>: View {
+    let reviewer: ReviewerCandidate?
+    let editor: ReviewerEditorState
+    let onSelect: () -> Void
+    @ViewBuilder let name: Name
+    @ViewBuilder let status: Status
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            name
+            if let reviewer {
+                ReviewerRemovalButton(person: reviewer, revealed: hovered, state: editor, onSelect: onSelect)
+            }
+            Spacer(minLength: 18)
+            status
+        }
+        .frame(minHeight: 36)
+        .padding(.horizontal, 12)
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
+        .accessibilityElement(children: reviewer == nil ? .combine : .contain)
     }
 }
 
@@ -243,8 +297,18 @@ struct BoardMRApprovalBadge: View {
             showsOpenFindingsApproval: {
                 guard let target, let head = row.displayRequest?.sha else { return false }
                 return monitor.settings.hasAutomaticApprovalWithOpenFindings(for: target, head: head)
-            }, personalAction: action,
+            }, personalAction: action, reviewerEditing: reviewerEditing,
             automaticApprovalOff: target.flatMap { monitor.settings.independentApprovalPreferences[$0] } == .off)
+    }
+
+    private var reviewerEditing: ReviewerEditing? {
+        guard let request = row.displayRequest, monitor.canEditReviewers(of: request) else { return nil }
+        let revision = monitor.glab.accountRevision
+        return .init(search: { query in
+            try await monitor.searchReviewers(of: request, query: query, accountRevision: revision)
+        }, change: { change in
+            await monitor.changeReviewer(change, of: request, accountRevision: revision)
+        })
     }
 
     private var action: BoardApprovalProgressBadge.Action? {

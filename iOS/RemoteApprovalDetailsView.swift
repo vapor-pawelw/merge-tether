@@ -6,13 +6,17 @@ struct RemoteApprovalDetailsView: View {
     let mergeRequestURL: URL?
     let approvedWithOpenFindings: Bool
     let personalApproval: RemotePersonalApprovalControl?
+    let reviewerEditing: ReviewerEditing?
     let automaticApprovalOff: Bool
     @Environment(\.dismiss) private var dismiss
+    @State private var reviewerEditor = ReviewerEditorState()
     init(details: RemoteApprovalDetails, mergeRequestURL: URL? = nil, approvedWithOpenFindings: Bool = false,
-         personalApproval: RemotePersonalApprovalControl? = nil, automaticApprovalOff: Bool = false) {
+         personalApproval: RemotePersonalApprovalControl? = nil, reviewerEditing: ReviewerEditing? = nil,
+         automaticApprovalOff: Bool = false) {
         self.details = details; self.mergeRequestURL = mergeRequestURL
         self.approvedWithOpenFindings = approvedWithOpenFindings
         self.personalApproval = personalApproval
+        self.reviewerEditing = reviewerEditing
         self.automaticApprovalOff = automaticApprovalOff
     }
 
@@ -39,8 +43,12 @@ struct RemoteApprovalDetailsView: View {
                             Text(.Board.boardApprovalsNoPeople).font(.callout).foregroundStyle(.secondary)
                         }
                         ForEach(details.orderedPeople) { person in
-                            RemoteApprovalPersonRow(person: person, isViewer: person.id == details.viewerApproval?.id)
+                            RemoteApprovalPersonRow(person: person, isViewer: person.id == details.viewerApproval?.id,
+                                reviewerEditor: reviewerEditing == nil ? nil : reviewerEditor)
                             Divider()
+                        }
+                        if let reviewerEditing {
+                            RemoteReviewerEditorControls(editing: reviewerEditing, people: details.people, state: reviewerEditor)
                         }
                     }
                     VStack(alignment: .leading, spacing: 14) {
@@ -83,6 +91,7 @@ struct RemoteApprovalDetailsView: View {
                 ToolbarItem(placement: .topBarTrailing) { Button(.Remote.remoteClose) { dismiss() } }
             }
         }
+        .modifier(ReviewerRemovalConfirmation(state: reviewerEditor, editing: reviewerEditing))
     }
     private var unavailable: some View { Text(.RemoteDetail.remoteDetailUnavailable).font(.callout).foregroundStyle(.secondary) }
 }
@@ -125,12 +134,16 @@ struct RemoteApprovalSummary: View {
 struct RemoteApprovalPersonRow: View {
     let person: RemoteApprovalPerson
     var isViewer = false
+    var reviewerEditor: ReviewerEditorState? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 PersonLabel(person: .init(name: person.name, username: person.username, avatarURL: person.avatarURL), avatarSize: 24)
                     .font(.body.weight(.medium))
                 if isViewer { Text(.Board.boardApprovalsViewerSuffix).font(.callout).foregroundStyle(.secondary) }
+                if let reviewerEditor, reviewerEditor.isEditing, let reviewer = person.assignedReviewer {
+                    ReviewerRemovalButton(person: reviewer, revealed: true, state: reviewerEditor)
+                }
                 Spacer(minLength: 8)
                 Image(systemName: person.status.symbol)
                     .font(.callout)
@@ -144,6 +157,37 @@ struct RemoteApprovalPersonRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
+    }
+}
+
+struct RemoteReviewerEditorControls: View {
+    let editing: ReviewerEditing
+    let people: [RemoteApprovalPerson]
+    let state: ReviewerEditorState
+
+    var body: some View {
+        let assigned = people.compactMap(\.assignedReviewer)
+        VStack(alignment: .leading, spacing: 8) {
+            if state.isAdding {
+                ReviewerPicker(editing: editing, assigned: assigned, state: state)
+            } else {
+                Button(.Board.boardReviewersAdd) { state.isAdding = true }
+                if !assigned.isEmpty || state.isEditing {
+                    Button(state.isEditing ? .Board.boardReviewersDone : .Board.boardReviewersEdit) { state.isEditing.toggle() }
+                }
+            }
+            if state.isSaving { ProgressView().controlSize(.small) }
+            if let error = state.error { Text(error).font(.caption).foregroundStyle(.secondary) }
+        }
+        .font(.callout)
+        .disabled(state.isSaving)
+    }
+}
+
+private extension RemoteApprovalPerson {
+    var assignedReviewer: ReviewerCandidate? {
+        guard isAssignedReviewer == true else { return nil }
+        return .init(id: id, name: name, username: username)
     }
 }
 

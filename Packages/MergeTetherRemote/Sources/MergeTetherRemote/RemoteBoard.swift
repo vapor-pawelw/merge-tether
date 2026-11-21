@@ -10,6 +10,7 @@ public enum RemoteActionKind: String, Codable, Sendable { case publish, approve,
     case setCommentOrigin
     case markReady
     case personalApprove, removeApproval
+    case editReviewers
     public var isPersonalApproval: Bool { self == .personalApprove || self == .removeApproval }
     public var requiresApprovalConfirmation: Bool { self == .approve || isPersonalApproval }
     // Sent only to clients that advertise draftRegenerationCapability.
@@ -342,6 +343,7 @@ public struct RemoteMessage: Codable, Sendable {
     public static let detailOriginsCapability = "detail-origins-v1"
     public static let mrControlsCapability = "mr-controls-v1"
     public static let personalApprovalCapability = "personal-approval-v1"
+    public static let reviewerEditingCapability = "reviewer-editing-v1"
     public static let commentOriginCapability = "comment-origin-v1"
     public static let markReadyCapability = "mark-ready-v1"
     public static let draftRegenerationCapability = "draft-regeneration-v1"
@@ -352,6 +354,7 @@ public struct RemoteMessage: Codable, Sendable {
         case draftRegenerationRequest = "draft-regeneration-request", draftRegenerationPage = "draft-regeneration-page"
         case avatarThumbnails = "avatar-thumbnails"
         case boardOrderRequest = "board-order-request"
+        case reviewerSearch = "reviewer-search", reviewerResults = "reviewer-results"
     }
     public var type: Kind
     public var challenge: UUID?
@@ -368,6 +371,8 @@ public struct RemoteMessage: Codable, Sendable {
     public var avatarThumbnails: [RemoteAvatarThumbnail]?
     public var boardOrderMove: RemoteBoardOrderMove?
     public var boardOrderApplied: Bool?
+    public var reviewerSearch: RemoteReviewerSearch?
+    public var reviewerResults: RemoteReviewerResults?
     /// True reads GitLab before answering. Otherwise the host returns its current board.
     public var refresh: Bool?
     public init(type: Kind, challenge: UUID? = nil, board: RemoteBoard? = nil,
@@ -377,7 +382,8 @@ public struct RemoteMessage: Codable, Sendable {
                 draftRegenerationRequest: RemoteDraftRegenerationPageRequest? = nil,
                 draftRegenerationPage: RemoteDraftRegenerationPage? = nil,
                 cachedAvatarURLs: [URL]? = nil, avatarThumbnails: [RemoteAvatarThumbnail]? = nil,
-                boardOrderMove: RemoteBoardOrderMove? = nil, boardOrderApplied: Bool? = nil) {
+                boardOrderMove: RemoteBoardOrderMove? = nil, boardOrderApplied: Bool? = nil,
+                reviewerSearch: RemoteReviewerSearch? = nil, reviewerResults: RemoteReviewerResults? = nil) {
         self.type = type; self.challenge = challenge; self.board = board; self.command = command; self.result = result
         self.refresh = refresh
         self.capabilities = capabilities
@@ -388,17 +394,22 @@ public struct RemoteMessage: Codable, Sendable {
         self.avatarThumbnails = avatarThumbnails
         self.boardOrderMove = boardOrderMove
         self.boardOrderApplied = boardOrderApplied
+        self.reviewerSearch = reviewerSearch; self.reviewerResults = reviewerResults
     }
 }
 
 extension RemoteBoard {
     public func forClient(supportsCommentReview: Bool, supportsMergeActions: Bool = false, supportsMRControls: Bool = false,
                           supportsCommentOrigins: Bool = false, supportsMarkReady: Bool = false,
-                          supportsDraftRegeneration: Bool = false, supportsPersonalApproval: Bool = false) -> Self {
+                          supportsDraftRegeneration: Bool = false, supportsPersonalApproval: Bool = false,
+                          supportsReviewerEditing: Bool = false) -> Self {
         var compatible = self
         if !supportsDraftRegeneration { compatible.draftRegeneration = nil }
         for lane in compatible.lanes.indices {
             for card in compatible.lanes[lane].cards.indices {
+                if !supportsReviewerEditing {
+                    compatible.lanes[lane].cards[card].actions.removeAll { $0.kind == .editReviewers }
+                }
                 if !supportsPersonalApproval {
                     compatible.lanes[lane].cards[card].actions.removeAll { $0.kind.isPersonalApproval }
                     compatible.lanes[lane].cards[card].presentation?.automaticApprovalOff = nil

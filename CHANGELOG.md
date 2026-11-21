@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Add or remove reviewers from the approvals popover on Mac and iPhone. Search by name or GitLab username. Make the iPhone approvals badge more compact and keep its tap area within the badge.
+
 - Put the repository and MR number above the title and the author below it on Mac and iPhone board cards. A Blocked badge in the top-right corner opens a popover with links to blocking MRs and shows whether each one is earlier in the stack, an explicit GitLab dependency, or both.
 
 - Drop merge request cards above, between or below other cards on Mac and iPhone. The insertion line marks valid positions in the card's current column, automation section and pin group.

@@ -87,6 +87,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     private var approvalConfirmation: ApprovalConfirmation?
     private(set) var expiredApprovalCardID: String?
     private var lastPersonalApproval: (id: UUID, kind: RemoteActionKind)?
+    @ObservationIgnored private var reviewerSearch: RemoteReviewerSearch?
+    @ObservationIgnored private var reviewerResults: RemoteReviewerResults?
 
     var completedPersonalApproval: RemoteActionKind? {
         guard let result = state.result else { return nil }
@@ -256,6 +258,13 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                     self.receiveAvatarThumbnails(message)
                     return
                 }
+                if message.type == .reviewerResults {
+                    if let result = message.reviewerResults, result.id == self.reviewerSearch?.id,
+                       let board = self.state.board, self.reviewerSearch?.matches(board) == true {
+                        self.reviewerResults = result
+                    }
+                    return
+                }
                 let previousBoard = self.state.board
                 let accepted = self.state.receive(message, now: self.now())
                 if accepted, message.type == .snapshot {
@@ -325,7 +334,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                            RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability, RemoteMessage.personalApprovalCapability,
                            RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability, RemoteMessage.detailPreviewCapability,
                            RemoteMessage.draftRegenerationCapability, RemoteMessage.boardAvatarsCapability,
-                           RemoteMessage.detailAvatarsCapability, RemoteMessage.boardOrderCapability],
+                           RemoteMessage.detailAvatarsCapability, RemoteMessage.boardOrderCapability,
+                           RemoteMessage.reviewerEditingCapability],
             refresh: fromGitLab, cachedAvatarURLs: Array((state.board?.avatarThumbnailURLs ?? [])
                 .filter { avatarThumbnails[$0] != nil }.prefix(64)))) }
         catch {
@@ -556,6 +566,36 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         if result.status == .uncertain { shouldRecoverCommand = true }
         return result
     }
+    func searchReviewers(card: RemoteCard, action: RemoteAction, query: String) async throws -> [ReviewerCandidate] {
+        guard state.isConnected(now: now()), let board = state.board, let connection else { throw RemoteProtocolError.invalid }
+        let request = RemoteReviewerSearch(board: board, card: card, action: action, query: query)
+        guard request.matches(board) else { throw RemoteProtocolError.invalid }
+        let revision = connectionRevision
+        reviewerSearch = request
+        reviewerResults = nil
+        defer {
+            if reviewerSearch == request { reviewerSearch = nil; reviewerResults = nil }
+        }
+        try await connection.send(.init(type: .reviewerSearch, reviewerSearch: request))
+        let deadline = ContinuousClock.now + .seconds(18)
+        while ContinuousClock.now < deadline, revision == connectionRevision, reviewerSearch == request {
+            try Task.checkCancellation()
+            if let results = reviewerResults {
+                guard let candidates = results.candidates else { throw RemoteProtocolError.invalid }
+                return candidates
+            }
+            try await Task.sleep(for: .milliseconds(75))
+        }
+        throw RemoteProtocolError.invalid
+    }
+
+    func changeReviewer(_ change: ReviewerChange, card: RemoteCard, action: RemoteAction) async -> RemoteCommandResult.Status {
+        guard let argument = change.argument else { return .failed }
+        guard let result = await submitCommand(card: card, action: action, argument: argument) else { return .changed }
+        if result.status != .uncertain, state.result?.id == result.id { state.acknowledgeResult() }
+        return result.status
+    }
+
     // MARK: - Draft regeneration
 
     var draftRegenerationIsAvailable: Bool {

@@ -3,6 +3,52 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct RemoteDetailsTests {
+    @Test func reviewerEditingRequiresACompatiblePhoneAndPreservesOtherActions() {
+        var board = board()
+        let edit = RemoteAction(id: "editReviewers", kind: .editReviewers, token: "edit")
+        let refresh = RemoteAction(id: "verify", kind: .verify, token: "verify")
+        board.lanes[0].cards[0].actions = [edit, refresh]
+
+        #expect(board.forClient(supportsCommentReview: true).cards[0].actions == [refresh])
+        #expect(board.forClient(supportsCommentReview: true, supportsReviewerEditing: true).cards[0].actions == [edit, refresh])
+    }
+
+    @Test func reviewerAssignmentIsIndependentOfApprovalAndDecodesOlderSnapshots() throws {
+        let legacy = Data(#"{"id":7,"name":"Alice","username":"alice","status":"approved"}"#.utf8)
+        #expect(try JSONDecoder().decode(RemoteApprovalPerson.self, from: legacy).isAssignedReviewer == nil)
+        let reviewer = RemoteApprovalPerson(id: 7, name: "Alice", username: "alice", status: .approved, isAssignedReviewer: true)
+        #expect(try JSONDecoder().decode(RemoteApprovalPerson.self, from: JSONEncoder().encode(reviewer)) == reviewer)
+    }
+
+    @Test func reviewerSearchIsBoundToTheCurrentAccountSessionCardAndAction() throws {
+        var board = board()
+        let action = RemoteAction(id: "editReviewers", kind: .editReviewers, token: "edit")
+        board.lanes[0].cards[0].actions = [action]
+        let request = RemoteReviewerSearch(board: board, card: board.cards[0], action: action, query: "alice")
+        let message = RemoteMessage(type: .reviewerSearch, reviewerSearch: request)
+        #expect(try JSONDecoder().decode(RemoteMessage.self, from: JSONEncoder().encode(message)).reviewerSearch == request)
+        #expect(request.matches(board))
+        for change in ["account", "session", "card", "action", "partial"] {
+            var changed = board
+            switch change {
+            case "account": changed.account = "other@gitlab.example.test"
+            case "session": changed.hostSession = UUID()
+            case "card": changed.lanes[0].cards[0].id = "mr:1:100"
+            case "action": changed.lanes[0].cards[0].actions[0].token = "different"
+            default: changed.partial = true
+            }
+            #expect(!request.matches(changed))
+        }
+    }
+
+    @Test func reviewerChangesKeepOperationAndIdentityTogetherInTheCommand() throws {
+        for operation in [ReviewerChange.Operation.add, .remove] {
+            let change = ReviewerChange(operation, reviewerID: 7, username: "alice")
+            #expect(ReviewerChange(argument: change.argument) == change)
+        }
+        #expect(ReviewerChange(argument: ReviewerChange(.remove, reviewerID: 0, username: "alice").argument) == nil)
+    }
+
     @Test func gitLabProfileUsesTheMergeRequestHostAndUsername() throws {
         let request = try #require(URL(string: "https://gitlab.example.test:8443/group/project/-/merge_requests/4?tab=notes#note_1"))
         let person = RemotePerson(name: "Alice Example", username: " @alice.dev-2 ",

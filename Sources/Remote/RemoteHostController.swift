@@ -43,6 +43,8 @@ extension RemoteConnection: RemoteHostTransport {}
     private var phoneSupportsOriginUpdates = false
     private var phoneSupportsMRControls = false
     private var phoneSupportsPersonalApproval = false
+    private var phoneSupportsReviewerEditing = false
+    @ObservationIgnored private var reviewerSearchTask: Task<Void, Never>?
     private var phoneSupportsCommentOrigins = false
     private var phoneSupportsMarkReady = false
     private var phoneSupportsDraftRegeneration = false
@@ -51,7 +53,7 @@ extension RemoteConnection: RemoteHostTransport {}
         RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability, RemoteMessage.detailOriginsCapability,
         RemoteMessage.mrControlsCapability, RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability,
         RemoteMessage.detailPreviewCapability, RemoteMessage.cachedDetailsCapability, RemoteMessage.draftRegenerationCapability,
-        RemoteMessage.boardOrderCapability, RemoteMessage.personalApprovalCapability
+        RemoteMessage.boardOrderCapability, RemoteMessage.personalApprovalCapability, RemoteMessage.reviewerEditingCapability
     ]
     private let readAvatarThumbnail: @Sendable (URL) async -> Data?
     @ObservationIgnored private(set) var avatarTask: Task<Void, Never>?
@@ -187,6 +189,8 @@ extension RemoteConnection: RemoteHostTransport {}
         phoneSupportsOriginUpdates = false
         phoneSupportsMRControls = false
         phoneSupportsPersonalApproval = false
+        phoneSupportsReviewerEditing = false
+        reviewerSearchTask?.cancel(); reviewerSearchTask = nil
         phoneSupportsCommentOrigins = false
         phoneSupportsMarkReady = false
         phoneSupportsDraftRegeneration = false
@@ -256,6 +260,7 @@ extension RemoteConnection: RemoteHostTransport {}
             phoneSupportsDetailPreviews = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.detailPreviewCapability) == true
             phoneSupportsMRControls = message.capabilities?.contains(RemoteMessage.mrControlsCapability) == true
             phoneSupportsPersonalApproval = message.capabilities?.contains(RemoteMessage.personalApprovalCapability) == true
+            phoneSupportsReviewerEditing = message.capabilities?.contains(RemoteMessage.reviewerEditingCapability) == true
             phoneSupportsMarkReady = message.capabilities?.contains(RemoteMessage.markReadyCapability) == true
             phoneSupportsDraftRegeneration = message.capabilities?.contains(RemoteMessage.draftRegenerationCapability) == true
             phoneSupportsBoardOrder = message.capabilities?.contains(RemoteMessage.boardOrderCapability) == true
@@ -304,6 +309,13 @@ extension RemoteConnection: RemoteHostTransport {}
             if message.detailRequest == activeDetailRequest {
                 detailTask?.cancel(); detailTask = nil; activeDetailRequest = nil
             }
+        case .reviewerSearch:
+            guard phoneSupportsReviewerEditing, let request = message.reviewerSearch else { return }
+            reviewerSearchTask?.cancel()
+            reviewerSearchTask = Task { [weak self, weak active] in
+                guard let self, let active else { return }
+                await searchReviewers(request, connection: active)
+            }
         case .draftRegenerationRequest:
             guard phoneSupportsDraftRegeneration, let request = message.draftRegenerationRequest,
                   let challenge = message.challenge else { return }
@@ -341,6 +353,22 @@ extension RemoteConnection: RemoteHostTransport {}
             try? await active.send(.init(type: .result, result: result))
         default: break
         }
+    }
+
+    private func searchReviewers(_ search: RemoteReviewerSearch, connection active: any RemoteHostTransport) async {
+        let board = snapshot()
+        let revision = monitor.glab.accountRevision
+        var candidates: [ReviewerCandidate]?
+        if search.matches(board), let request = reviewerEditingRequest(cardID: search.cardID) {
+            candidates = try? await monitor.searchReviewers(of: request, query: search.query, accountRevision: revision)
+        }
+        guard !Task.isCancelled, connection === active, revision == monitor.glab.accountRevision else { return }
+        if !search.matches(snapshot()) { candidates = nil }
+        try? await active.send(.init(type: .reviewerResults, reviewerResults: .init(id: search.id, candidates: candidates)))
+    }
+
+    private func reviewerEditingRequest(cardID: String) -> GitLabMergeRequest? {
+        monitor.boardSnapshot.own.first { "mr:\($0.id.projectID):\($0.id.iid)" == cardID }?.displayRequest
     }
     private func deliverAvatarThumbnails(_ candidates: [URL], challenge: UUID, session: UUID, excluding cached: [URL],
                                          over active: any RemoteHostTransport,
@@ -600,7 +628,7 @@ extension RemoteConnection: RemoteHostTransport {}
         return board.forClient(supportsCommentReview: phoneSupportsCommentReview, supportsMergeActions: phoneSupportsMergeActions,
             supportsMRControls: phoneSupportsMRControls, supportsCommentOrigins: phoneSupportsCommentOrigins,
             supportsMarkReady: phoneSupportsMarkReady, supportsDraftRegeneration: phoneSupportsDraftRegeneration,
-            supportsPersonalApproval: phoneSupportsPersonalApproval)
+            supportsPersonalApproval: phoneSupportsPersonalApproval, supportsReviewerEditing: phoneSupportsReviewerEditing)
     }
 
     private func applyBoardOrderMove(_ move: RemoteBoardOrderMove) -> Bool {
@@ -732,6 +760,14 @@ extension RemoteConnection: RemoteHostTransport {}
             guard phoneSupportsMRControls else { return .changed }
             let row = (board.own + board.reviewed).first { $0.item.id == item.id }
             return await executeControl(action, item: item, row: row)
+        }
+        if action.kind == .editReviewers {
+            guard phoneSupportsReviewerEditing, let change = ReviewerChange(argument: argument),
+                  let request = reviewerEditingRequest(cardID: card.id) else { return .changed }
+            recentDetails[card.id] = nil
+            let result = await monitor.changeReviewer(change, of: request, accountRevision: monitor.glab.accountRevision)
+            recentDetails[card.id] = nil
+            return result
         }
         switch action.kind {
         case .markReady:

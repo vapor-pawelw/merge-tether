@@ -7,6 +7,7 @@ final class TodoMonitorService {
     let settings: SettingsManager
     let cliHealth = AssistantCLIHealthStore.shared
     let glab: GlabService
+    @ObservationIgnored var reviewerEdits: Set<MergeRequestAttentionMonitor.Item.ID> = []
     let notifications: NotificationService
     let attention: MergeRequestAttentionMonitor
     var draftRegeneration: DraftRegenerationCoordinator { attention.draftRegeneration }

@@ -120,9 +120,12 @@ public struct RemoteApprovalPerson: Codable, Equatable, Identifiable, Sendable {
     public let status: Status
     public let changedAt: Date?
     public let avatarURL: URL?
-    public init(id: Int, name: String, username: String, status: Status, changedAt: Date? = nil, avatarURL: URL? = nil) {
+    public let isAssignedReviewer: Bool?
+    public init(id: Int, name: String, username: String, status: Status, changedAt: Date? = nil, avatarURL: URL? = nil,
+                isAssignedReviewer: Bool? = nil) {
         self.id = id; self.name = name; self.username = username; self.status = status; self.changedAt = changedAt
         self.avatarURL = avatarURL
+        self.isAssignedReviewer = isAssignedReviewer
     }
 }
 

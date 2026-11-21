@@ -8,8 +8,10 @@ struct RemoteApprovalProgressBadge: View {
     var assignedReviewerCount: Int? = nil
     var approvedWithOpenFindings = false
     var personalApproval: RemotePersonalApprovalControl? = nil
+    var reviewerEditing: ReviewerEditing? = nil
     var automaticApprovalOff = false
     @State private var showingPeople = false
+    @State private var reviewerEditor = ReviewerEditorState()
 
     private var details: RemoteApprovalDetails {
         .init(progress: progress, people: people ?? [], viewerApprovalID: viewerApprovalID)
@@ -44,7 +46,7 @@ struct RemoteApprovalProgressBadge: View {
     }
 
     var body: some View {
-        if personalApproval != nil || automaticApprovalOff
+        if personalApproval != nil || reviewerEditing != nil || automaticApprovalOff
             || (progress.map { $0.required > 0 || received > 0 } ?? true) || viewer != nil || assignedReviewerCount != nil {
             Button { showingPeople = true } label: {
                 HStack(spacing: 4) {
@@ -72,9 +74,9 @@ struct RemoteApprovalProgressBadge: View {
                     }
                 }
                 .fixedSize()
-                .padding(.horizontal, 6).padding(.vertical, 3)
+                .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-                .contentShape(.interaction, CardControlHitArea(anchor: .top))
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(explanation)
@@ -91,7 +93,8 @@ struct RemoteApprovalProgressBadge: View {
                             Text(.Board.boardApprovalsNoPeople).font(.callout).foregroundStyle(.secondary)
                         }
                         ForEach(details.orderedPeople) { person in
-                            RemoteApprovalPersonRow(person: person, isViewer: person.id == viewer?.id)
+                            RemoteApprovalPersonRow(person: person, isViewer: person.id == viewer?.id,
+                                reviewerEditor: reviewerEditing == nil ? nil : reviewerEditor)
                         }
                         if automaticApprovalOff {
                             Text(.Board.boardApprovalsAutomationOff).font(.callout).foregroundStyle(.secondary)
@@ -100,12 +103,24 @@ struct RemoteApprovalProgressBadge: View {
                             Divider()
                             personalApproval
                         }
+                        if let reviewerEditing {
+                            Divider()
+                            RemoteReviewerEditorControls(editing: reviewerEditing, people: details.people, state: reviewerEditor)
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading).padding(16)
                 }
                 .frame(width: 300, height: popoverHeight)
                 .presentationCompactAdaptation(.popover)
+                .modifier(ReviewerRemovalConfirmation(state: reviewerEditor, editing: reviewerEditing))
                 .accessibilityIdentifier("remote.approvals.people")
+            }
+            .onChange(of: showingPeople) { _, visible in
+                if !visible {
+                    reviewerEditor.isEditing = false
+                    reviewerEditor.isAdding = false
+                    reviewerEditor.error = nil
+                }
             }
         }
     }
@@ -113,7 +128,8 @@ struct RemoteApprovalProgressBadge: View {
     private var popoverHeight: CGFloat {
         let peopleHeight = CGFloat(max(people?.count ?? 0, 1)) * 80
         return min(380, peopleHeight + 60 + (approvedWithOpenFindings ? 60 : 0)
-            + (personalApproval != nil ? 56 : 0) + (automaticApprovalOff ? 56 : 0))
+            + (personalApproval != nil ? 56 : 0) + (automaticApprovalOff ? 56 : 0)
+            + (reviewerEditing == nil ? 0 : reviewerEditor.isAdding ? 205 : 70))
     }
 }
 
@@ -173,6 +189,15 @@ struct RemotePersonalApprovalControl: View {
 }
 
 extension RemoteCard {
+    func reviewerEditing(model: RemotePhoneModel?) -> ReviewerEditing? {
+        guard let model, let action = actions.first(where: { $0.kind == .editReviewers }) else { return nil }
+        return .init(search: { query in
+            try await model.searchReviewers(card: self, action: action, query: query)
+        }, change: { change in
+            await model.changeReviewer(change, card: self, action: action)
+        })
+    }
+
     func personalApprovalControl(model: RemotePhoneModel?) -> RemotePersonalApprovalControl? {
         guard let model, let action = actions.first(where: { $0.kind.isPersonalApproval }) else { return nil }
         return .init(card: self, action: action, model: model)

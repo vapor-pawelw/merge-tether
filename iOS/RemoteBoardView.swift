@@ -489,6 +489,7 @@ struct RemoteCardView: View {
                     assignedReviewerCount: card.presentation?.assignedReviewerCount,
                     approvedWithOpenFindings: card.presentation?.approvedWithOpenFindings == true,
                     personalApproval: card.personalApprovalControl(model: actionsModel),
+                    reviewerEditing: card.reviewerEditing(model: actionsModel),
                     automaticApprovalOff: card.presentation?.automaticApprovalOff == true)
             }
         }.font(.caption).foregroundStyle(.secondary)
