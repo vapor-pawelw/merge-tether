@@ -292,6 +292,7 @@ extension RemotePhoneModel {
 }
 
 struct RemoteCardView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let card: RemoteCard
     var expanded = false
     var branches: RemoteDetailBranches? = nil
@@ -302,6 +303,14 @@ struct RemoteCardView: View {
     private var primaryCTA: RemoteCardCTA? { card.primaryCTA.flatMap { $0.duplicatesCardTap ? nil : $0 } }
     private var secondaryCTA: RemoteCardCTA? { card.presentation?.secondaryCTA.flatMap { $0.duplicatesCardTap ? nil : $0 } }
     private var inboxUpdateDate: Date? { expanded ? nil : card.completionObservedAt }
+    // Paired Macs send the English DRAFT badge in the snapshot, alongside other lifecycle labels.
+    private var showsDraftStyle: Bool { !expanded && card.presentation?.draftBadge == "DRAFT" }
+    private var contentOpacity: Double { showsDraftStyle ? 0.5 : 1 }
+    private var draftBadgeTint: Color {
+        colorScheme == .dark
+            ? Color(red: 0.79, green: 0.70, blue: 0.92)
+            : Color(red: 0.38, green: 0.27, blue: 0.52)
+    }
     private var directAction: RemoteAction? {
         guard let actionsModel else { return nil }
         let actions = actionsModel.pendingActionCard.flatMap { $0.id == card.id ? $0.actions : nil } ?? card.actions
@@ -345,7 +354,7 @@ struct RemoteCardView: View {
     }
     @ViewBuilder
     private var cardInformation: some View {
-        if !card.detail.isEmpty || hasSupportingInformation { content }
+        if !card.detail.isEmpty || hasSupportingInformation { content.opacity(contentOpacity) }
     }
     @ViewBuilder
     private var cardActions: some View {
@@ -401,6 +410,7 @@ struct RemoteCardView: View {
                     }
                 }
             }
+            .opacity(contentOpacity)
             if expanded {
                 MergeRequestDescription(source: mergeRequestDescription, title: .RemoteDetail.remoteDetailDescription,
                     expandHint: .RemoteDetail.remoteDetailExpandDescription, collapseHint: .RemoteDetail.remoteDetailCollapseDescription)
@@ -443,9 +453,11 @@ struct RemoteCardView: View {
     private var badges: some View {
         HStack(spacing: 6) {
             if let badge = card.presentation?.draftBadge {
+                let tint = showsDraftStyle ? draftBadgeTint : Color.secondary
                 Text(verbatim: badge).fontWeight(.medium)
+                    .foregroundStyle(tint)
                     .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(.secondary.opacity(0.08), in: Capsule())
+                    .background(tint.opacity(showsDraftStyle ? 0.1 : 0.08), in: Capsule())
             }
             if card.id.hasPrefix("mr:") {
                 RemoteApprovalProgressBadge(progress: card.approvals, people: card.presentation?.approvalPeople,

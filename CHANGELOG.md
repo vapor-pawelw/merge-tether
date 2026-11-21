@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Use 50% opacity for draft merge request titles, repository references, and status content on the Mac board. Give the Draft badge a subtle violet tint and keep the author row and action buttons at their standard opacity.
 
+- Match the Mac draft merge request styling on iPhone cards, with dimmed titles, repository references, and status content and a violet Draft badge.
+
 - Use 16 pt insets beside and below the content of Mac board merge request cards, matching the inset above the avatar.
 
 - Swap the Mac board and merge request card background colors in light and dark modes.
