@@ -9,6 +9,20 @@ struct MRBoardManualOrderTests {
     private let host = "gitlab.example.test"
     private let username = "me"
 
+    @Test func macInsertionUsesTheVisibleGapAndTheGroupWhereTheDragStarted() throws {
+        let requests = try items([1, 2, 3, 4, 5], attention: [])
+        let frame = manual(board(own: requests, paused: [5], pins: [4]), .init(), pins: [4])
+        let entry = try #require(frame.own.first { $0.id.iid == 1 }?.manualOrderEntry)
+        let drag = BoardCardDrag(entry: entry, accountRevision: 1)
+        #expect(drag.destination(beside: target(3), insertion: .before, in: frame.manualOrderEntries) == target(2))
+        #expect(drag.destination(beside: target(3), insertion: .after, in: frame.manualOrderEntries) == target(3))
+        #expect(drag.destination(beside: target(4), insertion: .before, in: frame.manualOrderEntries) == nil)
+        #expect(drag.destination(beside: target(5), insertion: .before, in: frame.manualOrderEntries) == nil)
+
+        let changed = manual(board(own: requests, paused: [1, 5]), .init())
+        #expect(drag.destination(beside: target(5), insertion: .after, in: changed.manualOrderEntries) == nil)
+    }
+
     @Test func aMoveStaysWithinTheSameLaneAutomationSectionAndPinGroup() throws {
         let normal = try items([1, 2, 3, 4, 5, 6], attention: [2, 5])
         let reviewer = try items([7], attention: [], authored: false)

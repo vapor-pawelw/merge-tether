@@ -1,5 +1,17 @@
 import Foundation
 
+public enum BoardOrderInsertion: Equatable, Sendable {
+    case before, after
+
+    public func destination<ID: Equatable>(moving source: ID, beside anchor: ID, in order: [ID]) -> ID? {
+        guard let start = order.firstIndex(of: source), let neighbor = order.firstIndex(of: anchor) else { return nil }
+        let gap = self == .before ? neighbor : neighbor + 1
+        // The existing move inserts the source at the destination's old index.
+        let index = gap - (start < gap ? 1 : 0)
+        return index == start ? nil : order[index]
+    }
+}
+
 public struct RemoteBoardOrderGroup: Codable, Equatable, Sendable {
     public let automationEnabled: Bool
     public let pinned: Bool
@@ -33,6 +45,17 @@ public struct RemoteBoardOrderMove: Codable, Equatable, Sendable {
 }
 
 extension RemoteBoard {
+    public func orderMove(from source: RemoteBoardOrderMove.Source, beside anchor: String,
+                          insertion: BoardOrderInsertion) -> RemoteBoardOrderMove? {
+        guard !partial, source.account == account, source.hostSession == hostSession,
+              let lane = lanes.first(where: { $0.cards.contains { $0.id == source.cardID } }),
+              let group = lane.cards.first(where: { $0.id == source.cardID })?.orderGroup,
+              group.revision == source.revision else { return nil }
+        let order = lane.cards.filter { $0.orderGroup == group }.map(\.id)
+        return insertion.destination(moving: source.cardID, beside: anchor, in: order)
+            .map { .init(source: source, destinationID: $0) }
+    }
+
     public func orderSource(for card: RemoteCard) -> RemoteBoardOrderMove.Source? {
         guard !partial, let group = card.orderGroup,
               lanes.contains(where: { lane in

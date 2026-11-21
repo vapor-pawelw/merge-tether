@@ -10,6 +10,7 @@ struct RemoteLaneBoard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var visibleLane: RemoteLaneID?
+    @State private var dragSession = BoardDragSession<RemoteBoardOrderMove.Source>()
 
     var body: some View {
         GeometryReader { geometry in
@@ -68,7 +69,7 @@ struct RemoteLaneBoard: View {
             HStack(alignment: .top, spacing: 14) {
                 ForEach(lanes) { lane in
                     RemoteLaneView(lane: lane, showsHeader: showsLaneHeader, onOpen: onOpen, onOpenCTA: onOpenCTA,
-                        model: model, onRefresh: onRefresh)
+                        model: model, dragSession: dragSession, onRefresh: onRefresh)
                         .frame(width: laneWidth, height: max(1, size.height - 12))
                         .id(lane.id)
                 }
@@ -89,6 +90,7 @@ private struct RemoteLaneView: View {
     let onOpen: (RemoteCard) -> Void
     let onOpenCTA: (RemoteCard, RemoteCardCTA) -> Void
     let model: RemotePhoneModel
+    let dragSession: BoardDragSession<RemoteBoardOrderMove.Source>
     var onRefresh: (() async -> Void)? = nil
 
     var body: some View {
@@ -105,32 +107,48 @@ private struct RemoteLaneView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("remote.lane.header.\(lane.id.rawValue)")
             }
-            ScrollView(showsIndicators: false) {
-                LazyVStack(spacing: 12) {
-                    if lane.cards.isEmpty {
-                        Text(.Remote.remoteEmpty).foregroundStyle(.secondary).padding(.top, 30)
-                    }
-                    ForEach(Array(lane.cards.enumerated()), id: \.element.id) { index, card in
-                        if let group = card.orderGroup,
-                           index == 0 || lane.cards[index - 1].orderGroup?.automationEnabled != group.automationEnabled {
-                            Text(group.automationEnabled ? .Remote.remoteBoardAutomationOn : .Remote.remoteBoardAutomationOff)
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .accessibilityAddTraits(.isHeader)
+            GeometryReader { viewport in
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        laneCards
+                        if let last = lane.cards.last, last.orderGroup != nil {
+                            Spacer(minLength: 16)
+                                .frame(maxWidth: .infinity)
+                                .modifier(dropTarget(at: last.id, fixedInsertion: .after))
                         }
-                        boardCard(card)
                     }
+                    .frame(minHeight: viewport.size.height, alignment: .top)
+                    .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: lane.cards.map(\.dependencies))
+                    .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: lane.cards.map(\.id))
                 }
-                .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: lane.cards.map(\.dependencies))
-                .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: lane.cards.map(\.id))
+                .scrollBounceBehavior(.always, axes: .vertical)
+                .refreshable { await onRefresh?() }
             }
-            .scrollBounceBehavior(.always, axes: .vertical)
-            .refreshable { await onRefresh?() }
         }
         .padding(14)
         .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 22))
         .accessibilityIdentifier("remote.lane.\(lane.id.rawValue)")
+    }
+
+    private var laneCards: some View {
+        LazyVStack(spacing: 0) {
+            if lane.cards.isEmpty {
+                Text(.Remote.remoteEmpty).foregroundStyle(.secondary).padding(.top, 30)
+            }
+            ForEach(Array(lane.cards.enumerated()), id: \.element.id) { index, card in
+                if let group = card.orderGroup,
+                   index == 0 || lane.cards[index - 1].orderGroup?.automationEnabled != group.automationEnabled {
+                    Text(group.automationEnabled ? .Remote.remoteBoardAutomationOn : .Remote.remoteBoardAutomationOff)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityAddTraits(.isHeader)
+                        .padding(.vertical, 6)
+                        .modifier(dropTarget(at: card.id, fixedInsertion: .before))
+                }
+                boardCard(card)
+            }
+        }
     }
 
     @ViewBuilder private func boardCard(_ card: RemoteCard) -> some View {
@@ -138,9 +156,24 @@ private struct RemoteLaneView: View {
         let content = RemoteCardView(card: card, onOpen: { onOpen(card) }, onOpenCTA: { onOpenCTA(card, $0) },
             actionsModel: model)
         if let source {
-            content.modifier(RemoteBoardOrderInteraction(card: card, model: model, source: source))
+            content.modifier(RemoteBoardOrderDrag(source: source, session: dragSession))
+                .padding(.vertical, 6)
+                .modifier(dropTarget(at: card.id))
         } else {
-            content
+            content.padding(.vertical, 6)
         }
+    }
+
+    private func dropTarget(at anchor: String, fixedInsertion: BoardOrderInsertion? = nil) -> BoardInsertionDrop {
+        func orderMove(_ insertion: BoardOrderInsertion) -> RemoteBoardOrderMove? {
+            guard let source = dragSession.source, model.state.canAct() else { return nil }
+            return model.state.board?.orderMove(from: source, beside: anchor, insertion: insertion)
+        }
+        return .init(type: RemoteBoardOrderDrag.type, fixedInsertion: fixedInsertion, allows: { orderMove($0) != nil }, move: {
+            guard let move = orderMove($0) else { return false }
+            dragSession.finish()
+            Task { await model.moveBoardCard(move) }
+            return true
+        })
     }
 }

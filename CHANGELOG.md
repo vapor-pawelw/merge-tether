@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Drop merge request cards above, between or below other cards on Mac and iPhone. The insertion line marks valid positions in the card's current column, automation section and pin group.
+
 - Touch and hold anywhere on an iPhone board card, then drag it to reorder merge requests while connected to the Mac. The Mac saves moves within each automation and pin group, and the iPhone immediately displays the confirmed order.
 
 - Show Refresh from GitLab and Open in GitLab as icons in the Mac merge request details header, with Open next to Copy link.

@@ -3,6 +3,29 @@ import Testing
 @testable import MergeTetherRemote
 
 struct BoardOrderTests {
+    @Test func gapsResolveToTheExistingMoveContractInEitherDirection() {
+        let order = ["a", "b", "c", "d"]
+        #expect(BoardOrderInsertion.before.destination(moving: "d", beside: "a", in: order) == "a")
+        #expect(BoardOrderInsertion.after.destination(moving: "a", beside: "d", in: order) == "d")
+        #expect(BoardOrderInsertion.before.destination(moving: "a", beside: "d", in: order) == "c")
+        #expect(BoardOrderInsertion.after.destination(moving: "d", beside: "a", in: order) == "b")
+        #expect(BoardOrderInsertion.before.destination(moving: "a", beside: "b", in: order) == nil)
+        #expect(BoardOrderInsertion.after.destination(moving: "d", beside: "c", in: order) == nil)
+        #expect(BoardOrderInsertion.after.destination(moving: "a", beside: "missing", in: order) == nil)
+    }
+
+    @Test func aPhoneCanInsertAtAValidBoundaryOnlyWithinItsOriginalGroup() throws {
+        var board = try makeBoard()
+        let source = try #require(board.orderSource(for: board.cards[1]))
+        let move = board.orderMove(from: source, beside: "first", insertion: .before)
+        #expect(move?.destinationID == "first")
+        for anchor in ["pinned", "paused", "reviewed", "missing"] {
+            #expect(board.orderMove(from: source, beside: anchor, insertion: .before) == nil)
+        }
+        board.hostSession = UUID()
+        #expect(board.orderMove(from: source, beside: "first", insertion: .before) == nil)
+    }
+
     @Test func pairedClientsCanSendABoardOrderRequest() throws {
         let board = try makeBoard()
         let source = try #require(board.orderSource(for: board.cards[0]))

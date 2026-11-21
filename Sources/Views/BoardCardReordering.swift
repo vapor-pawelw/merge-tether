@@ -1,38 +1,16 @@
-import SwiftUI
+import MergeTetherRemote
 import UniformTypeIdentifiers
 
-struct BoardCardDrag: Codable, Transferable {
-    let target: MRAutomationScope.Target
+struct BoardCardDrag {
+    static let type = UTType(exportedAs: "com.vaporpw.mergetether.board-card", conformingTo: .data)
+
+    let entry: MRBoardManualOrder.Entry
     let accountRevision: UInt64
 
-    static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: UTType(exportedAs: "com.vaporpw.mergetether.board-card", conformingTo: .data))
-            .visibility(.ownProcess)
-    }
-}
-
-struct BoardCardReorderInteraction: ViewModifier {
-    let drag: BoardCardDrag
-    let monitor: TodoMonitorService
-    @State private var isTargeted = false
-
-    func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 8)
-        content
-            .contentShape([.interaction, .dragPreview], shape)
-            .draggable(drag)
-            .accessibilityHint(Text(.BoardActivity.reorderCard))
-            .overlay {
-                if isTargeted {
-                    shape.strokeBorder(Color.accentColor, lineWidth: 2)
-                        .allowsHitTesting(false)
-                }
-            }
-            .dropDestination(for: BoardCardDrag.self) { dragged, _ in
-                guard dragged.count == 1, let card = dragged.first else { return false }
-                return monitor.moveBoardCard(card.target, to: drag.target, accountRevision: card.accountRevision)
-            } isTargeted: {
-                isTargeted = $0
-            }
+    func destination(beside anchor: MRAutomationScope.Target, insertion: BoardOrderInsertion,
+                     in entries: [MRBoardManualOrder.Entry]) -> MRAutomationScope.Target? {
+        guard entries.first(where: { $0.target == entry.target })?.group == entry.group else { return nil }
+        let group = entries.filter { $0.group == entry.group }.map(\.target)
+        return insertion.destination(moving: entry.target, beside: anchor, in: group)
     }
 }
