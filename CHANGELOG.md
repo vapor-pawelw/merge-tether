@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Put the repository and MR number above the title and the author below it on Mac and iPhone board cards. A Blocked badge in the top-right corner opens a popover with links to blocking MRs and shows whether each one is earlier in the stack, an explicit GitLab dependency, or both.
+
 - Use 50% opacity for the author, title, repository reference, status content, background, and border of draft merge request cards on the Mac board. Give the Draft badge a subtle violet tint.
 
 - Keep the author and repository popovers available on hover on Mac draft cards.

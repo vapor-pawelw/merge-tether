@@ -154,12 +154,16 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
 
 /// Optional read-only metadata so older paired installations keep decoding snapshots.
 public struct RemoteMRPredecessor: Codable, Equatable, Sendable {
+    public enum Source: String, Codable, Sendable { case stack, gitLab }
+
     public var reference: String
     public var title: String
     public var url: URL
     public var isCurrent: Bool
-    public init(reference: String, title: String, url: URL, isCurrent: Bool = true) {
+    public var sources: [Source]?
+    public init(reference: String, title: String, url: URL, isCurrent: Bool = true, sources: [Source]? = nil) {
         self.reference = reference; self.title = title; self.url = url; self.isCurrent = isCurrent
+        self.sources = sources
     }
 }
 

@@ -72,7 +72,7 @@ let project = Project(
                       "Sources/Views/ExtraContextMarkdown.swift", "Sources/Views/DraftRegenerationSheet.swift",
                       "Sources/Views/MergeRequestDescription.swift", "Sources/Views/MRDetailSection.swift",
                       "Sources/Views/MergeRequestAttentionCallout.swift",
-                      "Sources/Views/ApprovalBadgeColor.swift", "Sources/Views/InboxUpdateTimestamp.swift"],
+                      "Sources/Views/ApprovalBadgeColor.swift", "Sources/Views/InboxUpdateTimestamp.swift", "Sources/Views/MRDependencyBadge.swift"],
             resources: ["Resources/MergeActions.xcstrings", "Resources/Remote.xcstrings", "Resources/Board.xcstrings",
                         "Resources/MRHumanAction.xcstrings", "Resources/AuthorFeedback.xcstrings", "Resources/MRDependencies.xcstrings",
                         "Resources/CommentReview.xcstrings", "Resources/FeedbackSuggestions.xcstrings", "Resources/DraftRegeneration.xcstrings",

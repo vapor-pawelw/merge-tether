@@ -201,6 +201,7 @@ struct MRDependencyLoaderTests {
         #expect(links.count == 1)
         #expect(links.first?["reference"] as? String == "!1")
         #expect(links.first?["url"] as? String == parent.webURL.absoluteString)
+        #expect(links.first?["sources"] as? [String] == ["stack", "gitLab"])
         let oldData = Data(#"{"id":"mr:34:2","title":"Old","project":"group/repo","detail":"","drafts":[],"actions":[]}"#.utf8)
         let old = try JSONDecoder().decode(RemoteCard.self, from: oldData)
         let oldWire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(old)) as? [String: Any])

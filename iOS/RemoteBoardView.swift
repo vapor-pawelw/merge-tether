@@ -399,7 +399,8 @@ struct RemoteCardView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 6) {
-                repositoryReference
+                if expanded { repositoryReference }
+                else { compactMetadata }
                 VStack(alignment: .leading, spacing: 4) {
                     title
                     if expanded, let branches {
@@ -410,37 +411,44 @@ struct RemoteCardView: View {
                         .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                         .accessibilityLabel(Text(.RemoteDetail.remoteDetailBranches(branches.source, branches.target)))
                     }
-                }
+                }.opacity(contentOpacity)
             }
-            .opacity(contentOpacity)
             if expanded {
                 MergeRequestDescription(source: mergeRequestDescription, title: .RemoteDetail.remoteDetailDescription,
                     expandHint: .RemoteDetail.remoteDetailExpandDescription, collapseHint: .RemoteDetail.remoteDetailCollapseDescription)
-            }
-            if card.presentation?.author != nil || card.presentation?.draftBadge != nil || card.id.hasPrefix("mr:") {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 8) {
-                        author
-                        Spacer(minLength: 0)
-                        badges
-                    }
-                    VStack(alignment: .leading, spacing: 8) {
-                        author
-                        badges
+                if card.presentation?.author != nil || card.presentation?.draftBadge != nil || card.id.hasPrefix("mr:") {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            author
+                            Spacer(minLength: 0)
+                            badges
+                        }
+                        VStack(alignment: .leading, spacing: 8) {
+                            author
+                            badges
+                        }
                     }
                 }
-                .font(.caption).foregroundStyle(.secondary)
+            } else {
+                author
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
+    private var compactMetadata: some View {
+        HStack(alignment: .top, spacing: 8) {
+            repositoryReference.padding(.top, 3)
+            Spacer(minLength: 0)
+            badges.fixedSize(horizontal: true, vertical: false)
+        }
+    }
     private var repositoryReference: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: expanded ? 8 : 4) {
             if !card.project.isEmpty {
-                RemoteRepositoryLabel(name: card.repositoryName, path: card.project)
+                RemoteRepositoryLabel(name: card.repositoryName, path: card.project, contentOpacity: contentOpacity)
             }
-            Spacer(minLength: 4)
+            if expanded { Spacer(minLength: 4) }
             if let iid = card.mergeRequestIID {
-                Text(verbatim: "!\(iid)").monospacedDigit().fixedSize()
+                Text(verbatim: "!\(iid)").monospacedDigit().fixedSize().opacity(contentOpacity)
             }
         }
         .font(.caption).foregroundStyle(.secondary)
@@ -450,11 +458,15 @@ struct RemoteCardView: View {
         if let presentation = card.presentation, presentation.author != nil {
             PersonLabel(person: .init(name: presentation.author, username: presentation.authorUsername,
                                       avatarURL: presentation.authorAvatarURL))
+                .font(.caption).foregroundStyle(.secondary)
                 .opacity(contentOpacity)
         }
     }
     private var badges: some View {
         HStack(spacing: 6) {
+            if !expanded, let dependencies = card.dependencies {
+                MRDependencyBadge(dependencies: dependencies)
+            }
             if let badge = card.presentation?.draftBadge {
                 let tint = showsDraftStyle ? draftBadgeTint : Color.secondary
                 Text(verbatim: badge).fontWeight(.medium)
@@ -470,11 +482,11 @@ struct RemoteCardView: View {
                     personalApproval: card.personalApprovalControl(model: actionsModel),
                     automaticApprovalOff: card.presentation?.automaticApprovalOff == true)
             }
-        }
+        }.font(.caption).foregroundStyle(.secondary)
     }
     private var hasSupportingInformation: Bool {
         card.presentation?.requirements?.isEmpty == false || card.visibleStatus != nil
-            || card.presentation?.pendingDrafts != nil || card.dependencies != nil
+            || card.presentation?.pendingDrafts != nil || (expanded && card.dependencies != nil)
             || card.presentation?.steps?.isEmpty == false || card.visibleNextStep != nil
             || !(card.presentation?.chips.isEmpty ?? card.drafts.isEmpty)
     }
@@ -536,7 +548,7 @@ struct RemoteCardView: View {
                 }
                 .font(.subheadline).fixedSize(horizontal: false, vertical: true)
             }
-            if let dependencies = card.dependencies { RemoteMRDependencyRow(dependencies: dependencies) }
+            if expanded, let dependencies = card.dependencies { RemoteMRDependencyRow(dependencies: dependencies) }
             if let steps = card.presentation?.steps, !steps.isEmpty {
                 RemoteStepChain(steps: steps, current: card.presentation?.currentStep ?? 0)
                     .font(expanded ? .callout : .caption)
@@ -587,6 +599,7 @@ private struct RemoteStepChain: View {
 private struct RemoteRepositoryLabel: View {
     let name: String
     let path: String
+    let contentOpacity: Double
     @State private var showingPath = false
 
     var body: some View {
@@ -594,6 +607,7 @@ private struct RemoteRepositoryLabel: View {
             Text(verbatim: name)
                 .fontWeight(.medium).lineLimit(1).truncationMode(.middle)
                 .foregroundStyle(.tint)
+                .opacity(contentOpacity)
                 .contentShape(.interaction, CardControlHitArea(anchor: .bottom))
         }
         .buttonStyle(.plain)

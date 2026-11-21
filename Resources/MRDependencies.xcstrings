@@ -12,6 +12,74 @@
         }
       }
     },
+    "mr.dependencies.badge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dependencies"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zależności"
+          }
+        }
+      }
+    },
+    "mr.dependencies.earlierInStack": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Earlier in the stack"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wcześniej w stosie"
+          }
+        }
+      }
+    },
+    "mr.dependencies.explicitGitLab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Explicit GitLab dependency"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jawna zależność w GitLabie"
+          }
+        }
+      }
+    },
+    "mr.dependencies.sourceUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dependency type unavailable"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Typ zależności niedostępny"
+          }
+        }
+      }
+    },
     "mr.dependencies.lastKnown": {
       "extractionState": "manual",
       "localizations": {
