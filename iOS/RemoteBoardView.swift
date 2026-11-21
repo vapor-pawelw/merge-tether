@@ -342,12 +342,14 @@ struct RemoteCardView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(16)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+        .background(Color(uiColor: .secondarySystemGroupedBackground).opacity(contentOpacity),
+                    in: RoundedRectangle(cornerRadius: 16))
         .modifier(RemoteCardInteraction(onOpen: onOpen))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("remote.card.\(card.id)")
         .overlay {
             RoundedRectangle(cornerRadius: 16).strokeBorder(.primary.opacity(0.14), lineWidth: 1)
+                .opacity(contentOpacity)
                 .allowsHitTesting(false)
         }
         .environment(\.gitLabPersonSourceURL, card.url)
@@ -448,6 +450,7 @@ struct RemoteCardView: View {
         if let presentation = card.presentation, presentation.author != nil {
             PersonLabel(person: .init(name: presentation.author, username: presentation.authorUsername,
                                       avatarURL: presentation.authorAvatarURL))
+                .opacity(contentOpacity)
         }
     }
     private var badges: some View {

@@ -49,7 +49,7 @@ private struct CommandCenterMRCardContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             metadataHeader.zIndex(1)
-            cardContent.opacity(contentOpacity)
+            cardContent
             if finishedState == nil {
                 MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext,
                     actionsBlocked: presentation.actionsBlocked || isStarting || finishingCommentReview,
@@ -94,11 +94,12 @@ private struct CommandCenterMRCardContent: View {
         .padding(.top, 12)
         .overlay {
             RoundedRectangle(cornerRadius: 8).strokeBorder(.primary.opacity(0.14), lineWidth: 1)
+                .opacity(contentOpacity)
                 .allowsHitTesting(false)
         }
         .boardCardInteraction(
             background: colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(white: 0.95),
-            onDetails: onDetails)
+            backgroundOpacity: contentOpacity, onDetails: onDetails)
         .contextMenu { menuItems }
         .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
             Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
@@ -107,21 +108,29 @@ private struct CommandCenterMRCardContent: View {
     }
 
     private var cardContent: some View {
-        let mergeActivity = presentation.mergeActivity
-        let showsWorkingStatus = presentation.working && mergeActivity == nil
-        return VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 6) {
                 Button(action: onDetails) {
                     BoardCardTitle(title: row.displayTitle, repositoryPath: row.displayURL.gitLabProjectPath,
                         titleColor: !isDraft && isMuted ? .secondary : .primary)
+                        .opacity(contentOpacity)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help(Text(verbatim: "\(row.displayTitle)\n\(row.displayURL.gitLabProjectPath)\n") + Text(.Board.boardDetails))
                 BoardMRReferenceLine(iid: item.id.iid, projectID: item.id.projectID,
-                    repositoryPath: row.displayURL.gitLabProjectPath, dependencies: row.displayItem.dependencies)
+                    repositoryPath: row.displayURL.gitLabProjectPath, dependencies: row.displayItem.dependencies,
+                    contentOpacity: contentOpacity)
             }
             .padding(.bottom, 8)
+            cardStatus.opacity(contentOpacity)
+        }
+    }
+
+    private var cardStatus: some View {
+        let mergeActivity = presentation.mergeActivity
+        let showsWorkingStatus = presentation.working && mergeActivity == nil
+        return Group {
             if finishedState != nil {
                 FinishedMergeRequestStatus(item: row.displayItem, monitor: monitor)
             } else {
@@ -242,9 +251,10 @@ private struct CommandCenterMRCardContent: View {
     private var metadataHeader: some View {
         HStack(spacing: 6) {
             if let author = ReviewingContext(row: row).author {
-                BoardCardAuthor(author: author)
+                BoardCardAuthor(author: author, contentOpacity: contentOpacity)
             } else if allowsRemoval {
                 PersonAvatar(url: nil, size: 16)
+                    .opacity(contentOpacity)
                     .help(Text(.ReviewingContext.reviewingAuthorUnknown))
                     .accessibilityLabel(Text(.ReviewingContext.reviewingAuthorUnknown))
             }

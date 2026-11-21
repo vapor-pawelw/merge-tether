@@ -39,6 +39,7 @@ struct BoardActionsMenu<Content: View>: View {
 /// The background exposes a keyboard action; the fallback tap also covers static text.
 private struct BoardCardInteraction: ViewModifier {
     let background: Color?
+    let backgroundOpacity: Double
     let onDetails: () -> Void
     @State private var isHovered = false
     @Environment(\.colorScheme) private var colorScheme
@@ -54,6 +55,7 @@ private struct BoardCardInteraction: ViewModifier {
                             RoundedRectangle(cornerRadius: 8)
                                 .fill(isHovered ? Color.primary.opacity(dark ? 0.02 : 0.045) : Color.clear)
                         }
+                        .opacity(backgroundOpacity)
                         .contentShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
@@ -69,8 +71,9 @@ extension View {
         modifier(BoardHeaderControlHover())
     }
 
-    func boardCardInteraction(background: Color? = nil, onDetails: @escaping () -> Void) -> some View {
-        modifier(BoardCardInteraction(background: background, onDetails: onDetails))
+    func boardCardInteraction(background: Color? = nil, backgroundOpacity: Double = 1,
+                              onDetails: @escaping () -> Void) -> some View {
+        modifier(BoardCardInteraction(background: background, backgroundOpacity: backgroundOpacity, onDetails: onDetails))
     }
 }
 
