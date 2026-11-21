@@ -21,6 +21,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
     var hidesBlockedActions = false
     var highlightedSubmission: MergeSubmissionState? = nil
     var statusTopPadding: CGFloat
+    var statusOpacity: Double
     var statusTrailer: () -> StatusTrailer
     var additionalActions: (Bool) -> AdditionalActions
     @Environment(\.openURL) private var openURL
@@ -43,7 +44,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
          showsRecoveryActions: Bool = true, showsFeedbackVerification: Bool = true, showsStatusCard: Bool = false,
          textFont: Font = .subheadline, coveredBlockers: Set<MergeRequestBlocker> = [],
          hidesBlockedActions: Bool = false, highlightedSubmission: MergeSubmissionState? = nil,
-         statusTopPadding: CGFloat = 0,
+         statusTopPadding: CGFloat = 0, statusOpacity: Double = 1,
          @ViewBuilder statusTrailer: @escaping () -> StatusTrailer,
          @ViewBuilder additionalActions: @escaping (Bool) -> AdditionalActions) {
         self.item = item; self.monitor = monitor
@@ -57,6 +58,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
         self.coveredBlockers = coveredBlockers; self.hidesBlockedActions = hidesBlockedActions
         self.highlightedSubmission = highlightedSubmission
         self.statusTopPadding = statusTopPadding
+        self.statusOpacity = statusOpacity
         self.statusTrailer = statusTrailer; self.additionalActions = additionalActions
     }
 
@@ -123,8 +125,9 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .modifier(MRDetailStatusCard(isPresented: showsStatusCard))
                     .padding(.top, statusTopPadding)
+                    .opacity(statusOpacity)
             }
-            statusTrailer()
+            statusTrailer().opacity(statusOpacity)
             HStack(spacing: 8) {
                 if owned {
                     if let action = directMergeAction, let request = item.mergeRequest {
