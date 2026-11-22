@@ -403,9 +403,9 @@ struct RemoteCardView: View {
     }
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: expanded ? 6 : 12) {
                 if expanded { repositoryReference }
-                else { compactMetadata }
+                else { compactMetadata.zIndex(1) }
                 VStack(alignment: .leading, spacing: 4) {
                     title
                     if expanded, let branches {
@@ -440,9 +440,8 @@ struct RemoteCardView: View {
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
     private var compactMetadata: some View {
-        HStack(alignment: .top, spacing: 8) {
+        MRCardMetadataLayout {
             repositoryReference.padding(.top, 3)
-            Spacer(minLength: 0)
             badges.fixedSize(horizontal: true, vertical: false)
         }
     }

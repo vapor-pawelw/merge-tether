@@ -50,7 +50,6 @@ private struct CommandCenterMRCardContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            metadataHeader.zIndex(1)
             cardContent
             if finishedState == nil {
                 MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext,
@@ -110,22 +109,26 @@ private struct CommandCenterMRCardContent: View {
 
     private var cardContent: some View {
         VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 6) {
-                Button(action: onDetails) {
-                    BoardCardTitle(title: row.displayTitle, repositoryPath: row.displayURL.gitLabProjectPath,
-                        titleColor: !isDraft && isMuted ? .secondary : .primary)
-                        .opacity(contentOpacity)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(Text(verbatim: "\(row.displayTitle)\n\(row.displayURL.gitLabProjectPath)\n") + Text(.Board.boardDetails))
-                if let author = ReviewingContext(row: row).author {
-                    BoardCardAuthor(author: author, contentOpacity: contentOpacity)
-                } else if allowsRemoval {
-                    PersonAvatar(url: nil, size: 16)
-                        .opacity(contentOpacity)
-                        .help(Text(.ReviewingContext.reviewingAuthorUnknown))
-                        .accessibilityLabel(Text(.ReviewingContext.reviewingAuthorUnknown))
+            // The title's line box adds space above the glyphs after the reference baseline.
+            VStack(alignment: .leading, spacing: 10) {
+                metadataHeader.zIndex(1)
+                VStack(alignment: .leading, spacing: 8) {
+                    Button(action: onDetails) {
+                        BoardCardTitle(title: row.displayTitle, repositoryPath: row.displayURL.gitLabProjectPath,
+                            titleColor: !isDraft && isMuted ? .secondary : .primary)
+                            .opacity(contentOpacity)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(Text(verbatim: "\(row.displayTitle)\n\(row.displayURL.gitLabProjectPath)\n") + Text(.Board.boardDetails))
+                    if let author = ReviewingContext(row: row).author {
+                        BoardCardAuthor(author: author, contentOpacity: contentOpacity)
+                    } else if allowsRemoval {
+                        PersonAvatar(url: nil, size: 16)
+                            .opacity(contentOpacity)
+                            .help(Text(.ReviewingContext.reviewingAuthorUnknown))
+                            .accessibilityLabel(Text(.ReviewingContext.reviewingAuthorUnknown))
+                    }
                 }
             }
             .padding(.bottom, 8)
@@ -255,11 +258,10 @@ private struct CommandCenterMRCardContent: View {
     }
 
     private var metadataHeader: some View {
-        HStack(alignment: .top, spacing: 6) {
+        MRCardMetadataLayout {
             BoardMRReferenceLine(iid: item.id.iid, projectID: item.id.projectID,
                 repositoryPath: row.displayURL.gitLabProjectPath, contentOpacity: contentOpacity)
                 .padding(.top, 4)
-            Spacer(minLength: 4)
             metadataControls.fixedSize(horizontal: true, vertical: false)
         }
     }

@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Use roughly 12 pt above the title and 8 pt between the title and author on Mac and iPhone merge request cards.
+
 - Add or remove reviewers from the approvals popover on Mac and iPhone. Search by name or GitLab username. Make the iPhone approvals badge more compact and keep its tap area within the badge.
 
 - Put the repository and MR number above the title and the author below it on Mac and iPhone board cards. A Blocked badge in the top-right corner opens a popover with links to blocking MRs and shows whether each one is earlier in the stack, an explicit GitLab dependency, or both.
