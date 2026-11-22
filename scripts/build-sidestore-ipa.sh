@@ -8,8 +8,8 @@ Usage: scripts/build-sidestore-ipa.sh [--build-number NUMBER]
 Build MergeTether Release for iPhoneOS and package it for SideStore to sign.
 Outputs go to release/sidestore along with a SHA-256 checksum and manifest.
 The default build number follows the highest existing local SideStore build.
-Set the external origin-only relay config via .mise.local.toml or
-TUIST_MERGETETHER_RELAY_CONFIG_FILE.
+Run scripts/setup-relay.sh to configure the local relay before building.
+An explicit TUIST_MERGETETHER_RELAY_CONFIG_FILE takes precedence.
 USAGE
 }
 

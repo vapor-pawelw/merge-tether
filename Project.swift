@@ -2,11 +2,20 @@ import ProjectDescription
 import Foundation
 
 let relayOrigin: String = {
-    guard let path = ProcessInfo.processInfo.environment["TUIST_MERGETETHER_RELAY_CONFIG_FILE"], !path.isEmpty else { return "" }
-    guard let data = FileManager.default.contents(atPath: path),
-          let values = try? JSONSerialization.jsonObject(with: data) as? [String: String],
-          Set(values.keys) == ["origin"], let raw = values["origin"] else {
-        fatalError("Relay configuration must be a readable external JSON file containing only a string origin; never include credentials.")
+    let environment = ProcessInfo.processInfo.environment
+    let raw: String
+    if let path = environment["TUIST_MERGETETHER_RELAY_CONFIG_FILE"] {
+        guard !path.isEmpty else { return "" }
+        guard let data = FileManager.default.contents(atPath: path),
+              let values = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+              Set(values.keys) == ["origin"], let configuredOrigin = values["origin"] else {
+            fatalError("Relay configuration must be a readable external JSON file containing only a string origin; never include credentials.")
+        }
+        raw = configuredOrigin
+    } else {
+        guard let configuredOrigin = environment["TUIST_MERGETETHER_RELAY_ORIGIN"],
+              !configuredOrigin.isEmpty else { return "" }
+        raw = configuredOrigin
     }
     let rawOrigin = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !rawOrigin.contains("%"), !rawOrigin.contains("\\"),

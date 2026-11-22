@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Touch and hold anywhere on an iPhone board card, then drag it to reorder merge requests while connected to the Mac. The Mac saves moves within each automation and pin group, and the iPhone immediately displays the confirmed order.
 
+- Configure an existing companion relay with one interactive Bash command. Local Mac and iPhone builds use the saved HTTPS URL, and the Mac privately prefills the token when pairing.
+
 - Use 50% opacity for the author, title, repository reference, status content, background, and border of draft merge request cards on the Mac board. Give the Draft badge a subtle violet tint.
 
 - Keep the author and repository popovers available on hover on Mac draft cards.

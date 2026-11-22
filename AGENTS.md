@@ -11,10 +11,10 @@ macOS GitLab inbox and MR automation. Read [README.md](README.md) for behavior,
   A local installation may use a different identifier; preserve its settings on rebuild.
   Paired local installations also need a stable certificate-backed signing identity;
   ad hoc rebuilds invalidate Keychain’s remembered approval.
-- Local builds must preserve the operator relay configuration: use the ignored
-  `.mise.local.toml` or explicitly pass the external origin-only config in worktrees.
-  Follow [the local relay build guide](docs/building.md#local-relay-configuration);
-  verify both app origins and keep operator credentials out of artifacts.
+- Local builds and worktrees use the macOS user's relay saved by `scripts/setup-relay.sh`
+  when generated through `mise exec`. Preserve any explicit origin-only override.
+  Follow the [local relay build guide](docs/building.md#local-relay-configuration),
+  verify the origin in both app bundles, and keep operator credentials out of artifacts.
 - Tuist owns the generated Xcode project. Use the version pinned in `mise.toml`;
   regenerate deliberately after project-graph changes. Open `MergeTether.xcworkspace`
   and use the `MergeTether` scheme for macOS or `MergeTetheriOS` for iOS.
@@ -51,8 +51,9 @@ macOS GitLab inbox and MR automation. Read [README.md](README.md) for behavior,
 
 - Keep `SettingsManager` persistence explicit with `save()`; avoid writes during view evaluation.
 - New profile-managed permissions inherit missing defaults from the active preset on upgrade; preserve Custom and explicit values, update profile matching/snapshots, and test legacy settings across restart.
-- User-facing strings belong in feature `.xcstrings` catalogs with manual extraction
-  and generated symbols. Do not introduce raw localization keys.
+- App UI strings belong in feature `.xcstrings` catalogs with manual extraction and
+  generated symbols. Do not introduce raw localization keys. Keep repository
+  documentation, scripts, and CLI messages in English.
 - Test behavior and relevant failure/concurrency cases; verify build/tests before
   claiming success. Remove temporary builds after verification, retaining only a
   requested runnable installation.

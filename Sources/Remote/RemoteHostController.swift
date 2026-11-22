@@ -134,6 +134,7 @@ extension RemoteConnection: RemoteHostTransport {}
                 guard loaded == nil || loaded?.role == .host else { throw RemoteProtocolError.invalid }
                 if let loaded, !relayConfiguration.accepts(origin: loaded.origin) {
                     relayMismatch = true
+                    loadLocalOperatorSetup()
                     return
                 }
                 pairing = loaded
@@ -240,12 +241,44 @@ extension RemoteConnection: RemoteHostTransport {}
     }
     private func loadLocalOperatorSetup() {
         let folder = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Application Support/MergeTether/remote-relay")
-        guard let data = try? Data(contentsOf: folder.appending(path: "operator.json")),
-              let values = try? JSONDecoder().decode([String: String].self, from: data),
-              let origin = try? String(contentsOf: folder.appending(path: "origin.txt"), encoding: .utf8) else { return }
-        guard let url = URL(string: origin.trimmingCharacters(in: .whitespacesAndNewlines)),
-              relayConfiguration.accepts(origin: url) else { return }
-        invitation = values["RELAY_ACCESS_TOKEN"] ?? ""
+        invitation = Self.localOperatorInvitation(for: relayConfiguration, in: folder) ?? ""
+    }
+    static func localOperatorInvitation(for configuration: RemoteRelayConfiguration, in folder: URL) -> String? {
+        guard let configured = configuration.origin else { return nil }
+        if let pairing = try? String(contentsOf: folder.appending(path: "pairing.txt"), encoding: .utf8) {
+            let lines = pairing.components(separatedBy: "\n")
+            if lines.count == 3, lines[2].isEmpty, !lines[1].isEmpty,
+               RemoteRelayConfiguration(rawOrigin: lines[0]).origin == configured {
+                return lines[1]
+            }
+        }
+
+        func read(_ file: URL) -> [String: String]? {
+            guard let data = try? Data(contentsOf: file) else { return nil }
+            return try? JSONDecoder().decode([String: String].self, from: data)
+        }
+
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .contentModificationDateKey]
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles])) ?? []
+        let prefills = files.compactMap { file -> (file: URL, modified: Date)? in
+            guard file.lastPathComponent.hasPrefix("prefill-"), file.pathExtension == "json",
+                  let properties = try? file.resourceValues(forKeys: keys), properties.isRegularFile == true else { return nil }
+            return (file, properties.contentModificationDate ?? .distantPast)
+        }.sorted {
+            ($0.modified, $0.file.lastPathComponent) > ($1.modified, $1.file.lastPathComponent)
+        }
+        for prefill in prefills {
+            if let values = read(prefill.file), RemoteRelayConfiguration(rawOrigin: values["origin"]).origin == configured,
+               let token = values["RELAY_ACCESS_TOKEN"], !token.isEmpty {
+                return token
+            }
+        }
+
+        guard let values = read(folder.appending(path: "operator.json")),
+              let origin = try? String(contentsOf: folder.appending(path: "origin.txt"), encoding: .utf8),
+              RemoteRelayConfiguration(rawOrigin: origin).origin == configured else { return nil }
+        return values["RELAY_ACCESS_TOKEN"]
     }
     private func receive(_ message: RemoteMessage) async {
         guard let active = connection else { return }

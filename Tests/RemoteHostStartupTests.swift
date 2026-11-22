@@ -6,6 +6,64 @@ import Security
 
 @MainActor
 struct RemoteHostStartupTests {
+    @Test func bashRelaySetupBindsTheTokenToTheConfiguredOrigin() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let token = String(repeating: "b", count: 43)
+        try " HTTPS://Relay.Example.Test:443/ \n\(token)\n".write(
+            to: folder.appending(path: "pairing.txt"), atomically: true, encoding: .utf8)
+
+        let relay = RemoteRelayConfiguration(rawOrigin: "https://relay.example.test")
+        let otherPort = RemoteRelayConfiguration(rawOrigin: "https://relay.example.test:8443")
+        #expect(RemoteHostController.localOperatorInvitation(for: relay, in: folder) == token)
+        #expect(RemoteHostController.localOperatorInvitation(for: otherPort, in: folder) == nil)
+    }
+
+    @Test func localRelaySetupUsesLatestTokenForEquivalentAddressSpellings() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let files = FileManager.default
+        try files.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? files.removeItem(at: folder) }
+        let configuration = RemoteRelayConfiguration(rawOrigin: "https://relay.example.test")
+        let previous = String(repeating: "a", count: 43)
+        let current = String(repeating: "b", count: 43)
+        let other = String(repeating: "c", count: 43)
+
+        for (index, record) in [
+            ("2d084736b748e9e0842fc83e1f302a60a4535e44d24e05165504d77be82752c9", "https://relay.example.test", previous),
+            ("alternate", " HTTPS://Relay.Example.Test:443/ ", current),
+            ("different-port", "https://relay.example.test:8443", other),
+            ("path", "https://relay.example.test/api", other),
+        ].enumerated() {
+            let (name, origin, token) = record
+            let file = folder.appending(path: "prefill-\(name).json")
+            try JSONEncoder().encode(["origin": origin, "RELAY_ACCESS_TOKEN": token]).write(to: file)
+            try files.setAttributes([.modificationDate: Date(timeIntervalSince1970: Double(index + 1))], ofItemAtPath: file.path)
+        }
+        #expect(RemoteHostController.localOperatorInvitation(for: configuration, in: folder) == current)
+    }
+
+    @Test func localRelaySetupPrefersMatchingPrefillAndKeepsLegacyFallback() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let configuration = RemoteRelayConfiguration(rawOrigin: "https://RELAY.example.test:443/")
+        let prefill = folder.appending(path: "prefill-2d084736b748e9e0842fc83e1f302a60a4535e44d24e05165504d77be82752c9.json")
+        let token = String(repeating: "a", count: 43)
+        let legacyToken = String(repeating: "b", count: 43)
+        try JSONEncoder().encode(["RELAY_ACCESS_TOKEN": legacyToken])
+            .write(to: folder.appending(path: "operator.json"))
+        try "https://relay.example.test\n".write(to: folder.appending(path: "origin.txt"), atomically: true, encoding: .utf8)
+
+        try JSONEncoder().encode(["origin": "https://relay.example.test", "RELAY_ACCESS_TOKEN": token]).write(to: prefill)
+        #expect(RemoteHostController.localOperatorInvitation(for: configuration, in: folder) == token)
+        let other = RemoteRelayConfiguration(rawOrigin: "https://other.example.test")
+        #expect(RemoteHostController.localOperatorInvitation(for: other, in: folder) == nil)
+        try JSONEncoder().encode(["origin": "https://other.example.test", "RELAY_ACCESS_TOKEN": token]).write(to: prefill)
+        #expect(RemoteHostController.localOperatorInvitation(for: configuration, in: folder) == legacyToken)
+    }
+
     @Test func initializerReturnsWhilePairingReadIsPendingAndReadsAwayFromTheMainThread() async throws {
         let f = try Fixture()
         defer { f.clean() }

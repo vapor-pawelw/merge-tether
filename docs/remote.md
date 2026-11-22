@@ -151,12 +151,14 @@ On first deployment Wrangler may need to register a workers.dev subdomain. Check
 the actual deployment and route if the first command reports a routing error after
 uploading. A retry after registration completes may be sufficient.
 
-On the Mac, open the phone button and enter the relay's HTTPS origin and invitation.
-Click **Enable phone access**. The iOS app scans the private QR, shows the relay for confirmation, and remembers
+Run [the interactive setup](byo-relay.md#interactive-setup-for-an-existing-relay)
+before building the apps. On the Mac, open the phone button and confirm the
+configured relay and invitation. Click **Enable phone access**.
+The iOS app scans the private QR, shows the relay for confirmation, and remembers
 the pairing. No GitLab or VPN configuration is needed on the phone. Each new Mac
 creates a separate pairing; the relay address and operator invitation can be reused.
 
-For the local operator, the setup can be prefilled from files outside the checkout:
+Manual setup can also prefill the invitation from the existing local files
 `~/Library/Application Support/MergeTether/remote-relay/operator.json` and an
 `origin.txt` containing only the HTTPS origin. This does not enable remote access
 until the user clicks the Mac button.

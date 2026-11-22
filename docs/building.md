@@ -29,8 +29,10 @@ Manual GitLab management requires authenticated `glab`. Agent automation additio
 
 The companion requires an operator-owned relay. Its origin-only build configuration
 must live outside source control; see [Bring your own relay](byo-relay.md).
-To keep local agents and repeated builds using that configuration, create an ignored
-`.mise.local.toml` in the checkout:
+Run `./scripts/setup-relay.sh` once for your macOS user before generating the project.
+Run generation through `mise exec` to load the saved URL for both local app targets.
+For a per-checkout or distribution override, create an ignored
+`.mise.local.toml` in the checkout.
 
 ```toml
 [env]
@@ -45,11 +47,11 @@ rebuild/release helpers. Regenerate before building so both app Info.plist files
 contain the intended origin. Verify those values in the finished Mac app and IPA.
 A bare Tuist call outside mise does not guarantee this local environment is loaded.
 
-Worktrees do not copy ignored files. Before building in one, create its own ignored
-`.mise.local.toml` pointing to the same external JSON, or explicitly set
-`TUIST_MERGETETHER_RELAY_CONFIG_FILE` for `mise exec -- tuist generate --no-open`.
-Do not copy a personal origin or token into tracked files. A public checkout without
-an operator's local configuration has no shared relay; companion access stays disabled.
+The user-level default works in local worktrees too. Worktrees do not copy ignored
+files, so set any per-checkout override there or pass it explicitly when generating.
+Use an empty `TUIST_MERGETETHER_RELAY_CONFIG_FILE` to generate without a relay.
+Distribution builds use their explicit release configuration. Keep personal
+relay files outside source control.
 
 ## Command-line build
 

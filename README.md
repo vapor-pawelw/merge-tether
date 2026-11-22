@@ -62,7 +62,16 @@ Agent progress, results, and failures are visible on the Mac. Permissions for pu
 
 MergeTether is built with **Swift 6 and SwiftUI**. The Mac app reads and writes GitLab through `glab`, starts the selected agent CLI in the background, and keeps settings and run history locally. Agent processes have file, command, and network access. The data they read can reach the selected provider. [Agent data and access](docs/automation.md#what-the-agent-sees)
 
-The optional **iPhone companion** mirrors the board and sends confirmed MR actions through a paired, online Mac. It requires **iOS 17+** and a relay you deploy on Cloudflare. The Mac handles GitLab requests and keeps your credentials. [Companion architecture](docs/remote.md) · [Bring your own relay](docs/byo-relay.md)
+The optional **iPhone companion** mirrors the board and sends confirmed MR actions through a paired, online Mac. It requires **iOS 17+** and access to a MergeTether relay on Cloudflare. The Mac handles GitLab requests and keeps your credentials. [Companion architecture](docs/remote.md) · [Bring your own relay](docs/byo-relay.md)
+
+If you already have a relay, run the interactive setup from your checkout before generating the Xcode project.
+
+```sh
+./scripts/setup-relay.sh
+mise exec -- tuist generate --no-open
+```
+
+Enter your relay's HTTPS URL and access token. Project generation uses the saved URL for both the Mac and iPhone builds. The Mac keeps the token in private local storage and fills it in when you pair. After building, choose **Enable phone access** on the Mac and scan its QR code using the iPhone app. [Relay setup details](docs/byo-relay.md#interactive-setup-for-an-existing-relay)
 
 ## Contributing
 

@@ -104,7 +104,7 @@ fi
 mise exec -- tuist generate --no-open
 generated_origin="$(plist "Derived/InfoPlists/$app_name-Info.plist" MergeTetherRelayOrigin)"
 if [[ -n "$old_origin" && -z "$generated_origin" ]]; then
-  fail "existing app uses a relay. Set the origin-only config in .mise.local.toml or TUIST_MERGETETHER_RELAY_CONFIG_FILE"
+  fail "existing app uses a relay. Run scripts/setup-relay.sh or set TUIST_MERGETETHER_RELAY_CONFIG_FILE"
 fi
 
 echo "Building $scheme ($configuration)..."

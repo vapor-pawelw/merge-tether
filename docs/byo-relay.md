@@ -1,6 +1,6 @@
 # Bring your own relay
 
-Each operator deploys a relay in their own Cloudflare account before building the native apps. The public server source is [Services/RemoteRelay](../Services/RemoteRelay); it is deployed separately from the Mac app and iOS IPA. MergeTether does not supply a common relay or default endpoint.
+If you already have a relay URL and access token, start with [interactive setup](#interactive-setup-for-an-existing-relay). To host your own relay, [deploy an instance](#deploy-your-instance) to your Cloudflare account first. The [relay server](../Services/RemoteRelay) is deployed separately from the Mac and iPhone apps.
 
 The relay origin is **public metadata**: it is embedded in both apps' Info.plist and is visible in the UI and extractable from an IPA. It neither authenticates users nor prevents resource consumption. Its operator is the person or organization controlling that deployment; the displayed origin is not proof of a person's identity. Build from your own configuration and verify the address before accepting pairing.
 
@@ -41,9 +41,17 @@ npx wrangler deploy --config ../../Services/RemoteRelay/wrangler.jsonc \
 
 Use the HTTPS origin reported for **your** deployment. Register a workers.dev subdomain if Cloudflare requires it. The server has no public pairing page and does not serve the diagnostic browser prototype. Keep the operator file private; it is runtime authentication material, not app configuration.
 
+## Interactive setup for an existing relay
+
+Run `./scripts/setup-relay.sh` from your checkout. Enter the relay's HTTPS URL and its 43-character access token when prompted. The token prompt hides input.
+
+The script saves one default relay for your macOS user. Both files live under `~/Library/Application Support/MergeTether/remote-relay/` outside the checkout. Project generation reads only `build-origin.txt`. The Mac app reads the private `pairing.txt` and fills in the token when its URL matches the built app's origin. Host casing, a trailing slash and an explicit default port are equivalent. Existing pairings stay in Keychain.
+
+Generate the project with `mise exec -- tuist generate --no-open` and then build the `MergeTether` and `MergeTetheriOS` schemes. Project generation validates the URL. If it reports an invalid address, run the setup again with the corrected URL. An existing explicit `TUIST_MERGETETHER_RELAY_CONFIG_FILE` setting, including one in `.mise.local.toml`, takes precedence over the local default.
+
 ## Configure and build both native apps
 
-Create a second external JSON file, such as `$HOME/.config/mergetether/relay-build.json`, containing exactly one field. Replace this illustrative address with your deployment's origin:
+For manual configuration, create an external JSON file, such as `$HOME/.config/mergetether/relay-build.json`, containing exactly one field. Replace the example address below with your deployment's origin.
 
 ```json
 {"origin":"https://your-relay.example.org"}
@@ -58,10 +66,9 @@ TUIST_MERGETETHER_RELAY_CONFIG_FILE="$HOME/.config/mergetether/relay-build.json"
   mise exec -- tuist generate --no-open
 ```
 
-For repeated local builds, configure the ignored `.mise.local.toml` described in
-[the local relay build guide](building.md#local-relay-configuration). This preserves
-the external config selection for local agents; each worktree needs its own ignored
-file or an explicit environment variable.
+For a persistent per-checkout override, use the ignored `.mise.local.toml` from
+[the local relay build guide](building.md#local-relay-configuration). Set the
+override separately in each worktree where you need it.
 
 Open the generated workspace and build the Mac `MergeTether` and iOS `MergeTetheriOS` schemes using your normal signing settings. Generation embeds only the validated origin in `MergeTetherRelayOrigin` in both app Info.plist files. Re-run generation after changing the external file; editing it does not update an existing binary. Generated projects are ignored by Git. No runtime invitation or operator key is packaged in either app.
 
@@ -78,7 +85,7 @@ If you use the repository's signed release workflow in your own fork, configure 
 
 ## Pair and confirm ownership
 
-On the Mac, open phone access. The app shows the configured origin and explains that its operator controls the address. Confirm it is your instance, enter the matching operator invitation in the secure field, then choose **Enable phone access**. The existing private local `remote-relay/operator.json` and `origin.txt` prefill is used only when that origin matches the build; it never enables access automatically.
+On the Mac, open phone access. The app shows the configured origin and explains that its operator controls the address. Confirm it is your instance, enter the matching operator invitation in the secure field if needed, then choose **Enable phone access**. Interactive setup and the manual `remote-relay/operator.json` and `origin.txt` prefill both require an origin that matches the build.
 
 Build the iOS app for the same origin, scan the Mac QR, and confirm the displayed address. The runtime QR contains the invitation and temporary pairing material; treat the QR and copied link as secrets. Both devices keep their established pairing in Keychain. The existing protocol, device-key pinning, encrypted frames and action guards remain in use. The public origin alone grants no pairing or GitLab access.
 

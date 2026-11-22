@@ -1,2 +1,10 @@
 [tools]
 tuist = "4.180.0"
+
+[env]
+TUIST_MERGETETHER_RELAY_ORIGIN = '''
+{%- set path = env.HOME ~ "/Library/Application Support/MergeTether/remote-relay/build-origin.txt" -%}
+{%- if path is file -%}
+  {{ read_file(path=path) }}
+{%- endif -%}
+'''
