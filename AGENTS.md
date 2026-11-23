@@ -49,6 +49,8 @@ macOS GitLab inbox and MR automation. Read [README.md](README.md) for behavior,
 
 ## Changes and verification
 
+- After verifying app changes, run `./scripts/rebuild-and-relaunch.sh` against the
+  user's installed Mac app so they can see the changes immediately.
 - Keep `SettingsManager` persistence explicit with `save()`; avoid writes during view evaluation.
 - New profile-managed permissions inherit missing defaults from the active preset on upgrade; preserve Custom and explicit values, update profile matching/snapshots, and test legacy settings across restart.
 - App UI strings belong in feature `.xcstrings` catalogs with manual extraction and
