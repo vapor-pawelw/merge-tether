@@ -55,13 +55,18 @@ struct MergeRequestSettingsTab: View {
                 Text(.Settings.settingsHiddenReviewsEmpty).foregroundStyle(.secondary)
             }
             ForEach(requests, id: \.webURL) { request in
-                LabeledContent {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(request.title)
+                        Text(verbatim: "\(request.webURL.gitLabProjectPath) !\(request.iid)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 12)
                     Button(.Settings.settingsHiddenReviewsRestore) {
                         monitor.restoreReviewedMergeRequest(request)
                     }
-                } label: {
-                    Text(request.title)
-                    Text(verbatim: "\(request.webURL.gitLabProjectPath) !\(request.iid)")
+                    .fixedSize(horizontal: true, vertical: false)
                 }
             }
         } label: {

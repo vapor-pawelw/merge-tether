@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Give merge request settings, notifications, and coding agent setup their own Mac settings tabs. Find hidden assignments in a collapsed section under Merge requests. Mark newly visible assignments on upgrade when Reviewing already contained cards.
 
+- Keep the **Restore** button fully visible in expanded hidden merge request rows.
+
 - Move **Run setup again** from GitLab to General settings.
 
 - Edit or restore the AI comment assessment prompt in Advanced automation settings.
