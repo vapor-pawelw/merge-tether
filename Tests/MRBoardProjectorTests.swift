@@ -62,6 +62,37 @@ struct MRBoardProjectorTests {
         #expect(MRBoardProjector(input: input).board().reviewed.isEmpty)
     }
 
+    @Test(arguments: [false, true])
+    func existingBoardMarksOnlyAdditionalAssignmentsNew(_ alreadyReadByOlderApp: Bool) throws {
+        let known = try request(["author": ["id": 8, "username": "author", "name": "Author"]])
+        let additional = try request(["iid": 43, "web_url": "https://gitlab.test/g/p/-/merge_requests/43",
+            "author": ["id": 8, "username": "author", "name": "Author"]])
+        let firstRead = Date(timeIntervalSince1970: 100)
+        let upgradeRead = Date(timeIntervalSince1970: 200)
+        let knownTarget = MRAutomationScope.Target(host: account.host, username: account.username, projectID: 1, iid: 42)
+        let additionalTarget = MRAutomationScope.Target(host: account.host, username: account.username, projectID: 1, iid: 43)
+        var assignments = ReviewAssignmentLedger()
+        if alreadyReadByOlderApp {
+            assignments.observe([known, additional], host: account.host, username: account.username, at: firstRead)
+            var legacy = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(assignments)) as? [String: Any])
+            legacy.removeValue(forKey: "baselinesEstablished")
+            assignments = try JSONDecoder().decode(ReviewAssignmentLedger.self, from: JSONSerialization.data(withJSONObject: legacy))
+        }
+
+        assignments.observe([known, additional], host: account.host, username: account.username, at: upgradeRead,
+            previouslyVisible: [knownTarget])
+
+        let entries = try #require(assignments.entries(host: account.host, username: account.username))
+        #expect(entries.first(where: { $0.request.iid == 42 })?.newSince == nil)
+        #expect(entries.first(where: { $0.request.iid == 43 })?.newSince == upgradeRead)
+        let markedSeen = assignments.markSeen(additionalTarget)
+        #expect(markedSeen)
+        assignments = try JSONDecoder().decode(ReviewAssignmentLedger.self, from: JSONEncoder().encode(assignments))
+        assignments.observe([known, additional], host: account.host, username: account.username, at: upgradeRead.addingTimeInterval(10),
+            previouslyVisible: [knownTarget])
+        #expect(assignments.entries(host: account.host, username: account.username)?.allSatisfy { $0.newSince == nil } == true)
+    }
+
     @Test func firstPollIsBaselineAndSeenSurvivesRefreshAndRestart() throws {
         let previouslyAssigned = try request(["author": ["id": 8, "username": "author", "name": "Author"]])
         let newRequest = try request(["iid": 43, "web_url": "https://gitlab.test/g/p/-/merge_requests/43",

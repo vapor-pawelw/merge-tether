@@ -187,23 +187,43 @@ struct ReviewAssignmentLedger: Codable, Sendable {
     }
 
     private var listings: [Account: [ID: Entry]] = [:]
+    private var baselinesEstablished: Set<Account>?
 
     func entries(host: String, username: String) -> [Entry]? {
         listings[Account(host: host, username: username)].map { Array($0.values) }
     }
 
-    mutating func observe(_ requests: [GitLabMergeRequest], host: String, username: String, at date: Date) {
+    func needsBaseline(host: String, username: String) -> Bool {
+        baselinesEstablished?.contains(Account(host: host, username: username)) != true
+    }
+
+    mutating func observe(_ requests: [GitLabMergeRequest], host: String, username: String, at date: Date,
+                          previouslyVisible: Set<MRAutomationScope.Target> = []) {
         let account = Account(host: host, username: username)
         let previous = listings[account]
+        let establishingBaseline = needsBaseline(host: host, username: username)
         var next: [ID: Entry] = [:]
         for request in requests where request.state == "opened" && request.projectID > 0 && request.iid > 0
             && request.author.username != username && request.webURL.isGitLabMergeRequest(host: host, iid: request.iid) {
             let id = ID(projectID: request.projectID, iid: request.iid)
             guard next[id] == nil else { continue }
-            let newSince = previous != nil && previous?[id] == nil ? date : previous?[id]?.newSince
+            let newSince: Date?
+            if establishingBaseline {
+                let target = MRAutomationScope.Target(host: host, username: username, projectID: id.projectID, iid: id.iid)
+                let newlyVisible = !previouslyVisible.isEmpty && !previouslyVisible.contains(target)
+                newSince = previous?[id]?.newSince ?? (newlyVisible ? date : nil)
+            } else if let old = previous?[id] {
+                newSince = old.newSince
+            } else {
+                newSince = date
+            }
             next[id] = .init(request: request, newSince: newSince)
         }
         listings[account] = next
+        if establishingBaseline {
+            if baselinesEstablished == nil { baselinesEstablished = [] }
+            baselinesEstablished?.insert(account)
+        }
     }
 
     @discardableResult
