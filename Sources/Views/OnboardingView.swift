@@ -8,6 +8,7 @@ struct OnboardingView: View {
     @State private var automationChoice: AutomationPackageChoice?
     @State private var assistant: AutomationAssistant?
     @State private var assistantSetup: AutomationAssistant?
+    @State private var isImportingReviews = false
 
     init(monitor: TodoMonitorService) {
         self.monitor = monitor
@@ -46,7 +47,8 @@ struct OnboardingView: View {
             onBack: goBack,
             onSkip: goNext,
             onContinue: goNext,
-            continueEnabled: canContinue
+            continueEnabled: canContinue,
+            isBusy: isImportingReviews
         ) {
             switch step {
             case .glabInstall:
@@ -62,7 +64,7 @@ struct OnboardingView: View {
                     monitor: monitor, assistant: $assistant, selection: $automationChoice
                 )
             case .done:
-                OnboardingDoneStep()
+                OnboardingDoneStep(monitor: monitor, isImporting: $isImportingReviews)
             }
         }
         .frame(minWidth: 560, minHeight: 440)

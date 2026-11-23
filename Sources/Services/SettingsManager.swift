@@ -331,6 +331,18 @@ final class SettingsManager {
         return saved && synchronized
     }
 
+    func saveMergeRequestLifecycleLedger(_ ledger: MergeRequestLifecycleLedger) -> Bool {
+        persistenceStore.preserveCorruptValues()
+        guard persistenceStore.save(ledger, forKey: Key.mrLifecycleLedger) else { return false }
+        guard persistenceStore.synchronize() else {
+            persistenceStore.save(mrLifecycleLedger, forKey: Key.mrLifecycleLedger)
+            persistenceStore.synchronize()
+            return false
+        }
+        mrLifecycleLedger = ledger
+        return true
+    }
+
     func removeReviewParticipationExclusion(_ id: UUID) -> Bool {
         let previous = reviewParticipationPreferences
         guard reviewParticipationPreferences.remove(id) else { return false }

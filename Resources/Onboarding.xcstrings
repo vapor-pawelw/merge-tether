@@ -205,6 +205,48 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Wszystko gotowe."}}
       }
     },
+    "onboarding.reviewImport.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en": {"stringUnit": {"state": "translated", "value": "Add your open GitLab review assignments to Reviewing, including drafts."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Dodaj do kolumny „Do przeglądu” otwarte MR-y przypisane Ci do recenzji w GitLabie, w tym szkice."}}
+      }
+    },
+    "onboarding.reviewImport.button" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en": {"stringUnit": {"state": "translated", "value": "Import assigned reviews"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Importuj MR-y do przeglądu"}}
+      }
+    },
+    "onboarding.reviewImport.empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en": {"stringUnit": {"state": "translated", "value": "No new reviews to import."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak nowych MR-ów do zaimportowania."}}
+      }
+    },
+    "onboarding.reviewImport.failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en": {"stringUnit": {"state": "translated", "value": "Could not import reviews. Try again or finish setup."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Import MR-ów się nie powiódł. Spróbuj ponownie lub zakończ konfigurację."}}
+      }
+    },
+    "onboarding.reviewImport.inProgress" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en": {"stringUnit": {"state": "translated", "value": "Importing assigned reviews"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Importowanie MR-ów do przeglądu"}}
+      }
+    },
+    "onboarding.reviewImport.success.%lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en": {"stringUnit": {"state": "translated", "value": "Added to Reviewing (%lld)."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Dodano do kolumny „Do przeglądu” (%lld)."}}
+      }
+    },
     "onboarding.finish" : {
       "extractionState" : "manual",
       "localizations" : {

@@ -779,6 +779,37 @@ final class TodoMonitorService {
         await refreshNow()
     }
 
+    func importAssignedReviews() async throws -> Int {
+        guard let account = boardDisplayAccount else { throw GlabError.notAuthenticated }
+        let executable = glab.glabPath
+        func checkAccount() throws {
+            try Task.checkCancellation()
+            guard boardDisplayAccount == account, glab.glabPath == executable else { throw CancellationError() }
+        }
+
+        let user = try await glab.fetchAuthenticatedUser(host: account.host, expectedUsername: account.username)
+        try checkAccount()
+        let readStartedAt = Date()
+        let assigned = try await glab.fetchReviewAssignedMergeRequests(userID: user.id, host: account.host)
+        try checkAccount()
+        let currentUser = try await glab.fetchAuthenticatedUser(host: account.host, expectedUsername: account.username)
+        guard currentUser == user else { throw GlabError.notAuthenticated }
+        try checkAccount()
+
+        var ledger = settings.mrLifecycleLedger
+        var imported = 0
+        for request in assigned {
+            guard request.state == "opened", request.author.id != user.id,
+                  request.reviewers?.contains(where: { $0.id == user.id }) != false,
+                  let target = scopeTarget(projectID: request.projectID, iid: request.iid, url: request.webURL),
+                  !settings.ignoredMergeRequests.contains(target), ledger.request(for: target) == nil else { continue }
+            ledger.record(request, for: target, now: readStartedAt)
+            imported += 1
+        }
+        if imported > 0, !settings.saveMergeRequestLifecycleLedger(ledger) { throw CocoaError(.fileWriteUnknown) }
+        return imported
+    }
+
     /// Removes a foreign MR locally, retaining GitLab assignments, drafts and history.
     /// A persisted pause prevents global discovery from adding it back on the next poll.
     @discardableResult
