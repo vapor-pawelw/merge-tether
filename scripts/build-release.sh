@@ -9,6 +9,7 @@ Usage: scripts/build-release.sh [X.Y.Z] [options]
   --build-number N             Positive integer (default: Project.swift setting)
   --platform macos|ios|all     Separate platform artifacts (default: macos)
   --relay-config FILE         External origin-only JSON (required for iOS distribution)
+  --no-relay                  Explicitly build macOS without a relay origin
   --signing-identity NAME|SHA  Developer ID Application identity for macOS
   --ios-signing-identity NAME|SHA  Apple Distribution identity for iOS
   --team-id ID                Distribution team for the selected platforms
@@ -20,6 +21,9 @@ Usage: scripts/build-release.sh [X.Y.Z] [options]
 Run through the repository-pinned toolchain: mise exec -- bash scripts/build-release.sh
 The signed macOS path submits artifacts to Apple for notarization. Use it only when
 that upload is authorized. --unsigned never submits or exports an installable IPA.
+Signed builds require --relay-config (or a nonempty TUIST_MERGETETHER_RELAY_CONFIG_FILE)
+or an explicit --no-relay. Without either, an unsigned build keeps the relay origin
+already configured for generation (for example the mise user default).
 Signing identities and credentials must already exist; this script creates neither.
 HELP
 }
@@ -29,11 +33,12 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 VERSION="" BUILD_NUMBER="" PLATFORM="macos" UNSIGNED=0
 SIGNING_IDENTITY="" IOS_SIGNING_IDENTITY="" TEAM_ID="" NOTARY_PROFILE="" IOS_EXPORT_OPTIONS=""
-RELAY_CONFIG="${TUIST_MERGETETHER_RELAY_CONFIG_FILE:-}"
+RELAY_CONFIG="${TUIST_MERGETETHER_RELAY_CONFIG_FILE:-}" NO_RELAY=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --help|-h) usage; exit 0 ;;
         --unsigned) UNSIGNED=1; shift ;;
+        --no-relay) NO_RELAY=1; shift ;;
         --build-number|--platform|--signing-identity|--ios-signing-identity|--team-id|--notary-profile|--ios-export-options|--relay-config)
             [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || fail "missing value for $1 (see --help)"
             case "$1" in
@@ -80,9 +85,18 @@ if len(matches) != 1:
 print(matches[0][0])
 ' "$requested" "$prefix"
 }
+# Relay origin source: config (validated file), none (explicit --no-relay) or
+# inherit (leave the generation environment untouched). EXPECTED_ORIGIN is never logged.
+RELAY_SOURCE=inherit EXPECTED_ORIGIN=""
+if [[ "$NO_RELAY" -eq 1 ]]; then
+    [[ -z "$RELAY_CONFIG" ]] || fail "--no-relay cannot be combined with --relay-config or TUIST_MERGETETHER_RELAY_CONFIG_FILE"
+    [[ "$IOS" -eq 0 || "$UNSIGNED" -eq 1 ]] || fail "iOS distribution requires --relay-config; --no-relay is only for macOS"
+    RELAY_SOURCE=none
+fi
 if [[ -n "$RELAY_CONFIG" ]]; then
     [[ -f "$RELAY_CONFIG" ]] || fail "--relay-config must name a readable external origin-only JSON file"
-    RELAY_CONFIG="$(python3 - "$RELAY_CONFIG" "$REPO_ROOT" <<'PY'
+    RELAY_SOURCE=config
+    RELAY_RESULT="$(python3 - "$RELAY_CONFIG" "$REPO_ROOT" <<'PY'
 import json, pathlib, sys, urllib.parse
 try:
     path = pathlib.Path(sys.argv[1]).resolve(strict=True)
@@ -101,17 +115,29 @@ try:
             or parts.password is not None or parts.path not in ('', '/')
             or (parts.port is not None and not 1 <= parts.port <= 65535)):
         raise ValueError()
+    host = parts.hostname.lower()
+    if not host.isascii() or not host:
+        raise ValueError()
+    if ':' in host:
+        host = '[' + host + ']'
+    # Mirrors Project.swift: lowercase host, no path, default HTTPS port omitted.
+    normalized = 'https://' + host + ('' if parts.port in (None, 443) else ':' + str(parts.port))
 except (OSError, ValueError, TypeError):
     sys.exit('error: relay config must be outside the checkout and contain only an HTTPS origin without credentials, path, query or fragment; never include tokens or keys')
 print(path)
+print(normalized)
 PY
 )"
+    RELAY_CONFIG="${RELAY_RESULT%%$'\n'*}"
+    EXPECTED_ORIGIN="${RELAY_RESULT#*$'\n'}"
+    unset RELAY_RESULT
 fi
 if [[ "$IOS" -eq 1 && "$UNSIGNED" -eq 0 && -z "$RELAY_CONFIG" ]]; then
     fail "iOS distribution requires --relay-config with your own relay origin; use --unsigned only for explicit inspection"
 fi
 if [[ "$UNSIGNED" -eq 0 ]]; then
     [[ -n "$TEAM_ID" ]] || fail "--team-id is required for distribution"
+    [[ "$RELAY_SOURCE" != inherit ]] || fail "signed builds require --relay-config with your own relay origin, or an explicit --no-relay for macOS"
     for tool in security codesign xcrun; do command -v "$tool" >/dev/null 2>&1 || fail "missing $tool"; done
     if [[ "$MACOS" -eq 1 ]]; then
         [[ -n "$SIGNING_IDENTITY" ]] || fail "--signing-identity Developer ID Application is required; use --unsigned only for local inspection"
@@ -156,16 +182,23 @@ mkdir -p "$SCRATCH/artifacts"
 ARTIFACTS=()
 COMMON_SETTINGS=("MARKETING_VERSION=${VERSION}" "CURRENT_PROJECT_VERSION=${BUILD_NUMBER}")
 echo "==> Generating project for ${VERSION} (${BUILD_NUMBER}), platform ${PLATFORM}"
-TUIST_MERGETETHER_RELAY_CONFIG_FILE="$RELAY_CONFIG" tuist generate --no-open
+case "$RELAY_SOURCE" in
+    config) TUIST_MERGETETHER_RELAY_CONFIG_FILE="$RELAY_CONFIG" tuist generate --no-open ;;
+    none) TUIST_MERGETETHER_RELAY_CONFIG_FILE="" tuist generate --no-open ;;
+    # Preserve the caller's generation environment, including an explicit origin-only override.
+    *) tuist generate --no-open ;;
+esac
 
 validate_bundle() {
-    python3 - "$1" "$VERSION" "$BUILD_NUMBER" "$2" <<'PY'
-import plistlib, sys
+    MERGETETHER_EXPECTED_RELAY_ORIGIN="$EXPECTED_ORIGIN" python3 - "$1" "$VERSION" "$BUILD_NUMBER" "$2" "$RELAY_SOURCE" <<'PY'
+import os, plistlib, sys
 with open(sys.argv[1], 'rb') as source:
     info = plistlib.load(source)
-expected = dict(zip(('CFBundleShortVersionString', 'CFBundleVersion', 'CFBundleIdentifier'), sys.argv[2:]))
+expected = dict(zip(('CFBundleShortVersionString', 'CFBundleVersion', 'CFBundleIdentifier'), sys.argv[2:5]))
+if sys.argv[5] != 'inherit':
+    expected['MergeTetherRelayOrigin'] = os.environ['MERGETETHER_EXPECTED_RELAY_ORIGIN']
 for key, value in expected.items():
-    if info.get(key) != value:
+    if info.get(key, '') != value:
         sys.exit('error: built bundle ' + key + ' does not match requested release metadata; refusing to package')
 PY
 }

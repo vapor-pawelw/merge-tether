@@ -45,9 +45,17 @@ class ReleaseBuildTests(ReleaseScriptFixture):
     def setUp(self):
         super().setUp()
         self.executable("tuist", """
-import os, pathlib
-path = os.environ.get('TUIST_MERGETETHER_RELAY_CONFIG_FILE', '')
-if path: pathlib.Path('generated-relay-config-path').write_text(path)
+import json, os, pathlib
+config = os.environ.get('TUIST_MERGETETHER_RELAY_CONFIG_FILE')
+pathlib.Path('generation-environment.json').write_text(json.dumps({
+    'config_file': config, 'origin': os.environ.get('TUIST_MERGETETHER_RELAY_ORIGIN')}))
+if config: pathlib.Path('generated-relay-config-path').write_text(config)
+# Stand-in for Project.swift normalization of the configured origin.
+if config is not None:
+    origin = json.loads(pathlib.Path(config).read_text())['origin'].strip().lower().rstrip('/') if config else ''
+else:
+    origin = os.environ.get('TUIST_MERGETETHER_RELAY_ORIGIN', '').strip().lower().rstrip('/')
+pathlib.Path('generated-origin').write_text(origin.removesuffix(':443'))
 """)
         relay_config = tempfile.NamedTemporaryFile(prefix="mergetether-relay-", suffix=".json", delete=False)
         self.relay_config = Path(relay_config.name)
@@ -84,7 +92,8 @@ info_path.parent.mkdir(parents=True)
 info = {'CFBundleShortVersionString': settings['MARKETING_VERSION'],
         'CFBundleVersion': settings['CURRENT_PROJECT_VERSION'],
         'CFBundleIdentifier': 'com.vaporpw.MergeTether.iOS' if ios else 'com.vaporpw.MergeTether',
-        'LSMinimumSystemVersion': '14.0'}
+        'LSMinimumSystemVersion': '14.0',
+        'MergeTetherRelayOrigin': os.environ.get('WRONG_RELAY_ORIGIN', pathlib.Path('generated-origin').read_text())}
 if os.environ.get('WRONG_VERSION'): info['CFBundleShortVersionString'] = '0.1.0'
 if os.environ.get('WRONG_BUILD'): info['CFBundleVersion'] = '1'
 info_path.write_bytes(plistlib.dumps(info))
@@ -306,6 +315,58 @@ if os.environ.get('STAPLE_FAIL') and 'stapler' in sys.argv: sys.exit(1)
                 self.assertNotIn("fixture-private", result.stdout + result.stderr)
                 self.assertFalse((self.root / "build-calls.jsonl").exists())
 
+    def signed_build_without_relay(self, *arguments):
+        return self.run_script("build-release.sh", "9.8.7", "--build-number", "456",
+                               "--signing-identity", "Developer ID Application: Fixture (TEAM123)",
+                               "--team-id", "TEAM123", "--notary-profile", "fixture-notary", *arguments)
+
+    def test_signed_macos_release_requires_relay_config(self):
+        result = self.signed_build_without_relay()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--relay-config", result.stderr)
+        self.assertIn("--no-relay", result.stderr)
+        self.assertFalse((self.root / "build-calls.jsonl").exists())
+
+    def test_explicit_no_relay_builds_macos_with_an_empty_origin(self):
+        result = self.signed_build_without_relay("--no-relay")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads((self.root / "generation-environment.json").read_text())["config_file"], "")
+        for arguments in [("--no-relay", "--relay-config", str(self.relay_config)),
+                          ("--no-relay", "--platform", "all")]:
+            with self.subTest(arguments=arguments):
+                (self.root / "build-calls.jsonl").unlink(missing_ok=True)
+                result = self.signed_build_without_relay(*arguments)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse((self.root / "build-calls.jsonl").exists())
+
+    def test_bundle_relay_origin_mismatch_stops_packaging(self):
+        for value in ["https://other-relay.example.test", ""]:
+            with self.subTest(value=value):
+                self.env["WRONG_RELAY_ORIGIN"] = value
+                result = self.signed_build()
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("MergeTetherRelayOrigin", result.stderr)
+                self.assertNotIn("private-relay.example.test", result.stdout + result.stderr)
+                self.assertFalse(list((self.root / "release").glob("*.zip")))
+                self.env.pop("WRONG_RELAY_ORIGIN")
+
+    def test_configured_origin_is_normalized_before_comparison(self):
+        self.relay_config.write_text(json.dumps({"origin": " HTTPS://Private-Relay.Example.Test:443/ "}))
+        result = self.signed_build()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.packaged_info("9.8.7")["MergeTetherRelayOrigin"], "https://private-relay.example.test")
+
+    def test_mise_relay_origin_not_cleared_when_relay_flag_omitted_for_unsigned(self):
+        self.env.pop("TUIST_MERGETETHER_RELAY_CONFIG_FILE")
+        self.env["TUIST_MERGETETHER_RELAY_ORIGIN"] = "https://user-default.example.test"
+        result = self.run_script("build-release.sh", "9.8.7", "--build-number", "456", "--unsigned")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        generation = json.loads((self.root / "generation-environment.json").read_text())
+        self.assertIsNone(generation["config_file"])
+        self.assertEqual(generation["origin"], "https://user-default.example.test")
+        self.assertEqual(self.packaged_info("9.8.7", unsigned=True)["MergeTetherRelayOrigin"],
+                         "https://user-default.example.test")
+
     def test_both_apps_bind_shared_version_build_settings(self):
         source = (self.root / "Project.swift").read_text()
         self.assertEqual(source.count('"CFBundleShortVersionString": .string("$(MARKETING_VERSION)")'), 2)
@@ -316,21 +377,43 @@ class ReleasePublicationTests(ReleaseScriptFixture):
     def setUp(self):
         super().setUp()
         (self.root / "CHANGELOG.md").write_text("## Unreleased\n\n- A release fixture.\n\n## 1.1.0\n")
+        self.head = "a" * 40
         self.executable("git", """
-import json, pathlib, sys
+import json, os, pathlib, sys
 a = sys.argv[1:]
 with pathlib.Path('git-calls.jsonl').open('a') as f: f.write(json.dumps(a) + '\\n')
+head = os.environ.get('FAKE_HEAD', 'a' * 40)
 if a == ['config', '--get', 'remote.origin.url']: print('https://github.com/fixture/source.git')
 elif a == ['rev-parse', '--git-dir']: print('.git-fixture')
-elif a == ['branch', '--show-current']: print('main')
+elif a == ['branch', '--show-current']: print(os.environ.get('FAKE_BRANCH', 'main'))
 elif a == ['tag', '--sort=-v:refname']: print('v1.1.0')
-elif a == ['rev-parse', '--short', 'HEAD']: print('abc123')
+elif a == ['rev-parse', '--short', 'HEAD']: print(head[:7])
+elif a == ['rev-parse', 'HEAD']: print(head)
 elif a == ['rev-parse', 'v9.8.7']: sys.exit(1)
 elif a[:3] == ['diff', '--cached', '--quiet']: sys.exit(1)
-elif a == ['status', '--porcelain'] or a[:1] == ['ls-remote']: pass
-elif a[:1] in [['add'], ['commit'], ['push']] or a[:2] == ['tag', '-a']: pass
+elif a == ['status', '--porcelain']: print(os.environ.get('FAKE_STATUS', ''), end='')
+elif a == ['status', '--porcelain', '--', 'CHANGELOG.md']: print(os.environ.get('FAKE_CHANGELOG_STATUS', ''), end='')
+elif a[:2] == ['ls-remote', 'origin'] and a[2:3] == ['refs/heads/main']:
+    if os.environ.get('LS_REMOTE_FAIL'): sys.exit(1)
+    print(os.environ.get('FAKE_REMOTE_HEAD', head) + '\\trefs/heads/main')
+elif a[:1] == ['ls-remote']: pass
+elif a[:1] == ['push'] and a[2:] == ['main'] and os.environ.get('BRANCH_PUSH_FAIL'): sys.exit(1)
+elif a[:1] in [['add'], ['commit'], ['push']] or a[:2] == ['tag', '-a'] or a[:2] == ['reset', '--keep']: pass
 else: sys.exit('unexpected git fixture call: ' + repr(a))
 """)
+        # Stand-in for the full suite: records its invocation and writes a report for FAKE_HEAD.
+        (self.root / "scripts/run-tests.py").write_text("""
+import json, os, pathlib, sys
+root = pathlib.Path(__file__).resolve().parents[1]
+with (root / 'verification-calls.jsonl').open('a') as f: f.write(json.dumps(sys.argv[1:]) + '\\n')
+code = int(os.environ.get('VERIFICATION_EXIT', '0'))
+run = root / '.test-results' / 'run-fixture-new'
+run.mkdir(parents=True, exist_ok=True)
+(run / 'report.json').write_text(json.dumps({'commit': os.environ.get('VERIFIED_HEAD', 'a' * 40), 'dirty': False,
+                                             'exit_code': code, 'selection': {'mode': 'full'}}))
+sys.exit(code)
+""")
+        self.write_report(mode="full")
         self.executable("gh", """
 import json, os, pathlib, sys
 a = sys.argv[1:]
@@ -362,6 +445,21 @@ elif a[:2] == ['release', 'download']:
                                  'artifacts': [{'name': name, 'sha256': 'a' * 64} for name in assets]}))
 else: sys.exit('unexpected gh fixture call: ' + repr(a))
 """)
+
+    def write_report(self, name="run-fixture-old", **overrides):
+        report = dict(commit=self.head, dirty=False, exit_code=0, selection=dict(mode="full"))
+        if "mode" in overrides:
+            report["selection"] = dict(mode=overrides.pop("mode"))
+        report.update(overrides)
+        run = self.root / ".test-results" / name
+        run.mkdir(parents=True, exist_ok=True)
+        (run / "report.json").write_text(json.dumps(report))
+
+    def assert_no_publication(self, result):
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        calls = self.calls("git") if (self.root / "git-calls.jsonl").exists() else []
+        self.assertFalse([a for a in calls if a[:1] in (["commit"], ["push"], ["add"]) or a[:2] == ["tag", "-a"]])
+        self.assertIn("## Unreleased\n\n- A release fixture.", (self.root / "CHANGELOG.md").read_text())
 
     def publish(self):
         (self.root / "CHANGELOG.md").write_text("## Unreleased\n\n- A release fixture.\n\n## 1.1.0\n")
@@ -477,6 +575,69 @@ else: sys.exit('unexpected gh fixture call: ' + repr(a))
         self.assertIn("--version", result.stderr)
         self.assertFalse((self.root / "git-calls.jsonl").exists())
 
+    def test_noninteractive_release_refuses_non_main_branch(self):
+        self.env["FAKE_BRANCH"] = "feature"
+        result = self.publish()
+        self.assert_no_publication(result)
+        self.assertIn("must run from 'main'", result.stderr)
+
+    def test_noninteractive_release_refuses_dirty_tree(self):
+        self.env["FAKE_STATUS"] = " M Sources/App.swift\n"
+        result = self.publish()
+        self.assert_no_publication(result)
+        self.assertIn("clean working tree", result.stderr)
+
+    def test_release_refuses_uncommitted_changelog_edits(self):
+        self.env["FAKE_CHANGELOG_STATUS"] = " M CHANGELOG.md\n"
+        result = self.publish()
+        self.assert_no_publication(result)
+        self.assertIn("uncommitted changes", result.stderr)
+
+    def test_release_refuses_when_local_branch_behind_origin(self):
+        for key, value in [("FAKE_REMOTE_HEAD", "b" * 40), ("LS_REMOTE_FAIL", "1")]:
+            with self.subTest(key=key):
+                self.env[key] = value
+                result = self.publish()
+                self.assert_no_publication(result)
+                self.assertIn("origin/main", result.stderr)
+                self.env.pop(key)
+
+    def test_existing_passing_full_report_for_head_is_reused(self):
+        result = self.publish()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.root / "verification-calls.jsonl").exists())
+        self.assertIn("passing full run", result.stdout)
+
+    def test_missing_or_unsuitable_report_runs_full_verification_first(self):
+        for overrides in [dict(commit="c" * 40), dict(mode="targeted"), dict(dirty=True), dict(exit_code=1)]:
+            with self.subTest(overrides=overrides):
+                shutil.rmtree(self.root / ".test-results")
+                (self.root / "verification-calls.jsonl").unlink(missing_ok=True)
+                self.write_report(**overrides)
+                result = self.publish()
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                calls = [json.loads(line) for line in (self.root / "verification-calls.jsonl").read_text().splitlines()]
+                self.assertEqual(calls, [["--full"]])
+                git_calls = self.calls("git")
+                self.assertLess(git_calls.index(["rev-parse", "HEAD"]),
+                                next(i for i, a in enumerate(git_calls) if a[:1] == ["commit"]))
+
+    def test_failing_or_mismatched_verification_blocks_publication(self):
+        for key, value in [("VERIFICATION_EXIT", "1"), ("VERIFIED_HEAD", "d" * 40)]:
+            with self.subTest(key=key):
+                shutil.rmtree(self.root / ".test-results")
+                self.env[key] = value
+                result = self.publish()
+                self.assert_no_publication(result)
+                self.env.pop(key)
+
+    def test_failed_branch_push_removes_local_changelog_commit(self):
+        self.env["BRANCH_PUSH_FAIL"] = "1"
+        result = self.publish()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(["reset", "--keep", self.head], self.calls("git"))
+        self.assertNotIn(["push", "origin", "v9.8.7"], self.calls("git"))
+
     def test_failed_workflow_is_not_a_successful_release(self):
         self.env["WATCH_FAIL"] = "1"
         result = self.publish()
@@ -488,27 +649,37 @@ class VersionSyncTests(ReleaseScriptFixture):
     def setUp(self):
         super().setUp()
         (self.root / "CHANGELOG.md").write_text("## Unreleased\n\n- A release fixture.\n")
-        self.executable("git", """
-import sys
-if sys.argv[1:] != ['tag', '--list', 'v[0-9]*.[0-9]*.[0-9]*']: sys.exit('unexpected git mutation')
-print('v1.0.0\\nv1.1.0')
-""")
+        self.executable("git", "import sys; sys.exit('unexpected git call')")
 
-    def test_sync_changes_shared_defaults_and_preserves_both_bundle_bindings(self):
+    def test_sync_changes_shared_version_and_preserves_both_bundle_bindings(self):
+        original_build = re.search(r'"CURRENT_PROJECT_VERSION": "([^"]+)"', (self.root / "Project.swift").read_text())[1]
         result = self.run_script("sync-version-from-tag.sh", "v9.8.7")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         project = (self.root / "Project.swift").read_text()
         self.assertIn('"MARKETING_VERSION": "9.8.7"', project)
-        self.assertIn('"CURRENT_PROJECT_VERSION": "3"', project)
+        self.assertIn(f'"CURRENT_PROJECT_VERSION": "{original_build}"', project)
         self.assertEqual(project.count('"CFBundleShortVersionString": .string("$(MARKETING_VERSION)")'), 2)
         self.assertEqual(project.count('"CFBundleVersion": .string("$(CURRENT_PROJECT_VERSION)")'), 2)
-        self.assertIn("## 9.8.7 - ", (self.root / "CHANGELOG.md").read_text())
+        self.assertIn("release-interactive.sh", result.stdout)
+
+    def test_sync_leaves_changelog_promotion_to_the_release_script(self):
+        before = (self.root / "CHANGELOG.md").read_bytes()
+        result = self.run_script("sync-version-from-tag.sh", "v9.8.7")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.root / "CHANGELOG.md").read_bytes(), before)
+
+    def test_sync_sets_build_number_only_when_explicit(self):
+        result = self.run_script("sync-version-from-tag.sh", "v9.8.7", "--build-number", "42")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('"CURRENT_PROJECT_VERSION": "42"', (self.root / "Project.swift").read_text())
 
     def test_sync_rejects_partial_version_match_before_source_mutation(self):
         original = (self.root / "Project.swift").read_bytes()
-        result = self.run_script("sync-version-from-tag.sh", "v9.8.7-invalid")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual((self.root / "Project.swift").read_bytes(), original)
+        for arguments in [("v9.8.7-invalid",), ("v9.8.7", "--build-number", "0")]:
+            with self.subTest(arguments=arguments):
+                result = self.run_script("sync-version-from-tag.sh", *arguments)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual((self.root / "Project.swift").read_bytes(), original)
 
 
 class ReleaseWorkflowTests(ReleaseScriptFixture):
@@ -601,6 +772,64 @@ pathlib.Path('mise-arguments.json').write_text(json.dumps(sys.argv[1:]))
         result = self.run_step("Verify distribution inventory and retain stable macOS names")
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.root / "MergeTether.dmg").exists())
+
+    def test_release_build_needs_full_verification_before_secrets(self):
+        release = (REPO / ".github/workflows/release.yml").read_text()
+        verify = (REPO / ".github/workflows/verify.yml").read_text()
+        self.assertIn("  verify:\n    uses: ./.github/workflows/verify.yml\n", release)
+        build = release.split("\n  build:\n", 1)[1].split("\n    steps:", 1)[0]
+        self.assertIn("needs: verify", build)
+        self.assertIn("workflow_call:", verify)
+        self.assertIn("pull_request:", verify)
+        self.assertRegex(verify, r"push:\n\s+branches:\n\s+- main")
+        self.assertIn("python3 scripts/run-tests.py --full", verify)
+        self.assertIn('TUIST_MERGETETHER_RELAY_CONFIG_FILE="" mise exec -- tuist generate --no-open', verify)
+        self.assertIn("npm ci --prefix prototypes/remote-relay", verify)
+        self.assertIn("node-version-file: prototypes/remote-relay/package.json", verify)
+        self.assertNotIn("secrets.", verify)
+
+    def test_ci_inventory_exposes_the_built_dmg_digest(self):
+        release, _ = self.prepare_inventory()
+        output = self.root / "github-output"
+        self.env["GITHUB_OUTPUT"] = str(output)
+        result = self.run_step("Verify distribution inventory and retain stable macOS names")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        digest = hashlib.sha256((self.root / "MergeTether.dmg").read_bytes()).hexdigest()
+        self.assertEqual(output.read_text(), f"dmg_sha256={digest}\n")
+
+    def test_cask_update_rejects_failed_download_and_unexpected_digest(self):
+        self.executable("curl", """
+import os, pathlib, sys
+if os.environ.get('CURL_FAIL'): sys.exit(22)
+pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_bytes(b'published dmg')
+pathlib.Path('curl-arguments').write_text(' '.join(sys.argv[1:]))
+""")
+        self.executable("sha256sum", """
+import hashlib, sys
+print(hashlib.sha256(open(sys.argv[1], 'rb').read()).hexdigest() + '  ' + sys.argv[1])
+""")
+        output = self.root / "github-output"
+        expected = hashlib.sha256(b"published dmg").hexdigest()
+        self.env.update(ASSET_URL="https://github.com/fixture/release/releases/download/v9.8.7/MergeTether.dmg",
+                        GITHUB_OUTPUT=str(output), EXPECTED_SHA256=expected)
+        result = self.run_step("Download release asset and verify SHA256")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(f"sha256={expected}", output.read_text())
+        arguments = (self.root / "curl-arguments").read_text()
+        for flag in ["--fail", "--retry 5", "--retry-all-errors"]:
+            self.assertIn(flag, arguments)
+        for key, value in [("CURL_FAIL", "1"), ("EXPECTED_SHA256", "b" * 64), ("EXPECTED_SHA256", "")]:
+            with self.subTest(key=key, value=value):
+                output.write_text("")
+                saved = self.env.get(key)
+                self.env[key] = value
+                result = self.run_step("Download release asset and verify SHA256")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("sha256=", output.read_text())
+                if saved is None:
+                    self.env.pop(key)
+                else:
+                    self.env[key] = saved
 
     def test_ci_prepares_and_removes_only_temporary_distribution_credentials(self):
         self.env.update(RUNNER_TEMP=str(self.root), APPLE_TEAM_ID="TEAM123", IOS_EXPORT_METHOD="release-testing",

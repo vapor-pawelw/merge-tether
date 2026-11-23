@@ -1,0 +1,43 @@
+name: Verify
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Install mise
+        uses: jdx/mise-action@v2
+        with:
+          install: true
+
+      - name: Install Node.js for relay tests
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: prototypes/remote-relay/package.json
+
+      - name: Install relay test dependencies
+        run: npm ci --prefix prototypes/remote-relay
+
+      # No relay origin and no secrets: verification never packages operator configuration.
+      - name: Generate project
+        run: TUIST_MERGETETHER_RELAY_CONFIG_FILE="" mise exec -- tuist generate --no-open
+
+      - name: Run full verification
+        run: python3 scripts/run-tests.py --full --keep-bundles 0
