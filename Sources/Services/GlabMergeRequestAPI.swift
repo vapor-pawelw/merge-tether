@@ -125,6 +125,13 @@ extension GlabService {
         return issues.compactMap(\.displayIssue)
     }
 
+    func fetchReviewSourceFile(projectID: Int, path: String, head: String, host: String) async throws -> Data {
+        guard projectID > 0 else { throw CancellationError() }
+        let encoded = try Self.encodeRepositoryFilePath(path, ref: head)
+        return try await mergeRequestAPI("/projects/\(projectID)/repository/files/\(encoded)/raw?ref=\(head)",
+            host: host, decode: { $0 })
+    }
+
     func fetchIssueCandidates(for request: GitLabMergeRequest, host: String) async throws -> [MRIssueCandidate] {
         guard request.projectID > 0, request.iid > 0, request.webURL.isGitLabMergeRequest(host: host, iid: request.iid)
         else { throw GlabError.decoding("Invalid merge request identity") }

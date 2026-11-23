@@ -143,6 +143,17 @@ struct MRCommonMenuItems: View {
             }
             .disabled(startingReview || !monitor.canRunReview(for: item))
             .mrActionHelp(.runReview)
+            Button {
+                guard let consent = confirmManualReview(for: item, monitor: monitor) else { return }
+                startingReview = true
+                Task {
+                    defer { startingReview = false }
+                    await monitor.runReview(for: item, fromScratch: true, confirmed: consent, readOnly: true)
+                }
+            } label: {
+                Label { Text(.AssistantJobs.assistantJobsReadOnlyReview) } icon: { Image(systemName: "magnifyingglass") }
+            }
+            .disabled(startingReview || !monitor.canRunReview(for: item))
         }
         AssistantContextMenu(mergeRequestURL: item.url, title: item.title,
                              settings: monitor.settings)

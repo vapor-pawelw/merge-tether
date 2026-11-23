@@ -49,7 +49,7 @@ extension TodoMonitorService {
 
     /// `fromScratch` is the emergency reset: it ignores earlier review passes and reviews the whole current MR.
     func runReview(for item: MergeRequestAttentionMonitor.Item, fromScratch: Bool = false,
-                   confirmed: ManualReviewConsent? = nil) async {
+                   confirmed: ManualReviewConsent? = nil, readOnly: Bool = false) async {
         assistantJobActionError = nil
         let consent = confirmed ?? manualReviewConsent(for: item)
         guard consent == manualReviewConsent(for: item), canRunReview(for: item),
@@ -92,7 +92,8 @@ extension TodoMonitorService {
                 workspace: settings.automation.assistantWorkspace, access: .gitLabRead,
                 work: work,
                 username: target.username, settings: settings, isReview: true, mrWorkflow: .review, manual: true,
-                expectedHeadSHA: head, jobCoordinator: reviewJobCoordinator, taskIntent: .review(fromScratch: fromScratch))
+                expectedHeadSHA: head, jobCoordinator: reviewJobCoordinator, taskIntent: .review(fromScratch: fromScratch),
+                readOnlyReview: readOnly)
         } catch {
             assistantJobActionError = String(localized: .AssistantJobs.assistantJobsActionFailed)
         }

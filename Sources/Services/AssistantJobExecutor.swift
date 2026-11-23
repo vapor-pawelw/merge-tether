@@ -114,6 +114,23 @@ enum AssistantJobExecutor {
                                                 attributes: [.posixPermissions: 0o700])
         let invocation = AssistantJobInvocation(workspace: folder, evidenceRoot: evidenceDirectory)
         try invocation.prepareEvidenceDirectories()
+        if handoff.readOnlyReview == true {
+            let revision = glab.accountRevision
+            let host = handoff.key.work.host
+            let baseline = await AssistantWorkerAudit.capture(for: request, host: host, user: user,
+                accountRevision: revision, glab: glab)
+            let outcome: Result<AssistantJobCoordinator.Outcome, any Error>
+            do {
+                outcome = .success(try await ReadOnlyReviewJob(handoff: handoff, settings: settings, glab: glab,
+                    target: request, user: user, invocation: invocation, executable: executable,
+                    timeout: workerTimeout.seconds, expectedAccountRevision: revision).run())
+            } catch { outcome = .failure(error) }
+            if let baseline {
+                await AssistantWorkerAudit.recordChanges(since: baseline, handoff: handoff, request: request,
+                    user: user, accountRevision: revision, glab: glab, settings: settings)
+            }
+            return try outcome.get()
+        }
         let generationBaseline = try? await glab.fetchOwnDraftNotes(projectID: request.projectID, iid: request.iid,
             host: handoff.key.work.host, userID: user.id)
         if let repair = handoff.draftRepair {

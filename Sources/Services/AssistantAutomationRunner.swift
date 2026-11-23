@@ -196,6 +196,7 @@ enum AssistantAutomationRunner {
         var workflowEventKind: MergeWorkflowTrigger? = nil
         var workflowOriginKnown: Bool? = nil
         var pipelineHandoffConfirmation: PipelineHandoffConfirmation? = nil
+        var readOnlyReview: Bool? = nil
 
         var deliveredFeedbackTodos: [Todo.FeedbackIdentity] {
             if let execution { return execution.state == .succeeded ? feedbackTodos ?? [] : [] }
@@ -337,9 +338,16 @@ enum AssistantAutomationRunner {
         foreignPipeline: GitLabMergeRequest.Pipeline? = nil,
         workflowEventKind: MergeWorkflowTrigger? = nil,
         pipelineHandoffConfirmation: PipelineHandoffConfirmation? = nil,
-        preparedWorkflowReview: PreparedWorkflowReview? = nil
+        preparedWorkflowReview: PreparedWorkflowReview? = nil,
+        readOnlyReview: Bool = false
     ) async throws -> Handoff {
         guard mrWorkflow != .draftReply else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
+        let usesReadOnlyReview = readOnlyReview || (retryOf.flatMap { id in
+            settings.assistantHandoffs.first(where: { $0.id == id })?.readOnlyReview
+        } == true)
+        guard !usesReadOnlyReview || (manual && isReview && mrWorkflow == .review) else {
+            throw AssistantJobExecutor.ExecutionError.disabledPermission
+        }
         let automaticConfiguration = configurationSnapshot ?? settings.automation
         let launchAccountRevision = glab?.accountRevision
         let pipelineClaims = ExistingPipelineWorkDetector()
@@ -586,12 +594,13 @@ enum AssistantAutomationRunner {
             followUpPushAllowed: mrWorkflow == .followUp ? followUpPush : nil,
             execution: AssistantJobExecution(state: .queued), taskPrompt: taskPrompt,
             mergeRequestURL: mergeRequestURL, workflow: mrWorkflow,
-            resolvesOwnThreads: recordsReviewVerdict ? resolveOwnThreads : nil,
+            resolvesOwnThreads: recordsReviewVerdict && !usesReadOnlyReview ? resolveOwnThreads : nil,
             manual: manual, expectedHeadSHA: headSHA, configurationSnapshot: manual ? settings.automation : automaticConfiguration,
             retryOf: retryOf, automaticRetryIdentity: automaticRetryIdentity, feedbackRecoveryRootID: feedbackRecoveryRootID, feedbackDecisionRevision: decisionContext,
             taskIntent: intent, foreignPipelineDiagnosis: pipelineDiagnosis,
             workflowEventKind: workflowEventKind, workflowOriginKnown: true,
-            pipelineHandoffConfirmation: pipelineHandoffConfirmation
+            pipelineHandoffConfirmation: pipelineHandoffConfirmation,
+            readOnlyReview: usesReadOnlyReview ? true : nil
         )
         for (noteID, revision) in verifiedFeedbackNotes ?? [:] {
             settings.authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision,
@@ -780,7 +789,7 @@ enum AssistantAutomationRunner {
     }
 
     static func recordsReviewVerdict(for handoff: Handoff, history: [Handoff] = []) -> Bool {
-        (handoff.workflow == .review || handoff.reviewModel != nil)
+        handoff.readOnlyReview != true && (handoff.workflow == .review || handoff.reviewModel != nil)
             && !isForeignPipelineDiagnosis(for: handoff, history: history)
     }
 
