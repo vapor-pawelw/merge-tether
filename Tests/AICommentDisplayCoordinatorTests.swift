@@ -119,7 +119,7 @@ import MergeTetherRemote
         func coordinator(cacheRead: AICommentDisplayCoordinator.CacheRead? = nil) -> AICommentDisplayCoordinator {
             AICommentDisplayCoordinator(glab: glab, settings: settings, assessmentDirectory: actionDirectory,
                 displayDirectory: displayDirectory, canAutomate: { [self] _ in ready },
-                publicationIsChecking: { [self] _ in publicationBusy }, assess: { [self] _, notes, _, _, _ in
+                publicationIsChecking: { [self] _ in publicationBusy }, assess: { [self] _, notes, _, _, _, _ in
                     batches.append(notes.compactMap(\.id))
                     bodies.append(notes.compactMap(\.body))
                     afterAssessment?()
@@ -244,7 +244,7 @@ import MergeTetherRemote
     func aLateEmptyCacheScanCannotEraseANewerViewedMessageQueue(_ holdCall: Int) async throws {
         let f = try Fixture(); defer { f.close() }
         let gate = CacheGate(holdCall: holdCall)
-        let coordinator = f.coordinator(cacheRead: { notes, _, _, _ in await gate.read(notes) })
+        let coordinator = f.coordinator(cacheRead: { notes, _, _, _, _ in await gate.read(notes) })
         let old = [note(1, body: "Old source")]
         let first = Task { await coordinator.schedule(request: f.request, notes: old) }
         let deadline = ContinuousClock.now + .seconds(3)

@@ -117,8 +117,7 @@ struct BoardMRCompletionCard: View {
             Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
         }
         CopyMergeRequestLinkButton(url: completion.url)
-        AssistantContextMenu(mergeRequestURL: completion.url, title: completion.title,
-            settings: monitor.settings)
+        AssistantContextMenu(mergeRequestURL: completion.url, settings: monitor.settings)
         Divider()
         Button {
             guard canAcknowledge else { return }

@@ -16,6 +16,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Preserve a command's result when it exits just as the timeout fires, and prevent an already cancelled command from starting.
 
+- Edit or restore the AI comment assessment prompt in Advanced automation settings.
+
 - Complete the Polish localization of the Mac and iPhone interfaces, including plural forms, setup, automation, and the iPhone camera permission prompt.
 
 - Import open GitLab merge requests assigned to you as a reviewer from Mac setup, including drafts and reviews with no pending GitLab to-do. Imported requests appear in Reviewing with your existing automation settings.
@@ -111,7 +113,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Explain multi-step actions before running them from an MR card or Details. **Don't ask again** applies to the confirmed action.
 
-- Open a conversation draft in T3 Code from a merge request on Mac, with the MR link and title ready in the composer.
+- Start a T3 Code draft with `Regarding <MR link>,` and continue typing. ChatGPT, Claude Desktop, and terminal conversations receive only the link as MR context.
 
 - Shorten the pending draft summary and group it with the attention message. Add more room around the repository line and distinguish card backgrounds from the Mac board in both appearances.
 

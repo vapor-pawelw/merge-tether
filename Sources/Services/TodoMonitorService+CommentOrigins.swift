@@ -9,7 +9,7 @@ extension TodoMonitorService {
         }, resume: { [weak self] target in
             guard let self, let iid = target.iid, self.isCurrentAccount(target) else { return }
             await self.refreshFromGitLab(for: .init(projectID: target.projectID, iid: iid))
-        })
+        }, criteriaOverride: { [weak self] in self?.settings.automation.aiCommentCriteriaOverride })
     }
 
     /// Records the user's verdict on comments of one MR. `nil` returns them to automatic assessment.

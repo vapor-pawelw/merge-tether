@@ -146,6 +146,7 @@ struct AutomationSettingsTab: View {
 
     private func applyDraft() {
         draft.selectedAssistant = settings.automation.selectedAssistant
+        if draft.aiCommentCriteriaOverride == nil { draft.aiCommentCriteria = AICommentOriginAssessor.criteriaInstructions }
         let custom = AutomationProfileSnapshot.custom(from: draft) ?? sessionCustom
         saveState.begin()
         settings.automation = draft.preservingScope(from: settings.automation)
@@ -484,6 +485,26 @@ struct AutomationSettingsTab: View {
     private var advancedFields: some View {
         ReviewParticipationSettingsSection(monitor: monitor)
         WorkerExecutionTimeoutSettingsView(policy: $draft.workerExecutionTimeout, repositories: timeoutRepositories)
+        Section {
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(.PublicationPolicy.publicationAiCommentCriteriaHelp)
+                        .font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: $draft.aiCommentCriteria)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(minHeight: 210)
+                        .accessibilityLabel(Text(.PublicationPolicy.publicationAiCommentCriteria))
+                    Button {
+                        draft.aiCommentCriteria = AICommentOriginAssessor.criteriaInstructions
+                    } label: {
+                        Text(.PublicationPolicy.publicationRestoreAICommentCriteria)
+                    }
+                    .disabled(draft.aiCommentCriteria == AICommentOriginAssessor.criteriaInstructions)
+                }
+            } label: {
+                Text(.PublicationPolicy.publicationAiCommentCriteria)
+            }
+        }
         Section {
             Toggle(isOn: Binding(
                 get: { settings.keepMacAwakeDuringAgentTasks },

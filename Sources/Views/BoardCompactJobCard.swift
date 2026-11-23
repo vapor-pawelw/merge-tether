@@ -87,8 +87,7 @@ struct BoardCompactJobCard: View {
                 Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
             }
             CopyMergeRequestLinkButton(url: url)
-            AssistantContextMenu(mergeRequestURL: url, title: handoff.title,
-                settings: monitor.settings)
+            AssistantContextMenu(mergeRequestURL: url, settings: monitor.settings)
         }
         if finishedState == nil {
             Divider()

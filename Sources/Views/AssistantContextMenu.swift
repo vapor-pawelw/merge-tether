@@ -3,11 +3,10 @@ import SwiftUI
 
 struct AssistantContextMenu: View {
     let mergeRequestURL: URL
-    let title: String
     let settings: SettingsManager
     @State private var isOpening = false
 
-    private var context: AssistantLaunchContext { .init(url: mergeRequestURL, title: title) }
+    private var context: AssistantLaunchContext { .init(url: mergeRequestURL) }
 
     var body: some View {
         Group {
@@ -63,7 +62,7 @@ struct AssistantContextMenu: View {
             if response == .alertFirstButtonReturn, destinations.indices.contains(picker.indexOfSelectedItem) {
                 open(destinations[picker.indexOfSelectedItem])
             } else if response == .alertThirdButtonReturn {
-                AssistantAutomationRunner.copyPrompt(context.prompt)
+                AssistantAutomationRunner.copyPrompt(mergeRequestURL.absoluteString)
             }
         }
     }
@@ -93,7 +92,7 @@ struct AssistantContextMenu: View {
         let alert = NSAlert()
         alert.messageText = String(localized: .AssistantContext.assistantContextMessageTitle)
         alert.informativeText = String(localized: .AssistantContext.assistantContextMessageHelp)
-            + "\n\n" + context.prompt
+            + "\n\n" + mergeRequestURL.absoluteString
         let scroll = NSTextView.scrollableTextView()
         scroll.frame = NSRect(x: 0, y: 0, width: 360, height: 120)
         guard let input = scroll.documentView as? NSTextView else { return nil }

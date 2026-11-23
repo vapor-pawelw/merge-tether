@@ -12,6 +12,21 @@
       "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Require AI-assisted source comments" } },
         "pl": {"stringUnit": {"state": "translated", "value": "Wymagaj, aby komentarze źródłowe były wspomagane przez AI"}} }
     },
+    "publication.aiCommentCriteria": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "AI comment assessment prompt" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Prompt do oceny komentarzy AI" } } }
+    },
+    "publication.aiCommentCriteriaHelp": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Edit the criteria used to assess whether a comment was written with AI. This affects both comment badges and which replies can be published automatically. Apply Changes saves your prompt. A blank prompt restores the default." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Zmień kryteria oceny, czy komentarz napisano z pomocą AI. Wpływają na oznaczenia komentarzy i kwalifikację odpowiedzi do automatycznej publikacji. Kliknij „Zastosuj zmiany”, aby zapisać prompt. Puste pole przywraca domyślną treść." } } }
+    },
+    "publication.restoreAICommentCriteria": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Restore Default Prompt" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Przywróć domyślny prompt" } } }
+    },
     "publication.aiRequiredByMode": {
       "extractionState": "manual",
       "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Replies to AI or bot feedback requires an AI assessment, or a verified bot account when bot replies are allowed. Choose Matching filters to configure the AI condition independently." } },

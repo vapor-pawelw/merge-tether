@@ -193,8 +193,7 @@ struct BoardMRProposalCard: View {
             itemID: proposal.target.iid.map { .init(projectID: proposal.target.projectID, iid: $0) }) {
             await authorLoader.load(proposal, force: true)
         }
-        AssistantContextMenu(mergeRequestURL: proposal.url, title: proposal.title,
-            settings: monitor.settings)
+        AssistantContextMenu(mergeRequestURL: proposal.url, settings: monitor.settings)
         if finishedState == nil {
             Divider()
             MRAutomationScopeMenu(monitor: monitor, target: proposal.target,

@@ -828,7 +828,7 @@ import MergeTetherRemote
                 })
             },
             verifyDraftProofRecovery: verifyDraftRecovery ?? { _, _, _ in throw DraftProofRecoveryVerifier.Failure.failed },
-            assessAIOrigin: assessAIOrigin ?? { _, notes, _, _, _ in
+            assessAIOrigin: assessAIOrigin ?? { _, notes, _, _, _, _ in
                 .init(notes: notes.compactMap { note in note.id.map {
                     .init(noteID: $0, classification: .uncertain, confidence: .uncertain, evidence: "No AI provenance in this fixture.")
                 } })
@@ -5062,7 +5062,7 @@ import MergeTetherRemote
         let probe = OriginProbe()
         defer { probe.finish(ai: false) }
         let harness = try makeHarness(assistantWorked: outcome != "noWorker", authored: true,
-            assessAIOrigin: { _, notes, _, _, _ in await probe.assess(notes) })
+            assessAIOrigin: { _, notes, _, _, _, _ in await probe.assess(notes) })
         defer { harness.cleanUp() }
         harness.settings.automation.publicationMode = .aiReplies
         try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Verified fix","discussion_id":"human"}]"#)

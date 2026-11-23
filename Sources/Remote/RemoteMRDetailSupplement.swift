@@ -191,11 +191,13 @@ import MergeTetherRemote
               let host = glab.resolvedHost, let username = glab.currentUsername,
               let context = RemoteBoardAdapter.contextRevision(request) else { return nil }
         if details.truncated || details.threads?.contains(where: \.truncated) == true {
+            let criteriaOverride = coordinator.activeCriteriaOverride
             return Task {
                 do {
                     @MainActor func current(_ live: GitLabMergeRequest) -> Bool {
                         coordinator.permitsSourceRead(request: live, accountRevision: accountRevision)
                             && glab.resolvedHost == host && glab.currentUsername == username
+                            && coordinator.activeCriteriaOverride == criteriaOverride
                             && RemoteBoardAdapter.contextRevision(live) == context
                     }
                     let live = try await glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
@@ -205,7 +207,7 @@ import MergeTetherRemote
                         provenanceDirectory: action.deletingLastPathComponent().appending(path: "display-comment-origins"),
                         displayAssessmentDirectory: coordinator.displayDirectory)
                     await store.refresh(target: .init(host: host, username: username, projectID: request.projectID,
-                        iid: request.iid, url: request.webURL), glab: glab)
+                        iid: request.iid, url: request.webURL), glab: glab, criteriaOverride: criteriaOverride)
                     guard store.hasLoaded, !store.hasError, current(live) else { return }
                     let checked = try await glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
                     guard current(checked) else { return }

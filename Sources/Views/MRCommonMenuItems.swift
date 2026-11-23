@@ -155,8 +155,7 @@ struct MRCommonMenuItems: View {
             }
             .disabled(startingReview || !monitor.canRunReview(for: item))
         }
-        AssistantContextMenu(mergeRequestURL: item.url, title: item.title,
-                             settings: monitor.settings)
+        AssistantContextMenu(mergeRequestURL: item.url, settings: monitor.settings)
         if let boardPin {
             Divider()
             BoardPinButton(pin: boardPin, settings: monitor.settings, placement: .menu)

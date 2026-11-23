@@ -14,7 +14,7 @@ import MergeTetherRemote
 extension RemoteConnection: RemoteHostTransport {}
 
 @MainActor @Observable final class RemoteHostController {
-    typealias DetailReader = @MainActor (GitLabMergeRequest, [GitLabDraftNote], GlabService) async throws -> RemoteMRDetails
+    typealias DetailReader = @MainActor (GitLabMergeRequest, [GitLabDraftNote], GlabService, String?) async throws -> RemoteMRDetails
     private(set) var pairing: RemotePairing?
     let relayConfiguration: RemoteRelayConfiguration
     private(set) var relayMismatch = false
@@ -102,7 +102,7 @@ extension RemoteConnection: RemoteHostTransport {}
     private let detailReader: DetailReader
     private var activeDetailRequest: RemoteDetailRequest?
     private var lastDetailRead = Date.distantPast
-    @ObservationIgnored private var recentDetails: [String: (digest: String, readAt: Date, details: RemoteMRDetails)] = [:]
+    @ObservationIgnored private var recentDetails: [String: (digest: String, criteriaOverride: String?, readAt: Date, details: RemoteMRDetails)] = [:]
     @ObservationIgnored private var resolutionPreviews: [String: ManualDiscussionResolution.Prepared] = [:]
 
     init(monitor: TodoMonitorService,
@@ -113,7 +113,7 @@ extension RemoteConnection: RemoteHostTransport {}
          connectPairing: ((RemotePairing) -> Void)? = nil,
          commandGate: RemoteCommandGate? = nil,
          now: @escaping () -> Date = Date.init,
-         detailReader: @escaping DetailReader = { try await RemoteMRDetailLoader.load(source: $0, drafts: $1, glab: $2) },
+         detailReader: @escaping DetailReader = { try await RemoteMRDetailLoader.load(source: $0, drafts: $1, glab: $2, criteriaOverride: $3) },
          readAvatarThumbnail: @escaping @Sendable (URL) async -> Data? = { await RemoteAvatarLoader.shared.thumbnail(for: $0) },
          makeConnection: @escaping (RemotePairing) throws -> any RemoteHostTransport = { try RemoteConnection(pairing: $0, role: .host) }) {
         self.monitor = monitor
@@ -526,6 +526,7 @@ extension RemoteConnection: RemoteHostTransport {}
                 if activeDetailRequest == request { activeDetailRequest = nil; detailTask = nil }
             }
             let response: RemoteDetailResponse
+            let criteriaOverride = monitor.settings.automation.aiCommentCriteriaOverride
             do {
                 if cachedOnly {
                     guard let username = monitor.glab.currentUsername else { throw RemoteMRDetailLoader.ReadError.changed }
@@ -552,7 +553,8 @@ extension RemoteConnection: RemoteHostTransport {}
                           activeDetailRequest == request else { return }
                     guard request.matches(snapshot()) else { throw RemoteMRDetailLoader.ReadError.changed }
                     lastDetailRead = now()
-                    var details = try await detailReader(source, row.evidenceMatchesCatalogContext ? row.item.drafts : [], monitor.glab)
+                    var details = try await detailReader(source, row.evidenceMatchesCatalogContext ? row.item.drafts : [],
+                        monitor.glab, criteriaOverride)
                     let usage = try? await AssistantUsageStore.shared.snapshot()
                     try Task.checkCancellation()
                     RemoteMRDetailSupplement.append(to: &details, row: row, monitor: monitor, usage: usage)
@@ -564,9 +566,11 @@ extension RemoteConnection: RemoteHostTransport {}
             guard !Task.isCancelled, phoneSupportsDetails, connection === active, self.pairing?.sessionID == pairingSession,
                   monitor.glab.accountRevision == revision, activeDetailRequest == request else { return }
             var checked = bounded
-            if !request.matches(snapshot()) { checked = .init(request: request, status: .changed) }
+            if !request.matches(snapshot()) || monitor.settings.automation.aiCommentCriteriaOverride != criteriaOverride {
+                checked = .init(request: request, status: .changed)
+            }
             if !cachedOnly, checked.status == .current, let digest, let details = checked.details {
-                recentDetails[request.cardID] = (digest, Date(), details)
+                recentDetails[request.cardID] = (digest, criteriaOverride, Date(), details)
                 if recentDetails.count > 16, let oldest = recentDetails.min(by: { $0.value.readAt < $1.value.readAt })?.key {
                     recentDetails.removeValue(forKey: oldest)
                 }
@@ -594,7 +598,8 @@ extension RemoteConnection: RemoteHostTransport {}
 
     private func cachedDetails(_ request: RemoteDetailRequest, source: GitLabMergeRequest, row: MergeRequestBoardSnapshot.Row,
                                username: String, digest: String?, checkedAt: Date) async -> RemoteMRDetails {
-        let cached = recentDetails[request.cardID].flatMap { $0.digest == digest ? $0 : nil }
+        let criteriaOverride = monitor.settings.automation.aiCommentCriteriaOverride
+        let cached = recentDetails[request.cardID].flatMap { $0.digest == digest && $0.criteriaOverride == criteriaOverride ? $0 : nil }
         let discussionRead = monitor.glab.cachedDiscussions(projectID: source.projectID, iid: source.iid)
         let newerDiscussions = discussionRead.map { $0.readAt > (cached?.readAt ?? .distantPast) } ?? false
         if let cached, !newerDiscussions, checkedAt <= cached.readAt {
