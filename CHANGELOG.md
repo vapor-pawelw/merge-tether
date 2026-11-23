@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Identify Mac board cards by title and repository in VoiceOver.
+
+- Keep to-do automation receipts when one GitLab refresh temporarily omits a pending item.
+
+- Check coding agent availability less often during background GitLab refreshes.
+
+- Show GitLab setup, sign-in and synchronization problems in the Mac menu bar, with an action to recover.
+
+- Preserve a command's result when it exits just as the timeout fires, and prevent an already cancelled command from starting.
+
 - Complete the Polish localization of the Mac and iPhone interfaces, including plural forms, setup, automation, and the iPhone camera permission prompt.
 
 - Import open GitLab merge requests assigned to you as a reviewer from Mac setup, including drafts and reviews with no pending GitLab to-do. Imported requests appear in Reviewing with your existing automation settings.

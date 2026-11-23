@@ -214,6 +214,33 @@ struct AssistantDependenciesTests {
         #expect(setup.status == .missingCLI && !setup.canCommit)
     }
 
+    @MainActor @Test func frequentRefreshesCoalesceAndOnlyProbeRequestedAssistants() async throws {
+        var probes: [AutomationAssistant] = []
+        let monitor = AssistantDependencyMonitor(probe: { assistant in
+            probes.append(assistant)
+            return .ready(URL(fileURLWithPath: "/example/cli"))
+        })
+        func finish() async throws {
+            for _ in 0..<1000 where monitor.isChecking { await Task.yield() }
+            try #require(!monitor.isChecking)
+        }
+
+        for _ in 0..<10 { monitor.refresh([.codex]) }
+        try await finish()
+        for _ in 0..<10 { monitor.refresh([.codex]) }
+        #expect(!monitor.isChecking)
+        #expect(probes == [.codex])
+
+        monitor.refresh([.claude])
+        try await finish()
+        #expect(probes == [.codex, .claude])
+        #expect(monitor.available == [.codex, .claude])
+
+        monitor.refresh([.codex], force: true)
+        try await finish()
+        #expect(probes == [.codex, .claude, .codex])
+    }
+
     @MainActor @Test func initialReadinessIsSeparateFromReadOnlyFailureRecovery() async throws {
         var status: AssistantDependencyStatus = .ready(URL(fileURLWithPath: "/example/cli"))
         let monitor = AssistantDependencyMonitor(probe: { _ in status })

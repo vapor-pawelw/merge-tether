@@ -16,6 +16,7 @@ final class TodoAutomationService {
 
     private var running: Set<TodoAutomationReceipt> = []
     private var ineligible: Set<TodoAutomationReceipt> = []
+    private var unconfirmedMissingReceipts: Set<TodoAutomationReceipt> = []
     private struct RunningScript {
         let task: Task<ProcessRunner.Output, Error>
         let work: AssistantAutomationRunner.MergeRequestWork
@@ -60,16 +61,26 @@ final class TodoAutomationService {
     }
 
     func prune(fetchedIDs: Set<Int>, host: String, username: String, settings: SettingsManager) {
-        func isPending(_ key: TodoAutomationReceipt) -> Bool {
-            key.host != host || key.username != username || fetchedIDs.contains(key.todoID) || running.contains(key)
+        func receipt(for acknowledgement: TodoActionAcknowledgement) -> TodoAutomationReceipt {
+            .init(host: acknowledgement.host, username: acknowledgement.username, todoID: acknowledgement.todo.id)
         }
 
-        settings.automationReceipts = settings.automationReceipts.filter(isPending)
-        settings.automationAttemptReceipts = settings.automationAttemptReceipts.filter(isPending)
-        settings.pendingTodoAcknowledgements = settings.pendingTodoAcknowledgements.filter {
-            $0.host != host || $0.username != username || fetchedIDs.contains($0.todo.id)
+        let tracked = settings.automationReceipts.union(settings.automationAttemptReceipts)
+            .union(settings.pendingTodoAcknowledgements.map(receipt(for:))).union(ineligible)
+        let missing = tracked.filter { key in
+            key.host == host && key.username == username && !fetchedIDs.contains(key.todoID) && !running.contains(key)
         }
-        ineligible = ineligible.filter(isPending)
+        // GitLab's offset pagination can skip an item when an earlier page changes.
+        let confirmed = missing.intersection(unconfirmedMissingReceipts)
+        unconfirmedMissingReceipts = missing.subtracting(confirmed)
+        guard !confirmed.isEmpty else { return }
+
+        settings.automationReceipts.subtract(confirmed)
+        settings.automationAttemptReceipts.subtract(confirmed)
+        settings.pendingTodoAcknowledgements = settings.pendingTodoAcknowledgements.filter {
+            !confirmed.contains(receipt(for: $0))
+        }
+        ineligible.subtract(confirmed)
     }
 
     func actionState(

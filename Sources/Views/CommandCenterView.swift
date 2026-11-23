@@ -120,12 +120,12 @@ struct CommandCenterView: View {
         .task { await prepareWindow() }
         .task {
             while !Task.isCancelled {
-                monitor.assistantDependencies.refresh()
-                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+                monitor.refreshRuntimeAssistantAvailability()
+                do { try await Task.sleep(for: .seconds(600), tolerance: .seconds(30)) } catch { return }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            monitor.refreshAvailableAssistants()
+            monitor.refreshRuntimeAssistantAvailability()
         }
         .onAppear {
             MainWindowPresentation.openWindow = { openWindow(id: "main") }
@@ -293,7 +293,7 @@ struct CommandCenterView: View {
     }
 
     private func prepareWindow() async {
-        monitor.refreshAvailableAssistants()
+        monitor.refreshRuntimeAssistantAvailability()
         if !monitor.settings.onboardingCompleted {
             NSApplication.shared.activate(ignoringOtherApps: true)
             openWindow(id: "onboarding")

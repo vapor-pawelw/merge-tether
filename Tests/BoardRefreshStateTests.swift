@@ -3,6 +3,33 @@ import Testing
 @testable import MergeTether
 
 struct BoardRefreshStateTests {
+    @Test func signedOutOrMissingAccountNeverLooksSynchronized() {
+        #expect(GitLabMenuBarStatus(setupComplete: true, username: nil, authStatus: .notAuthenticated,
+                                    refresh: .current, error: nil, catalogFailed: false) == .signedOut)
+        #expect(GitLabMenuBarStatus(setupComplete: true, username: "cached", authStatus: .authenticated,
+                                    refresh: .current, error: .notAuthenticated, catalogFailed: false) == .signedOut)
+        #expect(GitLabMenuBarStatus(setupComplete: true, username: nil, authStatus: .unknown,
+                                    refresh: .syncing, error: nil, catalogFailed: false) == .syncing)
+    }
+
+    @Test func staleCatalogsAndFailedInitialReadsRemainVisible() {
+        #expect(GitLabMenuBarStatus(setupComplete: true, username: "reviewer", authStatus: .authenticated,
+                                    refresh: .current, error: nil, catalogFailed: true) == .failed)
+        #expect(GitLabMenuBarStatus(setupComplete: true, username: nil, authStatus: .unknown,
+                                    refresh: .unavailable, error: .timedOut, catalogFailed: false) == .failed)
+        #expect(GitLabMenuBarStatus(setupComplete: true, username: "reviewer", authStatus: .authenticated,
+                                    refresh: .current, error: nil, catalogFailed: false) == .current)
+    }
+
+    @Test func setupAndDefaultHostHaveDistinctRecoveryPaths() {
+        #expect(GitLabMenuBarStatus(setupComplete: false, username: nil, authStatus: .unknown,
+                                    refresh: .current, error: nil, catalogFailed: false) == .setup)
+        #expect(GitLabMenuBarStatus(setupComplete: true, username: nil, authStatus: .unknown,
+                                    refresh: .unavailable, error: .glabNotInstalled, catalogFailed: false) == .setup)
+        #expect(GitLabMenuBarStatus(setupComplete: true, username: nil, authStatus: .wrongDefaultHost(authedHosts: []),
+                                    refresh: .unavailable, error: .notAuthenticated, catalogFailed: false) == .hostConfiguration)
+    }
+
     @MainActor
     @Test func explicitMRProgressWaitsForCoalescedCatalogReadsWithoutAffectingOtherCards() async {
         let state = RefreshProgressState()

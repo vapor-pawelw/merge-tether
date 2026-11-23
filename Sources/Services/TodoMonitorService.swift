@@ -63,6 +63,12 @@ final class TodoMonitorService {
         boardAttentionPresenter.userAttention(account: attentionPresentationAccount)
     }
 
+    var menuBarGitLabStatus: GitLabMenuBarStatus {
+        .init(setupComplete: settings.onboardingCompleted, username: glab.currentUsername,
+              authStatus: glab.authStatus, refresh: boardRefreshState, error: lastError,
+              catalogFailed: attention.hasError || authoredMergeRequests.hasError)
+    }
+
     private func attentionKey(_ item: MergeRequestAttentionMonitor.Item) -> String? {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return nil }
         return "\(host)/\(username)/mr/\(item.id.projectID)/\(item.id.iid)"
@@ -144,7 +150,6 @@ final class TodoMonitorService {
     private var inboxAccountRevision: UInt64? { todoStore.accountRevision }
     @ObservationIgnored private let attentionNotificationScheduler: AttentionNotificationScheduler
     @ObservationIgnored private var manualAdoptions: [MRAutomationScope.Target: Int] = [:]
-    private var isAutomating = false
     private(set) var assessingMentionNoteIDs: Set<Int> = []
 
     func isAssessingNotice(_ todo: Todo) -> Bool {
@@ -479,6 +484,15 @@ final class TodoMonitorService {
         assistantDependencies.refresh(force: true)
     }
 
+    func refreshRuntimeAssistantAvailability(force: Bool = false) {
+        // Explicit retries still use the historical job's provider after the selection changes.
+        var assistants = Set(settings.assistantHandoffs.lazy
+            .filter { $0.operationalExecution.map { $0.state != .succeeded } == true }
+            .map(\.key.assistant))
+        if let assistant = settings.automation.selectedAssistant { assistants.insert(assistant) }
+        assistantDependencies.refresh(assistants, force: force)
+    }
+
     var boardRefreshState: BoardRefreshState {
         settings.onboardingCompleted ? inboxRefreshState : .current
     }
@@ -497,7 +511,7 @@ final class TodoMonitorService {
     }
 
     func bootstrap() async {
-        refreshAvailableAssistants()
+        refreshRuntimeAssistantAvailability()
         if glab.glabPath == nil {
             glab.glabPath = await OnboardingDetector.findGlabExecutable()
             settings.glabPath = glab.glabPath
@@ -1046,7 +1060,6 @@ final class TodoMonitorService {
     }
 
     private func refreshInbox() async {
-        refreshAvailableAssistants()
         refreshAssistantRelay()
         defer {
             todoStore.finishRefresh()
@@ -1076,7 +1089,7 @@ final class TodoMonitorService {
                 self.failedAutomationTodoID = nil
             }
 
-            if let host, let username, !isAutomating {
+            if let host, let username {
                 automation.prune(fetchedIDs: fetchedIDs, host: host, username: username, settings: settings)
             }
 
@@ -1090,7 +1103,6 @@ final class TodoMonitorService {
                 }
                 await routeMRTodos(host: host, username: username)
                 await acknowledgeHandledTodos(host: host, username: username)
-                scheduleAutomation(host: host, username: username)
             }
 
         case .failure(let err):
@@ -1132,29 +1144,6 @@ final class TodoMonitorService {
         let details = currentPipelineEvidence.first { $0.projectID == job.key.work.projectID && $0.iid == job.key.work.iid }
         return PipelineJobReconciliation.matchingDetails(catalog ?? details, details: details,
             checkedAt: currentPipelineEvidenceDate, job: job) ?? catalog
-    }
-
-    private func scheduleAutomation(host: String, username: String) {
-        guard settings.automaticWritesAllowed, !isAutomating,
-              settings.onboardingCompleted,
-              settings.automation.reviewRequested.isEnabled || settings.automation.authorFeedback.isEnabled
-        else { return }
-
-        let candidates = visibleTodos.reversed().compactMap { todo in
-            // MR events are classified exclusively by the durable router. Unknown
-            // mentions must not fall through to the former broad automation path.
-            guard todo.targetType != .mergeRequest else { return Optional<(Todo, TodoAutomationEvent)>.none }
-            return TodoAutomationEvent(todo: todo, username: username).map { (todo, $0) }
-        }
-        guard !candidates.isEmpty else { return }
-
-        isAutomating = true
-        Task {
-            defer { isAutomating = false }
-            for (todo, event) in candidates {
-                await runAutomation(todo, event: event, host: host, username: username, manual: false)
-            }
-        }
     }
 
     func automationAction(for todo: Todo) -> TodoAutomationService.ActionState? {
@@ -1282,7 +1271,7 @@ final class TodoMonitorService {
         }
         attention.automationConfigurationChanged(outsideScope: scopeOnly ? cancellationScope : nil)
         mergeRequestIssues?.cancelAssessments()
-        assistantDependencies.refresh(force: !scopeOnly)
+        refreshRuntimeAssistantAvailability(force: previous.selectedAssistant != current.selectedAssistant)
         authoredMergeRequests.automationConfigurationChanged(outsideScope: scopeOnly ? cancellationScope : nil)
         authoredMergeRequests.workflow.synchronizeAssistantJobs()
         wakeAutomaticRetries()
@@ -1417,7 +1406,7 @@ final class TodoMonitorService {
 
     func refreshAssistantRelay() {
         FollowUpVerificationStore.synchronizeRuns(settings: settings)
-        assistantDependencies.refresh()
+        refreshRuntimeAssistantAvailability()
     }
 
     func retryAssistantJob(_ id: UUID) async {
