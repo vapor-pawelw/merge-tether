@@ -2734,6 +2734,40 @@ import MergeTetherRemote
         #expect(harness.log("approve.log").contains("sha=\(head)"))
     }
 
+    @Test(arguments: ["complete", "missingCounts", "responseLost", "rejected"])
+    func automaticApprovalUpdatesTheBoardInTheSameRefresh(_ response: String) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        let before = #"{"approvals_required":2,"approvals_left":1,"approved_by":[{"user":{"id":7,"username":"reviewer"}}]}"#
+        let after = #"{"approvals_required":2,"approvals_left":0,"approved_by":[{"user":{"id":7,"username":"reviewer"}},{"user":{"id":3,"username":"me"}}]}"#
+        try harness.write("approvals.json", before)
+        try harness.recordVerdict("no_objections", head: head)
+        let original = try #require(harness.gitlab.handler)
+        harness.gitlab.handler = { call in
+            guard call.endpoint.hasSuffix("/approve") else { return try await original(call) }
+            if response == "rejected" { return InMemoryGitLab.output(code: 1) }
+            harness.gitlab.write("approvals.json", after)
+            if response == "responseLost" { return InMemoryGitLab.output(code: 1) }
+            if response == "missingCounts" { return InMemoryGitLab.output(#"{"approved_by":[{"user":{"id":3}}]}"#) }
+            return InMemoryGitLab.output(after)
+        }
+
+        try await harness.poll()
+
+        let snapshot = try #require(harness.monitor.presentationSnapshot)
+        var input = MRBoardProjector.Input(account: .init(host: host, username: "me", revision: snapshot.revision))
+        input.attention = snapshot
+        input.trackedReviewedTargets = [.init(host: host, username: "me", projectID: 1, iid: 2)]
+        let row = try #require(MRBoardProjector(input: input).board().reviewed.first)
+        let progress = try #require(row.displayItem.approvalProgress)
+        #expect(harness.gitlab.requests.filter { $0.method == "POST" }.map(\.endpoint) == ["/projects/1/merge_requests/2/approve"])
+        #expect(progress.required == 2)
+        #expect(progress.completed == (response == "rejected" ? 1 : 2))
+        #expect(progress.isSatisfied == (response != "rejected"))
+        #expect(progress.reviewHistory.activities[3] != nil)
+        #expect(harness.monitor.personalApprovalAction(for: row) == (response == "rejected" ? .approve : .remove))
+    }
+
     @Test(arguments: [
         ("noMajorIssues", "major", false), ("noMajorIssues", "minor_code", true),
         ("noCodeIssues", "minor_code", false), ("noCodeIssues", "non_code", true),

@@ -44,6 +44,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Approve or remove your approval from an MR’s approvals popover on Mac and iPhone. The removal confirmation explains that it will turn off automatic approval for that MR.
 
+- Update the approvals badge as soon as GitLab confirms automatic approval.
+
 - Expand or collapse **Automation off** in each Mac board column and restore that choice after restarting. The header shows the total number of merge requests and how many need attention.
 
 - Drag Mac merge request cards from anywhere on their surface to reorder them within Automation on or Automation off on Mac. Manual ordering is the default and saves positions across launches. Cards that start needing attention move to the top of their pin group unless you turn off that preference in Settings. The iPhone board follows the Mac order on refresh.
