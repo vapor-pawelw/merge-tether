@@ -2,31 +2,68 @@ import MergeTetherRemote
 import SwiftUI
 
 struct ReviewerEditing {
+    var supportsBatch = true
     let search: (String) async throws -> [ReviewerCandidate]
-    let change: (ReviewerChange) async -> RemoteCommandResult.Status
+    let change: ([ReviewerChange]) async -> RemoteCommandResult.Status
 }
 
 @MainActor @Observable final class ReviewerEditorState {
     var isEditing = false
-    var isAdding = false
+    private(set) var isAdding = false
     private(set) var isSaving = false
+    private(set) var pendingAdditions: [ReviewerCandidate] = []
     var pendingRemoval: ReviewerCandidate?
     var error: LocalizedStringResource?
+    @ObservationIgnored private var additionEditing: ReviewerEditing?
 
-    func save(_ change: ReviewerChange, using editing: ReviewerEditing) async {
-        guard !isSaving else { return }
+    func startAdding(using editing: ReviewerEditing) {
+        guard !isAdding, !isSaving else { return }
+        error = nil
+        isAdding = true
+        additionEditing = editing
+    }
+
+    func add(_ person: ReviewerCandidate) {
+        guard !isSaving, let editing = additionEditing else { return }
+        if editing.supportsBatch {
+            guard pendingAdditions.count < ReviewerChange.Batch.maximumCount,
+                  !pendingAdditions.contains(where: { $0.id == person.id }) else { return }
+            pendingAdditions.append(person)
+        } else {
+            save([.init(.add, reviewerID: person.id, username: person.username)], using: editing)
+        }
+    }
+
+    func unselect(_ person: ReviewerCandidate) {
+        pendingAdditions.removeAll { $0.id == person.id }
+    }
+
+    @discardableResult func finishAdding() -> Task<Void, Never>? {
+        isAdding = false
+        let editing = additionEditing
+        additionEditing = nil
+        let changes = pendingAdditions.map { ReviewerChange(.add, reviewerID: $0.id, username: $0.username) }
+        pendingAdditions.removeAll()
+        guard let editing, !changes.isEmpty else { return nil }
+        return save(changes, using: editing)
+    }
+
+    @discardableResult func save(_ changes: [ReviewerChange], using editing: ReviewerEditing) -> Task<Void, Never>? {
+        guard !isSaving else { return nil }
         isSaving = true
         error = nil
-        defer { isSaving = false }
-        switch await editing.change(change) {
-        case .completed:
-            if change.operation == .add { isAdding = false }
-        case .changed:
-            error = .Board.boardReviewersChanged
-        case .uncertain:
-            error = .Board.boardReviewersUncertain
-        default:
-            error = .Board.boardReviewersSaveFailed
+        return Task {
+            defer { isSaving = false }
+            switch await editing.change(changes) {
+            case .completed:
+                if !editing.supportsBatch, changes.first?.operation == .add { finishAdding() }
+            case .changed:
+                error = .Board.boardReviewersChanged
+            case .uncertain:
+                error = .Board.boardReviewersUncertain
+            default:
+                error = .Board.boardReviewersSaveFailed
+            }
         }
     }
 }
@@ -57,7 +94,7 @@ struct ReviewerRemovalButton: View {
         .focused($focused)
         .opacity(revealed || focused ? 1 : 0)
         .allowsHitTesting(revealed || focused)
-        .disabled(state.isSaving)
+        .disabled(state.isSaving || state.isAdding)
         .help(Text(.Board.boardReviewersRemovePerson(person.username)))
         .accessibilityLabel(Text(.Board.boardReviewersRemovePerson(person.username)))
     }
@@ -74,7 +111,7 @@ struct ReviewerRemovalConfirmation: ViewModifier {
             ), presenting: state.pendingRemoval) { person in
                 Button(.Board.boardReviewersRemove, role: .destructive) {
                     guard let editing else { return }
-                    Task { await state.save(.init(.remove, reviewerID: person.id, username: person.username), using: editing) }
+                    state.save([.init(.remove, reviewerID: person.id, username: person.username)], using: editing)
                 }
                 Button(.Remote.remoteCancel, role: .cancel) {}
             } message: { person in
@@ -83,10 +120,24 @@ struct ReviewerRemovalConfirmation: ViewModifier {
     }
 }
 
+struct ReviewerSaveErrorAlert: ViewModifier {
+    let state: ReviewerEditorState
+    let editorClosed: Bool
+
+    func body(content: Content) -> some View {
+        content.alert(Text(state.error ?? .Board.boardReviewersSaveFailed), isPresented: Binding(
+            get: { editorClosed && state.error != nil }, set: { if !$0 { state.error = nil } }
+        )) {
+            Button(.Remote.remoteClose) { state.error = nil }
+        }
+    }
+}
+
 struct ReviewerPicker: View {
     let editing: ReviewerEditing
     let assigned: [ReviewerCandidate]
     let state: ReviewerEditorState
+    let onDone: () -> Void
     @State private var input = ""
     @State private var selection = 0
     @State private var loadedQuery: String?
@@ -102,8 +153,8 @@ struct ReviewerPicker: View {
         assigned.contains { $0.username.lowercased() == query.lowercased() }
     }
     private var choices: [ReviewerCandidate] {
-        guard loadedQuery == query, !alreadyAssigned else { return [] }
-        let assignedIDs = Set(assigned.map(\.id))
+        guard loadedQuery == query, !alreadyAssigned, !selectionLimitReached else { return [] }
+        let assignedIDs = Set(assigned.map(\.id) + state.pendingAdditions.map(\.id))
         return matches.filter { !assignedIDs.contains($0.id) }
     }
 
@@ -122,11 +173,18 @@ struct ReviewerPicker: View {
                     .onSubmit {
                         if choices.indices.contains(selection) { add(choices[selection]) }
                     }
-                Button(.Remote.remoteCancel) { state.isAdding = false }.disabled(state.isSaving)
+                if editing.supportsBatch {
+                    Button(.Board.boardReviewersDone, action: onDone)
+                } else {
+                    Button(.Remote.remoteCancel) { state.finishAdding() }
+                }
             }
-            if alreadyAssigned {
+            if !state.pendingAdditions.isEmpty { pendingAdditions }
+            if selectionLimitReached {
+                Text(.Board.boardReviewersSelectionLimit(ReviewerChange.Batch.maximumCount)).foregroundStyle(.secondary)
+            } else if alreadyAssigned {
                 Text(.Board.boardReviewersAlreadyAssigned).foregroundStyle(.secondary)
-            } else if !query.isEmpty && loadedQuery != query {
+            } else if loadedQuery != query {
                 ProgressView().controlSize(.small)
             } else if loadFailed {
                 Text(.Board.boardReviewersSearchFailed).foregroundStyle(.secondary)
@@ -138,9 +196,14 @@ struct ReviewerPicker: View {
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(Array(choices.enumerated()), id: \.element.id) { index, person in
                                 Button { add(person) } label: {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(verbatim: person.name).font(.callout)
-                                        Text(verbatim: "@\(person.username)").font(.caption).foregroundStyle(.secondary)
+                                    HStack(spacing: 8) {
+                                        let identity = PersonIdentity(name: person.name, username: person.username)
+                                        PersonAvatar(url: person.avatarURL, size: 28, initials: identity.initials)
+                                            .accessibilityHidden(true)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(verbatim: person.name).font(.callout)
+                                            Text(verbatim: "@\(person.username)").font(.caption).foregroundStyle(.secondary)
+                                        }
                                     }
                                     .padding(.horizontal, 5)
                                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -168,6 +231,29 @@ struct ReviewerPicker: View {
         .onAppear { focused = true }
     }
 
+    private var pendingAdditions: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 4) {
+                ForEach(state.pendingAdditions) { person in
+                    Button { state.unselect(person) } label: {
+                        Label { Text(verbatim: "@\(person.username)") } icon: { Image(systemName: "xmark.circle.fill") }
+                            .font(.caption)
+                            .padding(.horizontal, 7)
+                            #if os(iOS)
+                            .frame(minHeight: 44)
+                            #else
+                            .frame(minHeight: 24)
+                            #endif
+                            .background(.secondary.opacity(0.12), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text(.Board.boardReviewersRemovePerson(person.username)))
+                }
+            }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
     private func moveSelection(by offset: Int) -> KeyPress.Result {
         guard !choices.isEmpty else { return .ignored }
         selection = min(max(selection + offset, 0), choices.count - 1)
@@ -178,13 +264,13 @@ struct ReviewerPicker: View {
         loadedQuery = nil
         selection = 0
         loadFailed = false
-        guard !query.isEmpty, query.utf8.count <= 128 else {
+        guard query.utf8.count <= 128 else {
             matches = []
             loadedQuery = query
             return
         }
         do {
-            try await Task.sleep(for: .milliseconds(250))
+            if !query.isEmpty { try await Task.sleep(for: .milliseconds(250)) }
             var result = try await editing.search(query)
             try Task.checkCancellation()
             if let exact = result.firstIndex(where: { $0.username.caseInsensitiveCompare(query) == .orderedSame }) {
@@ -202,6 +288,15 @@ struct ReviewerPicker: View {
     }
 
     private func add(_ person: ReviewerCandidate) {
-        Task { await state.save(.init(.add, reviewerID: person.id, username: person.username), using: editing) }
+        state.add(person)
+        selection = 0
+        if editing.supportsBatch {
+            if person.username.caseInsensitiveCompare(query) == .orderedSame { input = "" }
+            focused = true
+        }
+    }
+
+    private var selectionLimitReached: Bool {
+        state.pendingAdditions.count == ReviewerChange.Batch.maximumCount
     }
 }

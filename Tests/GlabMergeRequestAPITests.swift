@@ -96,7 +96,15 @@ struct GlabMergeRequestAPITests {
     @Test func reviewerSuggestionsSearchProjectUsersAndExcludeBlockedAccounts() async throws {
         try await withFakeGlab { glab in
             let matches = try await glab.searchProjectReviewers(projectID: 34, query: "a+b &", host: host)
-            #expect(matches == [.init(id: 8, name: "Alice", username: "alice")])
+            #expect(matches.map(\.username) == ["alice", "charlie"])
+            #expect(matches.first?.avatarURL?.absoluteString == "https://\(host)/uploads/alice.png")
+        }
+    }
+
+    @Test func reviewerSuggestionsAreAvailableBeforeTyping() async throws {
+        try await withFakeGlab { glab in
+            let matches = try await glab.searchProjectReviewers(projectID: 34, query: "", host: host)
+            #expect(matches.map(\.username) == ["alice", "charlie"])
         }
     }
 
@@ -105,14 +113,14 @@ struct GlabMergeRequestAPITests {
             let request = try await glab.fetchMergeRequest(projectID: 34, iid: 12, host: host)
             #expect(request.reviewers?.map(\.id) == [9])
 
-            try await glab.changeMergeRequestReviewer(.init(.add, reviewerID: 8, username: "alice"), of: request,
+            try await glab.changeMergeRequestReviewers([.init(.add, reviewerID: 8, username: "alice")], of: request,
                 host: host, username: "author", shouldProceed: { true })
             let added = try await glab.fetchMergeRequest(projectID: 34, iid: 12, host: host)
             #expect(added.reviewers?.map(\.id) == [9, 8])
 
             let removal = ReviewerChange(.remove, reviewerID: 8, username: "alice")
             for _ in 0..<2 {
-                try await glab.changeMergeRequestReviewer(removal, of: added, host: host, username: "author", shouldProceed: { true })
+                try await glab.changeMergeRequestReviewers([removal], of: added, host: host, username: "author", shouldProceed: { true })
             }
             let removed = try await glab.fetchMergeRequest(projectID: 34, iid: 12, host: host)
             #expect(removed.reviewers?.map(\.id) == [9])
@@ -125,16 +133,70 @@ struct GlabMergeRequestAPITests {
         try await withFakeGlab { glab in
             let request = try await glab.fetchMergeRequest(projectID: 34, iid: 12, host: host)
             await #expect(throws: GlabError.notAuthenticated) {
-                try await glab.changeMergeRequestReviewer(.init(.remove, reviewerID: 9, username: "bob"), of: request,
+                try await glab.changeMergeRequestReviewers([.init(.remove, reviewerID: 9, username: "bob")], of: request,
                     host: host, username: "wrong-account", shouldProceed: { true })
             }
             await #expect(throws: CancellationError.self) {
-                try await glab.changeMergeRequestReviewer(.init(.remove, reviewerID: 9, username: "old-bob"), of: request,
+                try await glab.changeMergeRequestReviewers([.init(.remove, reviewerID: 9, username: "old-bob")], of: request,
                     host: host, username: "author", shouldProceed: { true })
             }
             let executable = try #require(glab.glabPath)
             #expect(!FileManager.default.fileExists(atPath: executable.path + "-reviewer-writes"))
         }
+    }
+
+    @Test func addingSeveralReviewersAppendsOnceAndPreservesExistingAssignments() async throws {
+        try await withFakeGlab { glab in
+            let request = try await glab.fetchMergeRequest(projectID: 34, iid: 12, host: host)
+            let changes = [ReviewerChange(.add, reviewerID: 8, username: "alice"),
+                           ReviewerChange(.add, reviewerID: 11, username: "charlie")]
+            for _ in 0..<2 {
+                try await glab.changeMergeRequestReviewers(changes, of: request, host: host, username: "author", shouldProceed: { true })
+            }
+            let updated = try await glab.fetchMergeRequest(projectID: 34, iid: 12, host: host)
+            #expect(updated.reviewers?.map(\.id) == [9, 8, 11])
+            let mutationCount = try String(contentsOfFile: try #require(glab.glabPath).path + "-reviewer-writes", encoding: .utf8)
+            #expect(mutationCount == "APPEND\n")
+        }
+    }
+
+    @Test func anInvalidCandidatePreventsTheBatchFromWriting() async throws {
+        try await withFakeGlab { glab in
+            let request = try await glab.fetchMergeRequest(projectID: 34, iid: 12, host: host)
+            let changes = [ReviewerChange(.add, reviewerID: 8, username: "alice"),
+                           ReviewerChange(.add, reviewerID: 11, username: "old-charlie")]
+            await #expect(throws: CancellationError.self) {
+                try await glab.changeMergeRequestReviewers(changes, of: request, host: host, username: "author", shouldProceed: { true })
+            }
+            let executable = try #require(glab.glabPath)
+            #expect(!FileManager.default.fileExists(atPath: executable.path + "-reviewer-writes"))
+        }
+    }
+
+    @Test func reviewerSelectionStaysLocalUntilThePickerCloses() async throws {
+        let state = ReviewerEditorState()
+        let alice = ReviewerCandidate(id: 8, name: "Alice", username: "alice")
+        let bob = ReviewerCandidate(id: 9, name: "Bob", username: "bob")
+        let charlie = ReviewerCandidate(id: 11, name: "Charlie", username: "charlie")
+        var writes: [[ReviewerChange]] = []
+        state.startAdding(using: .init(search: { _ in [] }, change: { changes in
+            writes.append(changes)
+            return .completed
+        }))
+        state.add(alice)
+        state.add(alice)
+        state.add(bob)
+        state.unselect(bob)
+        state.add(charlie)
+
+        #expect(state.pendingAdditions == [alice, charlie])
+        #expect(!state.isSaving)
+        #expect(writes.isEmpty)
+
+        let save = try #require(state.finishAdding())
+        #expect(state.finishAdding() == nil)
+        await save.value
+        #expect(writes == [[.init(.add, reviewerID: 8, username: "alice"), .init(.add, reviewerID: 11, username: "charlie")]])
     }
 
     @Test func readsAuthoredMergeRequestsAndTheirCurrentChecks() async throws {
@@ -344,8 +406,9 @@ struct GlabMergeRequestAPITests {
         "has_conflicts":false,"labels":["auto merge"],"blocking_discussions_resolved":true,
         "head_pipeline":{"status":"success","sha":"\(sha)"},"user":{"can_merge":true}}
         """
-        let alice = #"{"id":8,"username":"alice","name":"Alice","state":"active"}"#
+        let alice = #"{"id":8,"username":"alice","name":"Alice","state":"active","avatar_url":"https://\#(host)/uploads/alice.png"}"#
         let bob = #"{"id":9,"username":"bob","name":"Bob"}"#
+        let charlie = #"{"id":11,"username":"charlie","name":"Charlie","state":"active"}"#
         try Data("""
         #!/bin/sh
         set -eu
@@ -358,17 +421,30 @@ struct GlabMergeRequestAPITests {
             printf '%s\\n' '[\(request)]' '[\(request.replacingOccurrences(of: "\"iid\":12", with: "\"iid\":13"))]'
             ;;
           'api /projects/34/merge_requests/12 --hostname \(host)')
-            if test -f "$0-reviewer-added"; then
+            if test -f "$0-charlie-added"; then
+              printf '%s' '\(request.dropLast()),"reviewers":[\(bob),\(alice),\(charlie)]}'
+            elif test -f "$0-reviewer-added"; then
               printf '%s' '\(request.dropLast()),"reviewers":[\(bob),\(alice)]}'
             else
               printf '%s' '\(request.dropLast()),"reviewers":[\(bob)]}'
             fi
             ;;
-          'api /projects/34/users?search=a%2Bb%20%26&per_page=30 --hostname \(host)')
-            printf '%s' '[\(alice),{"id":10,"username":"blocked","name":"Blocked","state":"blocked"}]'
+          'api /projects/34/users?search=a%2Bb%20%26&per_page=30 --hostname \(host)'|'api /projects/34/users?per_page=100 --hostname \(host)')
+            printf '%s' '[\(charlie),\(alice),{"id":10,"username":"blocked","name":"Blocked","state":"blocked"}]'
+            ;;
+          'api /projects/34/events?sort=desc&per_page=100 --hostname \(host)')
+            printf '%s' '[{"author_id":9},{"author_id":8},{"author_id":8},{"author_id":11}]'
             ;;
           'api /users/8 --hostname \(host)')
             printf '%s' '\(alice)'
+            ;;
+          'api /users/11 --hostname \(host)')
+            printf '%s' '\(charlie)'
+            ;;
+          'api graphql --hostname \(host) --raw-field query='*'reviewerUsernames: [$username0, $username1], operationMode: $mode'*' --raw-field projectPath=group/repo --raw-field iid=12 --raw-field username0=alice --raw-field username1=charlie --raw-field mode=APPEND')
+            touch "$0-reviewer-added" "$0-charlie-added"
+            printf '%s\\n' APPEND >> "$0-reviewer-writes"
+            printf '%s' '{"data":{"mergeRequestSetReviewers":{"mergeRequest":{"iid":"12"},"errors":[]}}}'
             ;;
           'api graphql --hostname \(host) --raw-field query='*'reviewerUsernames: [$username], operationMode: $mode'*' --raw-field projectPath=group/repo --raw-field iid=12 --raw-field username=alice --raw-field mode='*)
             mode="${14#mode=}"

@@ -8,16 +8,17 @@ struct RemoteApprovalDetailsView: View {
     let personalApproval: RemotePersonalApprovalControl?
     let reviewerEditing: ReviewerEditing?
     let automaticApprovalOff: Bool
+    let reviewerEditor: ReviewerEditorState
     @Environment(\.dismiss) private var dismiss
-    @State private var reviewerEditor = ReviewerEditorState()
     init(details: RemoteApprovalDetails, mergeRequestURL: URL? = nil, approvedWithOpenFindings: Bool = false,
          personalApproval: RemotePersonalApprovalControl? = nil, reviewerEditing: ReviewerEditing? = nil,
-         automaticApprovalOff: Bool = false) {
+         automaticApprovalOff: Bool = false, reviewerEditor: ReviewerEditorState) {
         self.details = details; self.mergeRequestURL = mergeRequestURL
         self.approvedWithOpenFindings = approvedWithOpenFindings
         self.personalApproval = personalApproval
         self.reviewerEditing = reviewerEditing
         self.automaticApprovalOff = automaticApprovalOff
+        self.reviewerEditor = reviewerEditor
     }
 
     var body: some View {
@@ -48,7 +49,9 @@ struct RemoteApprovalDetailsView: View {
                             Divider()
                         }
                         if let reviewerEditing {
-                            RemoteReviewerEditorControls(editing: reviewerEditing, people: details.people, state: reviewerEditor)
+                            RemoteReviewerEditorControls(editing: reviewerEditing, people: details.people, state: reviewerEditor) {
+                                dismiss()
+                            }
                         }
                     }
                     VStack(alignment: .leading, spacing: 14) {
@@ -164,14 +167,15 @@ struct RemoteReviewerEditorControls: View {
     let editing: ReviewerEditing
     let people: [RemoteApprovalPerson]
     let state: ReviewerEditorState
+    let onDone: () -> Void
 
     var body: some View {
         let assigned = people.compactMap(\.assignedReviewer)
         VStack(alignment: .leading, spacing: 8) {
             if state.isAdding {
-                ReviewerPicker(editing: editing, assigned: assigned, state: state)
+                ReviewerPicker(editing: editing, assigned: assigned, state: state, onDone: onDone)
             } else {
-                Button(.Board.boardReviewersAdd) { state.isAdding = true }
+                Button(.Board.boardReviewersAdd) { state.startAdding(using: editing) }
                 if !assigned.isEmpty || state.isEditing {
                     Button(state.isEditing ? .Board.boardReviewersDone : .Board.boardReviewersEdit) { state.isEditing.toggle() }
                 }

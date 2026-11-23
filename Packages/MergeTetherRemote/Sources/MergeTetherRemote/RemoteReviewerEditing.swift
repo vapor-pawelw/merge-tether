@@ -4,11 +4,13 @@ public struct ReviewerCandidate: Codable, Equatable, Identifiable, Sendable {
     public let id: Int
     public let name: String
     public let username: String
+    public let avatarURL: URL?
 
-    public init(id: Int, name: String, username: String) {
+    public init(id: Int, name: String, username: String, avatarURL: URL? = nil) {
         self.id = id
         self.name = name
         self.username = username
+        self.avatarURL = avatarURL
     }
 }
 
@@ -34,6 +36,31 @@ public struct ReviewerChange: Codable, Equatable, Sendable {
 
     public var argument: String? {
         try? String(decoding: JSONEncoder().encode(self), as: UTF8.self)
+    }
+
+    public struct Batch: Encodable, Sendable {
+        public static let maximumCount = 30
+        private static let maximumArgumentBytes = 16_384
+        public let changes: [ReviewerChange]
+
+        public init?(_ changes: [ReviewerChange]) {
+            guard (2...Self.maximumCount).contains(changes.count),
+                  changes.allSatisfy({ $0.operation == .add && $0.reviewerID > 0 && !$0.username.isEmpty && $0.username.utf8.count <= 255 }),
+                  Set(changes.map(\.reviewerID)).count == changes.count else { return nil }
+            self.changes = changes
+        }
+
+        public init?(argument: String?) {
+            struct Payload: Decodable { let changes: [ReviewerChange] }
+            guard let argument, argument.utf8.count <= Self.maximumArgumentBytes,
+                  let payload = try? JSONDecoder().decode(Payload.self, from: Data(argument.utf8)) else { return nil }
+            self.init(payload.changes)
+        }
+
+        public var argument: String? {
+            guard let data = try? JSONEncoder().encode(self), data.count <= Self.maximumArgumentBytes else { return nil }
+            return String(decoding: data, as: UTF8.self)
+        }
     }
 }
 
@@ -70,5 +97,9 @@ public struct RemoteReviewerResults: Codable, Sendable {
     public init(id: UUID, candidates: [ReviewerCandidate]?) {
         self.id = id
         self.candidates = candidates
+    }
+
+    public var avatarThumbnailURLs: [URL] {
+        RemoteAvatarThumbnail.eligibleURLs(candidates?.compactMap(\.avatarURL) ?? [])
     }
 }

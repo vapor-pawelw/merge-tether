@@ -24,6 +24,12 @@ final class GlabService {
     @ObservationIgnored private var localAutomationAuthors: [String: Set<Int>] = [:]
     private struct DiscussionKey: Hashable { let projectID: Int; let iid: Int }
     @ObservationIgnored private var recentDiscussions: [DiscussionKey: (readAt: Date, discussions: [GitLabMergeRequestDiscussion])] = [:]
+    @ObservationIgnored var reviewerActivity: [Int: (host: String, expiresAt: Date, ranks: Task<[Int: Int], Never>)] = [:]
+
+    private func clearReviewerActivity() {
+        for activity in reviewerActivity.values { activity.ranks.cancel() }
+        reviewerActivity.removeAll()
+    }
 
     func cachedDiscussions(projectID: Int, iid: Int) -> (readAt: Date, discussions: [GitLabMergeRequestDiscussion])? {
         recentDiscussions[DiscussionKey(projectID: projectID, iid: iid)]
@@ -123,7 +129,12 @@ final class GlabService {
 
     /// Path to the resolved `glab` executable. Set by `OnboardingDetector` / `recheck()`.
     var glabPath: URL? {
-        didSet { if glabPath != oldValue { recentDiscussions.removeAll() } }
+        didSet {
+            if glabPath != oldValue {
+                recentDiscussions.removeAll()
+                clearReviewerActivity()
+            }
+        }
     }
 
     /// Username on the default host, set only when that host is authenticated.
@@ -138,7 +149,10 @@ final class GlabService {
 
     /// A round-trip through another account must not revive earlier session data.
     private(set) var accountRevision: UInt64 = 0 {
-        didSet { recentDiscussions.removeAll() }
+        didSet {
+            recentDiscussions.removeAll()
+            clearReviewerActivity()
+        }
     }
 
     /// All hosts glab reports as logged in.

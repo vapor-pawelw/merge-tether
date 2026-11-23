@@ -49,6 +49,28 @@ import Testing
         #expect(ReviewerChange(argument: ReviewerChange(.remove, reviewerID: 0, username: "alice").argument) == nil)
     }
 
+    @Test func reviewerBatchCannotBeReadAsASingleChangeOrContainRemovals() throws {
+        let alice = ReviewerChange(.add, reviewerID: 7, username: "alice")
+        let bob = ReviewerChange(.add, reviewerID: 8, username: "bob")
+        let removal = ReviewerChange(.remove, reviewerID: 8, username: "bob")
+        let batch = try #require(ReviewerChange.Batch([alice, bob]))
+
+        #expect(ReviewerChange.Batch(argument: batch.argument)?.changes == [alice, bob])
+        #expect(ReviewerChange(argument: batch.argument) == nil)
+        #expect(ReviewerChange.Batch([alice, removal]) == nil)
+        #expect(ReviewerChange.Batch([alice, alice]) == nil)
+    }
+
+    @Test func reviewerCandidatesDecodeOlderResultsAndOnlyOfferEligibleAvatarURLs() throws {
+        let legacy = Data(#"{"id":7,"name":"Alice","username":"alice"}"#.utf8)
+        #expect(try JSONDecoder().decode(ReviewerCandidate.self, from: legacy).avatarURL == nil)
+        let url = try #require(URL(string: "https://gitlab.example.test/alice.png"))
+        let alice = ReviewerCandidate(id: 7, name: "Alice", username: "alice", avatarURL: url)
+        let bob = ReviewerCandidate(id: 8, name: "Bob", username: "bob", avatarURL: URL(string: "http://gitlab.example.test/bob.png"))
+        let result = RemoteReviewerResults(id: UUID(), candidates: [alice, bob, alice])
+        #expect(result.avatarThumbnailURLs == [url])
+    }
+
     @Test func gitLabProfileUsesTheMergeRequestHostAndUsername() throws {
         let request = try #require(URL(string: "https://gitlab.example.test:8443/group/project/-/merge_requests/4?tab=notes#note_1"))
         let person = RemotePerson(name: "Alice Example", username: " @alice.dev-2 ",

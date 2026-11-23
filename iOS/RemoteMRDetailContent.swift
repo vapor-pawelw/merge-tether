@@ -10,6 +10,7 @@ struct RemoteMRDetailContent: View {
     var onCommentOrigin: ((RemoteCommentOriginRequest) -> Void)? = nil
     @Environment(\.colorScheme) private var colorScheme
     @State private var showingApprovals = false
+    @State private var reviewerEditor = ReviewerEditorState()
     @State private var discussionsExpanded = true
     /// Holds that stop work lead; saved rules sit with the reference data, as on the Mac.
     private var rules: [String] { details.rules ?? [] }
@@ -131,13 +132,17 @@ struct RemoteMRDetailContent: View {
                 } else { unavailable }
             }
         }
-        .sheet(isPresented: $showingApprovals) {
+        .sheet(isPresented: $showingApprovals, onDismiss: {
+            reviewerEditor.isEditing = false
+            reviewerEditor.finishAdding()
+        }) {
             RemoteApprovalDetailsView(details: details.approvals ?? .init(progress: nil), mergeRequestURL: card.url,
                 approvedWithOpenFindings: card.presentation?.approvedWithOpenFindings == true,
                 personalApproval: personalApproval, reviewerEditing: reviewerEditing,
-                automaticApprovalOff: card.presentation?.automaticApprovalOff == true)
+                automaticApprovalOff: card.presentation?.automaticApprovalOff == true, reviewerEditor: reviewerEditor)
                 .presentationDetents([.medium, .large])
         }
+        .modifier(ReviewerSaveErrorAlert(state: reviewerEditor, editorClosed: !showingApprovals))
     }
 
     @ViewBuilder private func fieldView(_ field: RemoteDetailField) -> some View {

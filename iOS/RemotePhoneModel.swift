@@ -27,6 +27,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     private var supportsCachedDetails = false
     private(set) var supportsOriginUpdates = false
     private(set) var supportsDraftRegeneration = false
+    private(set) var supportsReviewerBatches = false
     var boardOrderMoveRejected = false
     private(set) var draftRegenerationLoadFailed = false
     private var draftRegenerationPreviewBatchID: UUID?
@@ -89,6 +90,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     private var lastPersonalApproval: (id: UUID, kind: RemoteActionKind)?
     @ObservationIgnored private var reviewerSearch: RemoteReviewerSearch?
     @ObservationIgnored private var reviewerResults: RemoteReviewerResults?
+    @ObservationIgnored private var reviewerAvatars: (request: RemoteReviewerSearch, urls: Set<URL>)?
 
     var completedPersonalApproval: RemoteActionKind? {
         guard let result = state.result else { return nil }
@@ -178,6 +180,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                     self.connectionRevision = UUID(); self.cancelApproval(); self.state.disconnected()
                     self.detailState.disconnect(); self.supportsDetails = false; self.supportsOriginUpdates = false
                     self.supportsDetailContext = false; self.supportsDetailPreviews = false; self.supportsCachedDetails = false
+                    self.supportsReviewerBatches = false; self.reviewerAvatars = nil; self.pruneAvatarThumbnails()
                     self.suspendDraftRegenerationReads()
                     self.isSynchronizingDetails = false; self.isManuallyRefreshingContent = false
                     self.contentRefresh?.cancel(); self.contentRefresh = nil
@@ -259,9 +262,11 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                     return
                 }
                 if message.type == .reviewerResults {
-                    if let result = message.reviewerResults, result.id == self.reviewerSearch?.id,
-                       let board = self.state.board, self.reviewerSearch?.matches(board) == true {
+                    if let result = message.reviewerResults, let search = self.reviewerSearch, result.id == search.id,
+                       let board = self.state.board, search.matches(board) {
                         self.reviewerResults = result
+                        self.reviewerAvatars = (search, Set(result.avatarThumbnailURLs))
+                        self.pruneAvatarThumbnails()
                     }
                     return
                 }
@@ -294,6 +299,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                         self.resetDraftRegenerationConnection()
                     }
                     self.supportsDraftRegeneration = message.capabilities?.contains(RemoteMessage.draftRegenerationCapability) == true
+                    self.supportsReviewerBatches = message.capabilities?.contains(RemoteMessage.reviewerBatchCapability) == true
                     await self.synchronizeDraftRegeneration()
                     if let board = self.state.board { self.detailState.update(board: board) }
                     if self.viewedCardID != nil, self.detailState.failure == .changed { self.isSynchronizingDetails = true }
@@ -321,6 +327,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         boardOrderMoveRejected = false
         detailState.disconnect(); supportsDetails = false; supportsOriginUpdates = false
         supportsDetailContext = false; supportsDetailPreviews = false; supportsCachedDetails = false
+        supportsReviewerBatches = false; reviewerAvatars = nil; pruneAvatarThumbnails()
         suspendDraftRegenerationReads()
         isSynchronizingDetails = false; isManuallyRefreshingContent = false
         contentRefresh?.cancel(); contentRefresh = nil
@@ -335,7 +342,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                            RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability, RemoteMessage.detailPreviewCapability,
                            RemoteMessage.draftRegenerationCapability, RemoteMessage.boardAvatarsCapability,
                            RemoteMessage.detailAvatarsCapability, RemoteMessage.boardOrderCapability,
-                           RemoteMessage.reviewerEditingCapability],
+                           RemoteMessage.reviewerEditingCapability, RemoteMessage.reviewerBatchCapability],
             refresh: fromGitLab, cachedAvatarURLs: Array((state.board?.avatarThumbnailURLs ?? [])
                 .filter { avatarThumbnails[$0] != nil }.prefix(64)))) }
         catch {
@@ -374,6 +381,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         } else if let request = detailState.openRequest, request.id == challenge, request.matches(board),
                   detailState.pending == nil {
             urls = detailAvatarURLs
+        } else if let reviewers = reviewerAvatars, reviewers.request.id == challenge, reviewers.request.matches(board) {
+            urls = reviewers.urls
         } else { return }
         for thumbnail in thumbnails where urls.contains(thumbnail.url) &&
             !thumbnail.jpeg.isEmpty && thumbnail.jpeg.count <= RemoteAvatarThumbnail.maximumBytes {
@@ -382,7 +391,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     }
 
     private func pruneAvatarThumbnails() {
-        let visible = detailAvatarURLs.union(state.board?.avatarThumbnailURLs ?? [])
+        if let reviewers = reviewerAvatars, state.board.map(reviewers.request.matches) != true { reviewerAvatars = nil }
+        let visible = detailAvatarURLs.union(state.board?.avatarThumbnailURLs ?? []).union(reviewerAvatars?.urls ?? [])
         avatarThumbnails = avatarThumbnails.filter { visible.contains($0.key) }
     }
     func refreshContent(fromGitLab: Bool = false) async {
@@ -576,7 +586,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         defer {
             if reviewerSearch == request { reviewerSearch = nil; reviewerResults = nil }
         }
-        try await connection.send(.init(type: .reviewerSearch, reviewerSearch: request))
+        try await connection.send(.init(type: .reviewerSearch, cachedAvatarURLs: Array(avatarThumbnails.keys.prefix(64)),
+            reviewerSearch: request))
         let deadline = ContinuousClock.now + .seconds(18)
         while ContinuousClock.now < deadline, revision == connectionRevision, reviewerSearch == request {
             try Task.checkCancellation()
@@ -589,8 +600,15 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         throw RemoteProtocolError.invalid
     }
 
-    func changeReviewer(_ change: ReviewerChange, card: RemoteCard, action: RemoteAction) async -> RemoteCommandResult.Status {
-        guard let argument = change.argument else { return .failed }
+    func changeReviewers(_ changes: [ReviewerChange], card: RemoteCard, action: RemoteAction) async -> RemoteCommandResult.Status {
+        let argument: String?
+        if changes.count == 1 {
+            argument = changes.first?.argument
+        } else {
+            guard supportsReviewerBatches else { return .changed }
+            argument = ReviewerChange.Batch(changes)?.argument
+        }
+        guard let argument else { return .failed }
         guard let result = await submitCommand(card: card, action: action, argument: argument) else { return .changed }
         if result.status != .uncertain, state.result?.id == result.id { state.acknowledgeResult() }
         return result.status

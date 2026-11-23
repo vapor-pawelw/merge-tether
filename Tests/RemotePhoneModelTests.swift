@@ -74,6 +74,37 @@ import MergeTetherRemote
         #expect(fixture.transports[0].sent.first?.capabilities?.contains(RemoteMessage.boardAvatarsCapability) == true)
     }
 
+    @Test func reviewerAvatarsAreAcceptedOnlyForTheMatchingSearchAndCandidate() async throws {
+        let f = try PhoneFixture(), model = f.model
+        let avatar = try #require(URL(string: "https://gitlab.example.org/reviewer.png"))
+        let unrelated = try #require(URL(string: "https://gitlab.example.org/unrelated.png"))
+        let action = RemoteAction(id: "editReviewers", kind: .editReviewers, token: "edit")
+        var board = f.board
+        board.lanes[0].cards[0].actions = [action]
+        model.connect()
+        await model.refresh()
+        await f.reply(board: board, capabilities: [RemoteMessage.reviewerBatchCapability])
+        let transport = f.transports[0]
+        let candidate = ReviewerCandidate(id: 7, name: "Alice", username: "alice", avatarURL: avatar)
+        transport.onReviewerSearch = { [weak transport] request in
+            await transport?.onMessage?(.init(type: .reviewerResults,
+                reviewerResults: .init(id: request.id, candidates: [candidate])))
+        }
+        let results = try await model.searchReviewers(card: board.cards[0], action: action, query: "")
+        #expect(results == [candidate])
+        #expect(model.supportsReviewerBatches)
+
+        let request = try #require(transport.sent.last?.reviewerSearch)
+        let jpeg = Data([1, 2, 3])
+        let images: [RemoteAvatarThumbnail] = [.init(url: avatar, jpeg: jpeg), .init(url: unrelated, jpeg: jpeg)]
+        await transport.onMessage?(.init(type: .avatarThumbnails, challenge: UUID(), avatarThumbnails: images))
+        #expect(model.avatarThumbnails.isEmpty)
+        await transport.onMessage?(.init(type: .avatarThumbnails, challenge: request.id, avatarThumbnails: images))
+        #expect(model.avatarThumbnails == [avatar: jpeg])
+        model.disconnect()
+        #expect(model.avatarThumbnails.isEmpty)
+    }
+
     @Test func phoneKeepsOnlyBoundedThumbnailsForTheAcceptedBoard() async throws {
         let f = try PhoneFixture(), model = f.model
         let author = try #require(URL(string: "https://gitlab.example.org/author"))
@@ -913,6 +944,7 @@ import MergeTetherRemote
     var sent: [RemoteMessage] = []
     var stopped = false
     var onCommand: ((RemoteCommand) async -> Void)?
+    var onReviewerSearch: ((RemoteReviewerSearch) async -> Void)?
     var sendBarrier: CheckedContinuation<Void, any Error>?
     var suspendSend = false
     func start() {}
@@ -920,6 +952,7 @@ import MergeTetherRemote
     func send(_ message: RemoteMessage) async throws {
         sent.append(message)
         if let command = message.command { await onCommand?(command) }
+        if let search = message.reviewerSearch { await onReviewerSearch?(search) }
         if suspendSend { try await withCheckedThrowingContinuation { sendBarrier = $0 } }
     }
 }

@@ -65,6 +65,13 @@
         "pl": { "stringUnit": { "state": "translated", "value": "Nie udało się wyszukać reviewerów." } }
       }
     },
+    "board.reviewers.selectionLimit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "You can add up to %lld reviewers at a time." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Za jednym razem możesz dodać do %lld reviewerów." } }
+      }
+    },
     "board.reviewers.saveFailed": {
       "extractionState": "manual",
       "localizations": {

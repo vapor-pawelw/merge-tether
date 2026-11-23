@@ -103,11 +103,11 @@ struct BoardApprovalProgressBadge: View {
             .onChange(of: showingPeople) { _, visible in
                 if !visible {
                     hoverTask?.cancel(); peopleHovered = false; pinned = false
-                    reviewerEditor.isAdding = false
-                    reviewerEditor.error = nil
+                    reviewerEditor.finishAdding()
                 }
             }
-            .onDisappear { hoverTask?.cancel(); showingPeople = false }
+            .onDisappear { hoverTask?.cancel(); showingPeople = false; reviewerEditor.finishAdding() }
+            .modifier(ReviewerSaveErrorAlert(state: reviewerEditor, editorClosed: !showingPeople))
             .alert(Text(confirmationTitle), isPresented: Binding(
                 get: { pendingAction != nil }, set: { if !$0 { pendingAction = nil } }
             ), presenting: pendingAction) { action in
@@ -183,11 +183,13 @@ struct BoardApprovalProgressBadge: View {
                     }
                     if let reviewerEditing {
                         if reviewerEditor.isAdding {
-                            ReviewerPicker(editing: reviewerEditing, assigned: assignedReviewers, state: reviewerEditor)
+                            ReviewerPicker(editing: reviewerEditing, assigned: assignedReviewers, state: reviewerEditor) {
+                                showingPeople = false
+                            }
                         } else {
                             Button(.Board.boardReviewersAdd) {
                                 pinPeople()
-                                reviewerEditor.isAdding = true
+                                reviewerEditor.startAdding(using: reviewerEditing)
                             }
                             .disabled(reviewerEditor.isSaving)
                         }
@@ -306,8 +308,8 @@ struct BoardMRApprovalBadge: View {
         let revision = monitor.glab.accountRevision
         return .init(search: { query in
             try await monitor.searchReviewers(of: request, query: query, accountRevision: revision)
-        }, change: { change in
-            await monitor.changeReviewer(change, of: request, accountRevision: revision)
+        }, change: { changes in
+            await monitor.changeReviewers(changes, of: request, accountRevision: revision)
         })
     }
 

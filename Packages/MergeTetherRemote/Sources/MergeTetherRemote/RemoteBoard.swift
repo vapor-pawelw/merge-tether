@@ -344,6 +344,7 @@ public struct RemoteMessage: Codable, Sendable {
     public static let mrControlsCapability = "mr-controls-v1"
     public static let personalApprovalCapability = "personal-approval-v1"
     public static let reviewerEditingCapability = "reviewer-editing-v1"
+    public static let reviewerBatchCapability = "reviewer-batch-v1"
     public static let commentOriginCapability = "comment-origin-v1"
     public static let markReadyCapability = "mark-ready-v1"
     public static let draftRegenerationCapability = "draft-regeneration-v1"

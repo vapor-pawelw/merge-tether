@@ -105,7 +105,9 @@ struct RemoteApprovalProgressBadge: View {
                         }
                         if let reviewerEditing {
                             Divider()
-                            RemoteReviewerEditorControls(editing: reviewerEditing, people: details.people, state: reviewerEditor)
+                            RemoteReviewerEditorControls(editing: reviewerEditing, people: details.people, state: reviewerEditor) {
+                                showingPeople = false
+                            }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading).padding(16)
@@ -118,10 +120,11 @@ struct RemoteApprovalProgressBadge: View {
             .onChange(of: showingPeople) { _, visible in
                 if !visible {
                     reviewerEditor.isEditing = false
-                    reviewerEditor.isAdding = false
-                    reviewerEditor.error = nil
+                    reviewerEditor.finishAdding()
                 }
             }
+            .onDisappear { reviewerEditor.finishAdding() }
+            .modifier(ReviewerSaveErrorAlert(state: reviewerEditor, editorClosed: !showingPeople))
         }
     }
 
@@ -189,12 +192,13 @@ struct RemotePersonalApprovalControl: View {
 }
 
 extension RemoteCard {
+    @MainActor
     func reviewerEditing(model: RemotePhoneModel?) -> ReviewerEditing? {
         guard let model, let action = actions.first(where: { $0.kind == .editReviewers }) else { return nil }
-        return .init(search: { query in
+        return .init(supportsBatch: model.supportsReviewerBatches, search: { query in
             try await model.searchReviewers(card: self, action: action, query: query)
-        }, change: { change in
-            await model.changeReviewer(change, card: self, action: action)
+        }, change: { changes in
+            await model.changeReviewers(changes, card: self, action: action)
         })
     }
 
