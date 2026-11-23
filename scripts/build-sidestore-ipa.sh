@@ -27,6 +27,9 @@ case "${1:-}" in
   *) usage >&2; exit 2 ;;
 esac
 for tool in mise xcodebuildmcp python3 codesign xcrun; do
+  if [[ "$tool" == xcodebuildmcp ]]; then
+    command -v "$tool" >/dev/null || fail "missing xcodebuildmcp: install the XcodeBuildMCP CLI separately (mise.toml pins only Tuist)"
+  fi
   command -v "$tool" >/dev/null || fail "missing $tool"
 done
 

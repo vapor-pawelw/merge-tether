@@ -11,6 +11,20 @@ fail() {
 [[ -t 0 ]] || fail 'Run the relay setup in a terminal.'
 IFS= read -r -p 'Relay HTTPS URL: ' origin
 [[ "$origin" =~ [^[:space:]] ]] || fail 'Enter the relay HTTPS URL.'
+# Same rules as Project.swift, so a saved origin never breaks project generation.
+python3 - "$origin" <<'PY' || fail 'The relay URL must be an HTTPS origin without credentials, path, query or fragment.'
+import sys, urllib.parse
+raw = sys.argv[1].strip()
+try:
+    parts = urllib.parse.urlsplit(raw)
+    valid = (raw.isascii() and not any(c.isspace() or ord(c) < 32 for c in raw)
+             and not any(c in raw for c in '%\\?#') and parts.scheme.lower() == 'https'
+             and bool(parts.hostname) and parts.username is None and parts.password is None
+             and parts.path in ('', '/') and (parts.port is None or 1 <= parts.port <= 65535))
+except ValueError:
+    valid = False
+sys.exit(0 if valid else 1)
+PY
 terminal_state="$(stty -g)"
 trap 'stty "$terminal_state"' EXIT
 stty -echo

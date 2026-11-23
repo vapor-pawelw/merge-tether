@@ -30,6 +30,8 @@ Manual GitLab management requires authenticated `glab`. Agent automation additio
 The companion requires an operator-owned relay. Its origin-only build configuration
 must live outside source control; see [Bring your own relay](byo-relay.md).
 Run `./scripts/setup-relay.sh` once for your macOS user before generating the project.
+It accepts only an HTTPS origin without credentials, path, query or fragment (the
+same rules project generation enforces) and keeps the existing configuration otherwise.
 Run generation through `mise exec` to load the saved URL for both local app targets.
 For a per-checkout or distribution override, create an ignored
 `.mise.local.toml` in the checkout.
@@ -75,7 +77,8 @@ For a local installation paired with iOS, also keep a consistent certificate-bac
 
 ### Rebuild and relaunch macOS
 
-The local build scripts use the `xcodebuildmcp` CLI and the repository's pinned Tuist.
+The local build scripts use the `xcodebuildmcp` CLI (XcodeBuildMCP) and the repository's pinned Tuist.
+`mise.toml` pins only Tuist; install `xcodebuildmcp` separately and keep it on `PATH`.
 
 ```bash
 ./scripts/rebuild-and-relaunch.sh

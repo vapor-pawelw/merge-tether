@@ -82,3 +82,18 @@ class RelaySetupTests(unittest.TestCase):
                 self.assertNotIn(token, output)
                 self.assertEqual(self.build_origin.read_text(), ORIGIN + "\n")
                 self.assertEqual(self.pairing.read_text(), ORIGIN + "\n" + TOKEN + "\n")
+
+    def test_non_https_or_path_origin_keeps_existing_configuration(self):
+        status, output = self.run_setup()
+        self.assertEqual(status, 0, output)
+        for origin in ["http://relay.example.test", "https://relay.example.test/path",
+                       "https://user:secret@relay.example.test", "https://relay.example.test?query=1",
+                       "https://relay.example.test#fragment", "https://", "relay.example.test",
+                       "https://relay.example.test:99999"]:
+            with self.subTest(origin=origin):
+                status, output = self.run_setup(origin, TOKEN)
+                self.assertNotEqual(status, 0, output)
+                self.assertIn("HTTPS origin", output)
+                self.assertNotIn("Relay access token", output)
+                self.assertEqual(self.build_origin.read_text(), ORIGIN + "\n")
+                self.assertEqual(self.pairing.read_text(), ORIGIN + "\n" + TOKEN + "\n")
