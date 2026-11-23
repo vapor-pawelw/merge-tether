@@ -18,6 +18,11 @@ enum GlabError: Error, Equatable, Sendable {
         }
     }
 
+    var isNotFound: Bool {
+        guard case .nonZeroExit(_, let diagnostic) = self else { return false }
+        return Self.hasHTTPStatus(404, in: diagnostic)
+    }
+
     static func classify(exitCode: Int32, stderr: String) -> GlabError {
         let lower = stderr.lowercased()
         if lower.contains("dial tcp")
@@ -49,6 +54,7 @@ enum GlabError: Error, Equatable, Sendable {
         let reason: String? = switch status {
         case 401: "unauthorized"
         case 403: "forbidden"
+        case 404: "not found"
         case 408: "request timeout"
         case 429: "too many requests"
         case 500: "internal server error"

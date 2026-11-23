@@ -15,6 +15,11 @@ final class InboxTodoStore {
     private let settings: SettingsManager
     private(set) var allTodos: [Todo] = []
     var lastError: GlabError?
+    private var actionFailure: (revision: UInt64, error: GlabError)?
+    var lastActionError: GlabError? {
+        guard let actionFailure, actionFailure.revision == glab.accountRevision else { return nil }
+        return actionFailure.error
+    }
     private(set) var lastRefresh: Date?
     private(set) var isLoading = false
     private(set) var hasCompletedFirstFetch = false
@@ -80,6 +85,14 @@ final class InboxTodoStore {
         hasCompletedFirstFetch = true
     }
 
+    func reportActionFailure(_ error: GlabError) {
+        actionFailure = (glab.accountRevision, error)
+    }
+
+    func dismissActionFailure() {
+        actionFailure = nil
+    }
+
     func acknowledge(_ ids: Set<Int>) {
         allTodos.removeAll { ids.contains($0.id) }
         acknowledgedDuringFetch.formUnion(ids)
@@ -132,20 +145,19 @@ final class InboxTodoStore {
                 && self.glab.accountRevision == revision && (!automatically || self.settings.automaticPublicWritesAllowed)
         }
         optimisticallyDone.remove(todo.id)
-        guard self.host == host, glab.currentUsername == username else { return }
-        switch result {
-        case .success:
-            if isLoading { acknowledgedDuringFetch.insert(todo.id) }
-            allTodos.removeAll { $0.id == todo.id }
-            onAcknowledged?(todo.id)
-            settings.lastSeenTodoIDs.remove(todo.id)
-            if let host, let username {
-                settings.pendingTodoAcknowledgements.remove(.init(host: host, username: username, todo: todo.feedbackIdentity))
-            }
-            settings.save()
-        case .failure(let error):
-            lastError = error
+        guard self.host == host, glab.currentUsername == username, glab.accountRevision == revision else { return }
+        if case .failure(let error) = result, !error.isNotFound {
+            reportActionFailure(error)
             Log.monitor.error("Mark-as-done failed for \(todo.id, privacy: .public): \(String(describing: error), privacy: .private)")
+            return
         }
+        if isLoading { acknowledgedDuringFetch.insert(todo.id) }
+        allTodos.removeAll { $0.id == todo.id }
+        onAcknowledged?(todo.id)
+        settings.lastSeenTodoIDs.remove(todo.id)
+        if let host, let username {
+            settings.pendingTodoAcknowledgements.remove(.init(host: host, username: username, todo: todo.feedbackIdentity))
+        }
+        settings.save()
     }
 }

@@ -239,6 +239,20 @@ struct CommandCenterView: View {
             }
             .font(.caption).padding(10)
         }
+        if let error = monitor.lastInboxActionError {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).accessibilityHidden(true)
+                Text(.CommandCenter.commandCenterInboxActionFailed)
+                Text(GlabErrorPresentation(error: error, authStatus: monitor.glab.authStatus).title)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Button { monitor.dismissInboxActionFailure() } label: {
+                    Image(systemName: "xmark").accessibilityLabel(Text(.CommandCenter.commandCenterClose))
+                }
+                .buttonStyle(.borderless)
+            }
+            .font(.caption).padding(10)
+        }
         if monitor.settings.onboardingCompleted {
             AssistantCLIHealthBanner(monitor: monitor)
         }

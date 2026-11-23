@@ -54,7 +54,7 @@ import Testing
         #expect(defaults.data(forKey: "assistantHandoffs") == Data("unsupported job history".utf8))
     }
 
-    @Test func queuedWorkWaitsWhenPersistenceDegradesBeforeItsExecutionSlot() async throws {
+    @Test func queuedWorkReleasesTheMergeRequestWhenPersistenceDegrades() async throws {
         // given
         let (settings, name, defaults) = try fixture()
         defer { defaults.removePersistentDomain(forName: name) }
@@ -79,8 +79,9 @@ import Testing
 
         // then
         #expect(started == [first.id])
-        #expect(settings.assistantHandoffs[1].execution?.state == .queued)
-        coordinator.cancel(second.id)
+        #expect(settings.assistantHandoffs[1].execution?.state == .cancelled)
+        #expect(settings.assistantHandoffs[1].execution?.cancellationOrigin == .policy)
+        #expect(!coordinator.isWorking(on: second.key.work))
     }
 
     @Test func failureSavingTheRunningStateCannotLaunchTheExecutor() async throws {

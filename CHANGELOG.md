@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Turn off automatic approval by default. When enabled, require a passing pipeline at the reviewed commit and verify the target branch and base before applying the verdict.
+
+- Authenticate locally stored AI comment assessments, overrides and review evidence before they can authorize automatic GitLab actions.
+
+- Cancel queued agent jobs that lose permission to run so they release the merge request.
+
+- Open the official coding CLI installation instructions from setup.
+
+- Require full verification before release, including an iOS simulator build and production relay tests.
+
+- Pause automatic GitLab actions when an agent run changes GitLab outside its allowed actions or its audit cannot be completed.
+
+- Offer fixed reply styles for remote draft regeneration. Keep temporary iPhone interruptions connected and show the paired phone's connection status on the Mac.
+
+- Report GitLab action failures separately from inbox sync. Acknowledging an already absent to-do clears it locally.
+
 - Identify Mac board cards by title and repository in VoiceOver.
 
 - Keep to-do automation receipts when one GitLab refresh temporarily omits a pending item.

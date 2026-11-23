@@ -116,6 +116,10 @@ final class TodoMonitorService {
         get { todoStore.lastError }
         set { todoStore.lastError = newValue }
     }
+    var lastInboxActionError: GlabError? { todoStore.lastActionError }
+
+    func dismissInboxActionFailure() { todoStore.dismissActionFailure() }
+
     private(set) var failedAutomationTodoID: Int?
     var lastRefresh: Date? { todoStore.lastRefresh }
     var isLoading: Bool { todoStore.isLoading }
@@ -844,6 +848,7 @@ final class TodoMonitorService {
 
     func ignoreMergeRequestProposal(projectID: Int, iid: Int, url: URL) async {
         guard projectID > 0, iid > 0, let target = scopeTarget(projectID: projectID, iid: iid, url: url) else { return }
+        let accountRevision = glab.accountRevision
         do {
             async let user = glab.fetchAuthenticatedUser(host: target.host, expectedUsername: target.username)
             async let request = glab.fetchMergeRequest(projectID: projectID, iid: iid, host: target.host)
@@ -851,9 +856,10 @@ final class TodoMonitorService {
             guard glab.resolvedHost == target.host, glab.currentUsername == target.username,
                   currentRequest.projectID == projectID, currentRequest.iid == iid,
                   currentRequest.webURL.isGitLabMergeRequest(host: target.host, iid: iid),
-                  currentRequest.author.id != currentUser.id else { return }
+                  currentRequest.author.id != currentUser.id, glab.accountRevision == accountRevision else { return }
         } catch {
-            lastError = error as? GlabError ?? .unknown(String(describing: error))
+            guard !(error is CancellationError), glab.accountRevision == accountRevision else { return }
+            todoStore.reportActionFailure(error as? GlabError ?? .unknown(String(describing: error)))
             return
         }
         settings.ignoredMergeRequests.insert(target)
@@ -865,7 +871,8 @@ final class TodoMonitorService {
         }
         for todo in visibleTodos where todo.targetType == .mergeRequest && todo.project.id == projectID
             && todo.target.iid == iid && todo.targetURL.gitLabTodoMergeRequestURL(host: target.host, iid: iid) != nil {
-            guard glab.resolvedHost == target.host, glab.currentUsername == target.username else { return }
+            guard glab.resolvedHost == target.host, glab.currentUsername == target.username,
+                  glab.accountRevision == accountRevision else { return }
             await markDone(todo)
         }
     }
@@ -1407,6 +1414,7 @@ final class TodoMonitorService {
     func refreshAssistantRelay() {
         FollowUpVerificationStore.synchronizeRuns(settings: settings)
         refreshRuntimeAssistantAvailability()
+        AssistantAutomationRunner.resumePendingJobs()
     }
 
     /// The result of one retry request. Callers that report the outcome elsewhere (such as to a paired phone)
