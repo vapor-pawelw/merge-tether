@@ -9,6 +9,7 @@ struct MRCardMetadataLayout: Layout {
     var referenceToTitleSpacing: CGFloat = 10
     var titleToPeopleSpacing: CGFloat = 10
     var keepsBadgesUnderActions = false
+    var alignsActionsAtTop = false
 
     private let controlsClearance: CGFloat = 16
     private let badgeSpacing: CGFloat = 8
@@ -65,7 +66,7 @@ struct MRCardMetadataLayout: Layout {
         let referenceReserve = max(actionReserve, earlyBadgeReserve)
         let referenceProposal = proposedWidth(reserving: referenceReserve + (badgesInline ? badgeSpacing + badges.width : 0))
         let reference = subviews[referenceIndex].dimensions(in: referenceProposal)
-        let actionsTop = (reference.height - actions.height) / 2
+        let actionsTop = alignsActionsAtTop ? 0 : (reference.height - actions.height) / 2
         let actionsBottom = hasActions ? actionsTop + actions.height : 0
         let earlyBadgeTop = hasActions ? actionsBottom + 4 : 0
         let earlyBadgeBottom = earlyBadgeReserve > 0 ? earlyBadgeTop + badges.height : 0

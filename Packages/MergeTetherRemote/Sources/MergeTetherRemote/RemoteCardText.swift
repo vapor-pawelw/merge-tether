@@ -33,6 +33,11 @@ public extension RemoteCard {
         content.needsAttention = nil
         content.primaryCTA = nil
         content.orderGroup = nil
+        content.pinned = nil
+        content.automation = nil
+        content.canRemoveFromBoard = nil
+        content.canAcknowledgeFinished = nil
+        content.actions.removeAll { $0.kind == .editCard }
         return try? RemoteDigest.token(content)
     }
 

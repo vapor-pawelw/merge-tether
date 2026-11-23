@@ -4,6 +4,68 @@ import MergeTetherRemote
 @testable import MergeTether
 
 @MainActor @Suite struct RemoteHostDetailTests {
+    @Test func phonePinSurvivesAutomaticSortingAndRejectsAnOlderPinState() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        let settings = f.monitor.settings
+        settings.boardOrderingMethod = .automatic
+        let pin = try #require(BoardCardPin.mergeRequest(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2))
+        settings.boardPins.insert(pin)
+        settings.save()
+        let olderPhone = try await f.board()
+        #expect(olderPhone.cards.allSatisfy { $0.actions.allSatisfy { $0.id != "editCard" } })
+
+        let board = try await f.board(cardActions: true)
+        let card = try #require(board.cards.first { $0.id == "mr:1:2" })
+        let wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(card)) as? [String: Any])
+        #expect(card.orderGroup == nil)
+        #expect(wire["pinned"] as? Bool == true)
+        let action = try #require(card.actions.first { $0.id == "editCard" })
+
+        settings.boardPins.remove(pin)
+        settings.save()
+        let unpin = RemoteCommand(hostSession: board.hostSession, account: board.account, cardID: card.id,
+            actionID: action.id, token: action.token, argument: #"{"pin":{"_0":false}}"#)
+        await f.transport.onMessage?(.init(type: .command, command: unpin))
+        #expect(f.transport.messages.last?.result?.status == .changed)
+
+        let latest = try await f.board(cardActions: true)
+        let current = try #require(latest.cards.first { $0.id == card.id }?.actions.first { $0.id == "editCard" })
+        let repin = RemoteCommand(hostSession: latest.hostSession, account: latest.account, cardID: card.id,
+            actionID: current.id, token: current.token, argument: #"{"pin":{"_0":true}}"#)
+        await f.transport.onMessage?(.init(type: .command, command: repin))
+        #expect(f.transport.messages.last?.result?.status == .completed)
+        #expect(SettingsManager(defaults: f.defaults).boardPins.contains(pin))
+    }
+
+    @Test func phoneEditsTheDisplayedDraftPolicyAndKeepsRepositoryScopeSeparate() async throws {
+        let f = try Fixture(draft: true); defer { f.clean() }
+        let settings = f.monitor.settings
+        settings.automation.applyPreset(.safe, for: .codex)
+        settings.setAutomationGloballyEnabled(false)
+        settings.save()
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2)
+
+        let board = try await f.board(cardActions: true)
+        let card = try #require(board.cards.first { $0.id == "mr:1:2" })
+        let action = try #require(card.actions.first { $0.id == "editCard" })
+        let edit = RemoteCommand(hostSession: board.hostSession, account: board.account, cardID: card.id,
+            actionID: action.id, token: action.token, argument: #"{"automation":{"_0":"on"}}"#)
+        await f.transport.onMessage?(.init(type: .command, command: edit))
+        #expect(f.transport.messages.last?.result?.status == .completed)
+        #expect(settings.configuredAutomation.scope[target] == .forceOn)
+        #expect(settings.configuredAutomation.scope[target.repository] == .inherit)
+        #expect(!settings.automationGloballyEnabled)
+
+        let latest = try await f.board(cardActions: true)
+        let current = try #require(latest.cards.first { $0.id == card.id }?.actions.first { $0.id == "editCard" })
+        let change = RemoteCommand(hostSession: latest.hostSession, account: latest.account, cardID: card.id,
+            actionID: current.id, token: current.token, argument: #"{"repository":{"_0":"off"}}"#)
+        await f.transport.onMessage?(.init(type: .command, command: change))
+        #expect(f.transport.messages.last?.result?.status == .completed)
+        #expect(settings.configuredAutomation.scope[target] == .forceOn)
+        #expect(settings.configuredAutomation.scope[target.repository] == .paused)
+    }
+
     @Test func detailAvatarsComeFromDeliveredPeopleAndOnlyApprovedOrigins() async throws {
         let gitLab = try #require(URL(string: "https://gitlab.example.test/uploads/person.png"))
         let gravatar = try #require(URL(string: "https://secure.gravatar.com/avatar/hash"))
@@ -613,7 +675,7 @@ import MergeTetherRemote
             pair = try .generate(origin: #require(URL(string: "https://relay.example.test")), access: String(repeating: "a", count: 43))
         }
         func board(originUpdates: Bool = false, markReady: Bool = false, detailPreviews: Bool = false,
-                   detailAvatars: Bool = false) async throws -> RemoteBoard {
+                   detailAvatars: Bool = false, cardActions: Bool = false) async throws -> RemoteBoard {
             await host.startupLoadTask?.value
             if monitor.lastRefresh == nil { await monitor.refreshNow() }
             let capabilities = [RemoteMessage.detailsCapability]
@@ -621,6 +683,7 @@ import MergeTetherRemote
                 + (markReady ? [RemoteMessage.markReadyCapability] : [])
                 + (detailPreviews ? [RemoteMessage.detailPreviewCapability] : [])
                 + (detailAvatars ? [RemoteMessage.detailAvatarsCapability] : [])
+                + (cardActions ? ["card-actions-v1"] : [])
             await transport.onMessage?(.init(type: .hello, challenge: UUID(), capabilities: capabilities))
             // Both background dependency reads can change the card digest after the catalog is idle.
             let deadline = ContinuousClock.now + .seconds(3)

@@ -49,11 +49,13 @@ extension RemoteConnection: RemoteHostTransport {}
     private var phoneSupportsMarkReady = false
     private var phoneSupportsDraftRegeneration = false
     private var phoneSupportsBoardOrder = false
+    private var phoneSupportsCardActions = false
     private static let boardCapabilities = [
         RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability, RemoteMessage.detailOriginsCapability,
         RemoteMessage.mrControlsCapability, RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability,
         RemoteMessage.detailPreviewCapability, RemoteMessage.cachedDetailsCapability, RemoteMessage.draftRegenerationCapability,
-        RemoteMessage.boardOrderCapability, RemoteMessage.personalApprovalCapability, RemoteMessage.reviewerEditingCapability
+        RemoteMessage.boardOrderCapability, RemoteMessage.personalApprovalCapability, RemoteMessage.reviewerEditingCapability,
+        RemoteMessage.cardActionsCapability
     ]
     private let readAvatarThumbnail: @Sendable (URL) async -> Data?
     @ObservationIgnored private(set) var avatarTask: Task<Void, Never>?
@@ -297,6 +299,7 @@ extension RemoteConnection: RemoteHostTransport {}
             phoneSupportsMarkReady = message.capabilities?.contains(RemoteMessage.markReadyCapability) == true
             phoneSupportsDraftRegeneration = message.capabilities?.contains(RemoteMessage.draftRegenerationCapability) == true
             phoneSupportsBoardOrder = message.capabilities?.contains(RemoteMessage.boardOrderCapability) == true
+            phoneSupportsCardActions = message.capabilities?.contains(RemoteMessage.cardActionsCapability) == true
             phoneSupportsCommentOrigins = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.commentOriginCapability) == true
             phoneSupportsOriginUpdates = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.detailOriginsCapability) == true
             if !phoneSupportsOriginUpdates { clearOriginSubscription() }
@@ -358,7 +361,12 @@ extension RemoteConnection: RemoteHostTransport {}
         case .command:
             guard let command = message.command, let pairing else { return }
             // Seen acknowledges a local receipt. Draft regeneration and suggestion decisions validate their own context.
-            let fresh = if command.isCompletionAcknowledgement || command.isFeedbackSuggestionDecision || command.isDraftRegeneration { true } else {
+            let cardChange = command.isCardChange ? RemoteCardChange(argument: command.argument) : nil
+            let refreshesItself: Bool = switch cardChange {
+            case .pin, .refresh: true
+            default: false
+            }
+            let fresh = if command.isCompletionAcknowledgement || command.isFeedbackSuggestionDecision || command.isDraftRegeneration || refreshesItself { true } else {
                 await refreshSource(deadline: .now + .seconds(35))
             }
             var board = snapshot()
@@ -642,7 +650,13 @@ extension RemoteConnection: RemoteHostTransport {}
             regenerationPreview = nil
         }
         var board = RemoteBoardAdapter.board(monitor: monitor, session: hostSession, account: account,
-            includesBoardOrder: phoneSupportsBoardOrder)
+            includesBoardOrder: phoneSupportsBoardOrder, includesCardActions: phoneSupportsCardActions)
+        if phoneSupportsCardActions {
+            let preferred = monitor.settings.conversationDestination
+            let available = AssistantContextLauncher.availableDestinations()
+            let ordered = available.filter { $0 == preferred } + available.filter { $0 != preferred }
+            board.cardAssistants = ordered.compactMap { RemoteCardAssistant(rawValue: $0.rawValue) }
+        }
         if !board.partial {
             let items = monitor.boardSnapshot.own.map(\.item)
             for lane in board.lanes.indices {
@@ -661,7 +675,8 @@ extension RemoteConnection: RemoteHostTransport {}
         return board.forClient(supportsCommentReview: phoneSupportsCommentReview, supportsMergeActions: phoneSupportsMergeActions,
             supportsMRControls: phoneSupportsMRControls, supportsCommentOrigins: phoneSupportsCommentOrigins,
             supportsMarkReady: phoneSupportsMarkReady, supportsDraftRegeneration: phoneSupportsDraftRegeneration,
-            supportsPersonalApproval: phoneSupportsPersonalApproval, supportsReviewerEditing: phoneSupportsReviewerEditing)
+            supportsPersonalApproval: phoneSupportsPersonalApproval, supportsReviewerEditing: phoneSupportsReviewerEditing,
+            supportsCardActions: phoneSupportsCardActions)
     }
 
     private func applyBoardOrderMove(_ move: RemoteBoardOrderMove) -> Bool {
@@ -752,6 +767,12 @@ extension RemoteConnection: RemoteHostTransport {}
     }
 
     private func execute(_ card: RemoteCard, action: RemoteAction, argument: String? = nil) async -> RemoteCommandResult.Status {
+        if action.kind == .editCard {
+            guard phoneSupportsCardActions, let change = RemoteCardChange(argument: argument),
+                  let context = RemoteCardActionContext(card: card, board: monitor.boardSnapshot, monitor: monitor)
+            else { return .changed }
+            return await context.execute(change)
+        }
         if card.id == RemoteDraftRegenerationControl.cardID {
             return await executeDraftRegeneration(action, argument: argument)
         }

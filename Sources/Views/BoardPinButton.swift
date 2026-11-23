@@ -36,7 +36,6 @@ struct BoardPinButton: View {
 
     private func toggle() {
         guard let pin else { return }
-        if isPinned { settings.boardPins.remove(pin) } else { settings.boardPins.insert(pin) }
-        settings.save()
+        settings.setBoardPin(pin, pinned: !isPinned)
     }
 }

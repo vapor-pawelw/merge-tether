@@ -335,7 +335,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                            RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability, RemoteMessage.detailPreviewCapability,
                            RemoteMessage.draftRegenerationCapability, RemoteMessage.boardAvatarsCapability,
                            RemoteMessage.detailAvatarsCapability, RemoteMessage.boardOrderCapability,
-                           RemoteMessage.reviewerEditingCapability],
+                           RemoteMessage.reviewerEditingCapability, RemoteMessage.cardActionsCapability],
             refresh: fromGitLab, cachedAvatarURLs: Array((state.board?.avatarThumbnailURLs ?? [])
                 .filter { avatarThumbnails[$0] != nil }.prefix(64)))) }
         catch {
@@ -593,6 +593,14 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         guard let argument = change.argument else { return .failed }
         guard let result = await submitCommand(card: card, action: action, argument: argument) else { return .changed }
         if result.status != .uncertain, state.result?.id == result.id { state.acknowledgeResult() }
+        return result.status
+    }
+
+    func changeCard(_ change: RemoteCardChange, card: RemoteCard, inSheet: Bool = false) async -> RemoteCommandResult.Status {
+        guard let action = card.actions.first(where: { $0.kind == .editCard }),
+              let argument = change.argument,
+              let result = await submitCommand(card: card, action: action, argument: argument) else { return .changed }
+        if inSheet, result.status != .uncertain, state.result?.id == result.id { state.acknowledgeResult() }
         return result.status
     }
 

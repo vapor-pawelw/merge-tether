@@ -79,9 +79,10 @@ struct MRAutomationScopeEditor {
         }
     }
 
-    func choose(_ preference: MRAutomationPreference, for action: MRAutomaticAction) async {
-        guard canChoose(action) else { return }
-        await monitor.setAutomaticActionPreference(preference, for: action, target: target)
+    @discardableResult
+    func choose(_ preference: MRAutomationPreference, for action: MRAutomaticAction) async -> Bool {
+        guard canChoose(action) else { return false }
+        return await monitor.setAutomaticActionPreference(preference, for: action, target: target)
     }
 
     /// Cached, account-bound metadata only: rendering a menu or popover never starts a read.
@@ -107,22 +108,25 @@ struct MRAutomationScopeEditor {
         announceChange()
     }
 
-    func choose(_ choice: MRAutomationScope.Choice) async {
-        guard choice != summary.choice || (choice == .inherit && hasLegacyActionOverrides) else { return }
-        await apply(changing: target,
+    @discardableResult
+    func choose(_ choice: MRAutomationScope.Choice) async -> Bool {
+        guard choice != summary.choice || (choice == .inherit && hasLegacyActionOverrides) else { return true }
+        return await apply(changing: target,
             message: draftAutomationMessage(target: target, projectPath: projectPath, followsDefaults: choice == .inherit)) {
             $0.setManualChoice(choice, for: target)
         }
     }
 
-    func setRepositoryDefault(_ enabled: Bool) async {
-        await apply(changing: target.repository, message: repositoryConfirmationMessage) {
+    @discardableResult
+    func setRepositoryDefault(_ enabled: Bool) async -> Bool {
+        return await apply(changing: target.repository, message: repositoryConfirmationMessage) {
             $0.setEnabled(enabled, for: target.repository)
         }
     }
 
-    func followGeneralScope() async {
-        await apply(changing: target.repository, message: repositoryConfirmationMessage) {
+    @discardableResult
+    func followGeneralScope() async -> Bool {
+        return await apply(changing: target.repository, message: repositoryConfirmationMessage) {
             $0.setManualChoice(.inherit, for: target.repository)
         }
     }
@@ -144,12 +148,11 @@ struct MRAutomationScopeEditor {
         change(&proposed)
         if MRAutomationControl.requiresDraftConfirmation(from: current, to: proposed, changing: key,
                                                          target: target, isDraft: isDraft) {
-            guard await confirm(message) else { return false }
+            guard await confirm(message), settings.configuredAutomation.scope == current else { return false }
         }
         change(&settings.automation.scope)
         if let projectPath { settings.automation.scope.rememberRepository(projectPath, for: key) }
-        settings.save()
-        return true
+        return settings.save()
     }
 
     private func announceChange() {

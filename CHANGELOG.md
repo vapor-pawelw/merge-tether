@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Add an iPhone merge request card menu for copying or opening links, pinning, refreshing and other available actions. Show pinned cards even with automatic sorting, and edit merge request and repository automation from the card's lightning button.
+
 - Pin and unpin a merge request from the Mac board card's More or context menu. Both menus show the same actions and group agent actions separately. Pinned cards show an unpin button next to automation, and selecting the card opens Details.
 
 - Keep merge request messages beside the approvals and tags when they overlap vertically, and let messages below them use the full card width. Place bottom actions below both areas on Mac and iPhone.

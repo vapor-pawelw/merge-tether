@@ -750,18 +750,20 @@ final class TodoMonitorService {
 
     /// Removes a foreign MR locally, retaining GitLab assignments, drafts and history.
     /// A persisted pause prevents global discovery from adding it back on the next poll.
-    func removeReviewedMergeRequest(_ item: MergeRequestAttentionMonitor.Item) {
+    @discardableResult
+    func removeReviewedMergeRequest(_ item: MergeRequestAttentionMonitor.Item) -> Bool {
         guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
               let request = item.mergeRequest, request.author.username != target.username,
               request.projectID == target.projectID, request.iid == target.iid,
-              request.webURL == item.url else { return }
+              request.webURL == item.url else { return false }
         settings.ignoredMergeRequests.insert(target)
         settings.automation.scope[target] = .paused
-        settings.save()
+        let saved = settings.save()
         let work = AssistantAutomationRunner.MergeRequestWork(host: target.host, projectID: target.projectID, iid: item.id.iid)
         for job in assistantHandoffs where job.key.work == work && job.execution?.state.isActive == true {
             AssistantAutomationRunner.cancel(job.id, settings: settings)
         }
+        return saved
     }
 
     func ignoreMergeRequestProposal(projectID: Int, iid: Int, url: URL) async {
@@ -1259,12 +1261,14 @@ final class TodoMonitorService {
         return !settings.mrLifecycleLedger.isSuppressed(target)
     }
 
-    func acknowledgeFinishedMergeRequest(_ item: MergeRequestAttentionMonitor.Item) {
+    @discardableResult
+    func acknowledgeFinishedMergeRequest(_ item: MergeRequestAttentionMonitor.Item) -> Bool {
         guard canAcknowledgeFinishedMergeRequest(item),
-              let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) else { return }
+              let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) else { return false }
         settings.mrLifecycleLedger.acknowledgeFinished(target)
-        settings.save()
+        let saved = settings.save()
         boardAttentionPresenter.updateAttention(pendingUserAttention)
+        return saved
     }
 
     @discardableResult

@@ -3,6 +3,20 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct CardPresentationTests {
+    @Test func pinStateAndCommandsRequireThePhoneCapabilityWithoutChangingLegacyDetailRequests() throws {
+        let payload = Data(#"{"id":"mr:1:2","title":"MR","project":"g/p","detail":"","drafts":[],"pinned":true,"actions":[{"id":"editCard","kind":"editCard","token":"pin"}]}"#.utf8)
+        let card = try JSONDecoder().decode(RemoteCard.self, from: payload)
+        let board = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [.init(id: .own, cards: [card])])
+        let modern = try #require(board.forClient(supportsCommentReview: true, supportsCardActions: true).cards.first)
+        #expect(modern.pinned == true && modern.actions.map(\.kind) == [.editCard])
+        let legacy = try #require(board.forClient(supportsCommentReview: true).cards.first)
+        #expect(legacy.actions.isEmpty && legacy.pinned == nil)
+        #expect(modern.detailContextDigest == legacy.detailContextDigest)
+        let previousVersion = RemoteCard(id: card.id, title: card.title, project: card.project, url: nil)
+        let request = try RemoteDetailRequest(card: previousVersion, board: board)
+        #expect(request.matches(board.forClient(supportsCommentReview: true)))
+    }
+
     @Test func onlyPlainOverviewShortcutsDuplicateTheCardTap() {
         #expect(RemoteCardCTA(title: "Show details", destination: .overview).duplicatesCardTap)
         #expect(!RemoteCardCTA(title: "Run", destination: .overview, actionID: "run").duplicatesCardTap)
