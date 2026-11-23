@@ -121,6 +121,7 @@ struct MRBoardProjector {
         var retainedRequests: [GitLabMergeRequest] = []
         var completionIDs: [Item.ID: UUID] = [:]
         var ownCatalogIsAuthoritative = false
+        var reviewAssignments: [ReviewAssignmentLedger.Entry]?
         var trackedReviewedTargets: Set<MRAutomationScope.Target> = []
         var remainingFeedbackIDs: [Item.ID: Set<Int>] = [:]
         var feedbackLaunchFailures: [MRFeedbackLaunchCoordinator.Failure] = []
@@ -196,6 +197,13 @@ struct MRBoardProjector {
     }
     var catalogItems: [Item] {
         var rows = Dictionary((attentionSnapshot?.catalog ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for entry in input.reviewAssignments ?? [] {
+            let request = entry.request
+            let id = Item.ID(projectID: request.projectID, iid: request.iid)
+            if rows[id] == nil {
+                rows[id] = .init(id: id, title: request.title, url: request.webURL, mergeRequest: request)
+            }
+        }
         for request in input.retainedRequests {
             let id = Item.ID(projectID: request.projectID, iid: request.iid)
             guard let target = scopeTarget(projectID: id.projectID, iid: id.iid, url: request.webURL) else { continue }
@@ -217,10 +225,18 @@ struct MRBoardProjector {
     }
     var ownItems: [Item] { browser.own }
     var reviewedItems: [Item] {
-        browser.reviewed.filter { item in
-            scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url).map {
-                !input.ignoredTargets.contains($0) && input.trackedReviewedTargets.contains($0)
-            } == true
+        reviewedItems(in: browser)
+    }
+
+    private func reviewedItems(in browser: MergeRequestBrowserSnapshot) -> [Item] {
+        let assignments = input.reviewAssignments.map {
+            Set($0.map { Item.ID(projectID: $0.request.projectID, iid: $0.request.iid) })
+        }
+        return browser.reviewed.filter { item in
+            guard item.mergeRequest?.state == "opened",
+                  let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
+                  !input.ignoredTargets.contains(target) else { return false }
+            return assignments?.contains(item.id) ?? input.trackedReviewedTargets.contains(target)
         }
     }
 
@@ -299,6 +315,7 @@ struct MRBoardProjector {
         let project = intent.request.webURL.gitLabProjectPath
         switch intent.kind {
         case .review:
+            guard !configuration.requireReviewStartConfirmation else { return false }
             let rule = configuration.reviewRequested
             return rule.isEnabled && rule.runner == .assistant && rule.isConfigured && rule.includes(project: project)
         case .followUp:
@@ -378,11 +395,11 @@ struct MRBoardProjector {
 
     func board(humanAttention: UserAttentionSnapshot? = nil, preservedOrder: [Item.ID: Int] = [:]) -> MergeRequestBoardSnapshot {
         let browser = self.browser
-        let reviewed = browser.reviewed.filter { item in
-            scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url).map {
-                !input.ignoredTargets.contains($0) && input.trackedReviewedTargets.contains($0)
-            } == true
-        }
+        let reviewed = reviewedItems(in: browser)
+        let newAssignments = Dictionary((input.reviewAssignments ?? []).compactMap { entry -> (Item.ID, Date)? in
+            guard let date = entry.newSince else { return nil }
+            return (.init(projectID: entry.request.projectID, iid: entry.request.iid), date)
+        }, uniquingKeysWith: min)
         let attention = attentionItems
         let evidence = attentionSnapshot?.evidence ?? []
         let prepared = Dictionary((browser.own + reviewed).map { catalog in
@@ -404,7 +421,8 @@ struct MRBoardProjector {
             humanAttention: humanAttention, pinnedCards: input.pins, pipelineEvidence: input.pipelineEvidence,
             pipelineEvidenceCheckedAt: input.pipelineEvidenceCheckedAt, preservedOrder: preservedOrder,
             automation: input.automation, displayRequests: input.displayRequests, grouping: input.grouping,
-            completions: input.completions, currentRows: prepared, automaticMerges: automaticMerges)
+            completions: input.completions, currentRows: prepared, automaticMerges: automaticMerges,
+            assignmentsAreAuthoritative: input.reviewAssignments != nil, newReviewAssignments: newAssignments)
     }
 
     var pendingUserAttention: ConfirmedAttentionSnapshot.Input {

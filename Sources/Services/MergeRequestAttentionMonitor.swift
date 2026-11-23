@@ -853,6 +853,13 @@ final class MergeRequestAttentionMonitor {
             listed = (owned ?? []) + (assigned ?? [])
         }
         guard isCurrent(account), revision == glab.accountRevision else { return }
+        if let assigned, let settings {
+            let requests = assigned.filter { request in
+                request.author.id != user.id && request.reviewers?.contains { $0.id == user.id } != false
+            }
+            settings.reviewAssignments.observe(requests, host: host, username: user.username, at: observedAt)
+            settings.save()
+        }
         func target(for request: GitLabMergeRequest) -> MRAutomationScope.Target {
             .init(host: host, username: user.username, projectID: request.projectID, iid: request.iid)
         }

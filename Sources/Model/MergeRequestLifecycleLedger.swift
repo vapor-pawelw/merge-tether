@@ -168,3 +168,51 @@ struct MergeRequestLifecycleLedger: Codable, Sendable {
         request.state == "merged" || request.state == "closed"
     }
 }
+
+/// The last successful reviewer listing, including unread assignments for each account.
+struct ReviewAssignmentLedger: Codable, Sendable {
+    private struct Account: Codable, Hashable, Sendable {
+        let host: String
+        let username: String
+    }
+
+    private struct ID: Codable, Hashable, Sendable {
+        let projectID: Int
+        let iid: Int
+    }
+
+    struct Entry: Codable, Sendable {
+        let request: GitLabMergeRequest
+        var newSince: Date?
+    }
+
+    private var listings: [Account: [ID: Entry]] = [:]
+
+    func entries(host: String, username: String) -> [Entry]? {
+        listings[Account(host: host, username: username)].map { Array($0.values) }
+    }
+
+    mutating func observe(_ requests: [GitLabMergeRequest], host: String, username: String, at date: Date) {
+        let account = Account(host: host, username: username)
+        let previous = listings[account]
+        var next: [ID: Entry] = [:]
+        for request in requests where request.state == "opened" && request.projectID > 0 && request.iid > 0
+            && request.author.username != username && request.webURL.isGitLabMergeRequest(host: host, iid: request.iid) {
+            let id = ID(projectID: request.projectID, iid: request.iid)
+            guard next[id] == nil else { continue }
+            let newSince = previous != nil && previous?[id] == nil ? date : previous?[id]?.newSince
+            next[id] = .init(request: request, newSince: newSince)
+        }
+        listings[account] = next
+    }
+
+    @discardableResult
+    mutating func markSeen(_ target: MRAutomationScope.Target) -> Bool {
+        guard let iid = target.iid else { return false }
+        let account = Account(host: target.host, username: target.username)
+        let id = ID(projectID: target.projectID, iid: iid)
+        guard listings[account]?[id]?.newSince != nil else { return false }
+        listings[account]?[id]?.newSince = nil
+        return true
+    }
+}

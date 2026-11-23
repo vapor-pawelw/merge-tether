@@ -10,6 +10,27 @@ struct GeneralSettingsTab: View {
     var body: some View {
         Form {
             Section {
+                let hidden = monitor.hiddenReviewAssignments
+                if hidden.isEmpty {
+                    Text(.Settings.settingsHiddenReviewsEmpty).foregroundStyle(.secondary)
+                }
+                ForEach(hidden, id: \.webURL) { request in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(request.title)
+                            Text(verbatim: "\(request.webURL.gitLabProjectPath) !\(request.iid)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(.Settings.settingsHiddenReviewsRestore) {
+                            monitor.restoreReviewedMergeRequest(request)
+                        }
+                    }
+                }
+            } header: {
+                Text(.Settings.settingsHiddenReviewsTitle)
+            }
+            Section {
                 AutomationAssistantPicker(
                     assistant: Binding(
                         get: { monitor.settings.automation.selectedAssistant },

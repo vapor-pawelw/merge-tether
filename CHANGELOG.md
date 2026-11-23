@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
-- Import open GitLab merge requests assigned to you as a reviewer from Mac setup, including drafts and reviews with no pending GitLab to-do. Imported requests appear in Reviewing with your existing automation settings.
+- Show all open GitLab reviewer assignments in Reviewing, including drafts. Mark new assignments as seen when you interact with the card, hide and restore individual assignments, and optionally require confirmation before starting a review automatically.
 
 - Let Mac users finish setup without selecting a coding agent. Save the verified agent selection and close setup when users finish. Add the agent picker to General settings, offer setup from actions that require a CLI, and show how to resume agent work on the affected merge request. Restore Polish labels in setup and on the board.
 

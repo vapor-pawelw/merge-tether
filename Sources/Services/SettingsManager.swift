@@ -19,7 +19,7 @@ final class SettingsManager {
     var automaticWritesAllowed: Bool { automaticActionsAllowed && automation.hasAutomaticActionConsent }
     var automaticPublicWritesAllowed: Bool { automaticActionsAllowed && automation.hasAutomaticPublicActionConsent }
     private static let conveniencePersistenceKeys: Set<String> = [
-        "automationEvents", "boardPins", "boardManualOrder", "lastSeenTodoIDs"
+        "automationEvents", "boardPins", "boardManualOrder", "lastSeenTodoIDs", "reviewAssignments"
     ]
 
     func recordPersistenceFailure(_ key: String) { persistenceStore.recordFailure(key) }
@@ -119,6 +119,7 @@ final class SettingsManager {
     var boardGrouping: MRBoardGrouping = .withoutAutomation
     var effectiveBoardGrouping: MRBoardGrouping { boardGrouping.effective(for: configuredAutomation) }
     var mrLifecycleLedger = MergeRequestLifecycleLedger()
+    var reviewAssignments = ReviewAssignmentLedger()
 
     @discardableResult
     func saveBoardManualOrder(_ order: MRBoardManualOrder) -> Bool {
@@ -173,6 +174,7 @@ final class SettingsManager {
         promoteBoardAttention = defaults.bool(forKey: Key.promoteBoardAttention)
         boardManualOrder = store.load(Key.boardManualOrder, fallback: .init())
         mrLifecycleLedger = store.load(Key.mrLifecycleLedger, fallback: .init())
+        reviewAssignments = store.load(Key.reviewAssignments, fallback: .init())
         conflictReceipts = store.load(Key.conflictReceipts, fallback: [])
         reReviewReceipts = store.load(Key.reReviewReceipts, fallback: [:])
         reReviewDraftBaselines = store.load(Key.reReviewDraftBaselines, fallback: [:])
@@ -246,6 +248,7 @@ final class SettingsManager {
         persistenceStore.save(boardPins, forKey: Key.boardPins)
         persistenceStore.save(boardManualOrder, forKey: Key.boardManualOrder)
         persistenceStore.save(mrLifecycleLedger, forKey: Key.mrLifecycleLedger)
+        persistenceStore.save(reviewAssignments, forKey: Key.reviewAssignments)
         defaults.removeObject(forKey: Key.autoRemoveFinishedMRs)
         defaults.removeObject(forKey: Key.showMergedMRCompletions)
         defaults.removeObject(forKey: Key.showClosedMRCompletions)
@@ -329,18 +332,6 @@ final class SettingsManager {
         let saved = persistenceStore.save(reviewParticipationPreferences, forKey: Key.reviewParticipationPreferences)
         let synchronized = persistenceStore.synchronize()
         return saved && synchronized
-    }
-
-    func saveMergeRequestLifecycleLedger(_ ledger: MergeRequestLifecycleLedger) -> Bool {
-        persistenceStore.preserveCorruptValues()
-        guard persistenceStore.save(ledger, forKey: Key.mrLifecycleLedger) else { return false }
-        guard persistenceStore.synchronize() else {
-            persistenceStore.save(mrLifecycleLedger, forKey: Key.mrLifecycleLedger)
-            persistenceStore.synchronize()
-            return false
-        }
-        mrLifecycleLedger = ledger
-        return true
     }
 
     func removeReviewParticipationExclusion(_ id: UUID) -> Bool {
@@ -469,6 +460,7 @@ final class SettingsManager {
         static let promoteBoardAttention = "promoteBoardAttention"
         static let boardManualOrder = "boardManualOrder"
         static let mrLifecycleLedger = "mrLifecycleLedger"
+        static let reviewAssignments = "reviewAssignments"
         static let autoRemoveFinishedMRs = "autoRemoveFinishedMRs"
         static let showMergedMRCompletions = "showMergedMRCompletions"
         static let showClosedMRCompletions = "showClosedMRCompletions"

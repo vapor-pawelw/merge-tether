@@ -13,6 +13,8 @@ struct MergeRequestBoardSnapshot {
         var evidenceMatchesCatalogContext = true
         var isEligibleForAutomaticMerge = false
         var manualOrderEntry: MRBoardManualOrder.Entry? = nil
+        var newReviewAssignedAt: Date? = nil
+        var waitsForReviewStart: Bool = false
         var displayRequest: GitLabMergeRequest? { catalog?.facts.request ?? item.mergeRequest }
         var displayTitle: String { catalog?.facts.title ?? item.title }
         var displayURL: URL { catalog?.facts.url ?? item.url }
@@ -128,8 +130,11 @@ struct MergeRequestBoardSnapshot {
          grouping: MRBoardGrouping = .withoutAutomation,
          completions: [MergeRequestLifecycleLedger.CompletionReceipt] = [],
          currentRows: [MergeRequestAttentionMonitor.Item.ID: MRCurrentRowProjection] = [:],
-         automaticMerges: Set<MergeRequestAttentionMonitor.Item.ID> = []) {
-        reviewedMembership = Set(reviewed.map { .init(id: $0.id, url: $0.url) })
+         automaticMerges: Set<MergeRequestAttentionMonitor.Item.ID> = [],
+         assignmentsAreAuthoritative: Bool = false,
+         newReviewAssignments: [MergeRequestAttentionMonitor.Item.ID: Date] = [:]) {
+        let listedReviewMembership = Set(reviewed.map { ReviewedMembership(id: $0.id, url: $0.url) })
+        reviewedMembership = listedReviewMembership
         self.ignoredTargets = ignoredTargets
         self.automation = automation
         self.grouping = grouping
@@ -181,11 +186,22 @@ struct MergeRequestBoardSnapshot {
             }.sorted { $0.updatedAt > $1.updatedAt }
             let actionKey = "\(host ?? "")/\(username ?? "")/mr/\(item.id.projectID)/\(item.id.iid)"
             item.humanActionRequired = humanAttention.map { $0.items.contains { $0.id == actionKey } }
+            let target = host.flatMap { host in username.map {
+                MRAutomationScope.Target(host: host, username: $0, projectID: item.id.projectID, iid: item.id.iid)
+            } }
+            let waiting = automation.map { configuration in
+                listedReviewMembership.contains(.init(id: item.id, url: item.url))
+                    && latest == nil && item.drafts.isEmpty && item.draftCount == 0
+                    && item.reviewingProgress != .current
+                    && (item.reviewingActivity?.publishedCommentCount ?? 0) == 0
+                    && target.map { configuration.waitsForReviewStart(on: projection.catalog.facts.request, target: $0) } == true
+            } ?? false
             return Row(item: item, latestJob: latest, intents: currentIntents,
                 pipelineEvidence: pipelineEvidence.first { $0.projectID == item.id.projectID && $0.iid == item.id.iid },
                 pipelineEvidenceCheckedAt: pipelineEvidenceCheckedAt, catalog: projection.catalog,
                 evidenceMatchesCatalogContext: projection.evidenceMatchesCatalogContext,
-                isEligibleForAutomaticMerge: automaticMerges.contains(item.id))
+                isEligibleForAutomaticMerge: automaticMerges.contains(item.id),
+                newReviewAssignedAt: newReviewAssignments[item.id], waitsForReviewStart: waiting)
         }
         let originalListed = own + reviewed
         let orphanIntents = accountIntents.filter { intent in
@@ -200,7 +216,7 @@ struct MergeRequestBoardSnapshot {
                 url: request.webURL, mergeRequest: request, isAuthored: request.author.username == username))
         }
         let ownRows = own + orphanRows.filter(\.isAuthored)
-        let reviewedRows = reviewed + orphanRows.filter { !$0.isAuthored }
+        let reviewedRows = assignmentsAreAuthoritative ? reviewed : reviewed + orphanRows.filter { !$0.isAuthored }
         self.own = Self.ordered(ownRows.map(row), host: host, username: username, pinnedCards: pinnedCards, preservedOrder: preservedOrder, automation: automation, grouping: grouping)
         self.reviewed = Self.ordered(reviewedRows.map(row), draftsLast: true, host: host, username: username, pinnedCards: pinnedCards, preservedOrder: preservedOrder, automation: automation, grouping: grouping)
         let listed = ownRows + reviewedRows

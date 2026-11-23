@@ -22,6 +22,7 @@ private struct BoardHeaderControlHover: ViewModifier {
 }
 
 struct BoardActionsMenu<Content: View>: View {
+    var onClick: () -> Void = {}
     @ViewBuilder var content: () -> Content
 
     var body: some View {
@@ -29,6 +30,7 @@ struct BoardActionsMenu<Content: View>: View {
             BoardCardActionIcon(systemName: "ellipsis")
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .simultaneousGesture(TapGesture().onEnded { onClick() })
         .boardHeaderControlHover()
         .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
         .help(Text(.CommandCenter.commandCenterActions))

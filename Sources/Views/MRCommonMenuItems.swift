@@ -59,6 +59,7 @@ struct CopyMergeRequestLinkButton: View {
 
     let url: URL
     var placement: Placement = .menu
+    var onClick: () -> Void = {}
     @State private var feedback = MergeRequestLinkCopyFeedback()
 
     var body: some View {
@@ -100,6 +101,7 @@ struct CopyMergeRequestLinkButton: View {
     }
 
     private func copy() {
+        onClick()
         feedback.copy(url, to: .general)
         if feedback.confirmationID != nil {
             AccessibilityNotification.Announcement(String(localized: .CommandCenter.commandCenterLinkCopied)).post()

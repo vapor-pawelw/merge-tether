@@ -302,6 +302,8 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     private var assistantDefaultsVersion = 1
     private var projectPermissionsVersion = 1
 
+    var requireReviewStartConfirmation = false
+
     var reviewRequested = AutomationRule(promptTemplate: """
         Review the GitLab merge request at {url} using the installed MR skill and repository instructions.
         Verify findings against the current head and save warranted comments as private GitLab drafts via glab.
@@ -366,6 +368,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         workflowRules = try values.decodeIfPresent(MergeWorkflowRules.self, forKey: .workflowRules) ?? MergeWorkflowRules()
         scope = try values.decodeIfPresent(MRAutomationScope.self, forKey: .scope) ?? MRAutomationScope()
         reviewRequested = try values.decodeIfPresent(AutomationRule.self, forKey: .reviewRequested) ?? reviewRequested
+        requireReviewStartConfirmation = try values.decodeIfPresent(Bool.self, forKey: .requireReviewStartConfirmation) ?? false
         if var storedFeedback = try values.decodeIfPresent(AutomationRule.self, forKey: .authorFeedback) {
             if storedFeedback.promptTemplate == Self.previousFeedbackPrompt {
                 storedFeedback.promptTemplate = authorFeedback.promptTemplate
@@ -433,6 +436,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         try values.encodeIfPresent(autoMergeEnabled, forKey: .autoMergeEnabled)
         try values.encodeIfPresent(conflictTasksEnabled, forKey: .conflictTasksEnabled)
         try values.encodeIfPresent(reviewRequested, forKey: .reviewRequested)
+        try values.encode(requireReviewStartConfirmation, forKey: .requireReviewStartConfirmation)
         try values.encodeIfPresent(authorFeedback, forKey: .authorFeedback)
         try values.encodeIfPresent(allowAssistantTools, forKey: .allowAssistantTools)
         try values.encodeIfPresent(assistantToolProjects, forKey: .assistantToolProjects)
@@ -472,6 +476,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case assistant, assistantSelectionCleared, assistantWorkspace, autoMergeEnabled, conflictTasksEnabled, reviewRequested, authorFeedback
+        case requireReviewStartConfirmation
         case allowAssistantTools, assistantToolProjects, packageDecision, workflowRules, allowAutomaticPublicActions
         case autoApprovalThreshold
         case autoMergeProjects, allowConflictPush, allowFollowUpPush, conflictPushProjects, autoReReviewEnabled, publishDraftsWithoutConfirmation, publishAIRepliesWithoutConfirmation, autoApproveEnabled, autoResolveOwnReviewThreads
@@ -487,6 +492,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
 
     mutating func applyPreset(_ preset: AutomationPreset, for assistant: AutomationAssistant?) {
         selectedAssistant = assistant
+        requireReviewStartConfirmation = false
         if preset == .manual {
             let firstChoice = packageDecision == .undecided
             disableAssistantPackage()
@@ -620,6 +626,13 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         autoResolveOwnReviewThreads = false
         allowAssistantTools = false
         allowConflictPush = false
+    }
+
+    func waitsForReviewStart(on request: GitLabMergeRequest?, target: MRAutomationScope.Target) -> Bool {
+        guard requireReviewStartConfirmation, hasAutomaticActionConsent, let request,
+              reviewRequested.isEnabled, reviewRequested.runner == .assistant, reviewRequested.isConfigured,
+              reviewRequested.includes(project: request.webURL.gitLabProjectPath) else { return false }
+        return scope.permits(request, host: target.host, username: target.username)
     }
 
     var usesAssistant: Bool {

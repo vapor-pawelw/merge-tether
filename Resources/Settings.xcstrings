@@ -1,6 +1,74 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "settings.requireReviewStartConfirmation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Require confirmation to start a review"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wymagaj potwierdzenia startu recenzji"
+          }
+        }
+      }
+    },
+    "settings.hiddenReviews.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hidden merge requests"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ukryte MR-y"
+          }
+        }
+      }
+    },
+    "settings.hiddenReviews.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No hidden review assignments."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Brak ukrytych MR-ów do przeglądu."
+          }
+        }
+      }
+    },
+    "settings.hiddenReviews.restore": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przywróć"
+          }
+        }
+      }
+    },
     "settings.assistant.resumeAction": {
       "extractionState": "manual",
       "localizations": {
