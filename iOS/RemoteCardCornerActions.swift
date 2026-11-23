@@ -324,7 +324,7 @@ private struct RemoteCardAssistantPanel: View {
             Form {
                 Section {
                     Button {
-                        UIPasteboard.general.string = AssistantLaunchContext(url: url, title: card.title).prompt
+                        UIPasteboard.general.string = url.absoluteString
                         copied = true
                     } label: {
                         Label(copied ? .RemoteCardActions.remoteCardActionsContextCopied : .AssistantContext.assistantContextCopy,

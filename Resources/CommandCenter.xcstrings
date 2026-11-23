@@ -28,7 +28,8 @@
             "state": "translated",
             "value": "MergeTether"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "MergeTether"}}
       }
     },
     "commandCenter.automationActivity": {
@@ -67,7 +68,8 @@
             "state": "translated",
             "value": "Overview"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przegląd"}}
       }
     },
     "commandCenter.feedback": {
@@ -78,7 +80,8 @@
             "state": "translated",
             "value": "Review feedback"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przejrzyj uwagi"}}
       }
     },
     "commandCenter.source": {
@@ -89,7 +92,8 @@
             "state": "translated",
             "value": "Source branch"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Gałąź źródłowa"}}
       }
     },
     "commandCenter.target": {
@@ -100,7 +104,8 @@
             "state": "translated",
             "value": "Target branch"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Gałąź docelowa"}}
       }
     },
     "commandCenter.author": {
@@ -111,7 +116,8 @@
             "state": "translated",
             "value": "Author"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Autor"}}
       }
     },
     "commandCenter.commit": {
@@ -122,7 +128,8 @@
             "state": "translated",
             "value": "Current commit"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Bieżący commit"}}
       }
     },
     "commandCenter.pipeline": {
@@ -133,7 +140,8 @@
             "state": "translated",
             "value": "Pipeline"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pipeline"}}
       }
     },
     "commandCenter.openGitLab": {
@@ -144,7 +152,8 @@
             "state": "translated",
             "value": "Open in GitLab"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz w GitLabie"}}
       }
     },
     "commandCenter.add": {
@@ -155,7 +164,8 @@
             "state": "translated",
             "value": "Add merge request"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dodaj merge request"}}
       }
     },
     "commandCenter.add.description": {
@@ -166,7 +176,8 @@
             "state": "translated",
             "value": "Paste an open GitLab MR link, or enter its number and choose a repository. Adding it enables automation for this MR under your current rules."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wklej link do otwartego MR w GitLabie lub wpisz jego numer i wybierz repozytorium. Dodanie włącza automatyzację tego MR zgodnie z bieżącymi regułami."}}
       }
     },
     "commandCenter.account.unavailable": {
@@ -177,7 +188,8 @@
             "state": "translated",
             "value": "GitLab account unavailable"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Konto GitLaba niedostępne"}}
       }
     },
     "commandCenter.refresh": {
@@ -188,7 +200,8 @@
             "state": "translated",
             "value": "Refresh"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Odśwież"}}
       }
     },
     "commandCenter.settings": {
@@ -199,7 +212,8 @@
             "state": "translated",
             "value": "Settings…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ustawienia…"}}
       }
     },
     "commandCenter.actions": {
@@ -210,7 +224,8 @@
             "state": "translated",
             "value": "Actions"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Działania"}}
       }
     },
     "commandCenter.status.attention": {
@@ -221,7 +236,8 @@
             "state": "translated",
             "value": "Needs attention"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wymaga uwagi"}}
       }
     },
     "commandCenter.status.monitoring": {
@@ -232,7 +248,8 @@
             "state": "translated",
             "value": "Monitoring"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Monitorowanie"}}
       }
     },
     "commandCenter.status.draft": {
@@ -243,7 +260,8 @@
             "state": "translated",
             "value": "Draft"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Szkic"}}
       }
     },
     "commandCenter.noPipeline": {
@@ -254,7 +272,8 @@
             "state": "translated",
             "value": "No pipeline reported"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie zgłoszono pipeline’u"}}
       }
     },
     "commandCenter.mergeState": {
@@ -265,7 +284,8 @@
             "state": "translated",
             "value": "Merge check"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kontrola scalania"}}
       }
     },
     "commandCenter.status.unavailable": {
@@ -276,7 +296,8 @@
             "state": "translated",
             "value": "Not reported"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak danych"}}
       }
     },
     "commandCenter.review.run": {
@@ -287,7 +308,8 @@
             "state": "translated",
             "value": "Run review"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchom przegląd"}}
       }
     },
     "commandCenter.review.starting": {
@@ -298,7 +320,8 @@
             "state": "translated",
             "value": "Starting review…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchamianie przeglądu…"}}
       }
     },
     "commandCenter.close": {
@@ -309,7 +332,8 @@
             "state": "translated",
             "value": "Close"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zamknij"}}
       }
     },
     "commandCenter.confirmations": {
@@ -320,7 +344,8 @@
             "state": "translated",
             "value": "Review and confirm"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przejrzyj i potwierdź"}}
       }
     },
     "commandCenter.nextStep": {
@@ -331,7 +356,8 @@
             "state": "translated",
             "value": "Next step"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Następny krok"}}
       }
     },
     "commandCenter.noPendingDecision": {
@@ -342,7 +368,8 @@
             "state": "translated",
             "value": "There is no pending decision for this MR."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ten MR nie wymaga teraz decyzji."}}
       }
     },
     "commandCenter.feedbackCheck": {
@@ -353,7 +380,8 @@
             "state": "translated",
             "value": "Feedback verification"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Weryfikacja uwag"}}
       }
     },
     "commandCenter.details": {
@@ -364,7 +392,8 @@
             "state": "translated",
             "value": "Details"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Szczegóły"}}
       }
     },
     "commandCenter.showAll": {
@@ -375,7 +404,8 @@
             "state": "translated",
             "value": "Show all"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pokaż wszystko"}}
       }
     },
     "commandCenter.showLess": {
@@ -386,7 +416,8 @@
             "state": "translated",
             "value": "Show less"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pokaż mniej"}}
       }
     },
     "commandCenter.automation.toggle": {

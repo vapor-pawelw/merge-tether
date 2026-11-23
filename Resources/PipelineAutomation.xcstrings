@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Handling CI"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Obsługa CI"}}
       }
     },
     "pipeline.refresh.alreadyAttempted": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "A current-target pipeline was already requested for this source and target. Inspect GitLab before retrying an uncertain request."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zlecono już pipeline dla bieżącej gałęzi źródłowej i docelowej. Sprawdź GitLaba przed ponowieniem niepotwierdzonego żądania."}}
       }
     },
     "pipeline.refresh.ownershipReserved": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "Another task already owns this MR’s pipeline work."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Obsługą pipeline’u tego MR zajmuje się już inne zadanie."}}
       }
     },
     "pipeline.refresh.unconfirmedResponse": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "The pipeline request was sent, but its current source and target could not be confirmed. Inspect GitLab before retrying."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wysłano żądanie pipeline’u, ale nie udało się potwierdzić jego bieżącej gałęzi źródłowej i docelowej. Sprawdź GitLaba przed ponowieniem."}}
       }
     },
     "pipeline.refresh.persistenceUnavailable": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "The pipeline request was not sent because its durable attempt record could not be saved."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Żądanie pipeline’u nie zostało wysłane, ponieważ nie udało się trwale zapisać próby."}}
       }
     },
     "pipeline.claimAssessment.context": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "Fresh assessment: reconcile the current failed pipeline after a claim without a recorded worker."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponowna ocena bieżącego nieudanego pipeline’u po rezerwacji bez odnotowanego zadania agenta."}}
       }
     },
     "pipeline.claimAssessment.persistenceUnavailable": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "The fresh pipeline assessment was not started because its durable attempt record could not be saved."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nowa ocena pipeline’u nie została uruchomiona, ponieważ nie udało się trwale zapisać próby."}}
       }
     },
     "pipeline.reservation.owner": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "Pipeline work is reserved by installation %@, process %@, run %@. Unknown or interrupted work is preserved; only a known terminal run with a confirmed dead owner can be recovered."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Naprawę pipeline’u zarezerwowała instalacja %@, proces %@, zadanie %@. Nieznane lub przerwane zadania są zachowywane. Rezerwację można odzyskać tylko dla znanego, zakończonego zadania, którego proces na pewno już nie działa."}}
       }
     },
     "pipeline.reservation.unknownOwner": {
@@ -97,7 +105,8 @@
             "state": "translated",
             "value": "Pipeline work has an external, legacy or unrecognized reservation. Its owner cannot be proven; it is preserved for manual inspection."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Obsługa pipeline’u ma zewnętrzną, starszą lub nierozpoznaną rezerwację. Jej właściciel jest niepotwierdzony, więc rezerwacja pozostaje do ręcznego sprawdzenia."}}
       }
     }
   },

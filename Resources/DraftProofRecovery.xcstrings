@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Draft verification was interrupted. Verify these drafts again to obtain current proof."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Weryfikacja szkiców została przerwana. Sprawdź szkice ponownie, aby uzyskać aktualne potwierdzenie."}}
       }
     },
     "draftProofRecoveryUnavailable": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "The configured coding agent is unavailable. Complete agent setup, then verify the drafts again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Skonfigurowany asystent jest niedostępny. Dokończ konfigurację agenta i ponownie zweryfikuj szkice."}}
       }
     },
     "draftProofRecoveryChanged": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "The account, merge request or discussion changed during draft verification. Refresh and verify the current drafts again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Konto, merge request lub dyskusja zmieniły się podczas weryfikacji szkiców. Odśwież dane i sprawdź bieżące szkice ponownie."}}
       }
     },
     "draftProofRecoverySourceChanged": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "The remote source or test files differ from the recorded evidence. Review the changes before verifying the drafts again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pliki źródłowe lub testy w repozytorium różnią się od tych zapisanych w danych z weryfikacji. Przejrzyj zmiany przed ponownym sprawdzeniem szkiców."}}
       }
     },
     "draftProofRecoveryFailed": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "Draft verification could not establish current proof. Check the agent and GitLab connection, then verify the drafts again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Weryfikacja szkiców nie dała aktualnego potwierdzenia. Sprawdź asystenta i połączenie z GitLabem, a następnie sprawdź szkice ponownie."}}
       }
     },
     "draftProofRecoveryChecking": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "Verifying draft replies…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Weryfikowanie szkiców odpowiedzi…"}}
       }
     },
     "draftProofRecoveryCompleted": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "Verified the current source, tests and existing draft claims."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zweryfikowano bieżące źródła, testy i treść istniejących szkiców."}}
       }
     },
     "draftProofRecoveryRetryRequested": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "Requested another verification of the existing draft replies."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zlecono ponowną weryfikację istniejących szkiców odpowiedzi."}}
       }
     },
     "draftReplyRepairUnconfirmed": {
@@ -97,7 +105,8 @@
             "state": "translated",
             "value": "The saved reply repair was interrupted before its execution could be confirmed. Inspect that attempt before retrying."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zapisaną poprawkę odpowiedzi przerwano przed potwierdzeniem jej wykonania. Przejrzyj tę próbę przed ponowieniem."}}
       }
     },
     "draftReplyRepairStopped": {
@@ -108,7 +117,8 @@
             "state": "translated",
             "value": "The coding agent could not finish repairing this reply. Inspect its recorded result."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Asystent nie ukończył poprawiania odpowiedzi. Sprawdź zapisany wynik."}}
       }
     },
     "draftReplyRepairExhausted": {
@@ -119,7 +129,8 @@
             "state": "translated",
             "value": "Two automatic repairs of this reply have been attempted. Inspect their results before another attempt."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Podjęto już dwie automatyczne próby poprawienia odpowiedzi. Przejrzyj ich wyniki przed kolejną próbą."}}
       }
     }
   },

@@ -60,7 +60,8 @@
             "state": "translated",
             "value": "Pair with iPhone"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Połącz z iPhone’em"}}
       }
     },
     "remote.title": {
@@ -1703,7 +1704,8 @@
             "state": "translated",
             "value": "Confirm that you have addressed or explained the feedback and that the merge request is ready for another review."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Potwierdź, że uwzględniono lub wyjaśniono uwagi oraz że merge request jest gotowy do ponownego przeglądu."}}
       }
     },
     "remote.boardAutomationOn": {
@@ -1714,7 +1716,8 @@
             "state": "translated",
             "value": "Automation on"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja włączona"}}
       }
     },
     "remote.boardAutomationOff": {
@@ -1725,7 +1728,8 @@
             "state": "translated",
             "value": "Automation off"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja wyłączona"}}
       }
     },
     "remote.boardPinned": {
@@ -1736,7 +1740,8 @@
             "state": "translated",
             "value": "Pinned"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przypięto"}}
       }
     },
     "remote.boardReorder": {
@@ -1747,7 +1752,8 @@
             "state": "translated",
             "value": "Touch and hold, then drag to reorder."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dotknij i przytrzymaj, a następnie przeciągnij, aby zmienić kolejność."}}
       }
     },
     "remote.boardOrderRejected": {
@@ -1758,7 +1764,8 @@
             "state": "translated",
             "value": "Couldn’t move the card"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się przenieść karty"}}
       }
     },
     "remote.boardOrderRejectedHelp": {
@@ -1769,7 +1776,8 @@
             "state": "translated",
             "value": "Move cards within the same section and pin group. If the order changed on your Mac, use the updated board and try again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przenoś karty w obrębie tej samej sekcji i grupy przypięcia. Jeśli kolejność zmieniła się na Macu, użyj zaktualizowanej tablicy i spróbuj ponownie."}}
       }
     }
   },

@@ -126,13 +126,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Context copied"
+            "value": "Link copied"
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Skopiowano kontekst"
+            "value": "Skopiowano link"
           }
         }
       }

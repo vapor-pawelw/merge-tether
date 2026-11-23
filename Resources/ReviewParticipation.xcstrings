@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "No automatic replies or review requests"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Bez automatycznych odpowiedzi i próśb o przegląd"}}
       }
     },
     "reviewParticipationUsername": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "GitLab username"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nazwa użytkownika GitLaba"}}
       }
     },
     "reviewParticipationExclude": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "Exclude participant"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wyklucz uczestnika"}}
       }
     },
     "reviewParticipationAllow": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "Allow again"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zezwól ponownie"}}
       }
     },
     "reviewParticipationFailed": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "Could not verify this GitLab username. Check the account and try again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się zweryfikować nazwy użytkownika GitLaba. Sprawdź konto i spróbuj ponownie."}}
       }
     },
     "reviewParticipationHelp": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "Saved immediately for the current GitLab account and host. Excluded participants receive no automatic replies, acknowledgements or review invitations. Their technical findings remain actionable. Explicit manual publication is separate. This does not remove existing reviewers or change automation permissions."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zapisuje się od razu dla bieżącego konta i hosta GitLaba. Wykluczeni uczestnicy nie otrzymują automatycznych odpowiedzi, potwierdzeń ani zaproszeń do przeglądu. Ich uwagi techniczne nadal wymagają obsługi. Ręczna publikacja działa niezależnie. Dotychczasowi recenzenci oraz uprawnienia automatyzacji zostają zachowani."}}
       }
     },
     "reviewParticipationSaveFailed": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "Could not save this preference. The participant remains excluded in this session; automatic actions are on hold. Try again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się zapisać ustawienia. Uczestnik pozostaje wykluczony w tej sesji, a działania automatyczne są wstrzymane. Spróbuj ponownie."}}
       }
     },
     "reviewParticipationAutomationTitle": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "Bot accounts"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Konta botów"}}
       }
     },
     "reviewParticipationAutomationMark": {
@@ -97,7 +105,8 @@
             "state": "translated",
             "value": "Add bot account"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dodaj konto bota"}}
       }
     },
     "reviewParticipationAutomationRestore": {
@@ -108,7 +117,8 @@
             "state": "translated",
             "value": "Use GitLab account type"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Użyj typu konta z GitLaba"}}
       }
     },
     "reviewParticipationAutomationOwnAccount": {
@@ -119,7 +129,8 @@
             "state": "translated",
             "value": "Your signed-in account cannot be marked as an automation author."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Bieżącego zalogowanego konta nie można oznaczyć jako autora automatyzacji."}}
       }
     },
     "reviewParticipationAutomationSaveFailed": {
@@ -130,7 +141,8 @@
             "state": "translated",
             "value": "Could not save this designation. The previous list is unchanged; automatic actions are on hold. Try again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się zapisać oznaczenia. Poprzednia lista została zachowana, a działania automatyczne są wstrzymane. Spróbuj ponownie."}}
       }
     },
     "reviewParticipationAutomationHelp": {
@@ -141,7 +153,8 @@
             "state": "translated",
             "value": "These accounts are treated as bots for this GitLab host and signed-in account. Verified, answered feedback can be resolved automatically when your automation settings allow it. Other review and merge requirements still apply. Removing an entry restores GitLab’s account type."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Te konta traktuje się jako boty dla bieżącego hosta i zalogowanego konta GitLaba. Zweryfikowane uwagi z odpowiedzią można zamknąć automatycznie, jeśli pozwalają na to ustawienia. Pozostałe wymagania przeglądu i scalania nadal obowiązują. Usunięcie wpisu przywraca typ konta z GitLaba."}}
       }
     }
   },

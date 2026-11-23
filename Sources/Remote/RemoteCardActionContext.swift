@@ -5,7 +5,6 @@ import MergeTetherRemote
 @MainActor struct RemoteCardActionContext {
     let target: MRAutomationScope.Target
     let url: URL
-    let title: String
     let item: MergeRequestAttentionMonitor.Item?
     let isDraft: Bool
     let isFinished: Bool
@@ -24,7 +23,6 @@ import MergeTetherRemote
         let request = row?.displayRequest ?? proposal?.item?.mergeRequest
         self.target = target
         self.url = url
-        self.title = card.title
         self.item = row?.item ?? proposal?.item
         self.isDraft = row?.isDraft ?? (request?.draft == true || request?.detailedMergeStatus == "draft_status")
         self.isFinished = request.map { $0.state != "opened" } ?? false
@@ -77,7 +75,7 @@ import MergeTetherRemote
             guard let local = AssistantContextLauncher.Destination(rawValue: destination.rawValue),
                   AssistantContextLauncher.availableDestinations().contains(local) else { return .changed }
             do {
-                try await AssistantContextLauncher.open(local, context: .init(url: url, title: title),
+                try await AssistantContextLauncher.open(local, context: .init(url: url),
                     workspace: settings.automation.assistantWorkspace, message: message ?? "")
                 return .completed
             } catch { return .failed }

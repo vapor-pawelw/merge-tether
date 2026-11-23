@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Mark ready"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oznacz jako gotowy"}}
       }
     },
     "markingReady": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "Marking ready…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oznaczanie jako gotowy…"}}
       }
     },
     "failed": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "Could not confirm readiness"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się potwierdzić gotowości"}}
       }
     },
     "failedHelp": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "GitLab could not confirm this merge request is ready. Refresh its status and try again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "GitLab nie potwierdził gotowości merge requesta. Odśwież jego stan i spróbuj ponownie."}}
       }
     },
     "accountChanged": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "The GitLab account changed or sign-in could not be verified. Refresh and check your GitLab account."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Konto GitLaba się zmieniło lub logowania nie udało się zweryfikować. Odśwież dane i sprawdź konto."}}
       }
     },
     "changed": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "The merge request or account changed before this action could finish. Refresh its GitLab status."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przed zakończeniem działania zmienił się merge request lub konto. Odśwież stan w GitLabie."}}
       }
     },
     "ok": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "OK"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "OK"}}
       }
     },
     "sectionTitle": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "Drafts"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Szkice"}}
       }
     }
   },

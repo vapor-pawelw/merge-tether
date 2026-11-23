@@ -1,0 +1,13 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "NSHumanReadableCopyright": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copyright © 2026 vaporpw. MIT License." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Prawa autorskie © 2026 vaporpw. Licencja MIT." } }
+      }
+    }
+  },
+  "version": "1.0"
+}

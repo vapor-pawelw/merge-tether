@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Prepared reply #%lld"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przygotowana odpowiedź nr %lld"}}
       }
     },
     "preparedRepliesNeedsReview": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "Prepared reply needs review."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przygotowana odpowiedź wymaga przeglądu."}}
       }
     },
     "preparedRepliesViewDiscussion": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "View source discussion"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zobacz źródłową dyskusję"}}
       }
     },
     "preparedRepliesReviewAction": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "Review prepared reply"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przejrzyj przygotowaną odpowiedź"}}
       }
     },
     "preparedRepliesChecksPending": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "One or more prepared replies are waiting for verification or publication checks."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Co najmniej jedna przygotowana odpowiedź czeka na weryfikację lub kontrolę przed publikacją."}}
       }
     },
     "preparedRepliesDiscussionCheck": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "A prepared reply needs a fresh discussion check before automatic publication."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przygotowana odpowiedź wymaga aktualnego sprawdzenia dyskusji przed automatyczną publikacją."}}
       }
     }
   },

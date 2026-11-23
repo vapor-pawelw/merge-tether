@@ -20,9 +20,10 @@ struct LaunchAtLoginStep: View {
             .toggleStyle(.switch)
 
             if let errorMessage {
-                Text(errorMessage)
+                Text(.Onboarding.onboardingLaunchAtLoginFailed)
                     .font(.caption)
                     .foregroundStyle(.red)
+                    .help(Text(verbatim: errorMessage))
             }
         }
         .task {

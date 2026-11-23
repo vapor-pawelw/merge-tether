@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Comment behind this assessment"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarz będący podstawą oceny"}}
       }
     },
     "feedbackSuggestions.sourceReply": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "Comment this draft replies to"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarz, na który odpowiada szkic"}}
       }
     },
     "feedbackSuggestions.sourceSaved": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "Comment version saved with this decision"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wersja komentarza zapisana przy decyzji"}}
       }
     },
     "feedbackSuggestions.openComment": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "Open comment in GitLab"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz komentarz w GitLabie"}}
       }
     },
     "feedbackSuggestions.expandComment": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "Show full comment"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pokaż cały komentarz"}}
       }
     },
     "feedbackSuggestions.collapseComment": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "Show less"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pokaż mniej"}}
       }
     },
     "feedbackSuggestions.commentExpanded": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "Expanded"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozwinięty"}}
       }
     },
     "feedbackSuggestions.commentCollapsed": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "Collapsed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zwinięty"}}
       }
     },
     "feedbackSuggestions.sourceUnavailable": {
@@ -97,7 +105,8 @@
             "state": "translated",
             "value": "The exact source comment is unavailable or no longer matches this check. Refresh the discussions to load current context."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dokładna wersja komentarza jest niedostępna lub nie odpowiada bieżącej weryfikacji. Odśwież dyskusje, aby wczytać aktualny kontekst."}}
       }
     },
     "feedbackSuggestions.authorIdentifier": {
@@ -108,7 +117,8 @@
             "state": "translated",
             "value": "GitLab user #%lld"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Użytkownik GitLaba nr %lld"}}
       }
     },
     "feedbackSuggestions.threadOpenedBy": {
@@ -126,7 +136,8 @@
             "state": "translated",
             "value": "Ignore this suggestion"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pomiń tę sugestię"}}
       }
     },
     "feedbackSuggestions.ignoreTitle": {
@@ -137,7 +148,8 @@
             "state": "translated",
             "value": "Ignore this suggestion?"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pominąć tę sugestię?"}}
       }
     },
     "feedbackSuggestions.ignoreConfirm": {
@@ -148,7 +160,8 @@
             "state": "translated",
             "value": "Ignore suggestion"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pomiń sugestię"}}
       }
     },
     "feedbackSuggestions.ignoreExplanation": {
@@ -159,7 +172,8 @@
             "state": "translated",
             "value": "This ignores only the displayed suggestion for this version of the source comment. Other requirements in the comment still apply. No GitLab discussion will be resolved. You can restore the suggestion in Details → Ignored suggestions."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pominięcie dotyczy tylko wyświetlonej sugestii w tej wersji komentarza. Pozostałe wymagania z komentarza nadal obowiązują. Dyskusje GitLaba zachowają swój stan. Sugestię możesz przywrócić w sekcji Szczegóły → Pominięte sugestie."}}
       }
     },
     "feedbackSuggestions.concern": {
@@ -170,7 +184,8 @@
             "state": "translated",
             "value": "Suggestion"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sugestia"}}
       }
     },
     "feedbackSuggestions.comment": {
@@ -181,7 +196,8 @@
             "state": "translated",
             "value": "Source comment"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarz źródłowy"}}
       }
     },
     "feedbackSuggestions.ignored": {
@@ -192,7 +208,8 @@
             "state": "translated",
             "value": "Ignored suggestions"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pominięte sugestie"}}
       }
     },
     "feedbackSuggestions.restore": {
@@ -203,7 +220,8 @@
             "state": "translated",
             "value": "Restore"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przywróć"}}
       }
     },
     "feedbackSuggestions.reset": {
@@ -214,7 +232,8 @@
             "state": "translated",
             "value": "Reset all decisions for this MR"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zresetuj wszystkie decyzje dla tego MR"}}
       }
     },
     "feedbackSuggestions.resetTitle": {
@@ -225,7 +244,8 @@
             "state": "translated",
             "value": "Reset all decisions for this MR?"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zresetować wszystkie decyzje dla tego MR?"}}
       }
     },
     "feedbackSuggestions.resetExplanation": {
@@ -236,7 +256,8 @@
             "state": "translated",
             "value": "Restore all ignored suggestions for this MR and request a fresh assessment. GitLab discussions and saved task history remain unchanged."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przywróć wszystkie pominięte sugestie dla tego MR i zleć nową ocenę. Dyskusje GitLaba i zapisana historia zadań zostaną zachowane."}}
       }
     },
     "feedbackSuggestions.resetConfirm": {
@@ -247,7 +268,8 @@
             "state": "translated",
             "value": "Reset decisions"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zresetuj decyzje"}}
       }
     },
     "feedbackSuggestions.cancel": {
@@ -258,7 +280,8 @@
             "state": "translated",
             "value": "Cancel"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Anuluj"}}
       }
     },
     "feedbackSuggestions.updateFailed": {
@@ -269,7 +292,8 @@
             "state": "translated",
             "value": "Could not update this decision. Try refreshing the MR."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się zaktualizować decyzji. Spróbuj odświeżyć MR."}}
       }
     },
     "feedbackSuggestions.sourceChanged": {
@@ -280,7 +304,8 @@
             "state": "translated",
             "value": "The source comment changed. Review its current version before ignoring this suggestion."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarz źródłowy się zmienił. Sprawdź jego bieżącą wersję przed pominięciem sugestii."}}
       }
     },
     "feedbackSuggestions.accountChanged": {
@@ -291,7 +316,8 @@
             "state": "translated",
             "value": "Your GitLab account changed. Reopen this MR before updating its decisions."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Twoje konto GitLaba się zmieniło. Otwórz ponownie ten MR przed aktualizacją decyzji."}}
       }
     },
     "feedbackSuggestions.invalidConcern": {
@@ -302,7 +328,8 @@
             "state": "translated",
             "value": "This suggestion could not be verified. Refresh its assessment before deciding."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się zweryfikować sugestii. Odśwież ocenę przed podjęciem decyzji."}}
       }
     },
     "feedbackSuggestions.sourceOpen": {
@@ -313,7 +340,8 @@
             "state": "translated",
             "value": "Open reviewer comment (remaining work not verified)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwarty komentarz recenzenta (pozostałe prace czekają na weryfikację)"}}
       }
     },
     "feedbackSuggestions.sourceStatus": {
@@ -324,7 +352,8 @@
             "state": "translated",
             "value": "This comes from GitLab’s MR status; no specific source comment was provided."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Informacja pochodzi ze stanu MR w GitLabie. Konkretny komentarz źródłowy jest niedostępny."}}
       }
     },
     "feedbackSuggestions.sourceLoading": {
@@ -335,7 +364,8 @@
             "state": "translated",
             "value": "Loading the source comment…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wczytywanie komentarza źródłowego…"}}
       }
     },
     "feedbackSuggestions.sourceReplyThread": {
@@ -346,7 +376,8 @@
             "state": "translated",
             "value": "Discussion awaiting your reply"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dyskusja oczekuje na Twoją odpowiedź"}}
       }
     },
     "feedbackSuggestions.unverifiedConcern": {
@@ -357,7 +388,8 @@
             "state": "translated",
             "value": "Needs verification"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wymaga weryfikacji"}}
       }
     },
     "feedbackSuggestions.confirmedConcern": {
@@ -368,7 +400,8 @@
             "state": "translated",
             "value": "Confirmed concern"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Potwierdzona uwaga"}}
       }
     },
     "feedback.suggestions.sourceRequest": {
@@ -379,7 +412,8 @@
             "state": "translated",
             "value": "Comment behind this follow-up request"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarz będący podstawą prośby o dalsze działanie"}}
       }
     }
   },

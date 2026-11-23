@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Merge after"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Scal po"}}
       }
     },
     "mr.dependencies.badge": {
@@ -88,7 +89,8 @@
             "state": "translated",
             "value": "last known"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "ostatnio znana"}}
       }
     },
     "mr.dependencies.unavailable": {
@@ -99,7 +101,8 @@
             "state": "translated",
             "value": "Dependencies could not be fully checked"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się w pełni sprawdzić zależności"}}
       }
     },
     "mr.dependencies.hidden": {
@@ -110,7 +113,8 @@
             "state": "translated",
             "value": "A GitLab dependency is not accessible"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zależność w GitLabie jest niedostępna"}}
       }
     },
     "mr.dependencies.stackUnavailable": {
@@ -121,7 +125,8 @@
             "state": "translated",
             "value": "Stack order could not be checked"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się sprawdzić kolejności stosu"}}
       }
     },
     "mr.dependencies.stackIncomplete": {
@@ -132,7 +137,8 @@
             "state": "translated",
             "value": "Stack order is incomplete"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kolejność stosu jest niekompletna"}}
       }
     },
     "mr.dependencies.stackAmbiguous": {
@@ -143,7 +149,8 @@
             "state": "translated",
             "value": "Stack order is ambiguous"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kolejność stosu jest niejednoznaczna"}}
       }
     },
     "mr.dependencies.positionHelp": {
@@ -154,7 +161,8 @@
             "state": "translated",
             "value": "Position in the verified merge order"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pozycja w zweryfikowanej kolejności scalania"}}
       }
     },
     "mr.dependencies.stackPosition": {
@@ -165,7 +173,8 @@
             "state": "translated",
             "value": "Stack %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Stos %@"}}
       }
     },
     "mr.dependencies.afterInline": {
@@ -176,7 +185,8 @@
             "state": "translated",
             "value": "merge after"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "scal po"}}
       }
     },
     "mr.dependencies.mergeWaiting": {
@@ -187,7 +197,8 @@
             "state": "translated",
             "value": "Automatic merge waits until every required dependency is merged. Closed dependencies still block merging."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyczne scalanie czeka na scalenie wszystkich wymaganych zależności. Zamknięte zależności nadal blokują scalanie."}}
       }
     },
     "mr.dependencies.mergeTarget": {
@@ -198,7 +209,8 @@
             "state": "translated",
             "value": "Automatic merge is on hold: the target is a stack or historical MR branch. Review the target and retarget through the existing stack workflow."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyczne scalanie wstrzymano: gałąź docelowa jest gałęzią stosu lub historyczną gałęzią MR. Sprawdź cel i zmień go w ramach istniejącego procesu obsługi stosu."}}
       }
     },
     "mr.dependencies.mergeUnavailable": {
@@ -209,7 +221,8 @@
             "state": "translated",
             "value": "Automatic merge is on hold until dependencies and stack order can be verified."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyczne scalanie jest wstrzymane do czasu zweryfikowania zależności i kolejności stosu."}}
       }
     }
   },

@@ -45,7 +45,8 @@
             "state": "translated",
             "value": "Author unavailable"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Autor niedostępny"}}
       }
     },
     "reviewing.authorLabel": {
@@ -56,7 +57,8 @@
             "state": "translated",
             "value": "MR author"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Autor MR"}}
       }
     },
     "reviewing.tracked": {
@@ -67,7 +69,8 @@
             "state": "translated",
             "value": "Tracked for review"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Śledzony do przeglądu"}}
       }
     },
     "reviewing.reviewRequested": {
@@ -78,7 +81,8 @@
             "state": "translated",
             "value": "Review requested"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Poproszono o przegląd"}}
       }
     },
     "reviewing.reviewRequestedBy.%@": {
@@ -89,7 +93,8 @@
             "state": "translated",
             "value": "Review requested by @%1$@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "@%1$@ prosi o przegląd"}}
       }
     },
     "reviewing.approvalRequested": {
@@ -100,7 +105,8 @@
             "state": "translated",
             "value": "Approval requested"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Poproszono o zatwierdzenie"}}
       }
     },
     "reviewing.approvalRequestedBy.%@": {
@@ -111,7 +117,8 @@
             "state": "translated",
             "value": "Approval requested by @%1$@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "@%1$@ prosi o zatwierdzenie"}}
       }
     },
     "reviewing.activityUnknown": {
@@ -122,7 +129,8 @@
             "state": "translated",
             "value": "Review activity not loaded"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Aktywność przeglądu czeka na wczytanie"}}
       }
     },
     "reviewing.running": {
@@ -133,7 +141,8 @@
             "state": "translated",
             "value": "Review in progress"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przegląd w toku"}}
       }
     },
     "reviewing.reviewCompleted": {
@@ -144,7 +153,8 @@
             "state": "translated",
             "value": "Review run completed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zadanie przeglądu ukończone"}}
       }
     },
     "reviewing.noPublishedComments": {
@@ -155,7 +165,8 @@
             "state": "translated",
             "value": "No published comments from you"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak Twoich opublikowanych komentarzy"}}
       }
     },
     "reviewing.drafts.%lld": {
@@ -178,7 +189,8 @@
               }
             }
           }
-        }
+        },
+        "pl": {"variations": {"plural": {"one": {"stringUnit": {"state": "translated", "value": "%1$lld prywatny szkic"}}, "few": {"stringUnit": {"state": "translated", "value": "%1$lld prywatne szkice"}}, "many": {"stringUnit": {"state": "translated", "value": "%1$lld prywatnych szkiców"}}, "other": {"stringUnit": {"state": "translated", "value": "Prywatne szkice: %1$lld"}}}}}
       }
     },
     "reviewing.authorReplied.%lld": {
@@ -201,7 +213,8 @@
               }
             }
           }
-        }
+        },
+        "pl": {"variations": {"plural": {"one": {"stringUnit": {"state": "translated", "value": "Autor odpowiedział w %1$lld dyskusji"}}, "few": {"stringUnit": {"state": "translated", "value": "Autor odpowiedział w %1$lld dyskusjach"}}, "many": {"stringUnit": {"state": "translated", "value": "Autor odpowiedział w %1$lld dyskusjach"}}, "other": {"stringUnit": {"state": "translated", "value": "Dyskusje z odpowiedzią autora: %1$lld"}}}}}
       }
     },
     "reviewing.otherReplied.%lld": {
@@ -224,7 +237,8 @@
               }
             }
           }
-        }
+        },
+        "pl": {"variations": {"plural": {"one": {"stringUnit": {"state": "translated", "value": "Odpowiedź na Twoje komentarze w %1$lld dyskusji"}}, "few": {"stringUnit": {"state": "translated", "value": "Odpowiedzi na Twoje komentarze w %1$lld dyskusjach"}}, "many": {"stringUnit": {"state": "translated", "value": "Odpowiedzi na Twoje komentarze w %1$lld dyskusjach"}}, "other": {"stringUnit": {"state": "translated", "value": "Dyskusje z odpowiedzią na Twoje komentarze: %1$lld"}}}}}
       }
     },
     "reviewing.openThreads.%lld": {
@@ -247,7 +261,8 @@
               }
             }
           }
-        }
+        },
+        "pl": {"variations": {"plural": {"one": {"stringUnit": {"state": "translated", "value": "%1$lld otwarta dyskusja z przeglądu"}}, "few": {"stringUnit": {"state": "translated", "value": "%1$lld otwarte dyskusje z przeglądu"}}, "many": {"stringUnit": {"state": "translated", "value": "%1$lld otwartych dyskusji z przeglądu"}}, "other": {"stringUnit": {"state": "translated", "value": "Otwarte dyskusje z przeglądu: %1$lld"}}}}}
       }
     },
     "reviewing.commented.%lld": {
@@ -270,7 +285,8 @@
               }
             }
           }
-        }
+        },
+        "pl": {"variations": {"plural": {"one": {"stringUnit": {"state": "translated", "value": "%1$lld Twój opublikowany komentarz"}}, "few": {"stringUnit": {"state": "translated", "value": "%1$lld Twoje opublikowane komentarze"}}, "many": {"stringUnit": {"state": "translated", "value": "%1$lld Twoich opublikowanych komentarzy"}}, "other": {"stringUnit": {"state": "translated", "value": "Twoje opublikowane komentarze: %1$lld"}}}}}
       }
     },
     "reviewing.automatic": {
@@ -281,7 +297,8 @@
             "state": "translated",
             "value": "Handled automatically; no action needed."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Obsługiwane automatycznie. Brak działań do wykonania."}}
       }
     },
     "reviewing.verificationAutomatic": {
@@ -292,7 +309,8 @@
             "state": "translated",
             "value": "Checking automatically; no action needed."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Trwa automatyczne sprawdzanie. Brak działań do wykonania."}}
       }
     },
     "reviewing.setupRequired": {
@@ -303,7 +321,8 @@
             "state": "translated",
             "value": "Set up or sign in to the selected agent CLI to continue."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Skonfiguruj wybrane CLI lub zaloguj się w nim, aby kontynuować."}}
       }
     },
     "reviewing.runNeeded": {
@@ -314,7 +333,8 @@
             "state": "translated",
             "value": "Run a review to check the current changes and discussion."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchom przegląd, aby sprawdzić aktualne zmiany i dyskusję."}}
       }
     },
     "reviewing.draftsNeedReview": {
@@ -325,7 +345,8 @@
             "state": "translated",
             "value": "Review the private comments before publication."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przejrzyj prywatne komentarze przed publikacją."}}
       }
     },
     "reviewing.runNeedsInput": {
@@ -336,7 +357,8 @@
             "state": "translated",
             "value": "The last review stopped. Check its result before continuing."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ostatni przegląd został zatrzymany. Sprawdź jego wynik przed kontynuowaniem."}}
       }
     },
     "reviewing.inspectDiscussions": {
@@ -347,7 +369,8 @@
             "state": "translated",
             "value": "Open the discussion to see the review context."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz dyskusję, aby zobaczyć kontekst przeglądu."}}
       }
     },
     "reviewing.waitingOtherThreads": {
@@ -358,7 +381,8 @@
             "state": "translated",
             "value": "No action needed. Waiting for other review threads to be resolved."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak działań do wykonania. Oczekiwanie na zamknięcie innych dyskusji z przeglądu."}}
       }
     },
     "reviewing.waitingAuthor": {
@@ -369,7 +393,8 @@
             "state": "translated",
             "value": "No action needed. Waiting for updates to your review threads."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak działań do wykonania. Oczekiwanie na zmiany w Twoich dyskusjach z przeglądu."}}
       }
     },
     "reviewing.monitoring": {
@@ -380,7 +405,8 @@
             "state": "translated",
             "value": "No action needed. Watching for updates."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak działań do wykonania. Trwa monitorowanie aktualizacji."}}
       }
     },
     "reviewing.viewDiscussions": {
@@ -391,7 +417,8 @@
             "state": "translated",
             "value": "View discussions"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zobacz dyskusje"}}
       }
     },
     "reviewing.queued": {
@@ -402,7 +429,8 @@
             "state": "translated",
             "value": "Review queued"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przegląd w kolejce"}}
       }
     },
     "reviewing.verifying": {
@@ -413,7 +441,8 @@
             "state": "translated",
             "value": "Checking review evidence"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzanie danych z przeglądu"}}
       }
     },
     "reviewing.reviewNeeded": {
@@ -424,7 +453,8 @@
             "state": "translated",
             "value": "Review required"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wymagany przegląd"}}
       }
     },
     "reviewing.otherThreadsOpen": {
@@ -435,7 +465,8 @@
             "state": "translated",
             "value": "Waiting for other review threads"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oczekiwanie na inne dyskusje z przeglądu"}}
       }
     },
     "reviewing.waitingReady": {
@@ -446,7 +477,8 @@
             "state": "translated",
             "value": "Waiting for author readiness"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oczekiwanie na oznaczenie gotowości"}}
       }
     },
     "reviewing.waitingReadyMessage": {
@@ -457,7 +489,8 @@
             "state": "translated",
             "value": "No action needed. Waiting for the author to mark this merge request ready."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak działań do wykonania. Oczekiwanie, aż autor oznaczy ten merge request jako gotowy."}}
       }
     }
   }

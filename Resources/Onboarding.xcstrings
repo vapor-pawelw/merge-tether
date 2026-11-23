@@ -301,6 +301,13 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Uruchamiaj przy logowaniu"}}
       }
     },
+    "onboarding.launchAtLogin.failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Couldn’t change the launch at login setting." } },
+        "pl" : { "stringUnit" : { "state" : "translated", "value" : "Nie udało się zmienić uruchamiania przy logowaniu." } }
+      }
+    },
     "onboarding.launchAtLogin.title" : {
       "extractionState" : "manual",
       "localizations" : {

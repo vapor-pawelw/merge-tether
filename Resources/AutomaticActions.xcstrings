@@ -3,43 +3,53 @@
   "strings": {
     "automaticActions.publication": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Comment publication" } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Comment publication" } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Publikacja komentarzy"}} }
     },
     "automaticActions.verifiedReplyAcknowledgement": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Thanks for flagging this. The issue is addressed in the current changes." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Thanks for flagging this. The issue is addressed in the current changes." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dziękuję za zgłoszenie. Problem został uwzględniony w bieżących zmianach."}} }
     },
     "automaticActions.merge": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Auto-merge" } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Auto-merge" } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyczne scalanie"}} }
     },
     "automaticActions.on": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "On" } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "On" } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Włączone"}} }
     },
     "automaticActions.off": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Off" } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Off" } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wyłączone"}} }
     },
     "automaticActions.mergeHelp": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "On enables auto-merge after the usual checks." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "On enables auto-merge after the usual checks." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Włączenie zezwala na automatyczne scalanie po zwykłych kontrolach."}} }
     },
     "automaticActions.approval": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Auto-approval" } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Auto-approval" } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyczne zatwierdzanie"}} }
     },
     "automaticActions.publicationHelp": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "If automatic publication is off in Settings, On allows eligible replies to AI feedback." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "If automatic publication is off in Settings, On allows eligible replies to AI feedback." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Jeśli automatyczna publikacja jest wyłączona w ustawieniach, włączenie tutaj zezwala na publikację kwalifikujących się odpowiedzi na uwagi AI."}} }
     },
     "automaticActions.approvalHelp": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "On uses the approval threshold in Settings." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "On uses the approval threshold in Settings." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Włączenie stosuje próg zatwierdzenia z ustawień."}} }
     },
     "automaticActions.exceptionsHelp": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "This MR has automatic action overrides. Review Automation in the … menu." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "This MR has automatic action overrides. Review Automation in the … menu." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ten MR ma własne ustawienia działań automatycznych. Sprawdź sekcję Automatyzacja w menu „…”."}} }
     }
   },
   "version": "1.0"

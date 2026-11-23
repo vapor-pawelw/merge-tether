@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Select draft for publication"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zaznacz szkic do opublikowania"}}
       }
     },
     "draftPublication.publishSelected.%lld": {
@@ -32,7 +33,8 @@
               }
             }
           }
-        }
+        },
+        "pl": {"variations": {"plural": {"one": {"stringUnit": {"state": "translated", "value": "Opublikuj %lld komentarz"}}, "few": {"stringUnit": {"state": "translated", "value": "Opublikuj %lld komentarze"}}, "many": {"stringUnit": {"state": "translated", "value": "Opublikuj %lld komentarzy"}}, "other": {"stringUnit": {"state": "translated", "value": "Opublikuj komentarze (%lld)"}}}}}
       }
     },
     "draftPublication.clearSelection": {
@@ -43,7 +45,8 @@
             "state": "translated",
             "value": "Clear selection"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wyczyść zaznaczenie"}}
       }
     },
     "draftPublication.threads": {
@@ -54,7 +57,8 @@
             "state": "translated",
             "value": "Drafts and their threads"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Szkice i ich dyskusje"}}
       }
     },
     "draftPublication.unavailable": {
@@ -65,7 +69,8 @@
             "state": "translated",
             "value": "Connect to the GitLab account for this merge request to select and publish comments."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Połącz się z kontem GitLaba dla tego merge requesta, aby wybierać i publikować komentarze."}}
       }
     },
     "draftPublication.quickActions.%lld": {
@@ -76,7 +81,8 @@
             "state": "translated",
             "value": "Draft #%lld contains potential GitLab quick actions. Publishing may run commands that change the merge request."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Szkic nr %lld zawiera potencjalne szybkie polecenia GitLaba. Publikacja może wykonać polecenia zmieniające merge request."}}
       }
     },
     "draftPublication.resolvesDiscussion.%lld": {
@@ -87,7 +93,8 @@
             "state": "translated",
             "value": "Draft #%lld is marked to resolve its discussion when published."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Szkic nr %lld ma zamknąć dyskusję podczas publikacji."}}
       }
     },
     "draftPublication.thread.%@": {
@@ -98,7 +105,8 @@
             "state": "translated",
             "value": "Thread: %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dyskusja: %@"}}
       }
     }
   },

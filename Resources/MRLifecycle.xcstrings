@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "MERGED"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "SCALONY"}}
       }
     },
     "closed": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "CLOSED"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "ZAMKNIĘTY"}}
       }
     },
     "mergedStatus": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "Merged. Automation is off."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Scalony. Automatyzacja jest wyłączona."}}
       }
     },
     "closedStatus": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "Closed. Automation is off."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zamknięty. Automatyzacja jest wyłączona."}}
       }
     },
     "seen": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "Seen"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oznacz jako przeczytane"}}
       }
     },
     "seenHelp": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "Remove this finished merge request from the managed board. Its history and GitLab drafts are preserved."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Usuń zakończony merge request z zarządzanej tablicy. Historia i szkice w GitLabie zostaną zachowane."}}
       }
     },
     "completionMerged": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "This merge request was merged."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ten merge request został scalony."}}
       }
     },
     "completionClosed": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "This merge request was closed."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ten merge request został zamknięty."}}
       }
     },
     "completionObserved": {
@@ -97,7 +105,8 @@
             "state": "translated",
             "value": "Observed:"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wykryto:"}}
       }
     },
     "completionSeenHelp": {
@@ -108,7 +117,8 @@
             "state": "translated",
             "value": "Acknowledge this completion and remove it from Inbox."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Potwierdź zakończenie i usuń wpis ze Skrzynki."}}
       }
     },
     "completionSettingsTitle": {
@@ -119,7 +129,8 @@
             "state": "translated",
             "value": "Completed merge requests"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zakończone merge requesty"}}
       }
     },
     "completionSettingsHelp": {
@@ -130,7 +141,8 @@
             "state": "translated",
             "value": "Merged and closed merge requests leave the board automatically. Their updates always appear in Inbox and stay until marked Seen. Event banners work independently."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Scalone i zamknięte merge requesty automatycznie opuszczają tablicę. Aktualizacje pojawiają się w Skrzynce i pozostają do oznaczenia jako przeczytane. Banery zdarzeń działają niezależnie."}}
       }
     }
   },

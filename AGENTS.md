@@ -54,8 +54,9 @@ macOS GitLab inbox and MR automation. Read [README.md](README.md) for behavior,
 - Keep `SettingsManager` persistence explicit with `save()`; avoid writes during view evaluation.
 - New profile-managed permissions inherit missing defaults from the active preset on upgrade; preserve Custom and explicit values, update profile matching/snapshots, and test legacy settings across restart.
 - App UI strings belong in feature `.xcstrings` catalogs with manual extraction and
-  generated symbols. Do not introduce raw localization keys. Keep repository
-  documentation, scripts, and CLI messages in English.
+  generated symbols. Add English and Polish values together, including every
+  required plural form and format argument. Do not introduce raw localization
+  keys. Keep repository documentation, scripts, and CLI messages in English.
 - Test behavior and relevant failure/concurrency cases; verify build/tests before
   claiming success. Remove temporary builds after verification, retaining only a
   requested runnable installation.

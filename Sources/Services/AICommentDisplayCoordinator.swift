@@ -17,7 +17,7 @@ import Observation
         let accountRevision: UInt64
         let origins: [PersistedOrigin]
     }
-    typealias CacheRead = @Sendable ([GitLabMergeRequestDiscussion.Note], MRAutomationScope.Target, URL, URL) async -> [GitLabMergeRequestDiscussion.Note]
+    typealias CacheRead = @Sendable ([GitLabMergeRequestDiscussion.Note], MRAutomationScope.Target, URL, URL, String?) async -> [GitLabMergeRequestDiscussion.Note]
 
     private struct Queue {
         let notes: [GitLabMergeRequestDiscussion.Note]
@@ -30,6 +30,7 @@ import Observation
     }
     private let glab: GlabService
     private let settings: SettingsManager
+    var activeCriteriaOverride: String? { settings.automation.aiCommentCriteriaOverride }
     private let assessmentDirectory: URL
     let displayDirectory: URL
     private let canAutomate: @MainActor (AutomationAssistant) async -> Bool
@@ -61,6 +62,7 @@ import Observation
               (try? AICommentOriginAssessor.validate(assessment, noteIDs: notes.compactMap(\.id))) != nil else { return }
         originRevision &+= 1
         let serial = originRevision, actionDirectory = assessmentDirectory, displayDirectory = self.displayDirectory
+        let criteriaOverride = settings.automation.aiCommentCriteriaOverride
         for note in notes { if let id = note.id { originVersions[.init(target: target, noteID: id)] = serial } }
         Task { [weak self] in
             let origins = await Task.detached {
@@ -70,7 +72,7 @@ import Observation
                         projectID: target.projectID, iid: iid, in: actionDirectory) != nil { return nil }
                     guard let id = note.id, let authorID = note.author?.id, authorID > 0, let body = note.body,
                           let iid = target.iid, let record = AICommentAssessmentStore.displayResult(for: note, host: target.host,
-                            projectID: target.projectID, iid: iid, username: target.username, in: actionDirectory,
+                            projectID: target.projectID, iid: iid, username: target.username, criteriaOverride: criteriaOverride, in: actionDirectory,
                             displayDirectory: displayDirectory),
                           let classification = AICommentOriginAssessment.Classification(rawValue: record.classification),
                           let confidence = AICommentOriginAssessment.Confidence(rawValue: record.confidence) else { return nil }
@@ -79,7 +81,8 @@ import Observation
                 }
             }.value
             guard let self, !Task.isCancelled, permitsSourceRead(request: request, accountRevision: accountRevision),
-                  glab.resolvedHost == target.host, glab.currentUsername == target.username else { return }
+                  glab.resolvedHost == target.host, glab.currentUsername == target.username,
+                  settings.automation.aiCommentCriteriaOverride == criteriaOverride else { return }
             let fresh = origins.filter { originVersions[.init(target: target, noteID: $0.noteID)] == $0.revision }
             guard !fresh.isEmpty else { return }
             let event = PersistedOrigins(target: target, request: request, accountRevision: accountRevision, origins: fresh)
@@ -91,15 +94,15 @@ import Observation
          assessmentDirectory: URL = AICommentAssessmentStore.directory, displayDirectory: URL? = nil,
          canAutomate: @escaping @MainActor (AutomationAssistant) async -> Bool,
          publicationIsChecking: @escaping @MainActor (AssistantAutomationRunner.MergeRequestWork) -> Bool = { _ in false },
-         assess: @escaping AICommentOriginCoordinator.Assess = { try await AICommentOriginAssessor.verify(target: $0, notes: $1, assistant: $2, model: $3, thinking: $4) },
+         assess: @escaping AICommentOriginCoordinator.Assess = { try await AICommentOriginAssessor.verify(target: $0, notes: $1, assistant: $2, model: $3, thinking: $4, criteriaOverride: $5) },
          cacheRead: CacheRead? = nil) {
         self.glab = glab; self.settings = settings; self.assessmentDirectory = assessmentDirectory
         self.displayDirectory = displayDirectory ?? (assessmentDirectory == AICommentAssessmentStore.directory
             ? AICommentAssessmentStore.displayDirectory : assessmentDirectory.appending(path: ".display-only"))
         self.canAutomate = canAutomate; self.publicationIsChecking = publicationIsChecking; self.assess = assess
-        self.cacheRead = cacheRead ?? { notes, target, actionDirectory, displayDirectory in
+        self.cacheRead = cacheRead ?? { notes, target, actionDirectory, displayDirectory, criteriaOverride in
             await Task.detached {
-                Self.missing(notes, target: target, actionDirectory: actionDirectory, displayDirectory: displayDirectory)
+                Self.missing(notes, target: target, actionDirectory: actionDirectory, displayDirectory: displayDirectory, criteriaOverride: criteriaOverride)
             }.value
         }
     }
@@ -119,7 +122,7 @@ import Observation
                 && counts[id] == 1 && !knownNoteIDs.contains(id)
         }.sorted { $0.id! < $1.id! }
         let actionDirectory = assessmentDirectory, displayDirectory = self.displayDirectory
-        let missing = await cacheRead(candidates, target, actionDirectory, displayDirectory)
+        let missing = await cacheRead(candidates, target, actionDirectory, displayDirectory, configuration.aiCommentCriteriaOverride)
         guard latest[target] == invocation, !Task.isCancelled, settings.automation == configuration,
               glab.accountRevision == accountRevision, glab.resolvedHost == host,
               glab.currentUsername == username, settings.automaticWritesAllowed else { return }
@@ -162,7 +165,7 @@ import Observation
 
     private func makeCoordinator() -> AICommentOriginCoordinator {
         let worker = AICommentOriginCoordinator(directory: displayDirectory, overrideDirectory: assessmentDirectory, purpose: .display,
-            assess: { [weak self] target, notes, assistant, model, thinking in
+            assess: { [weak self] target, notes, assistant, model, thinking, criteriaOverride in
                 guard let self, let generation = latest[target], isCurrent(target, assistant: assistant, model: model, thinking: thinking),
                       await canAutomate(assistant), !Task.isCancelled, latest[target] == generation,
                       isCurrent(target, assistant: assistant, model: model, thinking: thinking) else { throw CancellationError() }
@@ -170,14 +173,15 @@ import Observation
                 guard !Task.isCancelled, latest[target] == generation, notes.allSatisfy({ original in
                     let matches = current.filter { $0.id == original.id }
                     return matches.count == 1 && matches[0].body == original.body && matches[0].author?.id == original.author?.id
-                }), isCurrent(target, assistant: assistant, model: model, thinking: thinking) else { throw CancellationError() }
-                return try await assess(target, notes, assistant, model, thinking)
+                }), isCurrent(target, assistant: assistant, model: model, thinking: thinking),
+                      settings.automation.aiCommentCriteriaOverride == criteriaOverride else { throw CancellationError() }
+                return try await assess(target, notes, assistant, model, thinking, criteriaOverride)
             }, fetchCurrent: { [weak self] target in
                 guard let self else { throw CancellationError() }
                 return try await readCurrent(target)
             }, isCurrent: { [weak self] target, assistant, model, thinking in
                 self?.isCurrent(target, assistant: assistant, model: model, thinking: thinking) == true
-            })
+            }, criteriaOverride: { [weak self] in self?.settings.automation.aiCommentCriteriaOverride })
         worker.onChange = { [weak self] in
             guard let self else { return }
             revision &+= 1
@@ -241,7 +245,7 @@ import Observation
                     if scans[target]?.id == scanID { scans.removeValue(forKey: target) }
                     drain()
                 }
-                let missing = await cacheRead(batch, target, actionDirectory, displayDirectory)
+                let missing = await cacheRead(batch, target, actionDirectory, displayDirectory, configuration.aiCommentCriteriaOverride)
                 guard !Task.isCancelled, scans[target]?.id == scanID, latest[target] == queue.generation,
                       queued[target]?.generation == queue.generation, settings.automation == configuration,
                       isCurrent(target, assistant: configuration.assistant, model: model, thinking: configuration.verificationThinking),
@@ -257,12 +261,12 @@ import Observation
     }
 
     private nonisolated static func missing(_ notes: [GitLabMergeRequestDiscussion.Note], target: MRAutomationScope.Target,
-        actionDirectory: URL, displayDirectory: URL) -> [GitLabMergeRequestDiscussion.Note] {
+        actionDirectory: URL, displayDirectory: URL, criteriaOverride: String?) -> [GitLabMergeRequestDiscussion.Note] {
         notes.filter { note in
             if let iid = target.iid, AICommentOriginOverrideStore.override(for: note, host: target.host,
                 projectID: target.projectID, iid: iid, in: actionDirectory) != nil { return false }
             guard let iid = target.iid, let record = AICommentAssessmentStore.displayResult(for: note, host: target.host,
-                projectID: target.projectID, iid: iid, username: target.username, in: actionDirectory,
+                projectID: target.projectID, iid: iid, username: target.username, criteriaOverride: criteriaOverride, in: actionDirectory,
                 displayDirectory: displayDirectory) else { return true }
             return !(record.qualifiesAsAI || record.criteriaVersion == AICommentOriginAssessor.criteriaVersion)
         }

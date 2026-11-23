@@ -209,7 +209,8 @@ extension SettingsManager {
         case .on: mode == .manual ? .aiReplies : mode
         case .off: .manual
         }
-        return .init(mode: effectiveMode, restrictions: automation.publicationRestrictions)
+        return .init(mode: effectiveMode, restrictions: automation.publicationRestrictions,
+                     aiCommentCriteriaOverride: automation.aiCommentCriteriaOverride)
     }
 
     /// Policy admission only. Action executors retain their current fresh evidence checks.

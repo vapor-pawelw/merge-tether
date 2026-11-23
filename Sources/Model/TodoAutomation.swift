@@ -169,6 +169,18 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var codexVerificationModel: CodexReviewModel = .luna
     var claudeVerificationModel: ClaudeVerificationModel = .haiku
     var verificationThinking: VerificationThinking = .high
+    private var customAICommentCriteria: String?
+
+    var aiCommentCriteria: String {
+        get { customAICommentCriteria ?? AICommentOriginAssessor.criteriaInstructions }
+        set { customAICommentCriteria = newValue == AICommentOriginAssessor.criteriaInstructions ? nil : newValue }
+    }
+
+    var aiCommentCriteriaOverride: String? {
+        guard let customAICommentCriteria, !customAICommentCriteria.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              customAICommentCriteria != AICommentOriginAssessor.criteriaInstructions else { return nil }
+        return customAICommentCriteria
+    }
     var assistant: AutomationAssistant = .codex {
         didSet { assistantSelectionCleared = false }
     }
@@ -333,6 +345,8 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         codexVerificationModel = (try? values.decode(CodexReviewModel.self, forKey: .codexVerificationModel)) ?? .luna
         claudeVerificationModel = (try? values.decode(ClaudeVerificationModel.self, forKey: .claudeVerificationModel)) ?? .haiku
         verificationThinking = (try? values.decode(VerificationThinking.self, forKey: .verificationThinking)) ?? .high
+        customAICommentCriteria = try? values.decode(String.self, forKey: .aiCommentCriteria)
+        customAICommentCriteria = aiCommentCriteriaOverride
         assistant = try values.decodeIfPresent(AutomationAssistant.self, forKey: .assistant) ?? assistant
         assistantSelectionCleared = try values.decodeIfPresent(Bool.self, forKey: .assistantSelectionCleared) ?? false
         codexReviewModel = (try? values.decode(CodexReviewModel.self, forKey: .codexReviewModel)) ?? codexReviewModel
@@ -464,6 +478,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         try values.encodeIfPresent(codexVerificationModel, forKey: .codexVerificationModel)
         try values.encodeIfPresent(claudeVerificationModel, forKey: .claudeVerificationModel)
         try values.encodeIfPresent(verificationThinking, forKey: .verificationThinking)
+        try values.encodeIfPresent(aiCommentCriteriaOverride, forKey: .aiCommentCriteria)
         try values.encodeIfPresent(autoResolveAcceptedFeedback, forKey: .autoResolveAcceptedFeedback)
         try values.encodeIfPresent(publicationRestrictions, forKey: .publicationRestrictions)
         try values.encodeIfPresent(publicationPolicyMode, forKey: .publicationPolicyMode)
@@ -482,7 +497,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         case autoMergeProjects, allowConflictPush, allowFollowUpPush, conflictPushProjects, autoReReviewEnabled, publishDraftsWithoutConfirmation, publishAIRepliesWithoutConfirmation, autoApproveEnabled, autoResolveOwnReviewThreads
         case codexReviewModel, codexReviewThinking, claudeCodingModel, claudeCodingThinking, assistantDefaultsVersion, scope
         case workerExecutionTimeout
-        case autoVerifyReReview, codexVerificationModel, claudeVerificationModel, verificationThinking
+        case autoVerifyReReview, codexVerificationModel, claudeVerificationModel, verificationThinking, aiCommentCriteria
         case autoResolveAcceptedFeedback, publicationRestrictions, publicationPolicyMode, baselinePreset, projectPermissionsVersion, autoClaimPipelineFailures, selectedPreset
     }
 

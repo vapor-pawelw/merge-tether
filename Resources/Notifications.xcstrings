@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Work needs your attention"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Praca wymaga Twojej uwagi"}}
       }
     },
     "notifications.attention.batchTitle.%lld": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "%lld items need your attention"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pozycje wymagające Twojej uwagi: %lld"}}
       }
     },
     "notifications.attention.body": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "Open MergeTether to review the pending actions."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz MergeTether, aby przejrzeć oczekujące działania."}}
       }
     }
   },

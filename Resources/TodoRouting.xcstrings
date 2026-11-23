@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "The selected coding agent CLI is unavailable or not signed in. Check the agent setup before retrying."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wybrane CLI asystenta jest niedostępne lub wymaga zalogowania. Przed ponowieniem sprawdź konfigurację asystenta."}}
       }
     },
     "todoRouting.followUpNeedsEvidence": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "The worker finished, but current feedback evidence is missing or work remains. Check the latest feedback verification; a run result alone does not prove completion."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Agent zakończył pracę, ale brakuje bieżących danych o uwagach lub pozostała praca do wykonania. Sprawdź najnowszą weryfikację uwag. Sam wynik zadania nie potwierdza ich obsługi."}}
       }
     },
     "todoRouting.followUpVerificationUnavailable": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "Current feedback could not be verified. Check the merge request and retry the follow-up."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się zweryfikować bieżących uwag. Sprawdź merge request i ponów ich obsługę."}}
       }
     },
     "todoRouting.missingRun": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "The associated run is unavailable. Check the merge request before trying again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Powiązane zadanie jest niedostępne. Sprawdź merge request i spróbuj ponownie."}}
       }
     },
     "todoRouting.needsRecheck": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "This action needs a fresh check against the current merge request."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "To działanie wymaga ponownego sprawdzenia względem bieżącego merge requesta."}}
       }
     },
     "todoRouting.reviewHeadChanged": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "The review started on an older commit. The result still needs verification against the current commit."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przegląd rozpoczął się na starszym commicie. Wynik nadal wymaga weryfikacji na bieżącym commicie."}}
       }
     },
     "todoRouting.reviewNeedsEvidence": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "The review finished, but its result could not be confirmed for the current commit and discussions."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przegląd się zakończył, ale nie udało się potwierdzić wyniku dla bieżącego commita i dyskusji."}}
       }
     },
     "todoRouting.previousAttempt": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "This event has an earlier attempt. Check its result before starting another run."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "To zdarzenie było już obsługiwane. Sprawdź wynik poprzedniej próby przed uruchomieniem nowego zadania."}}
       }
     },
     "todoRouting.shellUnsupported": {
@@ -97,7 +105,8 @@
             "state": "translated",
             "value": "This action uses a configured shell command. Run it explicitly outside automatic MR handling or switch the action to a coding agent CLI."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "To działanie używa zapisanego polecenia powłoki. Uruchom je ręcznie poza automatyzacją MR lub wybierz dla tego działania CLI asystenta."}}
       }
     },
     "todoRouting.banner.accepted": {
@@ -108,7 +117,8 @@
             "state": "translated",
             "value": "Automatically handled"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Obsłużono automatycznie"}}
       }
     },
     "todoRouting.banner.review": {
@@ -119,7 +129,8 @@
             "state": "translated",
             "value": "Review request received"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otrzymano prośbę o przegląd"}}
       }
     },
     "todoRouting.banner.followUp": {
@@ -130,7 +141,8 @@
             "state": "translated",
             "value": "Feedback received"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otrzymano uwagi"}}
       }
     },
     "todoRouting.banner.pipeline": {
@@ -141,7 +153,8 @@
             "state": "translated",
             "value": "Pipeline update received"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otrzymano aktualizację pipeline’u"}}
       }
     },
     "todoRouting.banner.conflict": {
@@ -152,7 +165,8 @@
             "state": "translated",
             "value": "Conflict update received"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otrzymano aktualizację konfliktów"}}
       }
     },
     "todoRouting.banner.refresh": {
@@ -163,7 +177,8 @@
             "state": "translated",
             "value": "Merge request updated"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Merge request zaktualizowany"}}
       }
     },
     "todoRouting.banner.dismiss": {
@@ -174,7 +189,8 @@
             "state": "translated",
             "value": "Dismiss event banner"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zamknij baner zdarzenia"}}
       }
     }
   },

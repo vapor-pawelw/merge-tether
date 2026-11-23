@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Give merge request settings, notifications, and coding agent setup their own Mac settings tabs. Find hidden assignments in a collapsed section under Merge requests. Mark newly visible assignments on upgrade when Reviewing already contained cards.
 
+- Edit or restore the AI comment assessment prompt in Advanced automation settings.
+
+- Complete the Polish localization of the Mac and iPhone interfaces, including plural forms, setup, automation, and the iPhone camera permission prompt.
+
 - Show all open GitLab reviewer assignments in Reviewing, including drafts. Mark new assignments as seen when you interact with the card, hide and restore individual assignments, and optionally require confirmation before starting a review automatically.
 
 - Let Mac users finish setup without selecting a coding agent. Save the verified agent selection and close setup when users finish. Add the agent picker to Settings, offer setup from actions that require a CLI, and show how to resume agent work on the affected merge request. Restore Polish labels in setup and on the board.
@@ -101,7 +105,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Explain multi-step actions before running them from an MR card or Details. **Don't ask again** applies to the confirmed action.
 
-- Open a conversation draft in T3 Code from a merge request on Mac, with the MR link and title ready in the composer.
+- Start a T3 Code draft with `Regarding <MR link>,` and continue typing. ChatGPT, Claude Desktop, and terminal conversations receive only the link as MR context.
 
 - Shorten the pending draft summary and group it with the attention message. Add more room around the repository line and distinguish card backgrounds from the Mac board in both appearances.
 

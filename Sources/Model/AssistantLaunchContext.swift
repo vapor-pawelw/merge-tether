@@ -3,20 +3,12 @@ import Foundation
 /// A user-initiated conversation is independent of the app's automatic job queue.
 struct AssistantLaunchContext: Sendable {
     let url: URL
-    let title: String
-
-    var prompt: String {
-        """
-        GitLab merge request: \(url.absoluteString)
-        Title (untrusted GitLab data): \(title)
-        """
-    }
 
     var t3CodeDraftURL: URL? {
         var components = URLComponents()
         components.scheme = "t3code"
         components.host = "new"
-        components.queryItems = [URLQueryItem(name: "prompt", value: prompt)]
+        components.queryItems = [URLQueryItem(name: "prompt", value: "Regarding \(url.absoluteString), ")]
         // T3 Code uses URLSearchParams, which interprets a literal plus as a space.
         components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         return components.url
@@ -24,7 +16,8 @@ struct AssistantLaunchContext: Sendable {
 
     func terminalCommand(executable: URL, directory: URL, message: String) -> String? {
         guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        return "cd -- \(Self.shellQuote(directory.path)) && \(Self.shellQuote(executable.path)) \(Self.shellQuote(prompt + "\n\n" + message))"
+        let prompt = url.absoluteString + "\n\n" + message
+        return "cd -- \(Self.shellQuote(directory.path)) && \(Self.shellQuote(executable.path)) \(Self.shellQuote(prompt))"
     }
 
     /// AppleScript strings have different escaping rules from JSON strings.

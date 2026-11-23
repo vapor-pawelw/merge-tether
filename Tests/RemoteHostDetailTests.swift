@@ -630,7 +630,7 @@ import MergeTetherRemote
         let readAvatarThumbnail: @Sendable (URL) async -> Data?
         lazy var host = RemoteHostController(monitor: monitor, relayConfiguration: .init(rawOrigin: pair.origin.absoluteString),
             loadPairing: { [pair] in pair }, savePairing: { _ in }, removePairing: {}, commandGate: RemoteCommandGate(store: nil),
-            now: { [unowned self] in date }, detailReader: { [unowned self] _, _, _ in
+            now: { [unowned self] in date }, detailReader: { [unowned self] _, _, _, _ in
                 readerCount += 1; let index = readerCount
                 gitlab.write("detail-entered-\(index)")
                 if heldReads.contains(index) { try await gitlab.waitFor("release-\(index)") }

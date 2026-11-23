@@ -34,6 +34,7 @@ final class MRDiscussionStore {
     private var authenticatedUserID: Int?
     private(set) var currentUser: PersonIdentity?
     private var loadedRevision: UInt64?
+    private var assessmentCriteria: String?
     private var generation = 0
     private(set) var target: MRDiscussionTarget?
     private var discussionContent: MRDiscussionContent?
@@ -63,10 +64,11 @@ final class MRDiscussionStore {
         self.provenanceDirectory = provenanceDirectory
     }
 
-    func refresh(target requested: MRDiscussionTarget, glab: GlabService) async {
+    func refresh(target requested: MRDiscussionTarget, glab: GlabService, criteriaOverride: String? = nil) async {
         guard matchesAccount(requested, glab: glab) else { clear(); return }
-        guard target != requested || !isLoading else { return }
+        guard target != requested || assessmentCriteria != criteriaOverride || !isLoading else { return }
         if target != requested { clear(); target = requested }
+        assessmentCriteria = criteriaOverride
         observeAuthorKinds(glab)
         authorKindTask?.cancel(); authorKindTask = nil
         generation += 1
@@ -92,7 +94,7 @@ final class MRDiscussionStore {
             }
             guard isCurrent(current, target: requested, glab: glab, revision: revision) else { return }
             let preparedContent = Task.detached { MRDiscussionContent(result) }
-            let cached = await cachedOrigins(in: result, target: requested, userID: authenticatedUserID)
+            let cached = await cachedOrigins(in: result, target: requested, userID: authenticatedUserID, criteriaOverride: criteriaOverride)
             let content = await preparedContent.value
             var assessed = cached.0
             let contexts = cached.1
@@ -155,7 +157,7 @@ final class MRDiscussionStore {
     func reloadOrigins(glab: GlabService) async {
         guard let target, hasLoaded, loadedRevision == glab.accountRevision, matchesAccount(target, glab: glab) else { return }
         let current = generation, revision = glab.accountRevision
-        let cached = await cachedOrigins(in: discussions, target: target, userID: authenticatedUserID)
+        let cached = await cachedOrigins(in: discussions, target: target, userID: authenticatedUserID, criteriaOverride: assessmentCriteria)
         var updated = cached.0
         let contexts = cached.1
         guard isCurrent(current, target: target, glab: glab, revision: revision) else { return }
@@ -165,7 +167,7 @@ final class MRDiscussionStore {
     }
 
     private func cachedOrigins(in result: [GitLabMergeRequestDiscussion], target: MRDiscussionTarget,
-                               userID: Int?) async -> ([Int: MRDiscussionSnapshot.Origin], AICommentProvenanceStore.ExtraContexts) {
+                               userID: Int?, criteriaOverride: String?) async -> ([Int: MRDiscussionSnapshot.Origin], AICommentProvenanceStore.ExtraContexts) {
         let directory = assessmentDirectory
         let legacyDirectory = legacyAssessmentDirectory
         let displayDirectory = displayAssessmentDirectory
@@ -199,7 +201,8 @@ final class MRDiscussionStore {
                     }
                     if let id = note.id, id > 0, let record = AICommentAssessmentStore.displayResult(for: note,
                         host: target.host, projectID: target.projectID, iid: target.iid,
-                        username: target.username, in: directory, legacyDirectory: legacyDirectory, displayDirectory: displayDirectory),
+                        username: target.username, criteriaOverride: criteriaOverride, in: directory,
+                        legacyDirectory: legacyDirectory, displayDirectory: displayDirectory),
                        record.username == nil || record.username == target.username {
                         if record.qualifiesAsAI {
                             origins[id] = .assessed(evidence: record.evidence)

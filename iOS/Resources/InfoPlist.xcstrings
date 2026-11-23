@@ -1,0 +1,13 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "NSCameraUsageDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Scan the pairing code shown by MergeTether on your Mac." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Zeskanuj kod parowania wyświetlany przez MergeTether na Macu." } }
+      }
+    }
+  },
+  "version": "1.0"
+}

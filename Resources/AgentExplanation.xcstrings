@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Technical details"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Szczegóły techniczne"}}
       }
     }
   },
