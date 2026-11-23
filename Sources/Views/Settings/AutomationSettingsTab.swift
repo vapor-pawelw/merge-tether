@@ -413,7 +413,7 @@ struct AutomationSettingsTab: View {
             Section {
                 Text(.Settings.settingsAssistantRequiredBody).foregroundStyle(.secondary)
                 Button {
-                    SettingsNavigation.shared.selection = .general
+                    SettingsNavigation.shared.selection = .codingAgent
                 } label: {
                     Text(.Settings.settingsAssistantSetupAction)
                 }
@@ -486,6 +486,19 @@ struct AutomationSettingsTab: View {
 
     @ViewBuilder
     private var advancedFields: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { settings.confirmGlobalAutomationChanges },
+                set: { enabled in
+                    settings.confirmGlobalAutomationChanges = enabled
+                    settings.save()
+                }
+            )) {
+                Text(.CommandCenter.commandCenterAutomationConfirmPreference)
+            }
+        } header: {
+            Text(.CommandCenter.commandCenterAutomationToggle)
+        }
         ReviewParticipationSettingsSection(monitor: monitor)
         WorkerExecutionTimeoutSettingsView(policy: $draft.workerExecutionTimeout, repositories: timeoutRepositories)
         Section {

@@ -1225,6 +1225,27 @@
         }
       }
     },
+    "settings.codingAgent.tab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Agent"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Agent"}}
+      }
+    },
+    "settings.mergeRequests.tab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Merge requests"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Merge requesty"}}
+      }
+    },
+    "settings.notifications.tab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Notifications"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Powiadomienia"}}
+      }
+    },
     "settings.general.tab": {
       "extractionState": "manual",
       "localizations": {

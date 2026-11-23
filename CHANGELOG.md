@@ -6,9 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Give merge request settings, notifications, and coding agent setup their own Mac settings tabs. Find hidden assignments in a collapsed section under Merge requests. Mark newly visible assignments on upgrade when Reviewing already contained cards.
+
 - Show all open GitLab reviewer assignments in Reviewing, including drafts. Mark new assignments as seen when you interact with the card, hide and restore individual assignments, and optionally require confirmation before starting a review automatically.
 
-- Let Mac users finish setup without selecting a coding agent. Save the verified agent selection and close setup when users finish. Add the agent picker to General settings, offer setup from actions that require a CLI, and show how to resume agent work on the affected merge request. Restore Polish labels in setup and on the board.
+- Let Mac users finish setup without selecting a coding agent. Save the verified agent selection and close setup when users finish. Add the agent picker to Settings, offer setup from actions that require a CLI, and show how to resume agent work on the affected merge request. Restore Polish labels in setup and on the board.
 
 - Simplify Swift expressions that can hit compiler type-checking limits when building the Mac or iPhone app from source.
 

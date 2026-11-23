@@ -52,6 +52,25 @@ struct IntegrationSettingsTab: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section {
+                Picker(selection: Binding(
+                    get: { monitor.settings.refreshInterval },
+                    set: { interval in
+                        monitor.settings.refreshInterval = interval
+                        monitor.settings.save()
+                        monitor.restartTimer()
+                    }
+                )) {
+                    ForEach(RefreshInterval.allCases) { interval in
+                        Text(interval.displayLabel).tag(interval)
+                    }
+                } label: {
+                    Text(.Settings.settingsGeneralRefreshPicker)
+                }
+            } header: {
+                Text(.Settings.settingsGeneralRefreshSection)
+            }
         }
         .formStyle(.grouped)
     }
