@@ -40,6 +40,7 @@ struct BoardActionsMenu<Content: View>: View {
 private struct BoardCardInteraction: ViewModifier {
     let background: Color?
     let backgroundOpacity: Double
+    let detailsLabel: LocalizedStringResource
     let onDetails: () -> Void
     @State private var isHovered = false
     @Environment(\.colorScheme) private var colorScheme
@@ -59,7 +60,7 @@ private struct BoardCardInteraction: ViewModifier {
                         .contentShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(Text(.Board.boardDetails))
+                .accessibilityLabel(Text(detailsLabel))
             }
             .onHover { isHovered = $0 }
             .onTapGesture(perform: onDetails)
@@ -71,9 +72,12 @@ extension View {
         modifier(BoardHeaderControlHover())
     }
 
-    func boardCardInteraction(background: Color? = nil, backgroundOpacity: Double = 1,
+    func boardCardInteraction(title: String, repositoryPath: String, iid: Int? = nil,
+                              background: Color? = nil, backgroundOpacity: Double = 1,
                               onDetails: @escaping () -> Void) -> some View {
-        modifier(BoardCardInteraction(background: background, backgroundOpacity: backgroundOpacity, onDetails: onDetails))
+        let reference = iid.map { "\(repositoryPath) !\($0)" } ?? repositoryPath
+        return modifier(BoardCardInteraction(background: background, backgroundOpacity: backgroundOpacity,
+            detailsLabel: .Board.boardDetailsFor(title, reference), onDetails: onDetails))
     }
 }
 

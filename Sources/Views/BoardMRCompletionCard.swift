@@ -50,7 +50,8 @@ struct BoardMRCompletionCard: View {
         .controlSize(.small)
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.12), lineWidth: 0.5))
-        .boardCardInteraction(onDetails: openDetails)
+        .boardCardInteraction(title: completion.title, repositoryPath: completion.url.gitLabProjectPath,
+            iid: completion.target.iid, onDetails: openDetails)
         .contextMenu { menuItems }
         .onChange(of: isCurrentAccount) { _, current in
             if !current { showingDetails = false }

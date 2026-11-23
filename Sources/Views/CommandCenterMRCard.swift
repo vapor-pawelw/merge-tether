@@ -102,8 +102,8 @@ private struct CommandCenterMRCardContent: View {
                 .opacity(contentOpacity)
                 .allowsHitTesting(false)
         }
-        .boardCardInteraction(
-            background: colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(white: 0.95),
+        .boardCardInteraction(title: row.displayTitle, repositoryPath: row.displayURL.gitLabProjectPath,
+            iid: item.id.iid, background: colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(white: 0.95),
             backgroundOpacity: contentOpacity, onDetails: onDetails)
         .contextMenu { menuItems }
         .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
@@ -582,7 +582,8 @@ struct BoardTodoRow: View {
         .controlSize(.small)
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .boardCardInteraction { showingDetails = true }
+        .boardCardInteraction(title: todo.displayTitle, repositoryPath: todo.project.pathWithNamespace,
+            iid: todo.targetType == .mergeRequest ? todo.target.iid : nil) { showingDetails = true }
         .contextMenu { menuItems }
         .sheet(isPresented: $showingDetails) {
             BoardItemDetailSheet {

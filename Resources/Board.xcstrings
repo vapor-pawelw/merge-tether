@@ -477,6 +477,13 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Odepnij"}}
       }
     },
+    "board.details.for.%@.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Details for %1$@ (%2$@)" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Szczegóły: %1$@ (%2$@)" } }
+      }
+    },
     "board.details": {
       "extractionState": "manual",
       "localizations": {
