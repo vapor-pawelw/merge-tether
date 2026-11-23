@@ -4,11 +4,27 @@ struct MRCardContentSpacing: LayoutValueKey {
     static let defaultValue: CGFloat = 8
 }
 
-/// Lays out content independently of the trailing controls, with full width below them.
+/// Places the card's heading, people and controls, then gives each status row the width available at its height.
 struct MRCardMetadataLayout: Layout {
-    private struct Row {
+    var referenceToTitleSpacing: CGFloat = 10
+    var titleToPeopleSpacing: CGFloat = 10
+    var keepsBadgesUnderActions = false
+
+    private let controlsClearance: CGFloat = 16
+    private let badgeSpacing: CGFloat = 8
+
+    private struct Placement {
+        let index: Int
+        let x: CGFloat
         let top: CGFloat
         let proposal: ProposedViewSize
+        var trailing = false
+
+        func place(in bounds: CGRect, subviews: LayoutSubviews) {
+            subviews[index].place(
+                at: CGPoint(x: (trailing ? bounds.maxX : bounds.minX) + x, y: bounds.minY + top),
+                anchor: trailing ? .topTrailing : .topLeading, proposal: proposal)
+        }
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -17,61 +33,102 @@ struct MRCardMetadataLayout: Layout {
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        guard let controls = subviews.last else { return }
-        let layout = measure(width: bounds.width, subviews: subviews)
-        for (subview, row) in zip(subviews.dropLast(), layout.rows) {
-            subview.place(at: CGPoint(x: bounds.minX, y: bounds.minY + row.top),
-                          anchor: .topLeading, proposal: row.proposal)
+        for placement in measure(width: bounds.width, subviews: subviews).placements {
+            placement.place(in: bounds, subviews: subviews)
         }
-        controls.place(at: CGPoint(x: bounds.maxX, y: bounds.minY), anchor: .topTrailing,
-                       proposal: ProposedViewSize(layout.controls))
     }
 
-    // The last subview is the control stack. The others are content rows in reading order.
-    private func measure(width: CGFloat?, subviews: Subviews)
-        -> (size: CGSize, rows: [Row], controls: CGSize) {
-        let controls = subviews.last?.sizeThatFits(.unspecified) ?? .zero
-        let clearance = controls.width > 0 ? controls.width + 16 : 0
-        var bottom: CGFloat = 0
-        var usedWidth = max(width ?? 0, controls.width)
-        var rows: [Row] = []
-        for subview in subviews.dropLast() {
-            let top = bottom > 0 ? bottom + subview[MRCardContentSpacing.self] : 0
-            let reservedWidth = top < controls.height ? clearance : 0
-            let proposal = ProposedViewSize(width: width.map { max(0, $0 - reservedWidth) }, height: nil)
-            let size = subview.sizeThatFits(proposal)
-            rows.append(Row(top: top, proposal: proposal))
+    // The first five subviews are the reference, title, people, actions and badges respectively.
+    // The remaining subviews are status rows in reading order.
+    private func measure(width: CGFloat?, subviews: Subviews) -> (size: CGSize, placements: [Placement]) {
+        let referenceIndex = 0
+        let titleIndex = 1
+        let peopleIndex = 2
+        let actionsIndex = 3
+        let badgesIndex = 4
+        let actions = subviews[actionsIndex].sizeThatFits(.unspecified)
+        let badges = subviews[badgesIndex].dimensions(in: .unspecified)
+        let badgeSize = CGSize(width: badges.width, height: badges.height)
+        let hasBadges = badges.width > 0 && badges.height > 0
+        let hasActions = actions.width > 0 && actions.height > 0
+        let actionReserve = hasActions ? actions.width + controlsClearance : 0
+        let idealReferenceWidth = subviews[referenceIndex].sizeThatFits(.unspecified).width
+        let inlineWidth = idealReferenceWidth + badgeSpacing + badges.width + actionReserve
+        let badgesInline = hasBadges && !keepsBadgesUnderActions && (width.map { inlineWidth <= $0 } ?? true)
+        let badgesTrailing = hasBadges && !badgesInline
+
+        func proposedWidth(reserving reserved: CGFloat = 0) -> ProposedViewSize {
+            ProposedViewSize(width: width.map { max(0, $0 - reserved) }, height: nil)
+        }
+
+        let earlyBadgeReserve = badgesTrailing && keepsBadgesUnderActions ? badges.width + controlsClearance : 0
+        let referenceReserve = max(actionReserve, earlyBadgeReserve)
+        let referenceProposal = proposedWidth(reserving: referenceReserve + (badgesInline ? badgeSpacing + badges.width : 0))
+        let reference = subviews[referenceIndex].dimensions(in: referenceProposal)
+        let actionsTop = (reference.height - actions.height) / 2
+        let actionsBottom = hasActions ? actionsTop + actions.height : 0
+        let earlyBadgeTop = hasActions ? actionsBottom + 4 : 0
+        let earlyBadgeBottom = earlyBadgeReserve > 0 ? earlyBadgeTop + badges.height : 0
+
+        // The reference baseline and the gap below the title compensate for the text line boxes.
+        let titleTop = reference.height > 0 ? reference[.lastTextBaseline] + referenceToTitleSpacing : 0
+        let titleReserve = max(titleTop < actionsBottom ? actionReserve : 0,
+                               titleTop < earlyBadgeBottom ? earlyBadgeReserve : 0)
+        let titleProposal = proposedWidth(reserving: titleReserve)
+        let title = subviews[titleIndex].sizeThatFits(titleProposal)
+
+        let peopleTop = titleTop + title.height + titleToPeopleSpacing
+        let peopleReserve = peopleTop < earlyBadgeBottom ? earlyBadgeReserve : 0
+        let peopleProposal = proposedWidth(reserving: peopleReserve)
+        let people = subviews[peopleIndex].sizeThatFits(peopleProposal)
+        let peopleBottom = peopleTop + people.height
+        let badgeTop = badgesInline ? reference[.firstTextBaseline] - badges[.firstTextBaseline]
+            : keepsBadgesUnderActions ? earlyBadgeTop : peopleBottom + 4
+        let badgesBottom = hasBadges ? badgeTop + badges.height : 0
+
+        var placements = [
+            Placement(index: referenceIndex, x: 0, top: 0, proposal: referenceProposal),
+            Placement(index: titleIndex, x: 0, top: titleTop, proposal: titleProposal),
+            Placement(index: peopleIndex, x: 0, top: peopleTop, proposal: peopleProposal),
+            Placement(index: actionsIndex, x: 0, top: actionsTop, proposal: ProposedViewSize(actions), trailing: true)
+        ]
+        if hasBadges {
+            placements.append(Placement(index: badgesIndex, x: badgesInline ? reference.width + badgeSpacing : 0,
+                                        top: badgeTop, proposal: ProposedViewSize(badgeSize), trailing: badgesTrailing))
+        }
+
+        let referenceWidth = reference.width + referenceReserve + (badgesInline ? badgeSpacing + badges.width : 0)
+        var usedWidth = max(width ?? 0, referenceWidth, title.width + titleReserve, people.width + peopleReserve, badges.width)
+        var bottom = people.height > 0 ? peopleBottom : titleTop + title.height
+        var firstStatus = true
+        for index in subviews.indices.dropFirst(5) {
+            let row = subviews[index]
+            let spacing = max(firstStatus ? 16 : 0, row[MRCardContentSpacing.self])
+            let top = bottom + spacing
+            let badgeReserve = badgesTrailing && top < badgesBottom ? badges.width + controlsClearance : 0
+            let reserve = max(top < actionsBottom ? actionReserve : 0, badgeReserve)
+            let proposal = proposedWidth(reserving: reserve)
+            let size = row.sizeThatFits(proposal)
+            placements.append(Placement(index: index, x: 0, top: top, proposal: proposal))
             if size.height > 0 {
+                firstStatus = false
                 bottom = top + size.height
-                usedWidth = max(usedWidth, size.width + reservedWidth)
+                usedWidth = max(usedWidth, size.width + reserve)
             }
         }
-        return (CGSize(width: usedWidth, height: max(bottom, controls.height)), rows, controls)
+        return (CGSize(width: usedWidth, height: max(bottom, actionsBottom, badgesBottom)), placements)
     }
 }
 
-struct MRCardStatusLayout<CardContent: View, Controls: View>: ViewModifier {
-    let cardContent: CardContent
-    let controls: Controls
+struct MRCardStatusLayout<Heading: View, Status: View>: ViewModifier {
+    let heading: Heading
+    let status: Status
 
     func body(content: Content) -> some View {
         MRCardMetadataLayout {
-            cardContent
+            heading
+            status
             content
-            controls.zIndex(1)
         }
-    }
-}
-
-/// Measures the reference to its last baseline so font padding does not add to the title gap.
-struct MRCardReferenceLayout: Layout {
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let reference = subviews[0].dimensions(in: ProposedViewSize(width: proposal.width, height: nil))
-        return CGSize(width: reference.width, height: reference[.lastTextBaseline])
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        subviews[0].place(at: bounds.origin, anchor: .topLeading,
-                         proposal: ProposedViewSize(width: bounds.width, height: nil))
     }
 }

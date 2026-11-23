@@ -8,13 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Keep merge request messages beside the approvals and tags when they overlap vertically, and let messages below them use the full card width. Place bottom actions below both areas on Mac and iPhone.
 
-- Give the Mac card's More menu the same 24 pt square as the other action buttons and position the action row 12 pt from the top.
+- Give the Mac card's More menu the same 24 pt square as the other action buttons. Center the action row vertically with the repository reference.
 
-- Keep approvals and tags in a right-aligned column with 4 pt between rows on Mac and iPhone merge request cards. Draft and Blocked share a row, and long titles wrap to the left. Match the visible top inset to the other card insets and keep about 8 pt between the repository reference and the title.
+- Align approvals with the author at the right edge of Mac and iPhone merge request cards. Put Draft and Blocked beside the merge request number when they fit, and below approvals on narrower cards. Use about 12 pt of visible space between the repository reference, title and author.
 
 - Add or remove reviewers from the approvals popover on Mac and iPhone. Search by name or GitLab username. Make the iPhone approvals badge more compact and keep its tap area within the badge.
 
-- Put the repository and MR number above the title and the author below it on Mac and iPhone board cards. A Blocked badge in the top-right corner opens a popover with links to blocking MRs and shows whether each one is earlier in the stack, an explicit GitLab dependency, or both.
+- Put the repository and MR number above the title and the author below it on Mac and iPhone board cards. The Blocked badge opens a popover with links to blocking MRs and shows whether each one is earlier in the stack, an explicit GitLab dependency, or both.
 
 - Drop merge request cards above, between or below other cards on Mac and iPhone. The insertion line marks valid positions in the card's current column, automation section and pin group.
 

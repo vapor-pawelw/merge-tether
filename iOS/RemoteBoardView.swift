@@ -395,30 +395,32 @@ struct RemoteCardView: View {
         }
     }
     private var compactContent: some View {
-        MRCardMetadataLayout {
-            VStack(alignment: .leading, spacing: 8) {
-                MRCardReferenceLayout { repositoryReference }
-                title.opacity(contentOpacity)
+        MRCardMetadataLayout(referenceToTitleSpacing: 11, titleToPeopleSpacing: 6,
+                             keepsBadgesUnderActions: card.presentation?.draftBadge != nil && !showsDraftStyle) {
+            repositoryReference
+            title.opacity(contentOpacity)
+            HStack(spacing: 0) {
                 author
+                Spacer(minLength: 16)
+                approvalBadge
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: true, vertical: false)
             }
-            .padding(.bottom, !card.detail.isEmpty || hasSupportingInformation ? 8 : 0)
+            HStack { EmptyView() }
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if let dependencies = card.dependencies {
+                    MRDependencyBadge(dependencies: dependencies)
+                }
+                draftBadge
+            }
+            .font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: true, vertical: false)
+            .zIndex(1)
             informationRows.opacity(contentOpacity)
             if let date = inboxUpdateDate {
                 InboxUpdateTimestamp(date: date)
                     .layoutValue(key: MRCardContentSpacing.self, value: 16)
             }
-            VStack(alignment: .trailing, spacing: 4) {
-                approvalBadge
-                HStack(spacing: 8) {
-                    if let dependencies = card.dependencies {
-                        MRDependencyBadge(dependencies: dependencies)
-                    }
-                    draftBadge
-                }
-            }
-            .font(.caption).foregroundStyle(.secondary)
-            .fixedSize(horizontal: true, vertical: false)
-            .zIndex(1)
         }
     }
 
