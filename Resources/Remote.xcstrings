@@ -1779,6 +1779,41 @@
         },
         "pl": {"stringUnit": {"state": "translated", "value": "Przenoś karty w obrębie tej samej sekcji i grupy przypięcia. Jeśli kolejność zmieniła się na Macu, użyj zaktualizowanej tablicy i spróbuj ponownie."}}
       }
+    },
+    "remote.mac.phoneConnected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "iPhone connected."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "iPhone jest połączony."}}
+      }
+    },
+    "remote.mac.waitingForPhone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Waiting for the iPhone to connect."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Oczekiwanie na połączenie z iPhone’em."}}
+      }
+    },
+    "remote.mac.reconnecting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Reconnecting to the relay…"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponowne łączenie z relayem…"}}
+      }
+    },
+    "remote.mac.newCodeConfirmTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Replace the paired iPhone?"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Zastąpić sparowanego iPhone’a?"}}
+      }
+    },
+    "remote.mac.newCodeConfirmMessage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "This immediately revokes the paired iPhone’s access. Scan the new code on a phone to use the companion again."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Sparowany iPhone natychmiast straci dostęp. Aby znów korzystać z aplikacji, zeskanuj nowy kod na telefonie."}}
+      }
     }
   },
   "version": "1.0"

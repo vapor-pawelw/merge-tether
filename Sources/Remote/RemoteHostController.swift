@@ -22,6 +22,15 @@ extension RemoteConnection: RemoteHostTransport {}
     var invitation = ""
     private(set) var failed = false
     private(set) var connected = false
+    /// Set by the first authenticated (decrypted) phone message on the current socket.
+    private(set) var phoneSeenAt: Date?
+
+    enum PhoneLink: Equatable { case reconnecting, waitingForPhone, phoneConnected }
+    /// `connected` only means the socket was opened; only a decrypted message proves the phone is reachable.
+    var phoneLink: PhoneLink {
+        guard connected else { return .reconnecting }
+        return phoneSeenAt == nil ? .waitingForPhone : .phoneConnected
+    }
     private let monitor: TodoMonitorService
     private let store: RemotePairingStore
     private let savePairing: (RemotePairing) throws -> Void
@@ -186,6 +195,7 @@ extension RemoteConnection: RemoteHostTransport {}
         cancelDetailAvatars()
         phoneSupportsDetailAvatars = false
         hostSession = UUID()
+        phoneSeenAt = nil
         resolutionPreviews.removeAll()
         phoneSupportsCommentReview = false
         phoneSupportsMergeActions = false
@@ -287,6 +297,7 @@ extension RemoteConnection: RemoteHostTransport {}
     }
     private func receive(_ message: RemoteMessage) async {
         guard let active = connection else { return }
+        if phoneSeenAt == nil { phoneSeenAt = now() }
         switch message.type {
         case .hello:
             guard let challenge = message.challenge else { return }

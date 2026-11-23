@@ -3,6 +3,7 @@ import CoreImage.CIFilterBuiltins
 
 struct RemoteAccessView: View {
     @Bindable var remote: RemoteHostController
+    @State private var confirmNewCode = false
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Label(.Remote.remoteMacPairPhone, systemImage: "iphone").font(.title2.bold())
@@ -19,6 +20,13 @@ struct RemoteAccessView: View {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     if pairing.peerPublicKey != nil {
                         Text(.Remote.remoteMacDevicePaired).foregroundStyle(.secondary)
+                        Label {
+                            Text(linkTitle)
+                        } icon: {
+                            Image(systemName: remote.phoneLink == .phoneConnected ? "checkmark.circle.fill" : "clock")
+                                .foregroundStyle(remote.phoneLink == .phoneConnected ? Color.green : Color.secondary)
+                        }
+                        .font(.callout)
                     } else if pairing.invitationIsValid(now: context.date) {
                         if let image = qr(pairing.deepLink.absoluteString) {
                             Image(nsImage: image).interpolation(.none).resizable().scaledToFit()
@@ -36,7 +44,18 @@ struct RemoteAccessView: View {
                         Text(.Remote.remoteMacInvitationExpired).foregroundStyle(.secondary)
                     }
                 }
-                Button(.Remote.remoteNewCode) { remote.enable() }
+                Button(.Remote.remoteNewCode) {
+                    if pairing.peerPublicKey != nil { confirmNewCode = true } else { remote.enable() }
+                }
+                .alert(Text(.Remote.remoteMacNewCodeConfirmTitle), isPresented: $confirmNewCode) {
+                    Button(.Remote.remoteCancel, role: .cancel) {}
+                    Button(.Remote.remoteNewCode, role: .destructive) {
+                        guard remote.pairing == pairing else { return }
+                        remote.enable()
+                    }
+                } message: {
+                    Text(.Remote.remoteMacNewCodeConfirmMessage)
+                }
                 Button(.Remote.remoteDisable, role: .destructive) { remote.disable() }
             } else {
                 if remote.relayMismatch { Text(.Remote.remoteRelayMismatch).font(.caption).foregroundStyle(.orange) }
@@ -47,6 +66,13 @@ struct RemoteAccessView: View {
             }
             if remote.failed { Text(.Remote.remoteError).foregroundStyle(.red).font(.caption) }
         }.padding(24).frame(width: 440)
+    }
+    private var linkTitle: LocalizedStringResource {
+        switch remote.phoneLink {
+        case .reconnecting: .Remote.remoteMacReconnecting
+        case .waitingForPhone: .Remote.remoteMacWaitingForPhone
+        case .phoneConnected: .Remote.remoteMacPhoneConnected
+        }
     }
     private func qr(_ value: String) -> NSImage? {
         let filter = CIFilter.qrCodeGenerator(); filter.message = Data(value.utf8)
