@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Usage period"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Okres użycia"}}
       }
     },
     "assistantUsageThisMonth": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "This month (UTC)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ten miesiąc (UTC)"}}
       }
     },
     "assistantUsageAllTracked": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "All tracked runs"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wszystkie zarejestrowane uruchomienia"}}
       }
     },
     "assistantUsageCodingAgent": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "Coding agent"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Asystent programistyczny"}}
       }
     },
     "assistantUsageCodingAgentDetail": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "Reviews, follow-ups, conflicts and pipeline fixes"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przeglądy, obsługa uwag, konflikty i naprawy pipeline’ów"}}
       }
     },
     "assistantUsageVerification": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "Verification"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Weryfikacja"}}
       }
     },
     "assistantUsageVerificationDetail": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "Checks, reply verification and classification"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kontrole, weryfikacja odpowiedzi i klasyfikacja"}}
       }
     },
     "assistantUsageRuns": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "Runs: %lld"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchomienia: %lld"}}
       }
     },
     "assistantUsageUnknownRuns": {
@@ -97,7 +105,8 @@
             "state": "translated",
             "value": "%lld unknown or partial"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nieznane lub częściowe: %lld"}}
       }
     },
     "assistantUsageTokens": {
@@ -108,7 +117,8 @@
             "state": "translated",
             "value": "Reported tokens: %lld input · %lld cached · %lld output"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zgłoszone tokeny: %lld wejściowych · %lld z pamięci podręcznej · %lld wyjściowych"}}
       }
     },
     "assistantUsageEstimate": {
@@ -119,7 +129,8 @@
             "state": "translated",
             "value": "≈ %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "≈ %@"}}
       }
     },
     "assistantUsageEstimateBelow": {
@@ -130,7 +141,8 @@
             "state": "translated",
             "value": "< %@ estimated"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Szacunek: < %@"}}
       }
     },
     "assistantUsageNoRuns": {
@@ -141,7 +153,8 @@
             "state": "translated",
             "value": "No tracked runs"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak zarejestrowanych uruchomień"}}
       }
     },
     "assistantUsageCostUnavailable": {
@@ -152,7 +165,8 @@
             "state": "translated",
             "value": "Cost unavailable"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Koszt niedostępny"}}
       }
     },
     "assistantUsageUnavailable": {
@@ -163,7 +177,8 @@
             "state": "translated",
             "value": "Usage history is unavailable. Previously loaded totals may be out of date."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Historia użycia jest niedostępna. Wcześniej wczytane sumy mogą być nieaktualne."}}
       }
     },
     "assistantUsageTrackingSince": {
@@ -174,7 +189,8 @@
             "state": "translated",
             "value": "Tracking since %@ (UTC). Earlier runs are not included."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rejestrowanie od %@ (UTC). Wcześniejsze uruchomienia są pomijane."}}
       }
     },
     "assistantUsageTrackingStarts": {
@@ -185,7 +201,8 @@
             "state": "translated",
             "value": "Tracking starts with your next agent run. Earlier runs are not included."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rejestrowanie rozpocznie się przy następnym uruchomieniu agenta. Wcześniejsze uruchomienia są pomijane."}}
       }
     },
     "assistantUsageEstimateExplanation": {
@@ -196,7 +213,8 @@
             "state": "translated",
             "value": "How estimates work"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Jak powstają szacunki"}}
       }
     },
     "assistantUsageEstimateHelp": {
@@ -207,7 +225,8 @@
             "state": "translated",
             "value": "USD estimates do not measure subscription payments. Codex uses standard short-context API rates from 8 Nov 2026, excluding cache-write premiums, tools and tier/context adjustments. Claude uses the CLI estimate."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Szacunki w USD nie uwzględniają opłat abonamentowych. Dla Codexa stosuje się standardowe stawki API dla krótkiego kontekstu z 8 listopada 2026 r., bez dopłat za zapis w pamięci podręcznej, narzędzi i korekt zależnych od poziomu usługi lub kontekstu. Dla Claude’a używany jest szacunek CLI."}}
       }
     },
     "assistantUsageScopeHelp": {
@@ -218,7 +237,8 @@
             "state": "translated",
             "value": "Only runs started by MergeTether are recorded. Separately launched nested CLIs may not be included."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rejestrowane są tylko uruchomienia rozpoczęte przez MergeTether. Osobno uruchomione, zagnieżdżone sesje CLI mogą zostać pominięte."}}
       }
     },
     "assistantUsageUnknownHelp": {
@@ -229,7 +249,8 @@
             "state": "translated",
             "value": "Unknown or partial runs may add cost beyond the displayed subtotal. Cached input is included in input tokens."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchomienia o nieznanych lub częściowych kosztach mogą zwiększyć wyświetloną sumę częściową. Tokeny wejściowe obejmują tokeny z pamięci podręcznej."}}
       }
     },
     "assistantUsagePricingSource": {
@@ -240,7 +261,8 @@
             "state": "translated",
             "value": "OpenAI API pricing"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Cennik OpenAI API"}}
       }
     },
     "assistantUsageTokensUnavailable": {
@@ -251,7 +273,8 @@
             "state": "translated",
             "value": "Reported token totals unavailable"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Suma zgłoszonych tokenów niedostępna"}}
       }
     },
     "assistantUsageTab": {
@@ -262,7 +285,8 @@
             "state": "translated",
             "value": "Agent usage"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Użycie asystentów"}}
       }
     },
     "assistantUsageDashboardTitle": {
@@ -273,7 +297,8 @@
             "state": "translated",
             "value": "Agent usage"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Użycie asystentów"}}
       }
     },
     "assistantUsageOverall": {
@@ -284,7 +309,8 @@
             "state": "translated",
             "value": "Overall"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Łącznie"}}
       }
     },
     "assistantUsageAppOnly": {
@@ -295,7 +321,8 @@
             "state": "translated",
             "value": "Runs started by MergeTether"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchomienia rozpoczęte przez MergeTether"}}
       }
     },
     "assistantUsageAverageDaily": {
@@ -306,7 +333,8 @@
             "state": "translated",
             "value": "Known estimate per day"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dzienny szacunek znanych kosztów"}}
       }
     },
     "assistantUsageCoveredDays": {
@@ -317,7 +345,8 @@
             "state": "translated",
             "value": "Calendar days tracked: %lld"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zarejestrowane dni kalendarzowe: %lld"}}
       }
     },
     "assistantUsageAverageHelp": {
@@ -328,7 +357,8 @@
             "state": "translated",
             "value": "Includes zero-activity days since tracking or range start; the partial current day counts once."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uwzględnia dni bez aktywności od początku rejestrowania lub zakresu dat. Bieżący niepełny dzień liczy się jako jeden dzień."}}
       }
     },
     "assistantUsageToday": {
@@ -339,7 +369,8 @@
             "state": "translated",
             "value": "Today"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dzisiaj"}}
       }
     },
     "assistantUsageLast7Days": {
@@ -350,7 +381,8 @@
             "state": "translated",
             "value": "Last 7 days"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ostatnie 7 dni"}}
       }
     },
     "assistantUsageLast30Days": {
@@ -361,7 +393,8 @@
             "state": "translated",
             "value": "Last 30 days"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ostatnie 30 dni"}}
       }
     },
     "assistantUsageDailyHistory": {
@@ -372,7 +405,8 @@
             "state": "translated",
             "value": "Daily history"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Historia dzienna"}}
       }
     },
     "assistantUsageDay": {
@@ -383,7 +417,8 @@
             "state": "translated",
             "value": "Day (UTC)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dzień (UTC)"}}
       }
     },
     "assistantUsageEstimatedUSD": {
@@ -394,7 +429,8 @@
             "state": "translated",
             "value": "Estimated USD"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Szacunek w USD"}}
       }
     },
     "assistantUsageUnknownDay": {
@@ -405,7 +441,8 @@
             "state": "translated",
             "value": "Unknown or partial usage in this period"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nieznane lub częściowe użycie w tym okresie"}}
       }
     },
     "assistantUsageChartHelp": {
@@ -416,7 +453,8 @@
             "state": "translated",
             "value": "Hover over a bar for the overall estimate and each CLI. Bars show known estimates; orange markers indicate unknown or partial usage. Missing costs are not plotted as zero. Runs are grouped by start time (UTC)."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Najedź na słupek, aby zobaczyć łączny szacunek i wynik dla każdego CLI. Słupki obejmują znane szacunki, a pomarańczowe znaczniki pokazują nieznane lub częściowe użycie. Brakujące koszty są pomijane na wykresie. Uruchomienia są grupowane według czasu rozpoczęcia (UTC)."}}
       }
     },
     "assistantUsageNoActivity": {
@@ -427,7 +465,8 @@
             "state": "translated",
             "value": "No activity"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak aktywności"}}
       }
     },
     "assistantUsageChartTitle": {
@@ -438,7 +477,8 @@
             "state": "translated",
             "value": "Usage by CLI · UTC"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Użycie według CLI · UTC"}}
       }
     },
     "assistantUsageMRRankingTitle": {
@@ -449,7 +489,8 @@
             "state": "translated",
             "value": "Top 5 merge requests"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "5 merge requestów o najwyższym koszcie"}}
       }
     },
     "assistantUsageMRRankingHelp": {
@@ -460,7 +501,8 @@
             "state": "translated",
             "value": "Estimated cost for the selected usage period."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Szacowany koszt w wybranym okresie."}}
       }
     },
     "assistantUsageMRRankingEmpty": {
@@ -471,7 +513,8 @@
             "state": "translated",
             "value": "No merge request runs with a known cost in this period."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak uruchomień dla merge requestów ze znanym kosztem w tym okresie."}}
       }
     },
     "assistantUsageMRUnknownRuns": {
@@ -482,7 +525,8 @@
             "state": "translated",
             "value": "%lld runs have unknown or partial cost; amount is the known subtotal."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchomienia z nieznanym lub częściowym kosztem: %lld. Wyświetlona kwota obejmuje tylko znane koszty."}}
       }
     },
     "assistantUsageMRLifetimeCost": {
@@ -493,7 +537,8 @@
             "state": "translated",
             "value": "Tracked total · estimated USD"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zarejestrowana suma · szacunek w USD"}}
       }
     },
     "assistantUsageHours": {
@@ -504,7 +549,8 @@
             "state": "translated",
             "value": "Hours"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Godziny"}}
       }
     },
     "assistantUsageDays": {
@@ -515,7 +561,8 @@
             "state": "translated",
             "value": "Days"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dni"}}
       }
     },
     "assistantUsageWeeks": {
@@ -526,7 +573,8 @@
             "state": "translated",
             "value": "Weeks"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Tygodnie"}}
       }
     },
     "assistantUsageMonths": {
@@ -537,7 +585,8 @@
             "state": "translated",
             "value": "Months"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Miesiące"}}
       }
     },
     "assistantUsageGranularity": {
@@ -548,7 +597,8 @@
             "state": "translated",
             "value": "Group usage by"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Grupuj użycie według"}}
       }
     },
     "assistantUsageCodexCLI": {
@@ -559,7 +609,8 @@
             "state": "translated",
             "value": "Codex CLI"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Codex CLI"}}
       }
     },
     "assistantUsageClaudeCLI": {
@@ -570,7 +621,8 @@
             "state": "translated",
             "value": "Claude CLI"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Claude CLI"}}
       }
     },
     "assistantUsageProvider": {
@@ -581,7 +633,8 @@
             "state": "translated",
             "value": "CLI"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "CLI"}}
       }
     },
     "assistantUsageTime": {
@@ -592,7 +645,8 @@
             "state": "translated",
             "value": "Time (UTC)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Czas (UTC)"}}
       }
     },
     "assistantUsageBucketRange": {
@@ -603,7 +657,8 @@
             "state": "translated",
             "value": "%@ – %@ (UTC, end exclusive)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%@ – %@ (UTC, bez końca przedziału)"}}
       }
     },
     "assistantUsageChartTruncated": {
@@ -614,7 +669,8 @@
             "state": "translated",
             "value": "Showing the latest %lld of %lld periods. Totals above cover the full selected range."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wyświetlono ostatnie %lld z %lld okresów. Powyższe sumy obejmują cały wybrany zakres."}}
       }
     },
     "assistantUsageAveragePartial": {
@@ -625,7 +681,8 @@
             "state": "translated",
             "value": "Known subtotal only; %lld runs have unknown or partial costs."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Suma znanych kosztów. Uruchomienia z nieznanym lub częściowym kosztem: %lld."}}
       }
     },
     "assistantUsageTokensPartial": {
@@ -636,7 +693,8 @@
             "state": "translated",
             "value": "Partial token counts; some usage is unavailable."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Liczba tokenów jest częściowa. Niektóre dane o użyciu są niedostępne."}}
       }
     },
     "assistantUsageMRReviewer": {
@@ -647,7 +705,8 @@
             "state": "translated",
             "value": "Reviewer / work agent"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Asystent do przeglądów i poprawek"}}
       }
     },
     "assistantUsageMRVerifier": {
@@ -658,7 +717,8 @@
             "state": "translated",
             "value": "Verifier"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Weryfikator"}}
       }
     },
     "assistantUsageMRAgentRequests": {
@@ -669,7 +729,8 @@
             "state": "translated",
             "value": "Agent requests: %lld"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Żądania do asystenta: %lld"}}
       }
     },
     "assistantUsageMRAgentRequestsHelp": {
@@ -680,7 +741,8 @@
             "state": "translated",
             "value": "One prompt issued by MergeTether per CLI invocation. Retries count separately; cached checks add no request. Internal model turns and tool calls are not counted."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "MergeTether wysyła jedno żądanie na uruchomienie CLI. Ponowienia liczą się osobno, a kontrole korzystające z pamięci podręcznej nie dodają żądania. Wewnętrzne kroki modelu i wywołania narzędzi są pomijane."}}
       }
     },
     "assistantUsageMRHistoryHelp": {
@@ -691,7 +753,8 @@
             "state": "translated",
             "value": "All recorded history for this MR and account, independent of the Settings date filter. Earlier or unattributed runs are not included."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Cała zarejestrowana historia tego MR i konta, niezależnie od filtra dat w ustawieniach. Wcześniejsze lub nieprzypisane uruchomienia są pomijane."}}
       }
     },
     "assistantUsageLegacyTitle": {
@@ -702,7 +765,8 @@
             "state": "translated",
             "value": "Legacy shared history (all time)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wcześniejsza wspólna historia (cały okres)"}}
       }
     },
     "assistantUsageLegacyHelp": {
@@ -713,7 +777,8 @@
             "state": "translated",
             "value": "Read-only history saved before installation isolation. It may include other installations and is kept separate from the totals above."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Historia tylko do odczytu, zapisana przed rozdzieleniem instalacji. Może obejmować inne instalacje i jest przechowywana osobno od powyższych sum."}}
       }
     },
     "assistantUsageLegacySource": {
@@ -724,7 +789,8 @@
             "state": "translated",
             "value": "Show legacy history source"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pokaż źródło wcześniejszej historii"}}
       }
     },
     "assistantUsageLegacyUnavailable": {
@@ -735,7 +801,8 @@
             "state": "translated",
             "value": "Legacy shared usage history could not be read. Its original file is preserved."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się odczytać wcześniejszej wspólnej historii użycia. Oryginalny plik został zachowany."}}
       }
     },
     "assistantUsageByAgentTitle": {
@@ -746,7 +813,8 @@
             "state": "translated",
             "value": "By agent"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Według asystenta"}}
       }
     },
     "assistantUsageByAgentHelp": {
@@ -757,7 +825,8 @@
             "state": "translated",
             "value": "Coding agent and verification combined, split by the CLI that ran each request. After switching agents, earlier requests stay with the agent that ran them."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Łączne żądania asystenta i weryfikatora, z podziałem na CLI, które je wykonało. Po zmianie asystenta wcześniejsze żądania pozostają przypisane do CLI, które je wykonało."}}
       }
     },
     "assistantUsageByAgentCardDetail": {
@@ -768,7 +837,8 @@
             "state": "translated",
             "value": "Coding agent and verification requests run with this CLI."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Żądania programistyczne i weryfikacyjne wykonane przez to CLI."}}
       }
     }
   },

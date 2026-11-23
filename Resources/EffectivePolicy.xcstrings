@@ -3,35 +3,43 @@
   "strings": {
     "settings.advancedRulesWarning": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Review & feedback rules and MR event rules are independent. Both can start work under your saved policy. Inspect their enablement and filters on those pages; editing templates here does not change either route." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Review & feedback rules and MR event rules are independent. Both can start work under your saved policy. Inspect their enablement and filters on those pages; editing templates here does not change either route." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Reguły przeglądów i uwag działają niezależnie od reguł zdarzeń MR. Oba zestawy mogą uruchamiać zadania zgodnie z zapisanymi zasadami. Stan i filtry sprawdzisz na odpowiednich stronach. Edycja szablonów tutaj nie zmienia warunków uruchomienia."}} }
     },
     "settings.jobPermissions": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "These permissions also apply to jobs you start yourself, including with the Manual preset or with automation switched off. Automatic jobs use them only while automation is on." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "These permissions also apply to jobs you start yourself, including with the Manual preset or with automation switched off. Automatic jobs use them only while automation is on." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Te uprawnienia dotyczą także zadań uruchamianych ręcznie, w tym w profilu Ręczny i przy wyłączonej automatyzacji. Zadania automatyczne korzystają z nich tylko przy włączonej automatyzacji."}} }
     },
     "settings.independentPush": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Follow-up pushes and conflict pushes are separate permissions. Tool access alone does not authorize either push." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Follow-up pushes and conflict pushes are separate permissions. Tool access alone does not authorize either push." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wysyłanie poprawek po uwagach i wysyłanie poprawek konfliktów to osobne uprawnienia. Sam dostęp do narzędzi nie zezwala na wysłanie żadnych zmian."}} }
     },
     "settings.conflictPushPrerequisites": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Conflict pushes need tool access above. Automatic conflict tasks also need conflict preparation under Preparation; conflict jobs you start yourself do not." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Conflict pushes need tool access above. Automatic conflict tasks also need conflict preparation under Preparation; conflict jobs you start yourself do not." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wysyłanie poprawek konfliktów wymaga powyższego dostępu do narzędzi. Zadania automatyczne wymagają również włączenia przygotowania poprawek konfliktów w sekcji Przygotowanie. Ręcznie uruchamiane zadania nie wymagają tego ustawienia."}} }
     },
     "settings.templatesLocation": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Custom titles and task instructions are in Advanced. This rule and its repository filter still control when work starts." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Custom titles and task instructions are in Advanced. This rule and its repository filter still control when work starts." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Własne tytuły i instrukcje zadań znajdują się w sekcji Zaawansowane. Warunki uruchomienia nadal określa ta reguła i jej filtr repozytoriów."}} }
     },
     "settings.templateTitle": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Custom task instructions" } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Custom task instructions" } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Własne instrukcje zadania"}} }
     },
     "settings.templateActive": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "These instructions belong to an enabled rule. Consent, scope, repository filters and current checks still apply. Change the rule in Review & feedback." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "These instructions belong to an enabled rule. Consent, scope, repository filters and current checks still apply. Change the rule in Review & feedback." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Instrukcje należą do włączonej reguły. Nadal obowiązują zgoda, zakres, filtry repozytoriów i bieżące kontrole. Regułę zmienisz w sekcji „Przeglądy i uwagi”."}} }
     },
     "settings.templateInactive": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "This rule is off. Its custom instructions are retained; editing them does not enable it. Independent MR event rules can still start work. Change this rule in Review & feedback." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "This rule is off. Its custom instructions are retained; editing them does not enable it. Independent MR event rules can still start work. Change this rule in Review & feedback." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ta reguła jest wyłączona. Jej instrukcje zostały zachowane, a ich edycja pozostawia regułę wyłączoną. Niezależne reguły zdarzeń MR nadal mogą uruchamiać pracę. Regułę zmienisz w sekcji „Przeglądy i uwagi”."}} }
     },
     "policy.publicationAll": {
       "extractionState": "manual",
@@ -41,7 +49,8 @@
             "state": "translated",
             "value": "Eligible comments can publish after checks"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kwalifikujące się komentarze mogą zostać opublikowane po sprawdzeniu"}}
       }
     },
     "policy.publicationAi": {
@@ -52,7 +61,8 @@
             "state": "translated",
             "value": "Qualifying replies can publish after checks"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kwalifikujące się odpowiedzi mogą zostać opublikowane po sprawdzeniu"}}
       }
     },
     "policy.publicationFiltered": {
@@ -63,7 +73,8 @@
             "state": "translated",
             "value": "Matching comments can publish after checks"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarze pasujące do filtrów mogą zostać opublikowane po sprawdzeniu"}}
       }
     },
     "policy.publicationManual": {
@@ -74,7 +85,8 @@
             "state": "translated",
             "value": "Comments wait for your review"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarze czekają na Twój przegląd"}}
       }
     },
     "policy.mergeManual": {
@@ -85,7 +97,8 @@
             "state": "translated",
             "value": "Merge waits for you"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Scalanie czeka na Twoją decyzję"}}
       }
     },
     "policy.mergeChecks": {
@@ -96,7 +109,8 @@
             "state": "translated",
             "value": "Automatic merge requires current checks"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyczne scalanie wymaga aktualnych kontroli"}}
       }
     },
     "policy.approvalManual": {
@@ -107,7 +121,8 @@
             "state": "translated",
             "value": "Approval waits for you"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zatwierdzenie czeka na Twoją decyzję"}}
       }
     },
     "policy.approvalChecks": {
@@ -118,7 +133,8 @@
             "state": "translated",
             "value": "Automatic approval requires current checks"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyczne zatwierdzanie wymaga aktualnych kontroli"}}
       }
     },
     "policy.deliveryManual": {
@@ -129,7 +145,8 @@
             "state": "translated",
             "value": "Pushing fixes waits for you"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wysłanie poprawek czeka na Twoją decyzję"}}
       }
     },
     "policy.draftPaused": {
@@ -140,7 +157,8 @@
             "state": "translated",
             "value": "Automation paused for this Draft"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja wstrzymana dla tego szkicu"}}
       }
     },
     "policy.scopePaused": {
@@ -151,7 +169,8 @@
             "state": "translated",
             "value": "Automation paused for this MR"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja wstrzymana dla tego MR"}}
       }
     },
     "policy.off": {
@@ -162,7 +181,8 @@
             "state": "translated",
             "value": "Automatic work is off"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Działania automatyczne są wyłączone"}}
       }
     },
     "policy.automationDecision": {
@@ -173,7 +193,8 @@
             "state": "translated",
             "value": "Automation needs your decision"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja wymaga Twojej decyzji"}}
       }
     },
     "policy.chooseAutomationSettings": {
@@ -184,7 +205,8 @@
             "state": "translated",
             "value": "Choose automation settings…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wybierz ustawienia automatyzacji…"}}
       }
     },
     "policy.savedData": {
@@ -195,7 +217,8 @@
             "state": "translated",
             "value": "Automatic actions paused: saved data needs attention"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Działania automatyczne wstrzymane z powodu zapisanych danych"}}
       }
     },
     "policy.verification": {
@@ -206,7 +229,8 @@
             "state": "translated",
             "value": "Automation needs current verification"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja wymaga aktualnej weryfikacji"}}
       }
     },
     "policy.assistant": {
@@ -224,7 +248,8 @@
             "state": "translated",
             "value": "Automatic work paused: sign in to the coding agent"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Praca automatyczna wstrzymana. Zaloguj się do asystenta."}}
       }
     },
     "policy.limit": {
@@ -235,7 +260,8 @@
             "state": "translated",
             "value": "Automatic work paused: coding agent usage limit"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Praca automatyczna wstrzymana z powodu limitu użycia asystenta."}}
       }
     },
     "policy.automationRules": {
@@ -246,7 +272,8 @@
             "state": "translated",
             "value": "Rules for this merge request:"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Reguły dla tego merge requesta:"}}
       }
     },
     "policy.commentReview": {
@@ -257,7 +284,8 @@
             "state": "translated",
             "value": "Finish comment review before approval or merge"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zakończ przegląd komentarzy przed zatwierdzeniem lub scaleniem"}}
       }
     },
     "settings.preparation": {
@@ -268,7 +296,8 @@
             "state": "translated",
             "value": "Preparation"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przygotowanie"}}
       }
     },
     "settings.delivery": {
@@ -279,7 +308,8 @@
             "state": "translated",
             "value": "Delivery"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dostarczanie"}}
       }
     },
     "settings.completion": {
@@ -290,7 +320,8 @@
             "state": "translated",
             "value": "Completion"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zakończenie"}}
       }
     },
     "settings.preparationRules": {
@@ -301,7 +332,8 @@
             "state": "translated",
             "value": "Review & feedback"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przeglądy i uwagi"}}
       }
     },
     "settings.legacyTitle": {
@@ -312,7 +344,8 @@
             "state": "translated",
             "value": "Saved shell handler"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zapisany skrypt powłoki"}}
       }
     },
     "settings.legacyEnabled": {
@@ -323,7 +356,8 @@
             "state": "translated",
             "value": "Saved as enabled. This legacy handler does not run automatically."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zapisano jako włączony. Ten starszy skrypt jest dostępny tylko do podglądu."}}
       }
     },
     "settings.legacyDisabled": {
@@ -334,7 +368,8 @@
             "state": "translated",
             "value": "Saved as disabled. This legacy handler does not run automatically."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zapisano jako wyłączony. Ten starszy skrypt jest dostępny tylko do podglądu."}}
       }
     },
     "settings.legacyLocation": {
@@ -345,7 +380,8 @@
             "state": "translated",
             "value": "The saved title and command are in Advanced. Choose the coding agent here to migrate explicitly."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zapisany tytuł i polecenie znajdziesz w sekcji Zaawansowane. Wybierz tutaj asystenta, aby jawnie zmienić sposób uruchamiania."}}
       }
     },
     "settings.conflictsHelp": {
@@ -356,7 +392,8 @@
             "state": "translated",
             "value": "The coding agent prepares and checks conflict fixes. Enable conflict pushes to deliver them automatically; otherwise inspect the run result and deliver them manually. Project permission under Delivery also applies."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Asystent przygotowuje i sprawdza poprawki konfliktów. Włącz wysyłanie poprawek konfliktów, aby dostarczać je automatycznie. W przeciwnym razie sprawdź wynik zadania i dostarcz poprawki ręcznie. Obowiązuje też uprawnienie projektowe w sekcji Dostarczanie."}}
       }
     }
   },

@@ -9,7 +9,8 @@
             "state" : "translated",
             "value" : "Own"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Własny"}}
       }
     },
     "action.added_approvers.%@" : {
@@ -20,7 +21,8 @@
             "state" : "translated",
             "value" : "%@ added approvers."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%@ dodał(a) osoby zatwierdzające."}}
       }
     },
     "action.added_approvers.you" : {
@@ -31,7 +33,8 @@
             "state" : "translated",
             "value" : "You were added as an approver."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dodano Cię jako osobę zatwierdzającą."}}
       }
     },
     "action.approval_required.%@" : {
@@ -42,7 +45,8 @@
             "state" : "translated",
             "value" : "%@ set you as an approver."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%@ wyznaczył(a) Cię jako osobę zatwierdzającą."}}
       }
     },
     "action.approval_required.you" : {
@@ -53,7 +57,8 @@
             "state" : "translated",
             "value" : "You set yourself as an approver."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wyznaczyłeś(-aś) siebie jako osobę zatwierdzającą."}}
       }
     },
     "action.assigned.%@" : {
@@ -64,7 +69,8 @@
             "state" : "translated",
             "value" : "%@ assigned this to you."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%@ przypisał(a) to do Ciebie."}}
       }
     },
     "action.assigned.you" : {
@@ -75,7 +81,8 @@
             "state" : "translated",
             "value" : "You assigned this to yourself."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przypisałeś(-aś) to do siebie."}}
       }
     },
     "action.build_failed" : {
@@ -86,7 +93,8 @@
             "state" : "translated",
             "value" : "The pipeline failed."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pipeline nie powiódł się."}}
       }
     },
     "action.directly_addressed.%@" : {
@@ -97,7 +105,8 @@
             "state" : "translated",
             "value" : "%@ mentioned you directly."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%@ bezpośrednio Cię oznaczył(a)."}}
       }
     },
     "action.directly_addressed.you" : {
@@ -108,7 +117,8 @@
             "state" : "translated",
             "value" : "You mentioned yourself directly."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oznaczyłeś(-aś) siebie bezpośrednio."}}
       }
     },
     "action.marked.%@" : {
@@ -119,7 +129,8 @@
             "state" : "translated",
             "value" : "%@ added a to-do."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%@ dodał(a) zadanie do wykonania."}}
       }
     },
     "action.marked.you" : {
@@ -130,7 +141,8 @@
             "state" : "translated",
             "value" : "You added a to-do."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dodałeś(-aś) zadanie do wykonania."}}
       }
     },
     "action.member_access_requested.%@" : {
@@ -141,7 +153,8 @@
             "state" : "translated",
             "value" : "%@ requested access."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%@ poprosił(a) o dostęp."}}
       }
     },
     "action.member_access_requested.you" : {
@@ -152,7 +165,8 @@
             "state" : "translated",
             "value" : "You requested access."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Poprosiłeś(-aś) o dostęp."}}
       }
     },
     "action.mentioned.%@" : {
@@ -163,7 +177,8 @@
             "state" : "translated",
             "value" : "%@ mentioned you."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%@ wspomniał(a) o Tobie."}}
       }
     },
     "action.mentioned.you" : {
@@ -174,7 +189,8 @@
             "state" : "translated",
             "value" : "You mentioned yourself."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wspomniałeś(-aś) o sobie."}}
       }
     },
     "action.merge_train_removed" : {
@@ -185,7 +201,8 @@
             "state" : "translated",
             "value" : "Removed from the merge train."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Usunięto z kolejki scalania."}}
       }
     },
     "action.okr_checkin_requested.%@" : {
@@ -196,7 +213,8 @@
             "state" : "translated",
             "value" : "%@ requested an OKR check-in."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%@ poprosił(a) o aktualizację OKR."}}
       }
     },
     "action.okr_checkin_requested.you" : {
@@ -207,7 +225,8 @@
             "state" : "translated",
             "value" : "You requested an OKR check-in."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Poprosiłeś(-aś) o aktualizację OKR."}}
       }
     },
     "action.review_requested.%@" : {
@@ -218,7 +237,8 @@
             "state" : "translated",
             "value" : "%@ requested a review."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%@ poprosił(a) o przegląd."}}
       }
     },
     "action.review_requested.you" : {
@@ -229,7 +249,8 @@
             "state" : "translated",
             "value" : "You requested a review from yourself."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Poprosiłeś(-aś) siebie o przegląd."}}
       }
     },
     "action.review_submitted.%@" : {
@@ -240,7 +261,8 @@
             "state" : "translated",
             "value" : "%@ reviewed your merge request."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%@ przejrzał(a) Twój merge request."}}
       }
     },
     "action.review_submitted.you" : {
@@ -251,7 +273,8 @@
             "state" : "translated",
             "value" : "You reviewed your merge request."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przejrzałeś(-aś) swój merge request."}}
       }
     },
     "action.unknown.%@" : {
@@ -262,7 +285,8 @@
             "state" : "translated",
             "value" : "%@ updated this."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%@ zaktualizował(a) to."}}
       }
     },
     "action.unmergeable" : {
@@ -273,7 +297,8 @@
             "state" : "translated",
             "value" : "This merge request cannot be merged."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie można scalić tego merge requestu."}}
       }
     }
   },

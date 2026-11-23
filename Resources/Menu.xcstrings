@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "This enables automation for MRs in %@ that follow the repository default, including existing and future Draft MRs. Enabled rules may start agent reviews, feedback fixes, pipeline or conflict work. Your current permissions also control pushes, comment publication, approvals and discussion resolution.\n\nExplicit Always on/off choices, global action permissions and filters still apply. MRs stay Draft and cannot merge automatically until Ready."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Włącza automatyzację dla MR w %@, które dziedziczą ustawienie repozytorium, w tym obecnych i przyszłych MR w trybie szkicu. Włączone reguły mogą uruchamiać przeglądy, poprawki po uwagach oraz zadania związane z pipeline’ami lub konfliktami. Bieżące uprawnienia określają także możliwość wysyłania zmian, publikowania komentarzy, zatwierdzania i zamykania dyskusji.\n\nNadal obowiązują indywidualne ustawienia „Zawsze włączone” i „Zawsze wyłączone”, uprawnienia globalne i filtry. MR zachowują status szkicu, a automatyczne scalanie jest dostępne po oznaczeniu ich jako gotowe."}}
       }
     },
     "menu.scope.draftConfirmationAutoMessage.%@": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "Automation will resume for %@ while it is Draft. Enabled rules may start agent reviews, feedback fixes, pipeline or conflict work. Your current permissions also control pushes, comment publication, approvals and discussion resolution.\n\nThis MR returns to Default and follows repository and global defaults, including future changes to the Draft pause. Global action permissions and filters still apply. The MR stays Draft and cannot merge automatically until Ready."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja zostanie wznowiona dla %@ jeszcze w trybie szkicu. Włączone reguły mogą uruchamiać przeglądy, poprawki po uwagach oraz zadania związane z pipeline’ami lub konfliktami. Bieżące uprawnienia określają także możliwość wysyłania zmian, publikowania komentarzy, zatwierdzania i zamykania dyskusji.\n\nMR wraca do opcji „Domyślne” i stosuje ustawienia repozytorium oraz globalne, w tym przyszłe zmiany wstrzymywania dla szkiców. Globalne uprawnienia i filtry nadal obowiązują. MR zachowuje status szkicu, a automatyczne scalanie jest dostępne po oznaczeniu go jako gotowego."}}
       }
     },
     "menu.scope.draftConfirmationTitle": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "Enable automation while Draft?"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Włączyć automatyzację w trybie szkicu?"}}
       }
     },
     "menu.scope.draftConfirmationEnable": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "Enable automation"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Włącz automatyzację"}}
       }
     },
     "menu.scope.draftConfirmationMessage.%@": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "Automation will be enabled for %@ while it is Draft. Enabled rules may start agent reviews, feedback fixes, pipeline or conflict work. Your current permissions also control pushes, comment publication, approvals and discussion resolution.\n\nThis sets Always on for this MR and keeps that choice when it becomes Ready. Global action permissions and filters still apply. The MR stays Draft and cannot merge automatically until Ready."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja zostanie włączona dla %@ jeszcze w trybie szkicu. Włączone reguły mogą uruchamiać przeglądy, poprawki po uwagach oraz zadania związane z pipeline’ami lub konfliktami. Bieżące uprawnienia określają także możliwość wysyłania zmian, publikowania komentarzy, zatwierdzania i zamykania dyskusji.\n\nUstawia opcję „Zawsze włączone” dla tego MR i zachowuje ją po oznaczeniu go jako gotowego. Nadal obowiązują globalne uprawnienia i filtry. MR zachowuje status szkicu, a automatyczne scalanie jest dostępne po oznaczeniu go jako gotowego."}}
       }
     },
     "menu.scope.draftConfirmationGlobalMessage": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "Draft merge requests in your automation scope will follow the same enabled rules as Ready MRs. This may start agent reviews, feedback fixes, pipeline or conflict work. Your current permissions also control pushes, comment publication, approvals and discussion resolution.\n\nThis applies to existing and future drafts in Default. Explicit Always on/off choices, global action permissions and filters still apply. MRs stay Draft and cannot merge automatically until Ready."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wersje robocze merge requestów w Twoim zakresie będą podlegać tym samym włączonym regułom co MR gotowe do przeglądu. Może to uruchomić przeglądy, poprawki po uwagach oraz zadania związane z pipeline’ami lub konfliktami. Bieżące uprawnienia określają także możliwość wysyłania zmian, publikowania komentarzy, zatwierdzania i zamykania dyskusji.\n\nDotyczy obecnych i przyszłych szkiców z opcją „Domyślne”. Nadal obowiązują indywidualne ustawienia „Zawsze włączone” i „Zawsze wyłączone”, uprawnienia globalne i filtry. MR zachowują status szkicu, a automatyczne scalanie jest dostępne po oznaczeniu ich jako gotowe."}}
       }
     },
     "menu.scope.enabledHelp.%@": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "Automation enabled. Uses your current Settings rules and permissions. Globally disabled actions stay off. Scope: %@."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja jest włączona i stosuje bieżące reguły oraz uprawnienia z ustawień. Działania wyłączone globalnie pozostają wyłączone. Zakres: %@."}}
       }
     },
     "menu.scope.pausedHelp.%@": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "Automation paused. General permissions are unchanged. Scope: %@."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja jest wstrzymana. Uprawnienia ogólne pozostają w mocy. Zakres: %@."}}
       }
     },
     "menu.scope.repositoryDefault": {
@@ -97,7 +105,8 @@
             "state": "translated",
             "value": "Repository default"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Domyślne dla repozytorium"}}
       }
     },
     "menu.scope.repositoryDefaultHelp": {
@@ -108,7 +117,8 @@
             "state": "translated",
             "value": "Sets the default for this repository. Individual MR overrides still take priority."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ustawia wartość domyślną repozytorium. Ustawienia pojedynczych MR nadal mają pierwszeństwo."}}
       }
     },
     "menu.scope.followGlobal": {
@@ -119,7 +129,8 @@
             "state": "translated",
             "value": "Follow general scope"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Użyj zakresu ogólnego"}}
       }
     },
     "menu.scope.add": {
@@ -130,7 +141,8 @@
             "state": "translated",
             "value": "Add repository or MR…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dodaj repozytorium lub MR…"}}
       }
     },
     "menu.scope.addHelp": {
@@ -141,7 +153,8 @@
             "state": "translated",
             "value": "Paste the GitLab URL of a repository or open merge request to enable automation for it."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wklej adres GitLaba do repozytorium lub otwartego merge requesta, aby włączyć jego automatyzację."}}
       }
     },
     "menu.scope.url": {
@@ -152,7 +165,8 @@
             "state": "translated",
             "value": "GitLab URL"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Adres GitLaba"}}
       }
     },
     "menu.scope.cancel": {
@@ -163,7 +177,8 @@
             "state": "translated",
             "value": "Cancel"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Anuluj"}}
       }
     },
     "menu.scope.addConfirm": {
@@ -174,7 +189,8 @@
             "state": "translated",
             "value": "Add"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dodaj"}}
       }
     },
     "menu.scope.addFailed": {
@@ -185,7 +201,8 @@
             "state": "translated",
             "value": "Couldn’t find an accessible repository or open merge request at that URL."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pod tym adresem nie znaleziono dostępnego repozytorium ani otwartego merge requesta."}}
       }
     },
     "menu.scope.latestRecordedEvent": {
@@ -196,7 +213,8 @@
             "state": "translated",
             "value": "Latest recorded event:"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ostatnie zarejestrowane zdarzenie:"}}
       }
     },
     "menu.scope.reReviewRequested": {
@@ -207,7 +225,8 @@
             "state": "translated",
             "value": "Re-review requested"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Poproszono o ponowny przegląd"}}
       }
     },
     "menu.scope.title": {
@@ -218,7 +237,8 @@
             "state": "translated",
             "value": "Automation"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja"}}
       }
     },
     "menu.scope.active": {
@@ -229,7 +249,8 @@
             "state": "translated",
             "value": "Automation enabled"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja włączona"}}
       }
     },
     "menu.scope.paused": {
@@ -240,7 +261,8 @@
             "state": "translated",
             "value": "Automation paused"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja wstrzymana"}}
       }
     },
     "menu.scope.sourceGlobal": {
@@ -251,7 +273,8 @@
             "state": "translated",
             "value": "Global"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Globalne"}}
       }
     },
     "menu.scope.sourceRepo": {
@@ -262,7 +285,8 @@
             "state": "translated",
             "value": "Repository"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Repozytorium"}}
       }
     },
     "menu.scope.sourceMR": {
@@ -273,7 +297,8 @@
             "state": "translated",
             "value": "MR override"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ustawienie MR"}}
       }
     },
     "menu.scope.empty": {
@@ -284,7 +309,8 @@
             "state": "translated",
             "value": "No managed merge requests"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak zarządzanych merge requestów"}}
       }
     },
     "menu.scope.emptyHelp": {
@@ -295,7 +321,8 @@
             "state": "translated",
             "value": "Add a repository or MR here, or enable automation from an MR’s menu on the board."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dodaj tutaj repozytorium lub MR albo włącz automatyzację z menu MR na tablicy."}}
       }
     },
     "menu.attention.reReviewUnconfirmed": {
@@ -306,7 +333,8 @@
             "state": "translated",
             "value": "Re-review request could not be confirmed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się potwierdzić prośby o ponowny przegląd"}}
       }
     },
     "menu.workflow.state.waitingForAssistant": {
@@ -317,7 +345,8 @@
             "state": "translated",
             "value": "Waiting for the agent run"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oczekiwanie na zadanie agenta"}}
       }
     },
     "menu.todo.automation.prepareFollowUp": {
@@ -328,7 +357,8 @@
             "state": "translated",
             "value": "Handle feedback"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Obsłuż uwagi"}}
       }
     },
     "menu.todo.automation.running": {
@@ -339,7 +369,8 @@
             "state": "translated",
             "value": "In progress…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "W toku…"}}
       }
     },
     "menu.todo.automation.failed": {
@@ -350,7 +381,8 @@
             "state": "translated",
             "value": "The action did not finish. Review its result before trying again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Działanie nie zostało ukończone. Przed kolejną próbą sprawdź jego wynik."}}
       }
     },
     "menu.attention.drafts.%lld": {
@@ -361,7 +393,8 @@
             "state": "translated",
             "value": "Unpublished review comments: %lld"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nieopublikowane komentarze z przeglądu: %lld"}}
       }
     },
     "menu.attention.discussions": {
@@ -372,7 +405,8 @@
             "state": "translated",
             "value": "Review unresolved discussions"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przejrzyj otwarte dyskusje"}}
       }
     },
     "menu.attention.conflict": {
@@ -383,7 +417,8 @@
             "state": "translated",
             "value": "Merge conflict"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Konflikt scalania"}}
       }
     },
     "menu.attention.changes": {
@@ -394,7 +429,8 @@
             "state": "translated",
             "value": "Changes requested"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Poproszono o zmiany"}}
       }
     },
     "menu.attention.pipeline": {
@@ -405,7 +441,8 @@
             "state": "translated",
             "value": "Pipeline requires attention"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pipeline wymaga uwagi"}}
       }
     },
     "menu.workflow.activity.result": {
@@ -416,7 +453,8 @@
             "state": "translated",
             "value": "Agent result"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wynik zadania agenta"}}
       }
     },
     "menu.workflow.activity.empty.description": {
@@ -427,7 +465,8 @@
             "state": "translated",
             "value": "MR events, automation decisions and results appear here."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Tutaj pojawią się zdarzenia MR, decyzje automatyzacji i wyniki."}}
       }
     },
     "menu.workflow.activity.empty.title": {
@@ -438,7 +477,8 @@
             "state": "translated",
             "value": "No workflow activity"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak aktywności procesów"}}
       }
     },
     "menu.workflow.handoff.button": {
@@ -449,7 +489,8 @@
             "state": "translated",
             "value": "Confirm Handoff…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Potwierdź przekazanie…"}}
       }
     },
     "menu.workflow.handoff.confirm": {
@@ -460,7 +501,8 @@
             "state": "translated",
             "value": "Start agent task"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchom zadanie agenta"}}
       }
     },
     "menu.workflow.handoff.explanation": {
@@ -471,7 +513,8 @@
             "state": "translated",
             "value": "Continue only if you have confirmed that no other agent is working on this merge request or pipeline."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kontynuuj po potwierdzeniu, że żaden inny agent nie pracuje nad tym merge requestem ani pipeline’em."}}
       }
     },
     "menu.workflow.handoff.title": {
@@ -482,7 +525,8 @@
             "state": "translated",
             "value": "Confirm pipeline handoff"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Potwierdź przekazanie pipeline’u"}}
       }
     },
     "menu.workflow.state.alreadyRegistered": {
@@ -493,7 +537,8 @@
             "state": "translated",
             "value": "An agent is already registered for this pipeline"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dla tego pipeline’u jest już zarejestrowany agent"}}
       }
     },
     "menu.workflow.state.awaitingPipelineHandoff": {
@@ -504,7 +549,8 @@
             "state": "translated",
             "value": "Waiting for you to confirm pipeline handoff"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oczekiwanie na potwierdzenie przekazania pipeline’u"}}
       }
     },
     "menu.workflow.state.completed": {
@@ -515,7 +561,8 @@
             "state": "translated",
             "value": "Completed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ukończone"}}
       }
     },
     "menu.workflow.state.failed": {
@@ -526,7 +573,8 @@
             "state": "translated",
             "value": "Failed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Niepowodzenie"}}
       }
     },
     "menu.workflow.state.notified": {
@@ -537,7 +585,8 @@
             "state": "translated",
             "value": "Tracked"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Śledzone"}}
       }
     },
     "menu.workflow.state.preview": {
@@ -548,7 +597,8 @@
             "state": "translated",
             "value": "Preview only"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Tylko podgląd"}}
       }
     },
     "menu.workflow.state.queued": {
@@ -559,7 +609,8 @@
             "state": "translated",
             "value": "Queued"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "W kolejce"}}
       }
     },
     "menu.workflow.state.running": {
@@ -570,7 +621,8 @@
             "state": "translated",
             "value": "Agent running"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Agent pracuje"}}
       }
     },
     "menu.workflow.state.skipped": {
@@ -581,7 +633,8 @@
             "state": "translated",
             "value": "Skipped"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pominięte"}}
       }
     },
     "menu.authored.blocker.discussions": {
@@ -592,7 +645,8 @@
             "state": "translated",
             "value": "Unresolved discussions"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwarte dyskusje"}}
       }
     },
     "menu.authored.project.%lld": {
@@ -603,7 +657,8 @@
             "state": "translated",
             "value": "Project %lld"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Projekt %lld"}}
       }
     },
     "whatsNew.dismiss": {
@@ -614,7 +669,8 @@
             "state": "translated",
             "value": "Got it"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozumiem"}}
       }
     },
     "whatsNew.empty": {
@@ -625,7 +681,8 @@
             "state": "translated",
             "value": "No release notes available for this version."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak informacji o zmianach w tej wersji."}}
       }
     },
     "whatsNew.title": {
@@ -636,7 +693,8 @@
             "state": "translated",
             "value": "What's new"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Co nowego"}}
       }
     },
     "whatsNew.version.%@": {
@@ -647,7 +705,8 @@
             "state": "translated",
             "value": "Version %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wersja %@"}}
       }
     },
     "menu.action.openInBrowser": {
@@ -658,7 +717,8 @@
             "state": "translated",
             "value": "Open in browser"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz w przeglądarce"}}
       }
     },
     "menu.action.settings": {
@@ -669,7 +729,8 @@
             "state": "translated",
             "value": "Settings…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ustawienia…"}}
       }
     },
     "menu.error.automation.%lld": {
@@ -680,7 +741,8 @@
             "state": "translated",
             "value": "Automation failed for to-do %lld. It is still pending."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja zadania %lld nie powiodła się. Zadanie nadal oczekuje."}}
       }
     },
     "menu.error.decoding.%@": {
@@ -691,7 +753,8 @@
             "state": "translated",
             "value": "Couldn't read the glab response: %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się odczytać odpowiedzi glab: %@"}}
       }
     },
     "menu.error.generic.%@": {
@@ -702,7 +765,8 @@
             "state": "translated",
             "value": "GitLab request failed: %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Żądanie GitLaba nie powiodło się: %@"}}
       }
     },
     "menu.error.glabNotInstalled": {
@@ -713,7 +777,8 @@
             "state": "translated",
             "value": "glab is not installed. Open Setup to install it."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie zainstalowano glab. Otwórz konfigurację, aby je zainstalować."}}
       }
     },
     "menu.error.network.%@": {
@@ -724,7 +789,8 @@
             "state": "translated",
             "value": "Network error: %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Błąd sieci: %@"}}
       }
     },
     "menu.error.notAuthenticated": {
@@ -735,7 +801,8 @@
             "state": "translated",
             "value": "glab isn't signed in. Open Setup to authenticate."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Glab wymaga logowania. Otwórz konfigurację, aby się zalogować."}}
       }
     },
     "menu.error.openSetup": {
@@ -746,7 +813,8 @@
             "state": "translated",
             "value": "Open Setup…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz konfigurację…"}}
       }
     },
     "menu.error.timedOut": {
@@ -757,7 +825,8 @@
             "state": "translated",
             "value": "glab took too long to respond."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przekroczono czas oczekiwania na odpowiedź glab."}}
       }
     },
     "menu.undo.action": {
@@ -768,7 +837,8 @@
             "state": "translated",
             "value": "Undo"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Cofnij"}}
       }
     },
     "menu.confirm.comments.%lld": {
@@ -779,7 +849,8 @@
             "state": "translated",
             "value": "Review comments to publish: %lld"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarze z przeglądu do opublikowania: %lld"}}
       }
     },
     "menu.confirm.replies.%lld": {
@@ -790,7 +861,8 @@
             "state": "translated",
             "value": "Replies to publish: %lld"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Odpowiedzi do opublikowania: %lld"}}
       }
     },
     "menu.confirm.approveReady": {
@@ -801,7 +873,8 @@
             "state": "translated",
             "value": "Review completed. Approval is available."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przegląd zakończony. Możesz zatwierdzić MR."}}
       }
     },
     "menu.confirm.showComments": {
@@ -812,7 +885,8 @@
             "state": "translated",
             "value": "Comments"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarze"}}
       }
     },
     "menu.confirm.approve": {
@@ -823,7 +897,8 @@
             "state": "translated",
             "value": "Approve"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zatwierdź"}}
       }
     },
     "menu.confirm.edit": {
@@ -834,7 +909,8 @@
             "state": "translated",
             "value": "Edit in GitLab"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Edytuj w GitLabie"}}
       }
     },
     "menu.confirm.reply": {
@@ -845,7 +921,8 @@
             "state": "translated",
             "value": "Reply in thread"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Odpowiedz w dyskusji"}}
       }
     },
     "menu.confirm.general": {
@@ -856,7 +933,8 @@
             "state": "translated",
             "value": "General comment"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarz ogólny"}}
       }
     },
     "menu.confirm.publishing": {
@@ -867,7 +945,8 @@
             "state": "translated",
             "value": "Publishing…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Publikowanie…"}}
       }
     },
     "menu.confirm.approving": {
@@ -878,7 +957,8 @@
             "state": "translated",
             "value": "Approving…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zatwierdzanie…"}}
       }
     },
     "menu.confirm.failed": {
@@ -889,7 +969,8 @@
             "state": "translated",
             "value": "That didn’t go through. Try again, or check the merge request in GitLab."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Działanie się nie powiodło. Spróbuj ponownie albo sprawdź merge request w GitLabie."}}
       }
     },
     "menu.confirm.changed": {
@@ -900,7 +981,8 @@
             "state": "translated",
             "value": "The comments or commits changed since you looked. Check them again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarze lub commity zmieniły się od ostatniego sprawdzenia. Sprawdź je ponownie."}}
       }
     },
     "menu.scope.addManaged": {
@@ -911,7 +993,8 @@
             "state": "translated",
             "value": "Add to managed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dodaj do zarządzanych"}}
       }
     },
     "menu.inbox.openToMerge": {
@@ -922,7 +1005,8 @@
             "state": "translated",
             "value": "Open in GitLab to merge"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz w GitLabie, aby scalić"}}
       }
     },
     "menu.mr.draftBadge": {
@@ -933,7 +1017,8 @@
             "state": "translated",
             "value": "DRAFT"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "SZKIC"}}
       }
     },
     "menu.mr.addFailed": {
@@ -944,7 +1029,8 @@
             "state": "translated",
             "value": "Couldn’t add this open merge request. Check its URL or repository and number."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się dodać otwartego merge requesta. Sprawdź adres lub repozytorium i numer."}}
       }
     },
     "menu.mr.address": {
@@ -955,7 +1041,8 @@
             "state": "translated",
             "value": "MR URL or !number"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Adres MR lub !numer"}}
       }
     },
     "menu.mr.noRepository": {
@@ -966,7 +1053,8 @@
             "state": "translated",
             "value": "Choose a repository"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wybierz repozytorium"}}
       }
     },
     "menu.mr.repository": {
@@ -977,7 +1065,8 @@
             "state": "translated",
             "value": "Repository"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Repozytorium"}}
       }
     },
     "menu.scope.notOpen": {
@@ -988,7 +1077,8 @@
             "state": "translated",
             "value": "Not in the current open MR list"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak na bieżącej liście otwartych MR"}}
       }
     },
     "menu.reReview.checking": {
@@ -999,7 +1089,8 @@
             "state": "translated",
             "value": "Checking whether feedback is ready for re-review…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzanie, czy uwagi są gotowe do ponownego przeglądu…"}}
       }
     },
     "menu.reReview.manual": {
@@ -1010,7 +1101,8 @@
             "state": "translated",
             "value": "Confirm that feedback is ready for re-review."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Potwierdź gotowość uwag do ponownego przeglądu."}}
       }
     },
     "menu.reReview.unavailable": {
@@ -1021,7 +1113,8 @@
             "state": "translated",
             "value": "Automatic verification is unavailable. Set up the agent, or confirm readiness manually."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyczna weryfikacja jest niedostępna. Skonfiguruj asystenta lub potwierdź gotowość ręcznie."}}
       }
     },
     "menu.reReview.failed": {
@@ -1032,7 +1125,8 @@
             "state": "translated",
             "value": "Could not verify feedback. Retry, or confirm readiness manually."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się zweryfikować uwag. Spróbuj ponownie albo ręcznie potwierdź gotowość."}}
       }
     },
     "menu.reReview.blocked": {
@@ -1043,7 +1137,8 @@
             "state": "translated",
             "value": "Re-review is waiting for the following feedback:"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponowny przegląd czeka na obsłużenie następujących uwag:"}}
       }
     },
     "menu.reReview.uncertain": {
@@ -1054,7 +1149,8 @@
             "state": "translated",
             "value": "Some feedback still needs verification."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Część uwag nadal wymaga weryfikacji."}}
       }
     },
     "menu.reReview.confirm": {
@@ -1065,7 +1161,8 @@
             "state": "translated",
             "value": "Confirm readiness and request re-review"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Potwierdź gotowość i poproś o ponowny przegląd"}}
       }
     },
     "menu.reReview.confirmMessage": {
@@ -1076,7 +1173,8 @@
             "state": "translated",
             "value": "I confirm that the feedback has been addressed or explained and is ready for another review. MergeTether will notify the relevant reviewers after checking the current MR again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Potwierdzam, że uwagi zostały uwzględnione lub wyjaśnione i są gotowe do ponownego przeglądu. Po ponownym sprawdzeniu bieżącego MR MergeTether powiadomi odpowiednich recenzentów."}}
       }
     },
     "menu.reReview.retry": {
@@ -1087,7 +1185,8 @@
             "state": "translated",
             "value": "Verify re-review readiness again"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponownie zweryfikuj gotowość do przeglądu"}}
       }
     },
     "menu.reReview.note": {
@@ -1098,7 +1197,8 @@
             "state": "translated",
             "value": "Comment #%lld"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarz nr %lld"}}
       }
     },
     "menu.reReview.changed": {
@@ -1109,7 +1209,8 @@
             "state": "translated",
             "value": "The MR changed. Check its current feedback before confirming again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "MR się zmienił. Sprawdź bieżące uwagi przed kolejnym potwierdzeniem."}}
       }
     },
     "menu.confirm.publishHelp": {
@@ -1120,7 +1221,8 @@
             "state": "translated",
             "value": "Publish every comment shown in this review. Automatic publication filters do not apply."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Opublikuj wszystkie komentarze widoczne w tym przeglądzie. Filtry automatycznej publikacji tu nie obowiązują."}}
       }
     },
     "menu.scope.default": {
@@ -1131,7 +1233,8 @@
             "state": "translated",
             "value": "Default"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Domyślne"}}
       }
     },
     "menu.scope.alwaysOn": {
@@ -1142,7 +1245,8 @@
             "state": "translated",
             "value": "Always on"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zawsze włączone"}}
       }
     },
     "menu.scope.alwaysOff": {
@@ -1153,7 +1257,8 @@
             "state": "translated",
             "value": "Always off"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zawsze wyłączone"}}
       }
     },
     "menu.scope.draftSafetyHelp": {
@@ -1164,7 +1269,8 @@
             "state": "translated",
             "value": "Default follows Settings. On restores this MR’s choices."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Opcja „Domyślne” stosuje ustawienia ogólne. Włączenie przywraca ustawienia tego MR."}}
       }
     },
     "menu.scope.pauseDrafts": {
@@ -1175,7 +1281,8 @@
             "state": "translated",
             "value": "Pause automation on draft merge requests by default"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Domyślnie wstrzymuj automatyzację szkiców"}}
       }
     },
     "menu.scope.pauseDraftsHelp": {
@@ -1186,7 +1293,8 @@
             "state": "translated",
             "value": "Applies to Default. Always on/off overrides this default and keeps your choice when the merge request becomes ready. This setting never marks an MR ready, and Draft merge requests never merge automatically."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dotyczy opcji „Domyślne”. Opcje „Zawsze włączone” i „Zawsze wyłączone” mają pierwszeństwo i obowiązują także po oznaczeniu MR jako gotowego. Oznaczenie gotowości wymaga osobnego działania. Scalanie szkiców odbywa się ręcznie."}}
       }
     },
     "menuScopeSourceDraft": {
@@ -1197,7 +1305,8 @@
             "state": "translated",
             "value": "Draft default"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Domyślne dla szkicu"}}
       }
     },
     "menu.scope.buttonHelpActive": {
@@ -1208,7 +1317,8 @@
             "state": "translated",
             "value": "Automation enabled for this merge request. Click for details and rules; Option-click to pause."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja tego merge requesta jest włączona. Kliknij, aby zobaczyć szczegóły i reguły. Kliknij z klawiszem Option, aby wstrzymać."}}
       }
     },
     "menu.scope.buttonHelpPaused": {
@@ -1219,7 +1329,8 @@
             "state": "translated",
             "value": "Automation paused for this merge request. Click for details and rules; Option-click to turn it on."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja tego merge requesta jest wstrzymana. Kliknij, aby zobaczyć szczegóły i reguły. Kliknij z klawiszem Option, aby włączyć."}}
       }
     },
     "menu.scope.buttonAccessibilityHint": {
@@ -1230,7 +1341,8 @@
             "state": "translated",
             "value": "Shows this merge request’s automation state, rules and switches."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pokazuje stan automatyzacji merge requesta, reguły i przełączniki."}}
       }
     },
     "menu.scope.popoverSource.%@": {
@@ -1241,7 +1353,8 @@
             "state": "translated",
             "value": "Decided by: %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Źródło ustawienia: %@"}}
       }
     },
     "menu.scope.popoverPauseMergeRequest": {
@@ -1252,7 +1365,8 @@
             "state": "translated",
             "value": "Pause for this MR"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wstrzymaj dla tego MR"}}
       }
     },
     "menu.scope.popoverEnableMergeRequest": {
@@ -1263,7 +1377,8 @@
             "state": "translated",
             "value": "Turn on for this MR"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Włącz dla tego MR"}}
       }
     },
     "menu.scope.popoverPauseRepository": {
@@ -1274,7 +1389,8 @@
             "state": "translated",
             "value": "Pause for this repository"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wstrzymaj dla tego repozytorium"}}
       }
     },
     "menu.scope.popoverEnableRepository": {
@@ -1285,7 +1401,8 @@
             "state": "translated",
             "value": "Turn on for this repository"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Włącz dla tego repozytorium"}}
       }
     },
     "menu.scope.popoverRepository": {
@@ -1296,7 +1413,8 @@
             "state": "translated",
             "value": "Repository"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Repozytorium"}}
       }
     },
     "menu.scope.popoverGloballySuspended": {
@@ -1307,7 +1425,8 @@
             "state": "translated",
             "value": "All automation is switched off. Choices saved here apply when you switch it back on."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Cała automatyzacja jest wyłączona. Zapisane tutaj ustawienia zaczną obowiązywać po ponownym włączeniu."}}
       }
     },
     "menu.scope.popoverOptionClickHint": {
@@ -1318,7 +1437,8 @@
             "state": "translated",
             "value": "Tip: Option-click the bolt to switch automation without opening this panel."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wskazówka: kliknij błyskawicę z klawiszem Option, aby przełączyć automatyzację bez otwierania tego panelu."}}
       }
     },
     "menu.scope.followRepository": {
@@ -1329,7 +1449,8 @@
             "state": "translated",
             "value": "Follow repository default"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Użyj ustawienia domyślnego repozytorium"}}
       }
     },
     "menu.scope.individualOptIn": {
@@ -1340,7 +1461,8 @@
             "state": "translated",
             "value": "Individually enabled"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Włączone indywidualnie"}}
       }
     },
     "menu.confirm.approvalThreshold.%@": {
@@ -1351,7 +1473,8 @@
             "state": "translated",
             "value": "Review met the approval threshold “%@”."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przegląd spełnił próg zatwierdzenia „%@”."}}
       }
     },
     "menu.confirm.findingEditorial": {
@@ -1362,7 +1485,8 @@
             "state": "translated",
             "value": "Editorial finding remains"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pozostała uwaga redakcyjna"}}
       }
     },
     "menu.confirm.findingMinorCode": {
@@ -1373,7 +1497,8 @@
             "state": "translated",
             "value": "Minor code finding remains"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pozostała drobna uwaga do kodu"}}
       }
     },
     "menu.confirm.findingMajor": {
@@ -1384,7 +1509,8 @@
             "state": "translated",
             "value": "Major finding remains"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pozostała poważna uwaga"}}
       }
     }
   },

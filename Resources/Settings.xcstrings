@@ -44,7 +44,8 @@
             "state": "translated",
             "value": "Automatic actions paused"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wstrzymano działania automatyczne"}}
       }
     },
     "settings.persistence.pausedHelp": {
@@ -55,7 +56,8 @@
             "state": "translated",
             "value": "Saved action history or permissions could not be read or saved. Existing records and your policy have been kept. Read-only checks remain available; restore the affected records before resuming actions that need them."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wystąpił problem z odczytem lub zapisem historii działań albo uprawnień. Dotychczasowe dane i zasady zostały zachowane. Nadal możesz uruchamiać kontrole tylko do odczytu. Przywróć potrzebne dane przed wznowieniem działań."}}
       }
     },
     "settings.persistence.actionBlocked": {
@@ -66,7 +68,8 @@
             "state": "translated",
             "value": "Saved action history or permissions are unavailable. Restore the affected records before trying this action."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zapisana historia działań lub uprawnienia są niedostępne. Przywróć te dane i spróbuj ponownie."}}
       }
     },
     "settings.automation.workflow.reviewWaitingHelp": {
@@ -77,7 +80,8 @@
             "state": "translated",
             "value": "Track review waiting locally. This event never starts an agent or creates GitLab comments."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rejestruj lokalnie oczekiwanie na przegląd. To zdarzenie dotyczy tylko śledzenia stanu, bez uruchamiania agenta i tworzenia komentarzy w GitLabie."}}
       }
     },
     "settings.automation.profilePermissionsHelp": {
@@ -88,7 +92,8 @@
             "state": "translated",
             "value": "Choose a profile, then adjust permissions. Reset restores only that setting to the chosen profile."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wybierz profil, a potem dostosuj uprawnienia. Przywrócenie wartości domyślnej zmienia tylko dane ustawienie na wartość z wybranego profilu."}}
       }
     },
     "settings.automation.scope.title": {
@@ -99,7 +104,8 @@
             "state": "translated",
             "value": "Automate merge requests"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzuj obsługę merge requestów"}}
       }
     },
     "settings.automation.scope.all": {
@@ -110,7 +116,8 @@
             "state": "translated",
             "value": "All eligible MRs"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wszystkie kwalifikujące się MR"}}
       }
     },
     "settings.automation.scope.selected": {
@@ -121,7 +128,8 @@
             "state": "translated",
             "value": "Selected repositories and MRs"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wybrane repozytoria i MR"}}
       }
     },
     "settings.automation.scope.help": {
@@ -132,7 +140,8 @@
             "state": "translated",
             "value": "Automate all eligible merge requests or only selected repositories and MRs. An MR setting overrides its repository."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzuj obsługę wszystkich kwalifikujących się merge requestów lub tylko wybranych repozytoriów i MR. Ustawienie MR ma pierwszeństwo przed ustawieniem repozytorium."}}
       }
     },
     "settings.automation.page.advanced": {
@@ -143,7 +152,8 @@
             "state": "translated",
             "value": "Advanced"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zaawansowane"}}
       }
     },
     "settings.automation.keep.mac.awake": {
@@ -154,7 +164,8 @@
             "state": "translated",
             "value": "Keep Mac awake during agent tasks on external power"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zapobiegaj uśpieniu Maca podczas zadań agenta przy zasilaniu zewnętrznym"}}
       }
     },
     "settings.automation.keep.mac.awake.help": {
@@ -165,7 +176,8 @@
             "state": "translated",
             "value": "The display can sleep. Your Mac follows its usual sleep settings on battery and between agent tasks."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ekran może się wyłączyć. Na baterii i między zadaniami agenta Mac stosuje zwykłe ustawienia uśpienia."}}
       }
     },
     "settings.automation.workspace.choose": {
@@ -176,7 +188,8 @@
             "state": "translated",
             "value": "Choose Folder…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wybierz folder…"}}
       }
     },
     "settings.automation.workspace.help": {
@@ -187,7 +200,8 @@
             "state": "translated",
             "value": "Starting folder for coding agent conversations you open in Terminal. Automated tasks use separate workspaces for each run."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Folder startowy rozmów z asystentem programistycznym otwieranych w Terminalu. Każde automatyczne uruchomienie korzysta z osobnego obszaru roboczego."}}
       }
     },
     "settings.automation.todo.customize": {
@@ -198,7 +212,8 @@
             "state": "translated",
             "value": "Customize task title and instructions"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dostosuj tytuł i instrukcje zadania"}}
       }
     },
     "settings.automation.autoReReview.toggle": {
@@ -209,7 +224,8 @@
             "state": "translated",
             "value": "Automatically request re-review"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatycznie proś o ponowny przegląd"}}
       }
     },
     "settings.automation.autoReReview.help": {
@@ -220,7 +236,8 @@
             "state": "translated",
             "value": "After feedback is verified as addressed and replies are published, ask reviewers who haven’t accepted it to review again. GitLab may reset an earlier approval."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Po zweryfikowaniu, że uwagi zostały uwzględnione, i opublikowaniu odpowiedzi poproś o ponowny przegląd osoby, które jeszcze ich nie zaakceptowały. GitLab może wycofać wcześniejsze zatwierdzenie."}}
       }
     },
     "settings.automation.reviewModel": {
@@ -231,7 +248,8 @@
             "state": "translated",
             "value": "Coding model"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Model asystenta"}}
       }
     },
     "settings.automation.reviewThinking": {
@@ -242,7 +260,8 @@
             "state": "translated",
             "value": "Coding reasoning"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Poziom rozumowania asystenta"}}
       }
     },
     "settings.automation.reviewModelHelp": {
@@ -253,7 +272,8 @@
             "state": "translated",
             "value": "Used by the selected coding agent for MR reviews, feedback fixes, pipeline fixes and conflicts. Lightweight checks use the separate verification model."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wybrany asystent używa tego modelu do przeglądów MR, poprawek po uwagach, napraw pipeline’ów i rozwiązywania konfliktów. Krótkie kontrole korzystają z osobnego modelu weryfikacji."}}
       }
     },
     "settings.automation.thinkingLow": {
@@ -264,7 +284,8 @@
             "state": "translated",
             "value": "Low"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Niski"}}
       }
     },
     "settings.automation.thinkingMedium": {
@@ -275,7 +296,8 @@
             "state": "translated",
             "value": "Medium"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Średni"}}
       }
     },
     "settings.automation.thinkingHigh": {
@@ -286,7 +308,8 @@
             "state": "translated",
             "value": "High"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wysoki"}}
       }
     },
     "settings.automation.thinkingExtraHigh": {
@@ -297,7 +320,8 @@
             "state": "translated",
             "value": "Extra high"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Bardzo wysoki"}}
       }
     },
     "settings.automation.thinkingMax": {
@@ -308,7 +332,8 @@
             "state": "translated",
             "value": "Max"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Maksymalny"}}
       }
     },
     "settings.automation.assistant.lastCheck.%@": {
@@ -355,7 +380,8 @@
             "state": "translated",
             "value": "With checkpoints"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Z punktami kontrolnymi"}}
       }
     },
     "settings.automation.toolProjects": {
@@ -366,7 +392,8 @@
             "state": "translated",
             "value": "Project permission repositories (optional)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Repozytoria objęte uprawnieniem projektowym (opcjonalnie)"}}
       }
     },
     "settings.automation.todoProjects": {
@@ -377,7 +404,8 @@
             "state": "translated",
             "value": "Projects (comma-separated paths)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Projekty (ścieżki oddzielone przecinkami)"}}
       }
     },
     "settings.automation.todoProjectsHelp": {
@@ -388,7 +416,8 @@
             "state": "translated",
             "value": "CLI handlers match all projects when blank. Use repository paths to limit their scope."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Puste pole obejmuje wszystkie projekty. Aby ograniczyć zakres obsługi CLI, wpisz ścieżki repozytoriów."}}
       }
     },
     "settings.automation.workflow.targetBranches": {
@@ -399,7 +428,8 @@
             "state": "translated",
             "value": "Target branches (comma-separated, optional)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Gałęzie docelowe (opcjonalnie, oddziel przecinkami)"}}
       }
     },
     "settings.automation.workflow.requiredLabel": {
@@ -410,7 +440,8 @@
             "state": "translated",
             "value": "Required label (optional)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wymagana etykieta (opcjonalnie)"}}
       }
     },
     "settings.automation.apply": {
@@ -421,7 +452,8 @@
             "state": "translated",
             "value": "Apply Changes"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zastosuj zmiany"}}
       }
     },
     "settings.automation.apply.help": {
@@ -432,7 +464,8 @@
             "state": "translated",
             "value": "Apply Changes saves automation settings. Scope changes are saved immediately."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przycisk „Zastosuj zmiany” zapisuje ustawienia automatyzacji. Zmiany zakresu zapisują się od razu."}}
       }
     },
     "settings.automation.assistant.claude": {
@@ -479,7 +512,8 @@
             "state": "translated",
             "value": "Project permission for conflict pushes"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uprawnienie projektowe do wysyłania poprawek konfliktów"}}
       }
     },
     "settings.automation.assistant.toolsHelp": {
@@ -490,7 +524,8 @@
             "state": "translated",
             "value": "CLI tasks have full tool access. This project permission is separate from the conflict-push switch. Leave its repository list blank for all active Scope, or list exact paths to narrow it."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zadania CLI mają pełny dostęp do narzędzi. To uprawnienie projektowe działa niezależnie od przełącznika wysyłania poprawek konfliktów. Pusta lista obejmuje cały aktywny zakres. Możesz go zawęzić, wpisując dokładne ścieżki repozytoriów."}}
       }
     },
     "settings.automation.authorFeedback": {
@@ -501,7 +536,8 @@
             "state": "translated",
             "value": "Feedback on my MR"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uwagi do mojego MR"}}
       }
     },
     "settings.automation.authorFeedback.description": {
@@ -512,7 +548,8 @@
             "state": "translated",
             "value": "Runs when someone submits a review or addresses you in a comment on an open merge request you authored."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchamia zadanie, gdy ktoś prześle przegląd lub zwróci się do Ciebie w komentarzu do Twojego otwartego merge requesta."}}
       }
     },
     "settings.automation.authoredMergeRequests.polling": {
@@ -523,7 +560,8 @@
             "state": "translated",
             "value": "Your open merge requests are checked in the background at the refresh interval set in General. Open the main window to review their status and actions."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Twoje otwarte merge requesty są sprawdzane w tle z częstotliwością ustawioną w zakładce Ogólne. W głównym oknie znajdziesz ich stan i dostępne działania."}}
       }
     },
     "settings.automation.authoredMergeRequests.projectsHelp": {
@@ -534,7 +572,8 @@
             "state": "translated",
             "value": "Leave repository restrictions blank to cover all eligible MRs in active Scope. Enter exact project paths separated by commas to narrow the permission."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Puste pole obejmuje wszystkie kwalifikujące się MR w aktywnym zakresie. Aby zawęzić uprawnienie, wpisz dokładne ścieżki projektów oddzielone przecinkami."}}
       }
     },
     "settings.automation.autoMerge.help": {
@@ -545,7 +584,8 @@
             "state": "translated",
             "value": "Merge your eligible MRs after approvals, resolved discussions, a passing pipeline and verified reviewer expectations. All required dependencies must be merged first. Stacked MRs wait for a reviewed target update; MergeTether never merges a child into its parent MR branch or retargets it automatically. Unavailable dependency checks keep merging on hold. The project must enforce approvals and resolved discussions."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Scalaj kwalifikujące się własne MR po uzyskaniu zatwierdzeń, zamknięciu dyskusji, pomyślnym pipeline’ie i zweryfikowaniu oczekiwań recenzentów. Najpierw muszą zostać scalone wszystkie wymagane zależności. Zależne MR czekają na sprawdzenie zmiany gałęzi docelowej. MergeTether wstrzymuje scalanie do gałęzi nadrzędnego MR i pozostawia zmianę gałęzi docelowej użytkownikowi. Gdy sprawdzenie zależności jest niedostępne, scalanie czeka. Projekt musi wymagać zatwierdzeń i zamkniętych dyskusji."}}
       }
     },
     "settings.automation.autoMerge.projects": {
@@ -556,7 +596,8 @@
             "state": "translated",
             "value": "Automatic merge repositories (optional)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Repozytoria z automatycznym scalaniem (opcjonalnie)"}}
       }
     },
     "settings.automation.autoMerge.toggle": {
@@ -567,7 +608,8 @@
             "state": "translated",
             "value": "Merge when ready"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Scalaj po spełnieniu warunków"}}
       }
     },
     "settings.automation.claude.help": {
@@ -578,7 +620,8 @@
             "state": "translated",
             "value": "Runs tasks locally through signed-in Claude CLI. Progress and results stay in MergeTether."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchamia zadania lokalnie przez zalogowane Claude CLI. Postęp i wyniki są dostępne w MergeTether."}}
       }
     },
     "settings.automation.codex.help": {
@@ -589,7 +632,8 @@
             "state": "translated",
             "value": "Runs tasks locally through signed-in Codex CLI. Progress and results stay in MergeTether."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchamia zadania lokalnie przez zalogowane Codex CLI. Postęp i wyniki są dostępne w MergeTether."}}
       }
     },
     "settings.automation.command": {
@@ -600,7 +644,8 @@
             "state": "translated",
             "value": "Command"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Polecenie"}}
       }
     },
     "settings.automation.conflicts.allowPush": {
@@ -611,7 +656,8 @@
             "state": "translated",
             "value": "Allow conflict fixes to be pushed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zezwól na wysyłanie poprawek rozwiązujących konflikty"}}
       }
     },
     "settings.automation.conflicts.pushProjects": {
@@ -622,7 +668,8 @@
             "state": "translated",
             "value": "Conflict push repositories (optional)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Repozytoria z wysyłaniem poprawek konfliktów (opcjonalnie)"}}
       }
     },
     "settings.automation.conflicts.toggle": {
@@ -633,7 +680,8 @@
             "state": "translated",
             "value": "Start tasks to fix conflicts"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchamiaj zadania rozwiązujące konflikty"}}
       }
     },
     "settings.automation.enable": {
@@ -644,7 +692,8 @@
             "state": "translated",
             "value": "Run automatically"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchamiaj automatycznie"}}
       }
     },
     "settings.automation.incomplete": {
@@ -655,7 +704,8 @@
             "state": "translated",
             "value": "Enabled CLI handlers need a task title and instructions. Legacy scripts cannot run as MR automation."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Włączone procedury CLI wymagają tytułu i instrukcji zadania. Starsze skrypty są niedostępne w automatyzacji MR."}}
       }
     },
     "settings.automation.outcome": {
@@ -666,7 +716,8 @@
             "state": "translated",
             "value": "A recognized MR event is marked read after its action is saved durably. Action progress and completion are tracked separately on the MR."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozpoznane zdarzenie MR jest oznaczane jako przeczytane po trwałym zapisaniu działania. Postęp i zakończenie działania są śledzone osobno na MR."}}
       }
     },
     "settings.automation.package.choose": {
@@ -701,7 +752,8 @@
             "state": "translated",
             "value": "Manual only"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Tylko ręcznie"}}
       }
     },
     "settings.automation.package.recheck": {
@@ -736,7 +788,8 @@
             "state": "translated",
             "value": "Use profile"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Użyj profilu"}}
       }
     },
     "settings.automation.prompt": {
@@ -747,7 +800,8 @@
             "state": "translated",
             "value": "Task instructions"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Instrukcje zadania"}}
       }
     },
     "settings.automation.reviewRequested": {
@@ -758,7 +812,8 @@
             "state": "translated",
             "value": "Review request"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Prośba o przegląd"}}
       }
     },
     "settings.automation.reviewRequested.description": {
@@ -769,7 +824,8 @@
             "state": "translated",
             "value": "Runs when someone requests your review on a merge request."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchamia zadanie, gdy ktoś poprosi Cię o przegląd merge requesta."}}
       }
     },
     "settings.automation.runner": {
@@ -780,7 +836,8 @@
             "state": "translated",
             "value": "Run with"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchom za pomocą"}}
       }
     },
     "settings.automation.runner.assistant": {
@@ -791,7 +848,8 @@
             "state": "translated",
             "value": "Selected coding agent CLI"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "CLI wybranego asystenta"}}
       }
     },
     "settings.automation.runner.shell": {
@@ -802,7 +860,8 @@
             "state": "translated",
             "value": "Legacy script (unsupported)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Starszy skrypt (nieobsługiwany)"}}
       }
     },
     "settings.automation.tab": {
@@ -825,7 +884,8 @@
             "state": "translated",
             "value": "Templates can use {repo}, {iid}, {author}, {url}, {actor}, {actorUsername}, {title}, {todoId}, and {project}."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "W szablonach możesz używać {repo}, {iid}, {author}, {url}, {actor}, {actorUsername}, {title}, {todoId} oraz {project}."}}
       }
     },
     "settings.automation.title": {
@@ -836,7 +896,8 @@
             "state": "translated",
             "value": "Task title"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Tytuł zadania"}}
       }
     },
     "settings.automation.todo.section": {
@@ -847,7 +908,8 @@
             "state": "translated",
             "value": "To-do automation"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja zadań"}}
       }
     },
     "settings.automation.trigger": {
@@ -858,7 +920,8 @@
             "state": "translated",
             "value": "When"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kiedy"}}
       }
     },
     "settings.automation.workflow.blockerChange": {
@@ -869,7 +932,8 @@
             "state": "translated",
             "value": "Merge blockers change"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zmiana blokad scalania"}}
       }
     },
     "settings.automation.workflow.event": {
@@ -880,7 +944,8 @@
             "state": "translated",
             "value": "When"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kiedy"}}
       }
     },
     "settings.automation.workflow.mode": {
@@ -891,7 +956,8 @@
             "state": "translated",
             "value": "Action"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Działanie"}}
       }
     },
     "settings.automation.workflow.mode.assistant": {
@@ -902,7 +968,8 @@
             "state": "translated",
             "value": "Run with coding agent CLI"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchom przez CLI asystenta"}}
       }
     },
     "settings.automation.workflow.mode.notify": {
@@ -913,7 +980,8 @@
             "state": "translated",
             "value": "Track event"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Śledź zdarzenie"}}
       }
     },
     "settings.automation.workflow.mode.off": {
@@ -924,7 +992,8 @@
             "state": "translated",
             "value": "Off"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wyłączone"}}
       }
     },
     "settings.automation.workflow.mode.preview": {
@@ -935,7 +1004,8 @@
             "state": "translated",
             "value": "Log a preview"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zapisz podgląd"}}
       }
     },
     "settings.automation.workflow.modesHelp": {
@@ -946,7 +1016,8 @@
             "state": "translated",
             "value": "Preview and Track event record events in Activity without starting work. Run with coding agent CLI starts a task. System notifications follow the General setting and alert you only to new work needing your attention."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "„Zapisz podgląd” i „Śledź zdarzenie” zapisują zdarzenia w Aktywności bez uruchamiania pracy. „Uruchom przez CLI asystenta” uruchamia zadanie. Powiadomienia systemowe korzystają z ustawień ogólnych i informują tylko o nowej pracy wymagającej Twojej uwagi."}}
       }
     },
     "settings.automation.workflow.newDiscussion": {
@@ -957,7 +1028,8 @@
             "state": "translated",
             "value": "New merge request discussion"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nowa dyskusja w merge requeście"}}
       }
     },
     "settings.automation.workflow.pipelineFailure": {
@@ -968,7 +1040,8 @@
             "state": "translated",
             "value": "Pipeline fails"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Niepowodzenie pipeline’u"}}
       }
     },
     "settings.automation.workflow.projects": {
@@ -979,7 +1052,8 @@
             "state": "translated",
             "value": "Project paths"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ścieżki projektów"}}
       }
     },
     "settings.automation.workflow.projectsHelp": {
@@ -990,7 +1064,8 @@
             "state": "translated",
             "value": "Enter exact GitLab project paths such as group/repo, separated by commas. Leave empty to match any project."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wpisz dokładne ścieżki projektów GitLaba, np. group/repo, oddzielone przecinkami. Puste pole pasuje do dowolnego projektu."}}
       }
     },
     "settings.automation.workflow.retry": {
@@ -1001,7 +1076,8 @@
             "state": "translated",
             "value": "Allow one infrastructure retry (listed projects only)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zezwól na jedną ponowną próbę po błędzie infrastruktury (tylko wybrane projekty)"}}
       }
     },
     "settings.automation.workflow.reviewUpdate": {
@@ -1012,7 +1088,8 @@
             "state": "translated",
             "value": "Merge request changes after review"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zmiana merge requesta po przeglądzie"}}
       }
     },
     "settings.automation.workflow.reviewWaiting": {
@@ -1023,7 +1100,8 @@
             "state": "translated",
             "value": "Review is still waiting"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przegląd nadal oczekuje"}}
       }
     },
     "settings.automation.workflow.section": {
@@ -1034,7 +1112,8 @@
             "state": "translated",
             "value": "Merge request workflows"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Procesy obsługi merge requestów"}}
       }
     },
     "settings.automation.workflow.stackDependencyMerged": {
@@ -1045,7 +1124,8 @@
             "state": "translated",
             "value": "Stack dependency merges"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Scalenie zależności w stosie"}}
       }
     },
     "settings.automation.workflow.waitHours.%lld": {
@@ -1056,7 +1136,8 @@
             "state": "translated",
             "value": "Wait %lld h before acting"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Odczekaj %lld godz. przed podjęciem działania"}}
       }
     },
     "settings.automation.workspace": {
@@ -1067,7 +1148,8 @@
             "state": "translated",
             "value": "Manual CLI starting folder (optional)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Folder startowy ręcznych sesji CLI (opcjonalnie)"}}
       }
     },
     "settings.general.notifications.footer.denied": {
@@ -1121,7 +1203,8 @@
             "state": "translated",
             "value": "Check GitLab for updates"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzaj aktualizacje w GitLabie"}}
       }
     },
     "settings.general.refresh.section": {
@@ -1132,7 +1215,8 @@
             "state": "translated",
             "value": "Refresh"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Odświeżanie"}}
       }
     },
     "settings.general.startup.launchAtLogin": {
@@ -1143,7 +1227,8 @@
             "state": "translated",
             "value": "Launch at login"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchamiaj przy logowaniu"}}
       }
     },
     "settings.general.startup.section": {
@@ -1154,7 +1239,8 @@
             "state": "translated",
             "value": "Startup"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchamianie"}}
       }
     },
     "settings.general.tab": {
@@ -1177,7 +1263,8 @@
             "state": "translated",
             "value": "Authenticated as @%@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zalogowano jako @%@"}}
       }
     },
     "settings.integration.auth.notAuthenticated": {
@@ -1188,7 +1275,8 @@
             "state": "translated",
             "value": "Not authenticated"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak logowania"}}
       }
     },
     "settings.integration.auth.wrongHost.%@": {
@@ -1199,7 +1287,8 @@
             "state": "translated",
             "value": "Signed in to %@ (not default host)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zalogowano do %@ (host inny niż domyślny)"}}
       }
     },
     "settings.integration.auth.row": {
@@ -1210,7 +1299,8 @@
             "state": "translated",
             "value": "Authentication"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uwierzytelnianie"}}
       }
     },
     "settings.integration.footer": {
@@ -1221,7 +1311,8 @@
             "state": "translated",
             "value": "MergeTether uses glab’s default host and signed-in account to read merge requests and to-dos and perform the GitLab actions you enable."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "MergeTether używa domyślnego hosta i zalogowanego konta glab do odczytu merge requestów i zadań oraz wykonywania włączonych działań w GitLabie."}}
       }
     },
     "settings.integration.glab.notFound": {
@@ -1232,7 +1323,8 @@
             "state": "translated",
             "value": "glab not found"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie znaleziono glab"}}
       }
     },
     "settings.integration.glab.path.row": {
@@ -1243,7 +1335,8 @@
             "state": "translated",
             "value": "glab path"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ścieżka glab"}}
       }
     },
     "settings.integration.glab.section": {
@@ -1254,7 +1347,8 @@
             "state": "translated",
             "value": "GitLab CLI"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "GitLab CLI"}}
       }
     },
     "settings.integration.host.row": {
@@ -1265,7 +1359,8 @@
             "state": "translated",
             "value": "Host"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Host"}}
       }
     },
     "settings.integration.host.unresolved": {
@@ -1276,7 +1371,8 @@
             "state": "translated",
             "value": "Unknown"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nieznany"}}
       }
     },
     "settings.integration.recheck": {
@@ -1287,7 +1383,8 @@
             "state": "translated",
             "value": "Re-check"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdź ponownie"}}
       }
     },
     "settings.integration.runSetupAgain": {
@@ -1298,7 +1395,8 @@
             "state": "translated",
             "value": "Run setup again"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchom konfigurację ponownie"}}
       }
     },
     "settings.integration.tab": {
@@ -1321,7 +1419,8 @@
             "state": "translated",
             "value": "Every 15 minutes"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Co 15 minut"}}
       }
     },
     "settings.refreshInterval.1h": {
@@ -1332,7 +1431,8 @@
             "state": "translated",
             "value": "Every hour"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Co godzinę"}}
       }
     },
     "settings.refreshInterval.1m": {
@@ -1343,7 +1443,8 @@
             "state": "translated",
             "value": "Every minute"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Co minutę"}}
       }
     },
     "settings.refreshInterval.30m": {
@@ -1354,7 +1455,8 @@
             "state": "translated",
             "value": "Every 30 minutes"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Co 30 minut"}}
       }
     },
     "settings.refreshInterval.5m": {
@@ -1365,7 +1467,8 @@
             "state": "translated",
             "value": "Every 5 minutes"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Co 5 minut"}}
       }
     },
     "settings.reminderInterval.15m": {
@@ -1376,7 +1479,8 @@
             "state": "translated",
             "value": "Every 15 minutes"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Co 15 minut"}}
       }
     },
     "settings.reminderInterval.1h": {
@@ -1387,7 +1491,8 @@
             "state": "translated",
             "value": "Every hour"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Co godzinę"}}
       }
     },
     "settings.reminderInterval.30m": {
@@ -1398,7 +1503,8 @@
             "state": "translated",
             "value": "Every 30 minutes"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Co 30 minut"}}
       }
     },
     "settings.reminderInterval.5m": {
@@ -1409,7 +1515,8 @@
             "state": "translated",
             "value": "Every 5 minutes"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Co 5 minut"}}
       }
     },
     "settings.reminderInterval.off": {
@@ -1420,7 +1527,8 @@
             "state": "translated",
             "value": "Off"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wyłączone"}}
       }
     },
     "settings.automation.page.assistant": {
@@ -1438,7 +1546,8 @@
             "state": "translated",
             "value": "MR Events"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zdarzenia MR"}}
       }
     },
     "settings.automation.checkpoint.autoApprove": {
@@ -1449,7 +1558,8 @@
             "state": "translated",
             "value": "Approve merge requests automatically"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatycznie zatwierdzaj merge requesty"}}
       }
     },
     "settings.automation.publishAIReplies": {
@@ -1460,7 +1570,8 @@
             "state": "translated",
             "value": "Automatically publish replies to AI feedback"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatycznie publikuj odpowiedzi na uwagi AI"}}
       }
     },
     "settings.automation.followUpPush": {
@@ -1471,7 +1582,8 @@
             "state": "translated",
             "value": "Let the coding agent push fixes to my merge requests"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zezwól asystentowi na wysyłanie poprawek do moich merge requestów"}}
       }
     },
     "settings.automation.followUpPushHelp": {
@@ -1482,7 +1594,8 @@
             "state": "translated",
             "value": "Allow tested fixes to be committed and pushed to your MR’s source branch. Off: proposed fixes stay in the run result for you to deliver."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zezwól na zapisanie sprawdzonych poprawek w commicie i wysłanie go do gałęzi źródłowej MR. Po wyłączeniu propozycje poprawek pozostają w wyniku zadania do ręcznego dostarczenia."}}
       }
     },
     "settings.automation.resolveOwnReviewThreads": {
@@ -1493,7 +1606,8 @@
             "state": "translated",
             "value": "Resolve my verified findings during re-review"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zamykaj moje zweryfikowane dyskusje podczas ponownego przeglądu"}}
       }
     },
     "settings.automation.resolveOwnReviewThreadsHelp": {
@@ -1504,7 +1618,8 @@
             "state": "translated",
             "value": "After new commits, the coding agent rechecks your earlier comments and resolves only your own threads it has verified as fixed."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Po nowych commitach asystent ponownie sprawdza Twoje wcześniejsze komentarze i zamyka wyłącznie Twoje własne dyskusje, w których potwierdził poprawkę."}}
       }
     },
     "settings.automation.page.scope": {
@@ -1515,7 +1630,8 @@
             "state": "translated",
             "value": "Scope"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zakres"}}
       }
     },
     "settings.automation.scope.immediate": {
@@ -1526,7 +1642,8 @@
             "state": "translated",
             "value": "Scope changes are saved immediately. Other automation settings use Apply Changes."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zmiany zakresu zapisują się od razu. Pozostałe ustawienia automatyzacji zapisuje przycisk „Zastosuj zmiany”."}}
       }
     },
     "settings.automation.approval.threshold": {
@@ -1537,7 +1654,8 @@
             "state": "translated",
             "value": "Automatically approve when"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zatwierdzaj automatycznie, gdy"}}
       }
     },
     "settings.automation.approval.noMajorIssues": {
@@ -1548,7 +1666,8 @@
             "state": "translated",
             "value": "No major issues remain"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie ma już poważnych problemów"}}
       }
     },
     "settings.automation.approval.noCodeIssues": {
@@ -1559,7 +1678,8 @@
             "state": "translated",
             "value": "No code-related issues remain"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie ma już problemów związanych z kodem"}}
       }
     },
     "settings.automation.approval.noIssues": {
@@ -1570,7 +1690,8 @@
             "state": "translated",
             "value": "No issues remain"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie ma już żadnych problemów"}}
       }
     },
     "settings.automation.approval.thresholdHelp": {
@@ -1581,7 +1702,8 @@
             "state": "translated",
             "value": "Applies to findings from all reviewers. Resolved discussions are ignored."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dotyczy uwag wszystkich recenzentów. Rozwiązane dyskusje są pomijane."}}
       }
     },
     "settings.automation.checkpoint.autoApproveHelp": {
@@ -1592,7 +1714,8 @@
             "state": "translated",
             "value": "After the coding agent reviews the latest commit and active discussions and the selected approval threshold is met. You can turn this off for a single MR on its Reviewing card."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zatwierdzenie następuje po sprawdzeniu najnowszego commita i aktywnych dyskusji oraz spełnieniu wybranego progu. Możesz wyłączyć tę funkcję dla pojedynczego MR z jego karty w kolumnie „Do przeglądu”."}}
       }
     },
     "settings.automation.page.checkpoints": {
@@ -1603,7 +1726,8 @@
             "state": "translated",
             "value": "Profile & permissions"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Profil i uprawnienia"}}
       }
     },
     "settings.assistant.setup.title": {
@@ -1794,7 +1918,8 @@
             "state": "translated",
             "value": "Re-review verification"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Weryfikacja przed ponownym przeglądem"}}
       }
     },
     "settings.verification.enabled": {
@@ -1805,7 +1930,8 @@
             "state": "translated",
             "value": "Verify feedback automatically before requesting re-review"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatycznie weryfikuj uwagi przed prośbą o ponowny przegląd"}}
       }
     },
     "settings.verification.help": {
@@ -1816,7 +1942,8 @@
             "state": "translated",
             "value": "Assess comments and the current diff with the selected CLI before requesting re-review. When off or a check is inconclusive, confirm readiness manually. Other coding agent automation still requires a signed-in CLI."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przed prośbą o ponowny przegląd sprawdź komentarze i aktualny diff za pomocą wybranego CLI. Gdy weryfikacja jest wyłączona lub wynik jest niejednoznaczny, potwierdź gotowość ręcznie. Pozostałe zadania automatyzacji asystenta nadal wymagają zalogowanego CLI."}}
       }
     },
     "settings.verification.thinking": {
@@ -1827,7 +1954,8 @@
             "state": "translated",
             "value": "Verification reasoning"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Poziom rozumowania weryfikatora"}}
       }
     },
     "settings.verification.model": {
@@ -1838,7 +1966,8 @@
             "state": "translated",
             "value": "Verification model"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Model weryfikacji"}}
       }
     },
     "settings.automation.runner.legacyHelp": {
@@ -1849,7 +1978,8 @@
             "state": "translated",
             "value": "This saved script is retained for reference. MR automation no longer runs scripts or substitutes AI for them. Choose the coding agent CLI to enable this handler."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zapisany skrypt jest dostępny jako punkt odniesienia. Obecna automatyzacja MR używa wybranego CLI asystenta. Wybierz je, aby włączyć tę procedurę."}}
       }
     },
     "settings.general.notifications.permission.prompt": {
@@ -1896,7 +2026,8 @@
             "state": "translated",
             "value": "Sign-in not verified"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Logowanie bez weryfikacji"}}
       }
     },
     "settings.automation.package.full": {
@@ -1907,7 +2038,8 @@
             "state": "translated",
             "value": "Full automation"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pełna automatyzacja"}}
       }
     },
     "settings.automation.package.fullHelp": {
@@ -1918,7 +2050,8 @@
             "state": "translated",
             "value": "Automatically run reviews, feedback fixes, CI workflows, publication of all eligible comments, approvals, thread resolution and eligible merges. Verified follow-up and conflict fixes may be pushed within active Scope. Project and verification checks still apply."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatycznie wykonuj przeglądy, poprawki po uwagach i zadania CI, publikuj wszystkie kwalifikujące się komentarze, zatwierdzaj, zamykaj dyskusje i scalaj kwalifikujące się MR. Zweryfikowane poprawki po uwagach i konfliktach mogą zostać wysłane w aktywnym zakresie. Nadal obowiązują ograniczenia projektowe i weryfikacja."}}
       }
     },
     "settings.automation.package.checkpointsHelp": {
@@ -1929,7 +2062,8 @@
             "state": "translated",
             "value": "Run reviews, diagnoses and local fix proposals automatically. Publish checked replies to likely AI-assisted comments; other comments await confirmation. Pushes, approvals, merges and thread resolution are manual. Readiness verification and re-review requests stay on."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatycznie wykonuj przeglądy, diagnozy i lokalne propozycje poprawek. Publikuj sprawdzone odpowiedzi na komentarze prawdopodobnie wspomagane przez AI. Pozostałe komentarze czekają na potwierdzenie. Wysyłanie commitów, zatwierdzanie, scalanie i zamykanie dyskusji są ręczne. Weryfikacja gotowości i prośby o ponowny przegląd pozostają włączone."}}
       }
     },
     "settings.automation.package.manualHelp": {
@@ -1940,7 +2074,8 @@
             "state": "translated",
             "value": "Monitor MRs and manage actions manually. Automatic runs, verification and remote actions are off. You can explicitly start a coding-agent review when a signed-in CLI is available."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Monitoruj MR i wykonuj działania ręcznie. Automatyczne zadania, weryfikacja i działania zdalne są wyłączone. Przegląd przez asystenta możesz uruchomić ręcznie, gdy zalogowane CLI jest dostępne."}}
       }
     },
     "settings.automation.publication.title": {
@@ -1951,7 +2086,8 @@
             "state": "translated",
             "value": "Comment publication"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Publikacja komentarzy"}}
       }
     },
     "settings.automation.publication.all": {
@@ -1962,7 +2098,8 @@
             "state": "translated",
             "value": "All eligible comments"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wszystkie kwalifikujące się komentarze"}}
       }
     },
     "settings.automation.publication.aiReplies": {
@@ -1973,7 +2110,8 @@
             "state": "translated",
             "value": "Replies to AI or bot feedback"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Odpowiedzi na uwagi AI i botów"}}
       }
     },
     "settings.automation.publication.manual": {
@@ -1984,7 +2122,8 @@
             "state": "translated",
             "value": "Private drafts only"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Tylko prywatne szkice"}}
       }
     },
     "settings.automation.publication.allHelp": {
@@ -1995,7 +2134,8 @@
             "state": "translated",
             "value": "Publish eligible checked drafts automatically after they remain unchanged across two refreshes and current verification passes. Optional restrictions can narrow this further."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Publikuj automatycznie kwalifikujące się, sprawdzone szkice, jeśli po dwóch odświeżeniach ich treść pozostaje taka sama i bieżąca weryfikacja przebiegnie pomyślnie. Opcjonalne ograniczenia pozwalają zawęzić zakres."}}
       }
     },
     "settings.automation.publication.aiRepliesHelp": {
@@ -2006,7 +2146,8 @@
             "state": "translated",
             "value": "Automatically publish checked replies to verified AI comments or comments assessed as AI-assisted with high or very high confidence. Known bots have a fixed Bot classification, regardless of whether scripts or AI produced their text. When bot replies are allowed, those accounts qualify through that separate permission without an AI assessment. Other likely manual or uncertain comments and new standalone comments stay private. Optional restrictions can narrow this further."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatycznie publikuj sprawdzone odpowiedzi na zweryfikowane komentarze AI lub komentarze ocenione z wysoką albo bardzo wysoką pewnością jako wspomagane przez AI. Rozpoznane boty mają stałą klasyfikację „Bot”, niezależnie od tego, czy tekst powstał przez skrypt czy AI. Po włączeniu odpowiedzi do botów te konta kwalifikują się na podstawie osobnego uprawnienia i bez oceny AI. Inne komentarze uznane za prawdopodobnie ręczne, komentarze o niepewnym pochodzeniu oraz nowe samodzielne komentarze pozostają prywatne. Opcjonalne ograniczenia pozwalają zawęzić zakres."}}
       }
     },
     "settings.automation.publication.manualHelp": {
@@ -2017,7 +2158,8 @@
             "state": "translated",
             "value": "Keep comments and replies as private drafts until you explicitly publish them. Automatic publication is off."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zachowuj komentarze i odpowiedzi jako prywatne szkice do czasu ręcznej publikacji. Automatyczna publikacja jest wyłączona."}}
       }
     },
     "settings.automation.pipelineOwnership": {
@@ -2028,7 +2170,8 @@
             "state": "translated",
             "value": "Automatically claim failed pipeline work"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatycznie podejmuj naprawę nieudanych pipeline’ów"}}
       }
     },
     "settings.automation.pipelineOwnershipHelp": {
@@ -2039,7 +2182,8 @@
             "state": "translated",
             "value": "Check existing reservations and atomically claim unowned failures on your MRs. Turn off to confirm each handoff. Pipeline evidence and push permissions are checked separately."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzaj istniejące rezerwacje i atomowo rezerwuj obsługę wolnych awarii w Twoich MR. Wyłącz tę opcję, aby potwierdzać każde przekazanie. Dane pipeline’u i uprawnienie do wysyłania zmian są sprawdzane osobno."}}
       }
     }
   },

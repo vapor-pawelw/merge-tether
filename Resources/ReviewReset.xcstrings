@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Reset review state and recheck everything"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zresetuj stan przeglądu i sprawdź wszystko ponownie"}}
       }
     },
     "reviewResetRunning": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "Resetting review state…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Resetowanie stanu przeglądu…"}}
       }
     },
     "reviewResetConfirmTitle": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "Recheck this merge request from scratch?"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzić ten merge request od początku?"}}
       }
     },
     "reviewResetConfirm": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "Reset and Recheck"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zresetuj i sprawdź ponownie"}}
       }
     },
     "reviewResetHelpAuthored": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "Forget earlier feedback checks and verify every comment against the current merge request from scratch. Later checks then cover only new or changed comments again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pomiń wcześniejsze wyniki i od podstaw zweryfikuj każdy komentarz względem bieżącego merge requesta. Kolejne kontrole znów obejmą tylko nowe lub zmienione komentarze."}}
       }
     },
     "reviewResetHelpReviewed": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "Ignore earlier review passes and run a full review of the whole current merge request. Later re-reviews then cover only what changed again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pomiń wcześniejsze przeglądy i uruchom pełny przegląd bieżącego merge requesta. Kolejne przeglądy znów obejmą tylko nowe zmiany."}}
       }
     }
   },

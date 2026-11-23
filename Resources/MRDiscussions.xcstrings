@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "New code comment"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nowy komentarz do kodu"}}
       }
     },
     "mrDiscussions.codeLoading": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "Loading code context…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wczytywanie kontekstu kodu…"}}
       }
     },
     "mrDiscussions.codeUnavailable": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "Code context is unavailable."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kontekst kodu jest niedostępny."}}
       }
     },
     "mrDiscussions.openChanges": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "Open file changes in GitLab"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz zmiany w pliku w GitLabie"}}
       }
     },
     "mrDiscussions.title": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "Comments and replies"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarze i odpowiedzi"}}
       }
     },
     "mrDiscussions.loading": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "Loading discussion threads…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wczytywanie dyskusji…"}}
       }
     },
     "mrDiscussions.failed": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "Couldn’t load the full discussion. Any pending drafts remain available below."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się wczytać całej dyskusji. Oczekujące szkice nadal są dostępne poniżej."}}
       }
     },
     "mrDiscussions.unavailable": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "Discussion context is unavailable. Pending drafts remain available for review."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kontekst dyskusji jest niedostępny. Oczekujące szkice nadal można przejrzeć."}}
       }
     },
     "mrDiscussions.empty": {
@@ -97,7 +105,8 @@
             "state": "translated",
             "value": "No published comments or pending drafts."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak opublikowanych komentarzy i oczekujących szkiców."}}
       }
     },
     "mrDiscussions.refresh": {
@@ -108,7 +117,8 @@
             "state": "translated",
             "value": "Refresh discussion"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Odśwież dyskusję"}}
       }
     },
     "mrDiscussions.open": {
@@ -119,7 +129,8 @@
             "state": "translated",
             "value": "Open thread"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwarta dyskusja"}}
       }
     },
     "mrDiscussions.resolved": {
@@ -130,7 +141,8 @@
             "state": "translated",
             "value": "Resolved"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozwiązana"}}
       }
     },
     "mrDiscussions.general": {
@@ -141,7 +153,8 @@
             "state": "translated",
             "value": "General comment"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarz ogólny"}}
       }
     },
     "mrDiscussions.privateDraft": {
@@ -152,7 +165,8 @@
             "state": "translated",
             "value": "Private draft"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Prywatny szkic"}}
       }
     },
     "mrDiscussions.unknownAuthor": {
@@ -163,7 +177,8 @@
             "state": "translated",
             "value": "Unknown author"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nieznany autor"}}
       }
     },
     "mrDiscussions.you": {
@@ -174,7 +189,8 @@
             "state": "translated",
             "value": "You"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ty"}}
       }
     },
     "mrDiscussions.bodyUnavailable": {
@@ -185,7 +201,8 @@
             "state": "translated",
             "value": "Comment text is unavailable."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Tekst komentarza jest niedostępny."}}
       }
     },
     "mrDiscussions.newComment": {
@@ -196,7 +213,8 @@
             "state": "translated",
             "value": "New comment"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nowy komentarz"}}
       }
     },
     "mrDiscussions.unmatchedReply": {
@@ -207,7 +225,8 @@
             "state": "translated",
             "value": "Reply draft — thread unavailable"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Szkic odpowiedzi · dyskusja niedostępna"}}
       }
     },
     "mrDiscussions.openInGitLab": {
@@ -218,7 +237,8 @@
             "state": "translated",
             "value": "Open comment in GitLab"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz komentarz w GitLabie"}}
       }
     },
     "mrDiscussions.ai": {
@@ -229,7 +249,8 @@
             "state": "translated",
             "value": "AI"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "AI"}}
       }
     },
     "mrDiscussions.aiLegend": {
@@ -240,7 +261,8 @@
             "state": "translated",
             "value": "AI means recorded app-generated content, a verified assistant or a high-confidence AI-assisted assessment. AI uncertain means an explicitly uncertain assessment. Human means likely manual writing with high confidence, not proven authorship. A thread badge summarizes all published posts; system events and private drafts are excluded. Mixed AI/Human threads or missing current assessments have no thread badge. Badges do not grant publication permission. Bot identifies comments from a known bot or automation account, without deciding whether scripts or AI produced them. Bot classification is fixed by GitLab metadata or your local bot list and cannot be changed in the origin menu."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Etykieta „AI” oznacza treść utworzoną przez aplikację, zweryfikowanego asystenta lub wysoką pewność, że tekst powstał przy wsparciu AI. „AI niepewne” oznacza niejednoznaczną ocenę. „Człowiek” oznacza wysoką pewność, że tekst napisano ręcznie. Etykieta dyskusji obejmuje wszystkie opublikowane wypowiedzi z pominięciem zdarzeń systemowych i prywatnych szkiców. Dyskusje mieszane i dyskusje bez aktualnych ocen pozostają bez etykiety. Etykiety nie przyznają uprawnień do publikacji. „Bot” oznacza znane konto bota lub automatyzacji, niezależnie od tego, czy tekst powstał przez skrypt czy AI. Klasyfikacja bota wynika z metadanych GitLaba lub lokalnej listy botów i jest stała w tym menu."}}
       }
     },
     "mrDiscussions.aiVerified": {
@@ -251,7 +273,8 @@
             "state": "translated",
             "value": "Verified agent identity. The badge does not approve the comment or change publication permissions."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zweryfikowana tożsamość asystenta. Etykieta służy wyłącznie do oznaczenia pochodzenia komentarza."}}
       }
     },
     "mrDiscussions.aiAppGenerated": {
@@ -262,7 +285,8 @@
             "state": "translated",
             "value": "Created with AI in MergeTether. A recorded app run produced this exact draft, and its publication was matched to this exact comment and account. Changing the comment text invalidates this display evidence. This does not approve its content or grant publication permission."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Utworzono z pomocą AI w MergeTether. Zarejestrowane zadanie utworzyło dokładnie ten szkic, a jego publikację powiązano z tym komentarzem i kontem. Edycja komentarza unieważnia to powiązanie. Zatwierdzenie treści i uprawnienia do publikacji podlegają odrębnym zasadom."}}
       }
     },
     "mrDiscussions.aiMergeTether": {
@@ -273,7 +297,8 @@
             "state": "translated",
             "value": "AI · MergeTether"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "AI · MergeTether"}}
       }
     },
     "mrDiscussions.aiAssessed": {
@@ -284,7 +309,8 @@
             "state": "translated",
             "value": "Assessed as written with AI assistance with high or very high confidence for this exact comment. This does not approve its content or independently allow publication."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dokładnie ten komentarz uznano z wysoką lub bardzo wysoką pewnością za napisany przy wsparciu AI. Ocena nie zatwierdza treści ani samodzielnie nie zezwala na publikację."}}
       }
     },
     "mrDiscussions.aiUncertain": {
@@ -295,7 +321,8 @@
             "state": "translated",
             "value": "AI uncertain"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "AI niepewne"}}
       }
     },
     "mrDiscussions.human": {
@@ -306,7 +333,8 @@
             "state": "translated",
             "value": "Human"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Człowiek"}}
       }
     },
     "mrDiscussions.aiUncertainHelp": {
@@ -317,7 +345,8 @@
             "state": "translated",
             "value": "The assessment has insufficient or mixed evidence, or uncertain confidence, for this exact comment. This is not a confirmed AI origin and does not qualify it for AI-only automatic publication."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dane o pochodzeniu tego komentarza są niewystarczające lub niejednoznaczne. Komentarz wymaga dalszej weryfikacji, aby kwalifikował się do automatycznej publikacji ograniczonej do AI."}}
       }
     },
     "mrDiscussions.humanHelp": {
@@ -328,7 +357,8 @@
             "state": "translated",
             "value": "Assessed as likely written manually with high or very high confidence for this exact comment. This is a probabilistic judgment, not proof of human authorship, and does not qualify it for AI-only automatic publication."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dokładnie ten komentarz uznano z wysoką lub bardzo wysoką pewnością za napisany ręcznie. Ocena jest probabilistyczna, a komentarz nie kwalifikuje się do automatycznej publikacji ograniczonej do AI."}}
       }
     },
     "mrDiscussions.threadAiHelp": {
@@ -339,7 +369,8 @@
             "state": "translated",
             "value": "Every published post and reply comes from a known bot account or has recorded app-generation evidence, a verified assistant identity or a current high-confidence AI-assisted assessment. System events and private drafts are excluded. This does not approve the thread or change publication permissions."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Każda opublikowana wypowiedź pochodzi od znanego bota lub ma potwierdzenie utworzenia przez aplikację, zweryfikowaną tożsamość asystenta albo aktualną ocenę wskazującą z wysoką pewnością na udział AI. Pominięto zdarzenia systemowe i prywatne szkice. Zatwierdzenie i publikacja podlegają odrębnym zasadom."}}
       }
     },
     "mrDiscussions.threadUncertainHelp": {
@@ -350,7 +381,8 @@
             "state": "translated",
             "value": "Every published post has recorded app-generation evidence, a current assessment or a verified assistant identity, at least one assessment is explicitly uncertain, and none is confidently assessed as manual. The thread is not confirmed as entirely AI-assisted. System events and private drafts are excluded."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Każda opublikowana wypowiedź ma potwierdzenie utworzenia przez aplikację, aktualną ocenę lub zweryfikowaną tożsamość asystenta. Co najmniej jedna ocena jest niejednoznaczna, a żadna nie wskazuje z wysoką pewnością na ręczne autorstwo. Udziału AI w całej dyskusji nie potwierdzono. Pominięto zdarzenia systemowe i prywatne szkice."}}
       }
     },
     "mrDiscussions.threadHumanHelp": {
@@ -361,7 +393,8 @@
             "state": "translated",
             "value": "Every published post and reply is assessed as likely written manually with high or very high confidence. This is not proof of human authorship. System events and private drafts are excluded."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Każdą opublikowaną wypowiedź uznano z wysoką lub bardzo wysoką pewnością za napisaną ręcznie. To ocena prawdopodobieństwa autorstwa. Pominięto zdarzenia systemowe i prywatne szkice."}}
       }
     },
     "mrDiscussions.draftCount.%lld": {
@@ -384,7 +417,8 @@
               }
             }
           }
-        }
+        },
+        "pl": {"variations": {"plural": {"one": {"stringUnit": {"state": "translated", "value": "%lld prywatny szkic"}}, "few": {"stringUnit": {"state": "translated", "value": "%lld prywatne szkice"}}, "many": {"stringUnit": {"state": "translated", "value": "%lld prywatnych szkiców"}}, "other": {"stringUnit": {"state": "translated", "value": "%lld prywatnego szkicu"}}}}}
       }
     },
     "mrDiscussions.replyDraft": {
@@ -395,7 +429,8 @@
             "state": "translated",
             "value": "Reply draft"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Szkic odpowiedzi"}}
       }
     },
     "mrDiscussions.expanded": {
@@ -406,7 +441,8 @@
             "state": "translated",
             "value": "Expanded"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozwinięta"}}
       }
     },
     "mrDiscussions.collapsed": {
@@ -417,7 +453,8 @@
             "state": "translated",
             "value": "Collapsed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zwinięta"}}
       }
     },
     "mrDiscussions.noOwnReply": {
@@ -428,7 +465,8 @@
             "state": "translated",
             "value": "No published reply from you"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak Twojej opublikowanej odpowiedzi"}}
       }
     },
     "mrDiscussions.noOwnReplyHelp": {
@@ -439,7 +477,8 @@
             "state": "translated",
             "value": "No published reply is attributed to the current account. The opening comment and system events do not count as replies. This is conversation history, not a request to take action."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Bieżącemu kontu nie przypisano opublikowanej odpowiedzi. Komentarz otwierający i zdarzenia systemowe są pomijane. To informacja o historii rozmowy."}}
       }
     },
     "mrDiscussions.publishedReply": {
@@ -450,7 +489,8 @@
             "state": "translated",
             "value": "Published reply"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Opublikowana odpowiedź"}}
       }
     },
     "mrDiscussions.publishedReplyHelp": {
@@ -461,7 +501,8 @@
             "state": "translated",
             "value": "Verification confirms that your published reply answers all concerns requiring a reply. Later informational acknowledgements can follow it without changing this status. A pending draft takes priority and is shown instead."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Weryfikacja potwierdza, że opublikowana odpowiedź obejmuje wszystkie uwagi wymagające reakcji. Późniejsze komentarze informacyjne nie zmieniają tego stanu. Oczekujący szkic ma pierwszeństwo i jest wyświetlany zamiast odpowiedzi."}}
       }
     },
     "mrDiscussions.earlierReply": {
@@ -472,7 +513,8 @@
             "state": "translated",
             "value": "Published reply · newer comments"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Opublikowana odpowiedź · nowsze komentarze"}}
       }
     },
     "mrDiscussions.earlierReplyHelp": {
@@ -483,7 +525,8 @@
             "state": "translated",
             "value": "The current account replied earlier. Newer comments follow that reply, so it does not indicate a response to the latest comment. Private drafts are shown separately."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Bieżące konto odpowiedziało wcześniej. Po odpowiedzi pojawiły się nowsze komentarze. Prywatne szkice są pokazane osobno."}}
       }
     },
     "mrDiscussions.replyUnknown": {
@@ -494,7 +537,8 @@
             "state": "translated",
             "value": "Reply attribution unclear"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Autor odpowiedzi niepewny"}}
       }
     },
     "mrDiscussions.replyUnknownHelp": {
@@ -505,7 +549,8 @@
             "state": "translated",
             "value": "At least one reply has no known username, so a reply from the current account cannot be confirmed or ruled out."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Co najmniej jedna odpowiedź ma nieznaną nazwę użytkownika. Nie można ustalić, czy bieżące konto odpowiedziało."}}
       }
     },
     "mrDiscussions.replyUnavailable": {
@@ -516,7 +561,8 @@
             "state": "translated",
             "value": "Reply status unavailable"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Stan odpowiedzi niedostępny"}}
       }
     },
     "mrDiscussions.replyUnavailableHelp": {
@@ -527,7 +573,8 @@
             "state": "translated",
             "value": "The current account username is unavailable, so published replies cannot be attributed. Private drafts are shown separately."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nazwa użytkownika bieżącego konta jest niedostępna, więc nie można przypisać opublikowanych odpowiedzi. Prywatne szkice są pokazane osobno."}}
       }
     },
     "mrDiscussions.feedbackAddressed": {
@@ -538,7 +585,8 @@
             "state": "translated",
             "value": "Feedback addressed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uwagi uwzględnione"}}
       }
     },
     "mrDiscussions.feedbackPending": {
@@ -549,7 +597,8 @@
             "state": "translated",
             "value": "Feedback pending"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uwagi oczekują"}}
       }
     },
     "mrDiscussions.feedbackInformational": {
@@ -560,7 +609,8 @@
             "state": "translated",
             "value": "Informational feedback"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uwagi informacyjne"}}
       }
     },
     "mrDiscussions.feedbackIgnored": {
@@ -571,7 +621,8 @@
             "state": "translated",
             "value": "Feedback ignored"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uwagi pominięte"}}
       }
     },
     "mrDiscussions.feedbackPartlyIgnored": {
@@ -582,7 +633,8 @@
             "state": "translated",
             "value": "Includes ignored feedback"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zawiera pominięte uwagi"}}
       }
     },
     "mrDiscussions.feedbackNotApplicable": {
@@ -593,7 +645,8 @@
             "state": "translated",
             "value": "No external feedback"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak uwag zewnętrznych"}}
       }
     },
     "mrDiscussions.feedbackHelp": {
@@ -604,7 +657,8 @@
             "state": "translated",
             "value": "Feedback status comes from the current code and discussion assessment. Replies and GitLab resolution are shown separately."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Stan uwag wynika z oceny bieżącego kodu i dyskusji. Odpowiedzi i stan rozwiązania w GitLabie są pokazane osobno."}}
       }
     },
     "mrDiscussions.branches.%@.%@": {
@@ -615,7 +669,8 @@
             "state": "translated",
             "value": "Branches: %1$@ → %2$@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Gałęzie: %1$@ → %2$@"}}
       }
     },
     "mrDiscussions.toggleThread": {
@@ -626,7 +681,8 @@
             "state": "translated",
             "value": "Show or hide the conversation"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pokaż lub ukryj rozmowę"}}
       }
     },
     "mrDiscussions.originMenuTitle": {
@@ -637,7 +693,8 @@
             "state": "translated",
             "value": "Classify this comment"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sklasyfikuj ten komentarz"}}
       }
     },
     "mrDiscussions.threadOriginMenuTitle": {
@@ -648,7 +705,8 @@
             "state": "translated",
             "value": "Classify every comment in this thread"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sklasyfikuj wszystkie komentarze w dyskusji"}}
       }
     },
     "mrDiscussions.originMenuHelp": {
@@ -659,7 +717,8 @@
             "state": "translated",
             "value": "Click to correct this comment’s classification."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kliknij, aby poprawić klasyfikację komentarza."}}
       }
     },
     "mrDiscussions.threadOriginMenuHelp": {
@@ -670,7 +729,8 @@
             "state": "translated",
             "value": "Click to correct the classification of every comment in this thread."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kliknij, aby poprawić klasyfikację wszystkich komentarzy w dyskusji."}}
       }
     },
     "mrDiscussions.originAutomatic": {
@@ -681,7 +741,8 @@
             "state": "translated",
             "value": "Use automatic assessment"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Użyj automatycznej oceny"}}
       }
     },
     "mrDiscussions.manualHelp": {
@@ -692,7 +753,8 @@
             "state": "translated",
             "value": "You set this classification. It replaces the automatic assessment, including for automatic publication, until the comment is edited."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ta klasyfikacja zastępuje automatyczną ocenę, także na potrzeby automatycznej publikacji, do czasu edycji komentarza."}}
       }
     },
     "mrDiscussions.originCancel": {
@@ -703,7 +765,8 @@
             "state": "translated",
             "value": "Cancel"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Anuluj"}}
       }
     },
     "mrDiscussions.originConfirm": {
@@ -714,7 +777,8 @@
             "state": "translated",
             "value": "Change"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zmień"}}
       }
     },
     "mrDiscussions.threadOriginAiTitle": {
@@ -725,7 +789,8 @@
             "state": "translated",
             "value": "Mark every comment in this thread as AI?"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oznaczyć wszystkie komentarze w dyskusji jako AI?"}}
       }
     },
     "mrDiscussions.threadOriginUncertainTitle": {
@@ -736,7 +801,8 @@
             "state": "translated",
             "value": "Mark every comment in this thread as AI uncertain?"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oznaczyć wszystkie komentarze w dyskusji jako AI niepewne?"}}
       }
     },
     "mrDiscussions.threadOriginHumanTitle": {
@@ -747,7 +813,8 @@
             "state": "translated",
             "value": "Mark every comment in this thread as human?"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oznaczyć wszystkie komentarze w dyskusji jako napisane ręcznie?"}}
       }
     },
     "mrDiscussions.threadOriginAutomaticTitle": {
@@ -758,7 +825,8 @@
             "state": "translated",
             "value": "Return this thread to automatic assessment?"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przywrócić automatyczną ocenę tej dyskusji?"}}
       }
     },
     "mrDiscussions.threadOriginMessage.%lld": {
@@ -781,7 +849,8 @@
               }
             }
           }
-        }
+        },
+        "pl": {"variations": {"plural": {"one": {"stringUnit": {"state": "translated", "value": "Klasyfikacja %lld opublikowanego komentarza zostanie zmieniona. Prywatne szkice pozostaną bez klasyfikacji."}}, "few": {"stringUnit": {"state": "translated", "value": "Klasyfikacja wszystkich %lld opublikowanych komentarzy zostanie zmieniona. Prywatne szkice pozostaną bez klasyfikacji."}}, "many": {"stringUnit": {"state": "translated", "value": "Klasyfikacja wszystkich %lld opublikowanych komentarzy zostanie zmieniona. Prywatne szkice pozostaną bez klasyfikacji."}}, "other": {"stringUnit": {"state": "translated", "value": "Wszystkie opublikowane komentarze (%lld) zmienią klasyfikację. Prywatne szkice pozostaną bez klasyfikacji."}}}}}
       }
     },
     "mrDiscussions.originChangeFailed": {
@@ -792,7 +861,8 @@
             "state": "translated",
             "value": "Couldn’t change the classification"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się zmienić klasyfikacji"}}
       }
     },
     "mrDiscussions.originChangeFailedMessage": {
@@ -803,7 +873,8 @@
             "state": "translated",
             "value": "The comment may have changed on GitLab, or the classification couldn’t be saved. Refresh the conversation and try again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarz mógł się zmienić w GitLabie albo zapis klasyfikacji się nie powiódł. Odśwież rozmowę i spróbuj ponownie."}}
       }
     },
     "mrDiscussions.originResume.%lld": {
@@ -826,7 +897,8 @@
               }
             }
           }
-        }
+        },
+        "pl": {"variations": {"plural": {"one": {"stringUnit": {"state": "translated", "value": "Ta zmiana pozwala automatycznie opublikować %lld szkic odpowiedzi."}}, "few": {"stringUnit": {"state": "translated", "value": "Ta zmiana pozwala automatycznie opublikować %lld szkice odpowiedzi."}}, "many": {"stringUnit": {"state": "translated", "value": "Ta zmiana pozwala automatycznie opublikować %lld szkiców odpowiedzi."}}, "other": {"stringUnit": {"state": "translated", "value": "Ta zmiana pozwala automatycznie opublikować oczekujące szkice odpowiedzi (%lld)."}}}}}
       }
     },
     "mrDiscussions.originResumeCountdown.%lld": {
@@ -837,7 +909,8 @@
             "state": "translated",
             "value": "Automation continues in %lld s."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja zostanie wznowiona za %lld s."}}
       }
     },
     "mrDiscussions.originUndo": {
@@ -848,7 +921,8 @@
             "state": "translated",
             "value": "Undo"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Cofnij"}}
       }
     },
     "mrDiscussions.originContinueNow": {
@@ -859,7 +933,8 @@
             "state": "translated",
             "value": "Continue now"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kontynuuj teraz"}}
       }
     },
     "mrDiscussions.extraContext": {
@@ -870,7 +945,8 @@
             "state": "translated",
             "value": "Extra context"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dodatkowy kontekst"}}
       }
     },
     "mrDiscussions.proposedSolution": {
@@ -898,7 +974,8 @@
             "state": "translated",
             "value": "MergeTether's explanation for you. It stays in the app and is never posted to GitLab."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wyjaśnienie MergeTether, dostępne tylko dla Ciebie w aplikacji."}}
       }
     },
     "mrDiscussions.botOriginHelp": {
@@ -909,7 +986,8 @@
             "state": "translated",
             "value": "Known bot or automation account, confirmed by GitLab metadata or your local bot list. Its comments are classified as Bot without distinguishing scripts from AI. This classification follows the account and cannot be changed here. Automatic bot replies require their separate publication permission."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Znane konto bota lub automatyzacji, potwierdzone przez metadane GitLaba lub lokalną listę botów. Jego komentarze mają etykietę „Bot” niezależnie od tego, czy powstały przez skrypt czy AI. Klasyfikacja wynika z konta i jest stała w tym menu. Automatyczne odpowiedzi do botów wymagają osobnego uprawnienia do publikacji."}}
       }
     },
     "mrDiscussions.feedbackAddressedHelp": {
@@ -920,7 +998,8 @@
             "state": "translated",
             "value": "All requested concerns have been handled through verified corrections in the current remote merge-request code or metadata, substantive answers, or justified decisions not to implement a suggestion. Required published replies and GitLab thread resolution are shown separately."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wszystkie zgłoszone uwagi zostały obsłużone poprzez zweryfikowane poprawki w bieżącym zdalnym kodzie lub metadanych MR, merytoryczne odpowiedzi lub uzasadnione decyzje o pominięciu sugestii. Wymagane opublikowane odpowiedzi i stan rozwiązania dyskusji w GitLabie są pokazane osobno."}}
       }
     }
   },

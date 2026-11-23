@@ -10,7 +10,8 @@
             "state": "translated",
             "value": "Try again"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Spróbuj ponownie"}}
       }
     },
     "mrHumanAction.blockedRun": {
@@ -21,7 +22,8 @@
             "state": "translated",
             "value": "The agent stopped before finishing."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Agent zatrzymał się przed ukończeniem zadania."}}
       }
     },
     "mrHumanAction.interruptedRun": {
@@ -32,7 +34,8 @@
             "state": "translated",
             "value": "The previous run was interrupted."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Poprzednie zadanie zostało przerwane."}}
       }
     },
     "mrHumanAction.reviewInterruptedHeadChanged": {
@@ -43,7 +46,8 @@
             "state": "translated",
             "value": "The previous review was interrupted. Review the latest commit."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Poprzedni przegląd został przerwany. Sprawdź najnowszy commit."}}
       }
     },
     "mrHumanAction.publication.%lld": {
@@ -54,7 +58,8 @@
             "state": "translated",
             "value": "%1$lld comments need your review before publication."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarze wymagające przeglądu przed publikacją: %1$lld."}}
       }
     },
     "mrHumanAction.uncheckedDrafts.%lld": {
@@ -65,7 +70,8 @@
             "state": "translated",
             "value": "%1$lld comments still need verification before automatic publication."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarze wymagające weryfikacji przed automatyczną publikacją: %1$lld."}}
       }
     },
     "mrHumanAction.verificationFailure": {
@@ -76,7 +82,8 @@
             "state": "translated",
             "value": "Reviewer feedback could not be checked. Run verification again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się sprawdzić uwag recenzentów. Uruchom weryfikację ponownie."}}
       }
     },
     "mrHumanAction.setupAssistant": {
@@ -87,7 +94,8 @@
             "state": "translated",
             "value": "Set up the selected agent CLI to continue automation."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Skonfiguruj CLI wybranego agenta, aby wznowić automatyzację."}}
       }
     },
     "mrHumanAction.reviewDecision": {
@@ -98,7 +106,8 @@
             "state": "translated",
             "value": "Review is ready for your confirmation."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przegląd jest gotowy do potwierdzenia."}}
       }
     },
     "mrHumanAction.approval": {
@@ -109,7 +118,8 @@
             "state": "translated",
             "value": "This MR is ready for your approval."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ten MR jest gotowy do zatwierdzenia."}}
       }
     },
     "mrHumanAction.pipelineHandoff": {
@@ -120,7 +130,8 @@
             "state": "translated",
             "value": "Pipeline work needs your ownership decision."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zdecyduj, kto ma przejąć obsługę pipeline’u."}}
       }
     },
     "mrHumanAction.merge": {
@@ -131,7 +142,8 @@
             "state": "translated",
             "value": "This MR is ready for your merge decision."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ten MR czeka na Twoją decyzję o scaleniu."}}
       }
     },
     "mrHumanAction.feedback": {
@@ -142,7 +154,8 @@
             "state": "translated",
             "value": "Reviewer feedback still needs a correction or an answer."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uwagi recenzentów nadal wymagają poprawki lub odpowiedzi."}}
       }
     },
     "mrHumanAction.discussion": {
@@ -153,7 +166,8 @@
             "state": "translated",
             "value": "GitLab reports unresolved discussions. Review the current comments."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "GitLab zgłasza otwarte dyskusje. Przejrzyj bieżące komentarze."}}
       }
     },
     "mrHumanAction.reviewIntent": {
@@ -164,7 +178,8 @@
             "state": "translated",
             "value": "Review has been requested for this MR."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Poproszono o przegląd tego MR."}}
       }
     },
     "mrHumanAction.followUpIntent": {
@@ -175,7 +190,8 @@
             "state": "translated",
             "value": "Reviewer feedback needs a follow-up."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uwagi recenzentów wymagają dalszego działania."}}
       }
     },
     "mrHumanAction.pipelineIntent": {
@@ -186,7 +202,8 @@
             "state": "translated",
             "value": "Pipeline failure needs investigation."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Błąd pipeline’u wymaga sprawdzenia."}}
       }
     },
     "mrHumanAction.conflictIntent": {
@@ -197,7 +214,8 @@
             "state": "translated",
             "value": "Merge conflicts need to be addressed."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Trzeba rozwiązać konflikty scalania."}}
       }
     },
     "mrHumanAction.refreshIntent": {
@@ -208,7 +226,8 @@
             "state": "translated",
             "value": "An MR update needs to be checked."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Trzeba sprawdzić aktualizację MR."}}
       }
     },
     "mrHumanAction.reviewFailed": {
@@ -219,7 +238,8 @@
             "state": "translated",
             "value": "The requested review did not finish. Review or retry it."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zlecony przegląd się nie zakończył. Sprawdź wynik lub spróbuj ponownie."}}
       }
     },
     "mrHumanAction.followUpFailed": {
@@ -230,7 +250,8 @@
             "state": "translated",
             "value": "The feedback follow-up did not finish. Review or retry it."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Obsługa uwag się nie zakończyła. Sprawdź wynik lub spróbuj ponownie."}}
       }
     },
     "mrHumanAction.pipelineFailed": {
@@ -241,7 +262,8 @@
             "state": "translated",
             "value": "Pipeline investigation did not finish. Review or retry it."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzanie pipeline’u się nie zakończyło. Sprawdź wynik lub spróbuj ponownie."}}
       }
     },
     "mrHumanAction.conflictFailed": {
@@ -252,7 +274,8 @@
             "state": "translated",
             "value": "Conflict resolution did not finish. Review or retry it."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozwiązywanie konfliktu się nie zakończyło. Sprawdź wynik lub spróbuj ponownie."}}
       }
     },
     "mrHumanAction.refreshFailed": {
@@ -263,7 +286,8 @@
             "state": "translated",
             "value": "The MR update could not be checked. Try again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się sprawdzić aktualizacji MR. Spróbuj ponownie."}}
       }
     },
     "mrHumanAction.action.reviewRun": {
@@ -274,7 +298,8 @@
             "state": "translated",
             "value": "View run result"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zobacz wynik zadania"}}
       }
     },
     "mrHumanAction.action.reviewDrafts": {
@@ -285,7 +310,8 @@
             "state": "translated",
             "value": "Review comments"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przejrzyj komentarze"}}
       }
     },
     "mrHumanAction.action.verifyFeedback": {
@@ -296,7 +322,8 @@
             "state": "translated",
             "value": "Verify feedback again"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zweryfikuj uwagi ponownie"}}
       }
     },
     "mrHumanAction.action.setupAssistant": {
@@ -307,7 +334,8 @@
             "state": "translated",
             "value": "Open settings"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz ustawienia"}}
       }
     },
     "mrHumanAction.action.reviewDecision": {
@@ -318,7 +346,8 @@
             "state": "translated",
             "value": "Review readiness…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdź gotowość…"}}
       }
     },
     "mrHumanAction.action.reviewApproval": {
@@ -329,7 +358,8 @@
             "state": "translated",
             "value": "Review approval…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdź zatwierdzenie…"}}
       }
     },
     "mrHumanAction.action.reviewHandoff": {
@@ -340,7 +370,8 @@
             "state": "translated",
             "value": "Review handoff…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdź przekazanie…"}}
       }
     },
     "mrHumanAction.action.reviewMerge": {
@@ -351,7 +382,8 @@
             "state": "translated",
             "value": "Review merge…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdź scalanie…"}}
       }
     },
     "mrHumanAction.action.handleFeedback": {
@@ -362,7 +394,8 @@
             "state": "translated",
             "value": "Handle feedback"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Obsłuż uwagi"}}
       }
     },
     "mrHumanAction.action.retryIntent": {
@@ -373,7 +406,8 @@
             "state": "translated",
             "value": "Try again"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Spróbuj ponownie"}}
       }
     },
     "mrHumanAction.action.reviewFeedback": {
@@ -384,7 +418,8 @@
             "state": "translated",
             "value": "Review feedback"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przejrzyj uwagi"}}
       }
     },
     "mrHumanAction.publicationSingle": {
@@ -395,7 +430,8 @@
             "state": "translated",
             "value": "1 comment needs your review before publication."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "1 komentarz wymaga przeglądu przed publikacją."}}
       }
     },
     "mrHumanAction.uncheckedDraftSingle": {
@@ -406,7 +442,8 @@
             "state": "translated",
             "value": "1 comment still needs verification before automatic publication."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "1 komentarz wymaga weryfikacji przed automatyczną publikacją."}}
       }
     },
     "mrHumanAction.action.reviewIssue": {
@@ -417,7 +454,8 @@
             "state": "translated",
             "value": "Review issue"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdź problem"}}
       }
     },
     "mrHumanAction.currentCheckMissing": {
@@ -428,7 +466,8 @@
             "state": "translated",
             "value": "A current verification is missing. Review the checks before continuing."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak aktualnej weryfikacji. Przejrzyj wyniki kontroli przed kontynuowaniem."}}
       }
     },
     "mrHumanAction.lastActionFailed": {
@@ -439,7 +478,8 @@
             "state": "translated",
             "value": "GitLab did not confirm the last action. Review its current state before trying again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "GitLab nie potwierdził ostatniego działania. Przed ponowieniem sprawdź jego bieżący stan."}}
       }
     },
     "mrHumanAction.previousHeadRun": {
@@ -450,7 +490,8 @@
             "state": "translated",
             "value": "The MR changed after a previous run stopped. Review that run before restarting it."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "MR zmienił się po zatrzymaniu poprzedniego zadania. Sprawdź to zadanie przed ponowieniem."}}
       }
     },
     "mrHumanAction.actionRetryDraftVerification": {
@@ -461,7 +502,8 @@
             "state": "translated",
             "value": "Verify drafts again"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zweryfikuj szkice ponownie"}}
       }
     },
     "mrHumanAction.draftVerificationFailure": {
@@ -472,7 +514,8 @@
             "state": "translated",
             "value": "Some replies could not be verified. Review them or run the check again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Części odpowiedzi nie udało się zweryfikować. Przejrzyj je lub ponów sprawdzenie."}}
       }
     },
     "mrHumanAction.feedbackUnverified": {
@@ -490,7 +533,8 @@
             "state": "translated",
             "value": "GitLab reports requested changes. Review the current feedback."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "GitLab zgłasza prośbę o zmiany. Przejrzyj aktualne uwagi."}}
       }
     },
     "mrHumanAction.feedbackReply": {
@@ -501,7 +545,8 @@
             "state": "translated",
             "value": "A reviewer comment still needs a published reply."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarz recenzenta nadal wymaga opublikowanej odpowiedzi."}}
       }
     },
     "mrHumanAction.duplicateDrafts.%lld": {
@@ -512,7 +557,8 @@
             "state": "translated",
             "value": "%1$lld drafts repeat a reply already in their thread. Delete them instead of publishing."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Szkice powielające odpowiedź z ich dyskusji: %1$lld. Usuń je zamiast publikować."}}
       }
     },
     "mrHumanAction.duplicateDraftSingle": {
@@ -523,7 +569,8 @@
             "state": "translated",
             "value": "1 draft repeats a reply already in its thread. Delete it instead of publishing."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "1 szkic powiela odpowiedź z jego dyskusji. Usuń go zamiast publikować."}}
       }
     },
     "mrHumanAction.retryReview": {
@@ -534,7 +581,8 @@
             "state": "translated",
             "value": "Retry code review"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponów przegląd kodu"}}
       }
     },
     "mrHumanAction.retryFollowUp": {
@@ -545,7 +593,8 @@
             "state": "translated",
             "value": "Retry author follow-up"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponów obsługę uwag"}}
       }
     },
     "mrHumanAction.retryPipeline": {
@@ -556,7 +605,8 @@
             "state": "translated",
             "value": "Retry pipeline investigation"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponów sprawdzanie pipeline’u"}}
       }
     },
     "mrHumanAction.retryConflict": {
@@ -567,7 +617,8 @@
             "state": "translated",
             "value": "Retry conflict resolution"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponów rozwiązywanie konfliktu"}}
       }
     },
     "mrHumanAction.retryRefresh": {
@@ -578,7 +629,8 @@
             "state": "translated",
             "value": "Retry GitLab refresh"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponów odświeżanie z GitLaba"}}
       }
     },
     "mrHumanAction.retryDraftReply": {
@@ -589,7 +641,8 @@
             "state": "translated",
             "value": "Retry reply preparation"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponów przygotowanie odpowiedzi"}}
       }
     },
     "mrHumanAction.runFollowUp": {
@@ -600,7 +653,8 @@
             "state": "translated",
             "value": "Run author follow-up"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchom obsługę uwag autora MR"}}
       }
     },
     "mrHumanAction.runPipeline": {
@@ -611,7 +665,8 @@
             "state": "translated",
             "value": "Investigate pipeline failure"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdź przyczynę błędu pipeline’u"}}
       }
     },
     "mrHumanAction.runConflict": {
@@ -622,7 +677,8 @@
             "state": "translated",
             "value": "Resolve merge conflict"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozwiąż konflikt scalania"}}
       }
     },
     "mrHumanAction.runRefresh": {
@@ -633,7 +689,8 @@
             "state": "translated",
             "value": "Refresh from GitLab"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Odśwież z GitLaba"}}
       }
     }
   }

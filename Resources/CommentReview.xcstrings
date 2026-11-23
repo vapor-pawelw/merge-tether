@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Delete draft"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Usuń szkic"}}
       }
     },
     "commentReview.deleteTitle": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "Delete this draft from GitLab?"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Usunąć ten szkic z GitLaba?"}}
       }
     },
     "commentReview.deleteHelp": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "This comment will not be published. Deleting drafts keeps the workflow paused until you finish reviewing comments."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarz pozostanie nieopublikowany. Usunięcie szkiców nie wznawia procesu. Najpierw zakończ przegląd komentarzy."}}
       }
     },
     "commentReview.finish": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "Finish comment review"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zakończ przegląd komentarzy"}}
       }
     },
     "commentReview.pending": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "Finish reviewing comments to let the workflow continue."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zakończ przegląd komentarzy, aby wznowić proces."}}
       }
     },
     "commentReview.publishAll": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "Publish all and continue"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Opublikuj wszystkie i kontynuuj"}}
       }
     },
     "commentReview.reviewBeforePublishing": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "Review before publishing"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przejrzyj przed publikacją"}}
       }
     },
     "commentReview.publishSelectedHelp": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "Publishes the selected comments. The workflow can continue when no drafts remain; other readiness checks still apply."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Publikuje zaznaczone komentarze. Proces może być kontynuowany, gdy nie będzie szkiców i przejdą pozostałe kontrole gotowości."}}
       }
     },
     "commentReview.deleting": {
@@ -97,7 +105,8 @@
             "state": "translated",
             "value": "Deleting draft\u2026"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Usuwanie szkicu…"}}
       }
     },
     "commentReview.finishing": {
@@ -108,7 +117,8 @@
             "state": "translated",
             "value": "Checking comments\u2026"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzanie komentarzy…"}}
       }
     },
     "commentReview.blocks": {
@@ -119,7 +129,8 @@
             "state": "translated",
             "value": "Comment review is blocking the next steps"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przegląd komentarzy wstrzymuje kolejne kroki"}}
       }
     },
     "commentReview.beforeReReview": {
@@ -130,7 +141,8 @@
             "state": "translated",
             "value": "Next: request another review after comment review is finished and the feedback is ready."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Następnie poproś o ponowny przegląd po zakończeniu przeglądu komentarzy i przygotowaniu odpowiedzi na uwagi."}}
       }
     },
     "commentReview.beforeMerge": {
@@ -141,7 +153,8 @@
             "state": "translated",
             "value": "Next: merge after comment review is finished and all merge requirements are met."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Następnie scal MR po zakończeniu przeglądu komentarzy i spełnieniu wszystkich wymagań scalania."}}
       }
     },
     "commentReview.beforeApproval": {
@@ -152,7 +165,8 @@
             "state": "translated",
             "value": "Next: approve after comment review is finished, the current review has no objections, and the required discussions are resolved."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Następnie zatwierdź MR po zakończeniu przeglądu komentarzy, jeśli bieżący przegląd nie ma zastrzeżeń i wymagane dyskusje są zamknięte."}}
       }
     },
     "commentReview.otherChecks": {
@@ -163,7 +177,8 @@
             "state": "translated",
             "value": "New comments, commits and pipeline problems can still be handled. The workflow continues after the remaining readiness checks pass."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nadal możesz obsługiwać nowe komentarze, commity i problemy z pipeline’em. Proces będzie kontynuowany po pomyślnej weryfikacji pozostałych warunków."}}
       }
     },
     "commentReview.afterOwn": {
@@ -174,7 +189,8 @@
             "state": "translated",
             "value": "Comment review \u2192 re-review readiness \u2192 merge checks"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przegląd komentarzy → gotowość do ponownego przeglądu → kontrole scalania"}}
       }
     },
     "commentReview.afterReviewed": {
@@ -185,7 +201,8 @@
             "state": "translated",
             "value": "Comment review \u2192 review verdict and discussion checks \u2192 approval"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przegląd komentarzy → wynik przeglądu i kontrola dyskusji → zatwierdzenie"}}
       }
     },
     "commentReview.publishSelected.%lld": {
@@ -208,7 +225,8 @@
               }
             }
           }
-        }
+        },
+        "pl": {"variations": {"plural": {"one": {"stringUnit": {"state": "translated", "value": "Opublikuj %lld komentarz i kontynuuj"}}, "few": {"stringUnit": {"state": "translated", "value": "Opublikuj %lld komentarze i kontynuuj"}}, "many": {"stringUnit": {"state": "translated", "value": "Opublikuj %lld komentarzy i kontynuuj"}}, "other": {"stringUnit": {"state": "translated", "value": "Opublikuj komentarze (%lld) i kontynuuj"}}}}}
       }
     },
     "commentReview.step.commentReview": {
@@ -219,7 +237,8 @@
             "state": "translated",
             "value": "Comment review"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przegląd komentarzy"}}
       }
     },
     "commentReview.step.reReviewReadiness": {
@@ -230,7 +249,8 @@
             "state": "translated",
             "value": "Re-review readiness"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Gotowość do ponownego przeglądu"}}
       }
     },
     "commentReview.step.mergeChecks": {
@@ -241,7 +261,8 @@
             "state": "translated",
             "value": "Merge checks"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kontrole scalania"}}
       }
     },
     "commentReview.step.reviewVerdict": {
@@ -252,7 +273,8 @@
             "state": "translated",
             "value": "Review verdict and discussion checks"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wynik przeglądu i kontrola dyskusji"}}
       }
     },
     "commentReview.step.approval": {
@@ -263,7 +285,8 @@
             "state": "translated",
             "value": "Approval"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zatwierdzenie"}}
       }
     },
     "commentReview.stepsHelp": {
@@ -274,7 +297,8 @@
             "state": "translated",
             "value": "Automation order for this merge request. The highlighted step is the current one."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kolejność automatyzacji tego merge requesta. Wyróżniono bieżący krok."}}
       }
     }
   },

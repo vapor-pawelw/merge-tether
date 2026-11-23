@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "%@ needs you to sign in again"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%@ musi ponownie się zalogować"}}
       }
     },
     "cli.health.limitTitle": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "%@ has reached its usage limit"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%@ osiągnął limit użycia"}}
       }
     },
     "cli.health.loginHelp": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "Work using this CLI is paused. Sign in in your terminal, then check access again. Completed work is kept."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Praca w tym CLI została wstrzymana. Zaloguj się w terminalu, a następnie ponownie sprawdź dostęp. Ukończona praca została zachowana."}}
       }
     },
     "cli.health.limitHelp": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "New work using this CLI is paused. After access is restored, retry queued work. Stopped runs still need an explicit retry."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nowa praca w tym CLI została wstrzymana. Po przywróceniu dostępu ponów oczekujące zadania. Zatrzymane uruchomienia wymagają jawnego ponowienia."}}
       }
     },
     "cli.health.reset": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "Reset time reported by the CLI: %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Czas resetu podany przez CLI: %@"}}
       }
     },
     "cli.health.signIn": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "Sign in…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zaloguj się…"}}
       }
     },
     "cli.health.recheck": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "Check access"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdź dostęp"}}
       }
     },
     "cli.health.retry": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "Retry queued work"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponów oczekujące zadania"}}
       }
     },
     "cli.health.actionFailed": {
@@ -97,7 +105,8 @@
             "state": "translated",
             "value": "Access is still unavailable. Finish signing in or check the CLI in Settings."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dostęp nadal jest niedostępny. Dokończ logowanie lub sprawdź CLI w Ustawieniach."}}
       }
     }
   },

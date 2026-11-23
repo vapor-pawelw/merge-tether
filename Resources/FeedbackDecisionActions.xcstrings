@@ -3,19 +3,23 @@
   "strings": {
     "historyTitle": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Feedback decision" } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Feedback decision" } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Decyzja dotycząca uwagi"}} }
     },
     "ignoredEvent": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Ignored a suggestion from comment #%lld: %@" } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Ignored a suggestion from comment #%lld: %@" } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pominięto sugestię z komentarza nr %lld: %@"}} }
     },
     "restoredEvent": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Restored a suggestion from comment #%lld: %@" } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Restored a suggestion from comment #%lld: %@" } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przywrócono sugestię z komentarza nr %lld: %@"}} }
     },
     "resetEvent": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Reset %lld ignored suggestions for this merge request." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Reset %lld ignored suggestions for this merge request." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zresetowano pominięte sugestie tego merge requesta: %lld."}} }
     }
   },
   "version": "1.0"

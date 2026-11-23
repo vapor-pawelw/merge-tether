@@ -4,23 +4,28 @@
   "strings": {
     "publication.filtersManual": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Automatic publication is off. Saved filters are inactive and will be available when you choose a filtered mode." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Automatic publication is off. Saved filters are inactive and will be available when you choose a filtered mode." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyczna publikacja jest wyłączona. Zapisane filtry są nieaktywne i będą dostępne po wybraniu trybu z filtrowaniem."}} }
     },
     "publication.requireAI": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Require AI-assisted source comments" } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Require AI-assisted source comments" } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wymagaj, aby komentarze źródłowe były wspomagane przez AI"}} }
     },
     "publication.aiRequiredByMode": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Replies to AI or bot feedback requires an AI assessment, or a verified bot account when bot replies are allowed. Choose Matching filters to configure the AI condition independently." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Replies to AI or bot feedback requires an AI assessment, or a verified bot account when bot replies are allowed. Choose Matching filters to configure the AI condition independently." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Tryb odpowiedzi na uwagi AI lub botów wymaga oceny AI albo potwierdzonego konta bota przy włączonych odpowiedziach na jego uwagi. Wybierz „Pasujące do filtrów”, aby ustawić warunek AI niezależnie."}} }
     },
     "publication.noConditions": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "No conditions are selected. Automatic publication stays blocked until you add a condition or choose another mode." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "No conditions are selected. Automatic publication stays blocked until you add a condition or choose another mode." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie wybrano warunków. Automatyczna publikacja pozostaje wstrzymana do czasu dodania warunku lub wybrania innego trybu."}} }
     },
     "publication.noConditionsShort": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "No conditions selected" } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "No conditions selected" } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak wybranych warunków"}} }
     },
     "publication.advanced": {
       "extractionState": "manual",
@@ -30,7 +35,8 @@
             "state": "translated",
             "value": "Publication filters"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Filtry publikacji"}}
       }
     },
     "publication.advancedHelp": {
@@ -41,7 +47,8 @@
             "state": "translated",
             "value": "All active conditions must match. With no conditions, comments stay as private drafts."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wszystkie aktywne warunki muszą być spełnione. Bez warunków komentarze pozostają prywatnymi szkicami."}}
       }
     },
     "publication.repositories": {
@@ -52,7 +59,8 @@
             "state": "translated",
             "value": "Repositories"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Repozytoria"}}
       }
     },
     "publication.mrAuthors": {
@@ -63,7 +71,8 @@
             "state": "translated",
             "value": "Merge request authors"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Autorzy merge requestów"}}
       }
     },
     "publication.commentAuthors": {
@@ -74,7 +83,8 @@
             "state": "translated",
             "value": "Source comment authors"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Autorzy komentarzy źródłowych"}}
       }
     },
     "publication.sourceHelp": {
@@ -85,7 +95,8 @@
             "state": "translated",
             "value": "Author filters cover the latest comments from others, even after your own replies."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Filtry autorów obejmują najnowsze komentarze innych osób, także po Twoich odpowiedziach."}}
       }
     },
     "publication.reset": {
@@ -96,7 +107,8 @@
             "state": "translated",
             "value": "Reset"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przywróć domyślne"}}
       }
     },
     "publication.resetFilters": {
@@ -107,7 +119,8 @@
             "state": "translated",
             "value": "Reset publication filters"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przywróć domyślne filtry publikacji"}}
       }
     },
     "publication.resetFilterHelp": {
@@ -118,7 +131,8 @@
             "state": "translated",
             "value": "Restore this filter to the selected profile’s defaults."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przywróć domyślną wartość filtra dla wybranego profilu."}}
       }
     },
     "publication.resetTo.%@": {
@@ -129,7 +143,8 @@
             "state": "translated",
             "value": "Reset only this setting to %1$@ defaults"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przywróć tylko dla tego ustawienia wartość domyślną z profilu %1$@"}}
       }
     },
     "publication.unrestricted": {
@@ -140,7 +155,8 @@
             "state": "translated",
             "value": "Any — no additional restriction"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dowolne · bez dodatkowych ograniczeń"}}
       }
     },
     "publication.repositoryPlaceholder": {
@@ -151,7 +167,8 @@
             "state": "translated",
             "value": "group/repository"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "grupa/repozytorium"}}
       }
     },
     "publication.userPlaceholder": {
@@ -162,7 +179,8 @@
             "state": "translated",
             "value": "@username"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "@nazwa_użytkownika"}}
       }
     },
     "publication.add": {
@@ -173,7 +191,8 @@
             "state": "translated",
             "value": "Add"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dodaj"}}
       }
     },
     "publication.remove.%@": {
@@ -184,7 +203,8 @@
             "state": "translated",
             "value": "Remove %1$@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Usuń %1$@"}}
       }
     },
     "publication.lookupFailed": {
@@ -195,7 +215,8 @@
             "state": "translated",
             "value": "Could not verify this GitLab identity. Check the value and connection, then try again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się zweryfikować tej tożsamości w GitLabie. Sprawdź wpis i połączenie, a potem spróbuj ponownie."}}
       }
     },
     "publication.unrestrictedShort": {
@@ -206,7 +227,8 @@
             "state": "translated",
             "value": "Unrestricted"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Bez ograniczeń"}}
       }
     },
     "publication.aiOnly": {
@@ -217,7 +239,8 @@
             "state": "translated",
             "value": "AI feedback only"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Tylko uwagi AI"}}
       }
     },
     "publication.chooseResetDefaults": {
@@ -228,7 +251,8 @@
             "state": "translated",
             "value": "Choose defaults for this setting"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wybierz domyślną wartość tego ustawienia"}}
       }
     },
     "publication.chooseResetDefaultsHelp": {
@@ -239,7 +263,8 @@
             "state": "translated",
             "value": "Choose a profile to reset only this setting. Other settings stay as configured."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wybierz profil, aby przywrócić domyślną wartość tylko tego ustawienia. Pozostałe ustawienia zostaną zachowane."}}
       }
     },
     "publication.onlyAiReplies": {
@@ -250,7 +275,8 @@
             "state": "translated",
             "value": "Automatically publish replies to likely AI-assisted comments"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatycznie publikuj odpowiedzi na komentarze prawdopodobnie wspomagane przez AI"}}
       }
     },
     "publication.aiRepliesHelp": {
@@ -261,7 +287,8 @@
             "state": "translated",
             "value": "For non-bot accounts, assessment concerns how the comment was written, including AI assistance used by a person. Known bot accounts have a fixed Bot badge. The separate bot-reply permission lets them qualify without an AI assessment; existing AI-evidence conditions remain independent. Other likely manual or uncertain sources stay private."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "W przypadku kont osób ocena dotyczy sposobu napisania komentarza, w tym możliwego wsparcia AI. Znane konta botów mają stałą etykietę „Bot”. Osobne uprawnienie do odpowiedzi na uwagi botów pozwala im się kwalifikować bez oceny AI. Warunki dowodów udziału AI pozostają niezależne. Komentarze prawdopodobnie ręczne lub o niepewnym pochodzeniu pozostają prywatne."}}
       }
     },
     "publication.automaticAll": {
@@ -272,7 +299,8 @@
             "state": "translated",
             "value": "Automatically publish all comments"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatycznie publikuj wszystkie komentarze"}}
       }
     },
     "publication.automaticAllHelp": {
@@ -283,7 +311,8 @@
             "state": "translated",
             "value": "Publish every eligible checked comment without confirmation, regardless of the filters below."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Publikuj każdy kwalifikujący się sprawdzony komentarz bez potwierdzenia, niezależnie od poniższych filtrów."}}
       }
     },
     "publication.filtersIgnored": {
@@ -294,7 +323,8 @@
             "state": "translated",
             "value": "All eligible checked comments can publish automatically. Saved filters are inactive in this mode."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wszystkie kwalifikujące się sprawdzone komentarze mogą zostać opublikowane automatycznie. Zapisane filtry są w tym trybie nieaktywne."}}
       }
     },
     "publication.automationOnlyHelp": {
@@ -305,7 +335,8 @@
             "state": "translated",
             "value": "These settings apply only to automation. The manual Publish all action ignores these filters."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Te ustawienia dotyczą tylko automatyzacji. Ręczne działanie „Opublikuj wszystkie” pomija te filtry."}}
       }
     },
     "publication.filtered": {
@@ -316,7 +347,8 @@
             "state": "translated",
             "value": "Matching filters"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pasujące do filtrów"}}
       }
     },
     "publication.filteredHelp": {
@@ -327,7 +359,8 @@
             "state": "translated",
             "value": "Automatically publish comments matching every selected filter. Other comments stay as private drafts."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatycznie publikuj komentarze pasujące do wszystkich wybranych filtrów. Pozostałe komentarze zachowaj jako prywatne szkice."}}
       }
     },
     "publication.filtersInactive": {
@@ -338,11 +371,12 @@
             "state": "translated",
             "value": "Inactive"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nieaktywne"}}
       }
     },
-    "publication.allowBotReplies": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Allow replies to bot accounts"}}}},
-    "publication.botRepliesHelp": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "In conditional modes, accounts confirmed as bots by GitLab metadata or your local bot list can qualify through this separate permission. Their comments stay classified as Bot; no distinction between scripts and AI is needed. Repository and author filters still apply. Each incoming comment must qualify; a human follow-up can keep the reply private. All eligible comments already includes bot replies."}}}},
-    "publication.botRepliesShort": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Bot replies"}}}}
+    "publication.allowBotReplies": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Allow replies to bot accounts"}}, "pl": {"stringUnit": {"state": "translated", "value": "Zezwól na odpowiedzi na komentarze kont botów"}}}},
+    "publication.botRepliesHelp": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "In conditional modes, accounts confirmed as bots by GitLab metadata or your local bot list can qualify through this separate permission. Their comments stay classified as Bot; no distinction between scripts and AI is needed. Repository and author filters still apply. Each incoming comment must qualify; a human follow-up can keep the reply private. All eligible comments already includes bot replies."}}, "pl": {"stringUnit": {"state": "translated", "value": "W trybach warunkowych konta potwierdzone jako boty przez metadane GitLaba lub lokalną listę botów mogą kwalifikować się dzięki temu odrębnemu uprawnieniu. Ich komentarze zachowują klasyfikację „Bot” niezależnie od udziału skryptów lub AI. Nadal obowiązują filtry repozytoriów i autorów. Każdy przychodzący komentarz musi się kwalifikować. Późniejszy komentarz człowieka może sprawić, że odpowiedź pozostanie prywatna. Tryb wszystkich kwalifikujących się komentarzy już obejmuje odpowiedzi do botów."}}}},
+    "publication.botRepliesShort": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Bot replies"}}, "pl": {"stringUnit": {"state": "translated", "value": "Odpowiedzi do botów"}}}}
   }
 }

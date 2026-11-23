@@ -30,7 +30,8 @@
             "state": "translated",
             "value": "Manual decision needed for this thread"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ta dyskusja wymaga ręcznej decyzji"}}
       }
     },
     "authorFeedback.decisionContext": {
@@ -41,7 +42,8 @@
             "state": "translated",
             "value": "Problem and context"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Problem i kontekst"}}
       }
     },
     "authorFeedback.decisionVerified": {
@@ -52,7 +54,8 @@
             "state": "translated",
             "value": "What has been verified"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Co zweryfikowano"}}
       }
     },
     "authorFeedback.decisionMissing": {
@@ -63,7 +66,8 @@
             "state": "translated",
             "value": "Missing evidence"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brakujące dane"}}
       }
     },
     "authorFeedback.decisionQuestion": {
@@ -74,7 +78,8 @@
             "state": "translated",
             "value": "Decision needed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Potrzebna decyzja"}}
       }
     },
     "authorFeedback.decisionImpact": {
@@ -85,7 +90,8 @@
             "state": "translated",
             "value": "Effect on this merge request"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wpływ na ten merge request"}}
       }
     },
     "authorFeedback.setting": {
@@ -96,7 +102,8 @@
             "state": "translated",
             "value": "Resolve addressed feedback after reviewer acceptance"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zamykaj dyskusje po uwzględnieniu uwag i akceptacji recenzenta"}}
       }
     },
     "authorFeedback.settingHelp": {
@@ -107,7 +114,8 @@
             "state": "translated",
             "value": "On my merge requests, verify every outstanding expectation before closing a reviewer’s threads. Their current approval or an explicit acceptance comment is required. Approval alone never proves a fix is complete."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "W moich merge requestach sprawdzaj wszystkie otwarte wymagania recenzenta przed zamknięciem jego dyskusji. Wymagane jest jego bieżące zatwierdzenie lub wyraźna akceptacja w komentarzu. Kompletność poprawki musi być zweryfikowana osobno."}}
       }
     },
     "authorFeedback.title": {
@@ -118,7 +126,8 @@
             "state": "translated",
             "value": "Reviewer feedback"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uwagi recenzentów"}}
       }
     },
     "authorFeedback.checking": {
@@ -129,7 +138,8 @@
             "state": "translated",
             "value": "Checking reviewer expectations…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzanie oczekiwań recenzentów…"}}
       }
     },
     "authorFeedback.failed": {
@@ -140,7 +150,8 @@
             "state": "translated",
             "value": "Could not verify reviewer feedback. Retry or inspect the discussion in GitLab."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się zweryfikować uwag. Ponów próbę lub sprawdź dyskusję w GitLabie."}}
       }
     },
     "authorFeedback.waitingPublication.%lld": {
@@ -163,7 +174,8 @@
               }
             }
           }
-        }
+        },
+        "pl": {"variations": {"plural": {"one": {"stringUnit": {"state": "translated", "value": "Opublikuj %lld oczekującą odpowiedź przed zamknięciem dyskusji."}}, "few": {"stringUnit": {"state": "translated", "value": "Opublikuj %lld oczekujące odpowiedzi przed zamknięciem dyskusji."}}, "many": {"stringUnit": {"state": "translated", "value": "Opublikuj %lld oczekujących odpowiedzi przed zamknięciem dyskusji."}}, "other": {"stringUnit": {"state": "translated", "value": "Opublikuj oczekujące odpowiedzi (%lld) przed zamknięciem dyskusji."}}}}}
       }
     },
     "authorFeedback.needsChanges": {
@@ -174,7 +186,8 @@
             "state": "translated",
             "value": "Changes or an explanation are still needed."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nadal potrzebne są zmiany lub wyjaśnienie."}}
       }
     },
     "authorFeedback.needsVerification": {
@@ -185,7 +198,8 @@
             "state": "translated",
             "value": "The available evidence does not confirm that this is addressed."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dostępne dane nie potwierdzają, że uwaga została obsłużona."}}
       }
     },
     "authorFeedback.disabled": {
@@ -196,7 +210,8 @@
             "state": "translated",
             "value": "Automatic thread resolution is off."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyczne zamykanie dyskusji jest wyłączone."}}
       }
     },
     "authorFeedback.ready": {
@@ -207,7 +222,8 @@
             "state": "translated",
             "value": "Verified and accepted; ready to close the thread."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zweryfikowano i zaakceptowano. Dyskusję można zamknąć."}}
       }
     },
     "authorFeedback.recheck": {
@@ -218,7 +234,8 @@
             "state": "translated",
             "value": "Verify feedback again"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zweryfikuj uwagi ponownie"}}
       }
     },
     "authorFeedback.handle": {
@@ -229,7 +246,8 @@
             "state": "translated",
             "value": "Handle remaining feedback"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Obsłuż pozostałe uwagi"}}
       }
     },
     "authorFeedback.waitingChip": {
@@ -240,7 +258,8 @@
             "state": "translated",
             "value": "Awaiting reviewer"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oczekiwanie na recenzenta"}}
       }
     },
     "authorFeedback.autoFollowUpOff": {
@@ -251,7 +270,8 @@
             "state": "translated",
             "value": "Automatic follow-up is off. Handle the feedback manually or enable it in Settings."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyczna obsługa uwag jest wyłączona. Obsłuż je ręcznie lub włącz funkcję w ustawieniach."}}
       }
     },
     "authorFeedback.replyNeeded": {
@@ -262,7 +282,8 @@
             "state": "translated",
             "value": "A published reply explaining the fix is still missing."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nadal brakuje opublikowanej odpowiedzi wyjaśniającej poprawkę."}}
       }
     },
     "authorFeedback.pushOff": {
@@ -273,7 +294,8 @@
             "state": "translated",
             "value": "Follow-up push is off. Proposed fixes stay in the agent result until you deliver them manually or enable push."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wysyłanie poprawek po uwagach jest wyłączone. Propozycje pozostają w wyniku zadania do czasu ręcznego dostarczenia albo włączenia wysyłania."}}
       }
     },
     "authorFeedback.codeReviewQuestion": {
@@ -284,7 +306,8 @@
             "state": "translated",
             "value": "Private code question for the reviewer"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Prywatne pytanie do recenzenta o kod"}}
       }
     },
     "authorFeedback.codeReviewContext": {
@@ -295,7 +318,8 @@
             "state": "translated",
             "value": "Related discussion (context only)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Powiązana dyskusja (tylko kontekst)"}}
       }
     },
     "authorFeedback.waitingSummary.%@.%@": {
@@ -306,7 +330,8 @@
             "state": "translated",
             "value": "%@ · %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%@ · %@"}}
       }
     },
     "authorFeedback.threadResolutionWait": {
@@ -334,7 +359,8 @@
             "state": "translated",
             "value": "Bot"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Bot"}}
       }
     },
     "authorFeedback.botAuthorHelp": {
@@ -345,7 +371,8 @@
             "state": "translated",
             "value": "This author account is identified as automated by GitLab or a local setting. This is separate from whether the message used AI."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "GitLab lub lokalne ustawienia identyfikują konto autora jako automatyczne. Udział AI w powstaniu wiadomości jest oceniany osobno."}}
       }
     },
     "authorFeedback.needsMoreApprovals.%lld": {
@@ -368,7 +395,8 @@
               }
             }
           }
-        }
+        },
+        "pl": {"variations": {"plural": {"one": {"stringUnit": {"state": "translated", "value": "Brakuje %lld zatwierdzenia"}}, "few": {"stringUnit": {"state": "translated", "value": "Brakuje %lld zatwierdzeń"}}, "many": {"stringUnit": {"state": "translated", "value": "Brakuje %lld zatwierdzeń"}}, "other": {"stringUnit": {"state": "translated", "value": "Brakujące zatwierdzenia: %lld"}}}}}
       }
     }
   },

@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Merge request merged"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Merge request scalony"}}
       }
     },
     "mrLifecycleBannersMerged": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "The merge request was merged on GitLab."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Merge request został scalony w GitLabie."}}
       }
     },
     "mrLifecycleBannersClosedTitle": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "Merge request closed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Merge request zamknięty"}}
       }
     },
     "mrLifecycleBannersClosed": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "The merge request was closed on GitLab."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Merge request został zamknięty w GitLabie."}}
       }
     },
     "mrLifecycleBannersReadyTitle": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "Ready for review"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Gotowy do przeglądu"}}
       }
     },
     "mrLifecycleBannersReady": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "The merge request is no longer a Draft."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Merge request jest już poza trybem szkicu."}}
       }
     },
     "mrLifecycleBannersDraftTitle": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "Marked as Draft"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oznaczono jako szkic"}}
       }
     },
     "mrLifecycleBannersDraft": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "The merge request is now a Draft."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Merge request jest teraz szkicem."}}
       }
     },
     "mrLifecycleBannersSection": {
@@ -97,7 +105,8 @@
             "state": "translated",
             "value": "Event banners"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Banery zdarzeń"}}
       }
     },
     "mrLifecycleBannersEnabled": {
@@ -108,7 +117,8 @@
             "state": "translated",
             "value": "Show brief in-app event banners"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pokazuj krótkie banery zdarzeń w aplikacji"}}
       }
     },
     "mrLifecycleBannersHelp": {
@@ -119,7 +129,8 @@
             "state": "translated",
             "value": "Show updates for accepted events, merged or closed merge requests, and Draft status changes. These banners do not require coding automation or automatic removal."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pokazuj aktualizacje zaakceptowanych zdarzeń, scalonych lub zamkniętych merge requestów oraz zmian trybu szkicu. Banery działają bez asystenta i automatycznego usuwania wpisów."}}
       }
     }
   },

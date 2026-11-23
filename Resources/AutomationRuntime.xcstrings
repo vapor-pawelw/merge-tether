@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "An agent job is already active for this merge request."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zadanie agenta dla tego merge requesta jest już aktywne."}}
       }
     },
     "runtime.evidenceMigrationFailed": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "MergeTether could not move its automation evidence."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "MergeTether nie mógł przenieść danych automatyzacji."}}
       }
     },
     "runtime.jobUnavailable": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "This agent run is unavailable for retry. Start a new action from the merge request."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "To uruchomienie agenta nie może zostać ponowione. Rozpocznij nowe działanie z poziomu merge requesta."}}
       }
     }
   },

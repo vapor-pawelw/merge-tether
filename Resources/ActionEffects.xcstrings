@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Adds this merge request to your board, turns its automation on and starts agents for its pending work."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dodaje ten merge request do tablicy, włącza jego automatyzację i uruchamia agentów do oczekujących zadań."}}
       }
     },
     "approve": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "Approves this merge request in GitLab."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zatwierdza ten merge request w GitLabie."}}
       }
     },
     "confirmPipelineHandoff": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "Starts an agent that works on the failed pipeline."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchamia agenta, który zajmie się nieudanym pipeline’em."}}
       }
     },
     "diagnosePipeline": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "Starts an agent that diagnoses the failed pipeline. For your own merge request, a stale pipeline is first retried in GitLab when automatic writes are allowed."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchamia agenta, który diagnozuje nieudany pipeline. W przypadku własnego merge requestu nieaktualny pipeline jest najpierw ponawiany w GitLabie, gdy dozwolone są automatyczne zapisy."}}
       }
     },
     "finishCommentReview": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "Ends your comment review in MergeTether. Nothing is sent to GitLab."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kończy przegląd komentarzy w MergeTether. Nic nie jest wysyłane do GitLaba."}}
       }
     },
     "handleFeedback": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "Starts an agent that addresses the remaining reviewer feedback. It pushes only when follow-up push is allowed in Settings."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchamia agenta, który zajmie się pozostałymi uwagami recenzentów. Wysyła zmiany tylko wtedy, gdy w Ustawieniach dozwolone jest wypychanie poprawek."}}
       }
     },
     "ignoreSuggestion": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "Ignores this suggestion in MergeTether, then checks the feedback again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ignoruje tę sugestię w MergeTether, a następnie ponownie sprawdza uwagi."}}
       }
     },
     "kindAICheck": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "Read-only AI check"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kontrola AI tylko do odczytu"}}
       }
     },
     "kindAgent": {
@@ -97,7 +105,8 @@
             "state": "translated",
             "value": "Agent run (AI)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchomienie agenta (AI)"}}
       }
     },
     "kindGitLab": {
@@ -108,7 +117,8 @@
             "state": "translated",
             "value": "GitLab action (no AI)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Działanie GitLaba (bez AI)"}}
       }
     },
     "kindLocal": {
@@ -119,7 +129,8 @@
             "state": "translated",
             "value": "MergeTether only (no AI)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Tylko MergeTether (bez AI)"}}
       }
     },
     "markReady": {
@@ -130,7 +141,8 @@
             "state": "translated",
             "value": "Marks this draft merge request ready in GitLab."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oznacza ten szkic merge requestu jako gotowy w GitLabie."}}
       }
     },
     "merge": {
@@ -141,7 +153,8 @@
             "state": "translated",
             "value": "Checks the merge request again and submits the merge action you confirmed."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponownie sprawdza merge request i wykonuje potwierdzone scalanie."}}
       }
     },
     "publishComments": {
@@ -152,7 +165,8 @@
             "state": "translated",
             "value": "Publishes the comments to GitLab."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Publikuje komentarze w GitLabie."}}
       }
     },
     "refreshFromGitLab": {
@@ -163,7 +177,8 @@
             "state": "translated",
             "value": "Reloads this merge request from GitLab."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponownie wczytuje ten merge request z GitLaba."}}
       }
     },
     "requestReReview": {
@@ -174,7 +189,8 @@
             "state": "translated",
             "value": "Asks the reviewers for another review in GitLab after checking the merge request again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Po ponownym sprawdzeniu merge requestu prosi recenzentów o kolejny przegląd w GitLabie."}}
       }
     },
     "resolveConflicts": {
@@ -185,7 +201,8 @@
             "state": "translated",
             "value": "Starts an agent that resolves the conflicts in a separate worktree. It pushes only when conflict push is allowed in Settings."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchamia agenta, który rozwiązuje konflikty w osobnym worktree. Wysyła zmiany tylko wtedy, gdy w Ustawieniach dozwolone jest wypychanie rozwiązań konfliktów."}}
       }
     },
     "resolveThreads": {
@@ -196,7 +213,8 @@
             "state": "translated",
             "value": "Checks which threads are addressed, using the selected CLI when no current check exists. You confirm before threads are resolved in GitLab."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdza, które wątki zostały obsłużone, używając wybranego CLI, jeśli nie ma aktualnej kontroli. Przed rozwiązaniem wątków w GitLabie wymagane jest potwierdzenie."}}
       }
     },
     "retryDraftVerification": {
@@ -207,7 +225,8 @@
             "state": "translated",
             "value": "Checks the prepared drafts again with the selected CLI. Nothing is published."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponownie sprawdza przygotowane szkice za pomocą wybranego CLI. Nic nie jest publikowane."}}
       }
     },
     "retryRun": {
@@ -218,7 +237,8 @@
             "state": "translated",
             "value": "Starts the stopped agent run again with the same task."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponownie uruchamia zatrzymanego agenta z tym samym zadaniem."}}
       }
     },
     "runReview": {
@@ -229,7 +249,8 @@
             "state": "translated",
             "value": "Starts an agent with the selected CLI to review this merge request."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchamia agenta z wybranym CLI, aby przejrzał ten merge request."}}
       }
     },
     "thenMayRequestReReview": {
@@ -240,7 +261,8 @@
             "state": "translated",
             "value": "Then: if the check is clear and automatic re-review is on, reviewers are asked again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Następnie: jeśli kontrola nie wykryje problemów i włączono automatyczny ponowny przegląd, recenzenci zostaną poproszeni o ponowną ocenę."}}
       }
     },
     "thenMayStartAgent": {
@@ -251,7 +273,8 @@
             "state": "translated",
             "value": "Then: if work remains and automatic follow-up is on, an agent starts fixing it."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Następnie: jeśli pozostała praca i włączono automatyczne działania następcze, agent rozpocznie poprawki."}}
       }
     },
     "thenResumesAutomation": {
@@ -262,7 +285,8 @@
             "state": "translated",
             "value": "Then: when nothing else is waiting, automation continues under your Settings rules and may start agents, publish, approve or merge."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Następnie: gdy nic innego nie oczekuje, automatyzacja działa zgodnie z regułami w Ustawieniach i może uruchomić agentów, opublikować, zatwierdzić lub scalić."}}
       }
     },
     "thenRunsAllowedAutomation": {
@@ -273,7 +297,8 @@
             "state": "translated",
             "value": "Then: automation allowed by your Settings can run right away, including agents and GitLab actions."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Następnie: automatyzacja dozwolona w Ustawieniach może uruchomić się od razu, w tym agenci i działania GitLaba."}}
       }
     },
     "verifyFeedback": {
@@ -284,7 +309,8 @@
             "state": "translated",
             "value": "Checks the reviewer feedback again with the selected CLI. The check itself changes nothing."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponownie sprawdza uwagi recenzentów za pomocą wybranego CLI. Sama kontrola niczego nie zmienia."}}
       }
     },
     "verifyReReview": {
@@ -295,7 +321,8 @@
             "state": "translated",
             "value": "Checks again with the selected CLI whether the feedback is addressed. The check itself changes nothing."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponownie sprawdza za pomocą wybranego CLI, czy uwagi zostały obsłużone. Sama kontrola niczego nie zmienia."}}
       }
     },
     "reviewPublicationManual": {
@@ -306,7 +333,8 @@
             "state": "translated",
             "value": "Review comments stay private until you publish them."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarze z przeglądu pozostają prywatne, dopóki ich nie opublikujesz."}}
       }
     },
     "reviewPublicationAll": {
@@ -317,7 +345,8 @@
             "state": "translated",
             "value": "Eligible drafts can be published automatically after two unchanged polls."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kwalifikujące się szkice mogą być automatycznie publikowane po dwóch kolejnych odczytach bez zmian."}}
       }
     },
     "reviewPublicationFiltered": {
@@ -328,7 +357,8 @@
             "state": "translated",
             "value": "Drafts that meet your publication filters can be published automatically after two unchanged polls. Other drafts require your approval."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Szkice spełniające filtry publikacji mogą być automatycznie publikowane po dwóch kolejnych odczytach bez zmian. Pozostałe wymagają zatwierdzenia."}}
       }
     },
     "reviewPublicationAIReplies": {
@@ -339,7 +369,8 @@
             "state": "translated",
             "value": "Eligible replies to AI comments or allowed bots can be published automatically after two unchanged polls. Standalone findings require your approval."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kwalifikujące się odpowiedzi na komentarze AI lub dozwolonych botów mogą być automatycznie publikowane po dwóch kolejnych odczytach bez zmian. Samodzielne ustalenia wymagają zatwierdzenia."}}
       }
     },
     "kindMerge": {
@@ -350,7 +381,8 @@
             "state": "translated",
             "value": "GitLab merge with a possible AI check"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Scalenie w GitLabie z możliwą kontrolą AI"}}
       }
     }
   },

@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Merge now"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Scal teraz"}}
       }
     },
     "mergeActions.enqueue": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "Set to auto-merge"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ustaw automatyczne scalanie"}}
       }
     },
     "mergeActions.queued": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "Queued for auto-merge"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "W kolejce do automatycznego scalenia"}}
       }
     },
     "mergeActions.inTrain": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "In merge train"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "W pociągu scalania"}}
       }
     },
     "mergeActions.uncertain": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "Merge outcome unconfirmed. Check GitLab before trying again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wynik scalania niepotwierdzony. Sprawdź GitLaba przed ponowieniem."}}
       }
     },
     "mergeActions.changed": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "Merge queue context changed. Review the queue in GitLab."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kontekst kolejki scalania się zmienił. Sprawdź kolejkę w GitLabie."}}
       }
     },
     "mergeActions.checkGitLab": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "Check merge in GitLab"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdź scalanie w GitLabie"}}
       }
     },
     "mergeActions.unavailable": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "Merge capability could not be verified. Check GitLab."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się potwierdzić możliwości scalenia. Sprawdź GitLaba."}}
       }
     },
     "mergeActions.confirmMerge": {
@@ -97,7 +105,8 @@
             "state": "translated",
             "value": "Submit this merge request?"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przekazać ten merge request do scalenia?"}}
       }
     },
     "mergeActions.confirmHelp": {
@@ -108,7 +117,8 @@
             "state": "translated",
             "value": "The current source, target, dependencies, approvals and feedback will be checked again. GitLab controls queued merges after submission. New feedback or setting changes are detected on refresh; the app does not cancel or replace queued work."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Źródło, gałąź docelowa, zależności, zatwierdzenia i uwagi zostaną sprawdzone ponownie. Po przekazaniu kolejką scalania zarządza GitLab. Odświeżenie wykryje nowe uwagi i zmiany ustawień. Obsługa anulowania lub zastąpienia pozycji w kolejce należy do GitLaba."}}
       }
     },
     "mergeActions.resolveAll": {
@@ -119,7 +129,8 @@
             "state": "translated",
             "value": "Resolve addressed threads…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zamknij dyskusje z obsłużonymi uwagami…"}}
       }
     },
     "mergeActions.resolveConfirm": {
@@ -130,7 +141,8 @@
             "state": "translated",
             "value": "Resolve checked threads"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zamknij sprawdzone dyskusje"}}
       }
     },
     "mergeActions.resolveTitle": {
@@ -141,7 +153,8 @@
             "state": "translated",
             "value": "Resolve the verified threads?"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zamknąć zweryfikowane dyskusje?"}}
       }
     },
     "mergeActions.resolveHelp": {
@@ -152,7 +165,8 @@
             "state": "translated",
             "value": "Only the listed, freshly checked threads will be resolved. Unaddressed, uncertain and unanswered comments stay open. Pending replies will not be published."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zamknięte zostaną tylko wymienione, właśnie sprawdzone dyskusje. Uwagi wymagające zmian lub odpowiedzi i uwagi o niepewnym wyniku pozostaną otwarte. Oczekujące odpowiedzi pozostaną w szkicach."}}
       }
     },
     "mergeActions.cancel": {
@@ -163,7 +177,8 @@
             "state": "translated",
             "value": "Cancel"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Anuluj"}}
       }
     },
     "mergeActions.blocked": {
@@ -174,7 +189,8 @@
             "state": "translated",
             "value": "Merge is blocked. Refresh and review the current requirements."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Scalanie jest zablokowane. Odśwież dane i sprawdź aktualne wymagania."}}
       }
     },
     "mergeActions.resolveResult": {
@@ -185,7 +201,8 @@
             "state": "translated",
             "value": "Resolved %lld of %lld checked threads. %lld still require attention."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zamknięto %lld z %lld sprawdzonych dyskusji. Nadal wymagają uwagi: %lld."}}
       }
     },
     "mergeActions.resolvePreview": {
@@ -196,7 +213,8 @@
             "state": "translated",
             "value": "%lld threads ready to resolve; %lld held for work, verification or replies."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dyskusje gotowe do zamknięcia: %lld. Oczekujące na zmiany, weryfikację lub odpowiedź: %lld."}}
       }
     },
     "mergeActions.failed": {
@@ -207,7 +225,8 @@
             "state": "translated",
             "value": "The action could not be verified. Refresh and check GitLab."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się potwierdzić działania. Odśwież dane i sprawdź GitLaba."}}
       }
     },
     "mergeActions.checkThreads": {
@@ -218,7 +237,8 @@
             "state": "translated",
             "value": "Check threads to resolve"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdź dyskusje do zamknięcia"}}
       }
     },
     "mergeActions.checked": {
@@ -229,7 +249,8 @@
             "state": "translated",
             "value": "Threads checked"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzono dyskusje"}}
       }
     },
     "mergeActions.resolveReadyThreads": {
@@ -240,7 +261,8 @@
             "state": "translated",
             "value": "Ready to resolve:\n%@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Gotowe do zamknięcia:\n%@"}}
       }
     },
     "mergeActions.resolveHeldThreads": {
@@ -251,7 +273,8 @@
             "state": "translated",
             "value": "Still require work, verification or replies:\n%@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nadal wymagają zmiany, weryfikacji lub odpowiedzi:\n%@"}}
       }
     },
     "mergeActions.trainRebaseConflict": {
@@ -262,7 +285,8 @@
             "state": "translated",
             "value": "Merge train blocked: GitLab could not rebase the commits onto the target branch."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pociąg scalania jest zablokowany. GitLab nie mógł przenieść commitów na bieżący stan gałęzi docelowej."}}
       }
     },
     "mergeActions.trainEvidenceUnavailable": {
@@ -273,7 +297,8 @@
             "state": "translated",
             "value": "Merge train preparation could not be checked. Review the current train in GitLab."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się sprawdzić przygotowania pociągu scalania. Sprawdź bieżący stan w GitLabie."}}
       }
     },
     "mergeActions.contextChanged": {
@@ -284,7 +309,8 @@
             "state": "translated",
             "value": "Merge checks belong to a different MR version. Refresh to check the current source and target."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wyniki kontroli dotyczą innej wersji MR. Odśwież dane, aby sprawdzić bieżące źródło i gałąź docelową."}}
       }
     },
     "mergeActions.checking": {
@@ -295,7 +321,8 @@
             "state": "translated",
             "value": "Merge readiness has not been checked for this MR yet. Refresh from GitLab."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Gotowość do scalenia tego MR czeka na sprawdzenie. Odśwież dane z GitLaba."}}
       }
     },
     "mergeActions.feedback": {
@@ -306,7 +333,8 @@
             "state": "translated",
             "value": "Feedback still needs work, publication or current verification before merging."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przed scaleniem uwagi wymagają dalszej pracy, publikacji lub aktualnej weryfikacji."}}
       }
     },
     "mergeActions.pipelineHandoff": {
@@ -317,7 +345,8 @@
             "state": "translated",
             "value": "Pipeline work still needs your attention before merging."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Obsługa pipeline’u wymaga Twojej uwagi przed scaleniem."}}
       }
     },
     "mergeActions.draft": {
@@ -328,7 +357,8 @@
             "state": "translated",
             "value": "Mark this merge request ready before merging."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przed scaleniem oznacz ten merge request jako gotowy."}}
       }
     },
     "mergeActions.commentReview": {
@@ -339,7 +369,8 @@
             "state": "translated",
             "value": "Review unpublished comments and finish comment review before merging."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przed scaleniem przejrzyj nieopublikowane komentarze i zakończ ich przegląd."}}
       }
     },
     "mergeActions.approvals": {
@@ -350,7 +381,8 @@
             "state": "translated",
             "value": "Required approvals are still missing."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nadal brakuje wymaganych zatwierdzeń."}}
       }
     },
     "mergeActions.changesRequested": {
@@ -361,7 +393,8 @@
             "state": "translated",
             "value": "A reviewer has requested changes."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Recenzent poprosił o zmiany."}}
       }
     },
     "mergeActions.automaticDiscussionPolicy": {
@@ -372,7 +405,8 @@
             "state": "translated",
             "value": "Auto-merge requires GitLab to enforce resolved discussions."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyczne scalanie wymaga, aby GitLab egzekwował zamknięcie dyskusji."}}
       }
     },
     "mergeActions.discussions": {
@@ -383,7 +417,8 @@
             "state": "translated",
             "value": "Resolve the outstanding discussions before merging."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przed scaleniem zamknij otwarte dyskusje."}}
       }
     },
     "mergeActions.dependencies": {
@@ -394,7 +429,8 @@
             "state": "translated",
             "value": "Required merge requests must merge first."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Najpierw trzeba scalić wymagane merge requesty."}}
       }
     },
     "mergeActions.stackTarget": {
@@ -405,7 +441,8 @@
             "state": "translated",
             "value": "Review this merge request’s target branch before merging."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przed scaleniem sprawdź gałąź docelową tego merge requesta."}}
       }
     },
     "mergeActions.dependencyEvidence": {
@@ -416,7 +453,8 @@
             "state": "translated",
             "value": "Dependencies and the target branch could not be verified. Refresh to check again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się zweryfikować zależności i gałęzi docelowej. Odśwież dane i spróbuj ponownie."}}
       }
     },
     "mergeActions.conflicts": {
@@ -427,7 +465,8 @@
             "state": "translated",
             "value": "Resolve the merge conflict before merging."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przed scaleniem rozwiąż konflikt."}}
       }
     },
     "mergeActions.pipeline": {
@@ -438,7 +477,8 @@
             "state": "translated",
             "value": "The pipeline must pass before this merge can proceed."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Scalanie wymaga pomyślnego pipeline’u."}}
       }
     },
     "mergeActions.permissions": {
@@ -449,7 +489,8 @@
             "state": "translated",
             "value": "GitLab reports that you do not have permission to merge this request."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "GitLab zgłasza brak uprawnień do scalenia tego merge requesta."}}
       }
     },
     "mergeActions.evidenceUnavailable": {
@@ -460,7 +501,8 @@
             "state": "translated",
             "value": "Merge requirements could not be fully verified. Refresh or check GitLab."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wymagań do scalenia nie udało się w pełni sprawdzić. Odśwież dane lub sprawdź GitLaba."}}
       }
     },
     "mergeActions.feedbackChecking": {
@@ -471,7 +513,8 @@
             "state": "translated",
             "value": "Checking whether the current feedback is addressed before merging."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzanie przed scaleniem, czy bieżące uwagi zostały obsłużone."}}
       }
     },
     "mergeActions.feedbackFailed": {
@@ -482,7 +525,8 @@
             "state": "translated",
             "value": "Feedback verification failed. Recheck feedback before merging."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Weryfikacja uwag się nie powiodła. Sprawdź je ponownie przed scaleniem."}}
       }
     },
     "mergeActions.feedbackSourceChanged": {
@@ -493,7 +537,8 @@
             "state": "translated",
             "value": "Feedback was checked for an earlier source commit. Refresh to verify the current changes."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uwagi sprawdzono dla wcześniejszego commita źródłowego. Odśwież dane, aby zweryfikować bieżące zmiany."}}
       }
     },
     "mergeActions.feedbackDiscussionChanged": {
@@ -504,7 +549,8 @@
             "state": "translated",
             "value": "The conversation has changed since feedback was checked. Refresh to check the current comments."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dyskusja zmieniła się od czasu weryfikacji. Odśwież dane, aby sprawdzić bieżące komentarze."}}
       }
     },
     "mergeActions.feedbackDescriptionChanged": {
@@ -515,7 +561,8 @@
             "state": "translated",
             "value": "The merge request’s title or description changed since feedback was checked. Refresh to verify its current requirements."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Tytuł lub opis merge requesta zmienił się od weryfikacji uwag. Odśwież dane, aby sprawdzić bieżące wymagania."}}
       }
     },
     "mergeActions.feedbackUnverified": {
@@ -526,7 +573,8 @@
             "state": "translated",
             "value": "Some feedback has no current verified outcome. Review it before merging."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Część uwag nie ma aktualnego, zweryfikowanego wyniku. Przejrzyj je przed scaleniem."}}
       }
     },
     "mergeActions.feedbackChanges": {
@@ -537,7 +585,8 @@
             "state": "translated",
             "value": "Verified feedback still requires correction work before merging."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zweryfikowane uwagi nadal wymagają poprawek przed scaleniem."}}
       }
     },
     "mergeActions.feedbackVerificationNeeded": {
@@ -548,7 +597,8 @@
             "state": "translated",
             "value": "A specific feedback requirement still needs verification. Review the feedback for details."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Jedno z wymagań w uwagach nadal wymaga weryfikacji. Szczegóły znajdziesz w uwagach."}}
       }
     },
     "mergeActions.feedbackPublication": {
@@ -559,7 +609,8 @@
             "state": "translated",
             "value": "The feedback check is waiting for unpublished comments. Review comments before merging."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Weryfikacja uwag czeka na nieopublikowane komentarze. Przejrzyj je przed scaleniem."}}
       }
     },
     "mergeActions.feedbackReply": {
@@ -570,7 +621,8 @@
             "state": "translated",
             "value": "A required reply has not been published in its discussion. Review the feedback before merging."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brakuje wymaganej opublikowanej odpowiedzi w dyskusji. Przejrzyj uwagi przed scaleniem."}}
       }
     },
     "mergeActions.feedbackCodeReview": {
@@ -581,7 +633,8 @@
             "state": "translated",
             "value": "A question raised during feedback verification still needs review before merging."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pytanie zgłoszone przy weryfikacji uwag wymaga przeglądu przed scaleniem."}}
       }
     },
     "mergeActions.feedbackConversationUnavailable": {
@@ -592,7 +645,8 @@
             "state": "translated",
             "value": "The current conversation has not been read. Refresh from GitLab before checking feedback."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Bieżąca dyskusja czeka na odczyt. Odśwież dane z GitLaba przed sprawdzeniem uwag."}}
       }
     },
     "mergeActions.feedbackChecksPaused": {
@@ -603,7 +657,8 @@
             "state": "translated",
             "value": "Automatic feedback checks are off or paused for this MR. Review its discussions and current evidence."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyczne sprawdzanie uwag dla tego MR jest wyłączone lub wstrzymane. Przejrzyj jego dyskusje i bieżące dane."}}
       }
     },
     "mergeActions.replySources": {
@@ -614,7 +669,8 @@
             "state": "translated",
             "value": "Published replies are still required for %lld comments. Review the specific feedback below."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarze wymagające opublikowanej odpowiedzi: %lld. Przejrzyj wskazane uwagi poniżej."}}
       }
     },
     "mergeActions.replySource": {
@@ -625,7 +681,8 @@
             "state": "translated",
             "value": "Open comment #%lld"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz komentarz nr %lld"}}
       }
     },
     "mergeActions.resolveScope": {
@@ -636,7 +693,8 @@
             "state": "translated",
             "value": "Resolve addressed threads checks open, resolvable discussions. It does not prepare replies or satisfy separate comments awaiting an answer."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Działanie sprawdza otwarte dyskusje, które można zamknąć. Przygotowanie odpowiedzi i obsługa osobnych komentarzy wymagają odrębnych działań."}}
       }
     },
     "mergeActions.verifyBeforeSubmit.%@": {
@@ -647,7 +705,8 @@
             "state": "translated",
             "value": "If the current feedback needs verification, MergeTether sends the merge request diff, description, and discussions to %@ for a read-only check before submitting."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Jeśli bieżące uwagi wymagają weryfikacji, przed przekazaniem MR do scalenia MergeTether wyśle diff, opis i dyskusje do %@ w celu sprawdzenia tylko do odczytu."}}
       }
     }
   },

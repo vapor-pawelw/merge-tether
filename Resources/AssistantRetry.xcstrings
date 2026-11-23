@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Automatic retry %1$lld of %2$lld is scheduled for %3$@."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zaplanowano automatyczną ponowną próbę %1$lld z %2$lld na %3$@."}}
       }
     },
     "assistantRetry.started": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "Started automatic retry %1$lld of %2$lld after checking the current task."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozpoczęto automatyczną ponowną próbę %1$lld z %2$lld po sprawdzeniu bieżącego zadania."}}
       }
     },
     "assistantRetry.failed": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "Automatic retry preparation failed: %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się przygotować automatycznej ponownej próby: %@"}}
       }
     },
     "assistantRetry.obsolete": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "The current MR no longer requires this retry."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Bieżący MR nie wymaga już tej ponownej próby."}}
       }
     },
     "assistantRetry.exhausted": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "The %lld automatic retries are exhausted. Review the latest task result before starting another attempt."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wykorzystano %lld automatycznych ponownych prób. Przed rozpoczęciem kolejnej sprawdź najnowszy wynik zadania."}}
       }
     },
     "assistantRetry.admissionInterrupted": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "The app stopped while preparing this retry. Its attempt was retained before checking current state again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Aplikacja zatrzymała się podczas przygotowywania tej ponownej próby. Jej próbę zachowano przed ponownym sprawdzeniem bieżącego stanu."}}
       }
     },
     "assistantRetry.reservationHeld": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "Automatic retry is paused while this MR has an exclusive worker reservation. Confirm that the previous worker has stopped before another run can start."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyczna ponowna próba jest wstrzymana, gdy ten MR ma wyłączną rezerwację dla procesu roboczego. Przed uruchomieniem kolejnego potwierdź, że poprzedni proces został zatrzymany."}}
       }
     }
   },

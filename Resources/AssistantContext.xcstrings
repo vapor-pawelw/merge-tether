@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Start conversation with…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozpocznij rozmowę z…"}}
       }
     },
     "assistant.context.codexApp": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "ChatGPT app"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Aplikacja ChatGPT"}}
       }
     },
     "assistant.context.claudeDesktop": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "Claude Desktop"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Claude Desktop"}}
       }
     },
     "assistant.context.t3Code": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "T3 Code"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "T3 Code"}}
       }
     },
     "assistant.context.codexCLI": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "Codex CLI in Terminal"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Codex CLI w Terminalu"}}
       }
     },
     "assistant.context.claudeCLI": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "Claude CLI in Terminal"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Claude CLI w Terminalu"}}
       }
     },
     "assistant.context.none": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "No supported agent app or CLI detected"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie wykryto obsługiwanej aplikacji ani CLI agenta"}}
       }
     },
     "assistant.context.copy": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "Copy MR context"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kopiuj kontekst MR"}}
       }
     },
     "assistant.context.failed": {
@@ -97,7 +105,8 @@
             "state": "translated",
             "value": "Could not open the agent. Check that it is installed and try again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się otworzyć agenta. Sprawdź, czy jest zainstalowany, i spróbuj ponownie."}}
       }
     },
     "assistant.context.ok": {
@@ -108,7 +117,8 @@
             "state": "translated",
             "value": "OK"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "OK"}}
       }
     },
     "assistant.context.help": {
@@ -119,7 +129,8 @@
             "state": "translated",
             "value": "Open a separate conversation with this MR’s link and title. Hold Option to choose another app."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz osobną rozmowę z linkiem i tytułem tego MR. Przytrzymaj Option, aby wybrać inną aplikację."}}
       }
     },
     "assistant.context.startIn": {
@@ -130,7 +141,8 @@
             "state": "translated",
             "value": "Start conversation in %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozpocznij rozmowę w %@"}}
       }
     },
     "assistant.context.cancel": {
@@ -141,7 +153,8 @@
             "state": "translated",
             "value": "Cancel"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Anuluj"}}
       }
     },
     "assistant.context.chooseHelp": {
@@ -152,7 +165,8 @@
             "state": "translated",
             "value": "Choose an app for this conversation only. Your default stays unchanged."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wybierz aplikację tylko dla tej rozmowy. Domyślny wybór pozostanie bez zmian."}}
       }
     },
     "assistant.context.default": {
@@ -163,7 +177,8 @@
             "state": "translated",
             "value": "Default app"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Domyślna aplikacja"}}
       }
     },
     "assistant.context.settingsTitle": {
@@ -174,7 +189,8 @@
             "state": "translated",
             "value": "MR conversations"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozmowy o MR"}}
       }
     },
     "assistant.context.settingsHelp": {
@@ -185,7 +201,8 @@
             "state": "translated",
             "value": "Start a separate conversation with the MR’s link and title. Hold Option when selecting the menu action to choose another app for one conversation."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozpocznij osobną rozmowę z linkiem i tytułem tego MR. Przytrzymaj Option podczas wybierania działania w menu, aby wybrać inną aplikację dla jednej rozmowy."}}
       }
     },
     "assistant.context.chooseOpen": {
@@ -196,7 +213,8 @@
             "state": "translated",
             "value": "Open conversation"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz rozmowę"}}
       }
     },
     "assistant.context.messageTitle": {
@@ -207,7 +225,8 @@
             "state": "translated",
             "value": "What would you like to discuss?"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "O czym chcesz porozmawiać?"}}
       }
     },
     "assistant.context.messageHelp": {
@@ -218,7 +237,8 @@
             "state": "translated",
             "value": "The MR context below is included automatically. Write your own message to start the terminal conversation."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Poniższy kontekst MR zostanie dołączony automatycznie. Napisz własną wiadomość, aby rozpocząć rozmowę w terminalu."}}
       }
     }
   },

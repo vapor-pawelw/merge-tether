@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Merging MR"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Scalanie MR"}}
       }
     },
     "progressQueued": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "Queued for agent"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "W kolejce agenta"}}
       }
     },
     "progressAgent": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "Running agent"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Agent działa"}}
       }
     },
     "progressReview": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "Running review"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Trwa przegląd"}}
       }
     },
     "progressFeedback": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "Handling feedback"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Obsługa opinii"}}
       }
     },
     "progressConflicts": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "Resolving conflicts"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozwiązywanie konfliktów"}}
       }
     },
     "progressPipeline": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "Handling pipeline"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Obsługa potoku"}}
       }
     },
     "progressPublishing": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "Publishing comments"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Publikowanie komentarzy"}}
       }
     },
     "progressApproving": {
@@ -97,7 +105,8 @@
             "state": "translated",
             "value": "Approving MR"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zatwierdzanie MR"}}
       }
     },
     "progressReplies": {
@@ -108,7 +117,8 @@
             "state": "translated",
             "value": "Checking replies"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzanie odpowiedzi"}}
       }
     },
     "progressFeedbackCheck": {
@@ -119,7 +129,8 @@
             "state": "translated",
             "value": "Checking whether reviewer comments are addressed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzanie, czy uwagi recenzentów zostały uwzględnione"}}
       }
     },
     "progressAIAssistance": {
@@ -130,7 +141,8 @@
             "state": "translated",
             "value": "Assessing AI assistance"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ocena potrzeby pomocy AI"}}
       }
     },
     "progressReviewReadiness": {
@@ -141,7 +153,8 @@
             "state": "translated",
             "value": "Checking review readiness"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzanie gotowości do przeglądu"}}
       }
     },
     "progressReviewCheck": {
@@ -152,7 +165,8 @@
             "state": "translated",
             "value": "Checking review"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przegląd"}}
       }
     },
     "progressReviewPreparing": {
@@ -163,7 +177,8 @@
             "state": "translated",
             "value": "Preparing review"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przygotowywanie przeglądu"}}
       }
     },
     "progressConflictPreparing": {
@@ -174,7 +189,8 @@
             "state": "translated",
             "value": "Preparing conflict fix"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przygotowywanie poprawki konfliktu"}}
       }
     },
     "progressProcessing": {
@@ -185,7 +201,8 @@
             "state": "translated",
             "value": "Processing MR"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przetwarzanie MR"}}
       }
     },
     "progressNotice": {
@@ -196,7 +213,8 @@
             "state": "translated",
             "value": "Checking update"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzanie aktualizacji"}}
       }
     },
     "progressRefreshing": {
@@ -207,7 +225,8 @@
             "state": "translated",
             "value": "Refreshing status"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Odświeżanie statusu"}}
       }
     },
     "progressRefreshFailed": {
@@ -218,7 +237,8 @@
             "state": "translated",
             "value": "Couldn’t refresh status"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się odświeżyć statusu"}}
       }
     },
     "progressMonitoring": {
@@ -229,7 +249,8 @@
             "state": "translated",
             "value": "Monitoring MR"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Monitorowanie MR"}}
       }
     },
     "progressPausedLogin": {
@@ -240,7 +261,8 @@
             "state": "translated",
             "value": "Paused: CLI sign-in required"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wstrzymano: wymagane logowanie do CLI"}}
       }
     },
     "progressPausedLimit": {
@@ -251,7 +273,8 @@
             "state": "translated",
             "value": "Paused: CLI usage limit"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wstrzymano: osiągnięto limit użycia CLI"}}
       }
     },
     "progressOwnDraft": {
@@ -262,7 +285,8 @@
             "state": "translated",
             "value": "Draft MR; waiting to be marked ready"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "MR w wersji roboczej; oczekiwanie na oznaczenie jako gotowy"}}
       }
     },
     "progressElapsedSeconds": {
@@ -274,7 +298,8 @@
             "state": "translated",
             "value": "%llds"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%lld s"}}
       }
     },
     "progressElapsedMinutes": {
@@ -286,7 +311,8 @@
             "state": "translated",
             "value": "%1$lldm %2$llds"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%1$lld min %2$lld s"}}
       }
     },
     "progressElapsedHours": {
@@ -298,7 +324,8 @@
             "state": "translated",
             "value": "%1$lldh %2$lldm"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%1$lld godz. %2$lld min"}}
       }
     },
     "progressTimedStatus": {
@@ -310,7 +337,8 @@
             "state": "translated",
             "value": "%1$@ (%2$@)"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%1$@ (%2$@)"}}
       }
     },
     "progressRefreshFailedFeedback": {
@@ -322,7 +350,8 @@
             "state": "translated",
             "value": "Couldn’t check reviewer comments"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się sprawdzić uwag recenzentów"}}
       }
     },
     "progressRefreshFailedDraftReplies": {
@@ -333,7 +362,8 @@
             "state": "translated",
             "value": "Couldn’t verify reply drafts"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się zweryfikować wersji roboczych odpowiedzi"}}
       }
     },
     "progressRefreshFailedWorkflow": {
@@ -345,7 +375,8 @@
             "state": "translated",
             "value": "Couldn’t prepare MR automation"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się przygotować automatyzacji MR"}}
       }
     },
     "progressRefreshFailedCommentOrigin": {
@@ -356,7 +387,8 @@
             "state": "translated",
             "value": "Couldn’t check which drafts are AI-written"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się sprawdzić, które wersje robocze pochodzą od AI"}}
       }
     },
     "progressRefreshFailedMergeRequests": {
@@ -367,7 +399,8 @@
             "state": "translated",
             "value": "Couldn’t refresh merge requests from GitLab"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się odświeżyć merge requestów z GitLab"}}
       }
     },
     "progressRefreshFailedWithCause": {
@@ -379,7 +412,8 @@
             "state": "translated",
             "value": "%1$@: %2$@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%1$@: %2$@"}}
       }
     },
     "progressRefreshFailedCount": {
@@ -391,7 +425,8 @@
             "state": "translated",
             "value": "%lld status checks failed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie powiodło się %lld kontroli statusu"}}
       }
     },
     "progressRefreshFailedRetry": {
@@ -402,7 +437,8 @@
             "state": "translated",
             "value": "MergeTether retries automatically and keeps the last known status meanwhile."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "MergeTether ponowi próbę automatycznie i w międzyczasie zachowa ostatni znany status."}}
       }
     },
     "progressFailureCauseGitLabUnreachable": {
@@ -413,7 +449,8 @@
             "state": "translated",
             "value": "GitLab unreachable"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "GitLab jest niedostępny"}}
       }
     },
     "progressFailureCauseGitLabSignIn": {
@@ -424,7 +461,8 @@
             "state": "translated",
             "value": "GitLab sign-in needed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wymagane logowanie do GitLab"}}
       }
     },
     "progressFailureCauseAssistantUnavailable": {
@@ -435,7 +473,8 @@
             "state": "translated",
             "value": "AI CLI unavailable"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "CLI AI jest niedostępne"}}
       }
     },
     "progressFailureCauseAssistantFailed": {
@@ -446,7 +485,8 @@
             "state": "translated",
             "value": "AI check failed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kontrola AI nie powiodła się"}}
       }
     }
   },

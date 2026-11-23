@@ -21,6 +21,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check English and Polish localizations
+        run: python3 -m unittest discover -s Tests/TestTools -p test_localizations.py
+
       - name: Select Xcode 26
         run: |
           sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer

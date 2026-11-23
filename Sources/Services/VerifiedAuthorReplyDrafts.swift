@@ -51,7 +51,10 @@ final class VerifiedAuthorReplyDrafts {
               let context = context(request: request, discussions: discussions, user: user, host: host,
                   discussionID: discussionID, noteID: noteID, semanticOptOutIDs: assessment
                       .reviewerOptOutIDs(in: discussions, authorID: user.id).sorted()) else { return [] }
-        let body = String(localized: .AutomaticActions.automaticActionsVerifiedReplyAcknowledgement)
+        // The verifier checks the exact standard reply independently of the app language.
+        var acknowledgement: LocalizedStringResource = .AutomaticActions.automaticActionsVerifiedReplyAcknowledgement
+        acknowledgement.locale = Locale(identifier: "en")
+        let body = String(localized: acknowledgement)
         let preview = GitLabDraftNote(id: nil, authorID: user.id, note: body, discussionID: discussionID, position: nil)
         let configuration = settings.automation
         let accountRevision = glab.accountRevision

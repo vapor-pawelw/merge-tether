@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Full review"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pełny przegląd"}}
       }
     },
     "assistant.jobs.title": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "Agent runs"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchomienia agentów"}}
       }
     },
     "assistant.jobs.explanation": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "A completed run may still have pending drafts or decisions. Open the MR to review them."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zakończone uruchomienie może nadal mieć oczekujące szkice lub decyzje. Otwórz MR, aby je przejrzeć."}}
       }
     },
     "assistant.jobs.empty": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "No agent runs for this selection."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak uruchomień agentów dla tego wyboru."}}
       }
     },
     "assistant.jobs.audit.heading": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "GitLab changes observed during this run. Check the merge request to confirm who made them."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zaobserwowane zmiany w GitLabie podczas tego uruchomienia. Sprawdź merge request, aby potwierdzić, kto je wprowadził."}}
       }
     },
     "assistant.jobs.audit.published.comment": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "New published comment from your account"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nowy opublikowany komentarz z Twojego konta"}}
       }
     },
     "assistant.jobs.audit.approval": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "New approval from your account"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nowe zatwierdzenie z Twojego konta"}}
       }
     },
     "assistant.jobs.audit.resolved.discussion": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "Discussion resolved by your account outside this task’s permissions"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dyskusja rozwiązana przez Twoje konto poza uprawnieniami tego zadania"}}
       }
     },
     "assistant.jobs.audit.source.head": {
@@ -97,7 +105,8 @@
             "state": "translated",
             "value": "Source commit changed while push was disabled for this run"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Commit źródłowy zmienił się, gdy wysyłanie zmian było wyłączone dla tego uruchomienia"}}
       }
     },
     "assistant.jobs.transcript": {
@@ -108,7 +117,8 @@
             "state": "translated",
             "value": "Show run transcript"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pokaż transkrypcję uruchomienia"}}
       }
     },
     "assistant.jobs.stop": {
@@ -119,7 +129,8 @@
             "state": "translated",
             "value": "Stop"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zatrzymaj"}}
       }
     },
     "assistant.jobs.retry": {
@@ -130,7 +141,8 @@
             "state": "translated",
             "value": "Run again"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchom ponownie"}}
       }
     },
     "assistant.jobs.copy": {
@@ -141,7 +153,8 @@
             "state": "translated",
             "value": "Copy instructions"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kopiuj instrukcje"}}
       }
     },
     "assistant.jobs.statusUnavailable": {
@@ -152,7 +165,8 @@
             "state": "translated",
             "value": "Status unavailable"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Stan niedostępny"}}
       }
     },
     "assistant.jobs.queued": {
@@ -163,7 +177,8 @@
             "state": "translated",
             "value": "Queued"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "W kolejce"}}
       }
     },
     "assistant.jobs.running": {
@@ -174,7 +189,8 @@
             "state": "translated",
             "value": "Running"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "W trakcie"}}
       }
     },
     "assistant.jobs.succeeded": {
@@ -185,7 +201,8 @@
             "state": "translated",
             "value": "Run completed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchomienie zakończone"}}
       }
     },
     "assistant.jobs.blocked": {
@@ -196,7 +213,8 @@
             "state": "translated",
             "value": "Needs attention"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wymaga uwagi"}}
       }
     },
     "assistant.jobs.failed": {
@@ -207,7 +225,8 @@
             "state": "translated",
             "value": "Failed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Niepowodzenie"}}
       }
     },
     "assistant.jobs.cancelled": {
@@ -218,7 +237,8 @@
             "state": "translated",
             "value": "Stopped"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zatrzymano"}}
       }
     },
     "assistant.jobs.interrupted": {
@@ -229,7 +249,8 @@
             "state": "translated",
             "value": "Interrupted"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przerwano"}}
       }
     },
     "assistant.jobs.actionFailed": {
@@ -240,7 +261,8 @@
             "state": "translated",
             "value": "Could not start this run. Refresh the MR and check the selected CLI in Settings."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się rozpocząć. Odśwież MR i sprawdź wybrane CLI w Ustawieniach."}}
       }
     },
     "assistant.jobs.files": {
@@ -251,7 +273,8 @@
             "state": "translated",
             "value": "Show run files"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pokaż pliki uruchomienia"}}
       }
     },
     "assistant.jobs.prompt": {
@@ -262,7 +285,8 @@
             "state": "translated",
             "value": "Show run prompt"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pokaż prompt uruchomienia"}}
       }
     },
     "assistant.jobs.interruptedHelp": {
@@ -273,7 +297,8 @@
             "state": "translated",
             "value": "Work stopped. Some commits, pushes or replies may already exist. Run files are retained; retry checks the current MR and existing actions before continuing."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Praca została zatrzymana. Część commitów, wysyłek lub odpowiedzi mogła już zostać wykonana. Pliki uruchomienia zachowano; ponowienie sprawdza bieżący MR i istniejące działania przed kontynuacją."}}
       }
     },
     "assistant.jobs.error.cliUnavailable": {
@@ -301,7 +326,8 @@
             "state": "translated",
             "value": "The signed-in GitLab account or host has changed. Restore the account used for this run, then try again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zalogowane konto GitLaba lub host uległy zmianie. Przywróć konto użyte dla tego uruchomienia i spróbuj ponownie."}}
       }
     },
     "assistant.jobs.error.inactiveMergeRequest": {
@@ -312,7 +338,8 @@
             "state": "translated",
             "value": "This merge request or its pipeline is no longer eligible for this task. Refresh the MR before starting a new run."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ten merge request lub jego pipeline nie kwalifikują się już do tego zadania. Odśwież MR przed rozpoczęciem nowego uruchomienia."}}
       }
     },
     "assistant.jobs.error.missingResult": {
@@ -323,7 +350,8 @@
             "state": "translated",
             "value": "The agent finished without a task result. Inspect the run transcript before trying again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Agent zakończył pracę bez wyniku zadania. Przejrzyj transkrypcję przed ponowną próbą."}}
       }
     },
     "assistant.jobs.error.disabledPermission": {
@@ -334,7 +362,8 @@
             "state": "translated",
             "value": "This task is blocked by the current automation settings. Check Settings → Automation and this MR’s automation rules before trying again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "To zadanie blokują bieżące ustawienia automatyzacji. Przed ponowną próbą sprawdź Ustawienia → Automatyzacja oraz reguły automatyzacji tego MR."}}
       }
     },
     "assistant.jobs.error.headChanged": {
@@ -345,7 +374,8 @@
             "state": "translated",
             "value": "The merge request has new commits. Refresh it and start a new run for the current commit."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Merge request zawiera nowe commity. Odśwież go i rozpocznij nowe uruchomienie dla bieżącego commitu."}}
       }
     },
     "assistant.jobs.error.contextUnavailable": {
@@ -356,7 +386,8 @@
             "state": "translated",
             "value": "The current merge request state or source commit is unavailable. Automatic work will wait for complete GitLab evidence."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Bieżący stan merge requestu lub commit źródłowy są niedostępne. Automatyczna praca poczeka na kompletne dane z GitLaba."}}
       }
     }
   },

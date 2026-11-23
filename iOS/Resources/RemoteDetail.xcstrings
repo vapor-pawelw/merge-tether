@@ -1101,7 +1101,8 @@
             "state": "translated",
             "value": "Feedback addressed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uwagi uwzględnione"}}
       }
     },
     "remoteDetail.feedbackPending": {
@@ -1112,7 +1113,8 @@
             "state": "translated",
             "value": "Feedback pending"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oczekujące uwagi"}}
       }
     },
     "remoteDetail.feedbackInformational": {
@@ -1123,7 +1125,8 @@
             "state": "translated",
             "value": "Informational feedback"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Informacyjne uwagi"}}
       }
     },
     "remoteDetail.feedbackIgnored": {
@@ -1134,7 +1137,8 @@
             "state": "translated",
             "value": "Feedback ignored"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zignorowane uwagi"}}
       }
     },
     "remoteDetail.feedbackPartlyIgnored": {
@@ -1145,7 +1149,8 @@
             "state": "translated",
             "value": "Includes ignored feedback"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zawiera zignorowane uwagi"}}
       }
     },
     "remoteDetail.feedbackNotApplicable": {
@@ -1156,7 +1161,8 @@
             "state": "translated",
             "value": "No external feedback"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak zewnętrznych uwag"}}
       }
     },
     "remoteDetail.feedbackHelp": {
@@ -1167,7 +1173,8 @@
             "state": "translated",
             "value": "Feedback status comes from the current code and discussion assessment. Replies and GitLab resolution are shown separately."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Stan uwag wynika z oceny bieżącego kodu i dyskusji. Odpowiedzi i rozstrzygnięcia w GitLabie są wyświetlane osobno."}}
       }
     },
     "remoteDetail.branches.%@.%@": {
@@ -1178,7 +1185,8 @@
             "state": "translated",
             "value": "Branches: %1$@ → %2$@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Gałęzie: %1$@ → %2$@"}}
       }
     },
     "remoteDetail.showFullPath": {
@@ -1206,7 +1214,8 @@
             "state": "translated",
             "value": "Show or hide the conversation"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pokaż lub ukryj rozmowę"}}
       }
     },
     "remoteDetail.originMenuTitle": {
@@ -1217,7 +1226,8 @@
             "state": "translated",
             "value": "Classify this comment"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sklasyfikuj ten komentarz"}}
       }
     },
     "remoteDetail.threadOriginMenuTitle": {
@@ -1228,7 +1238,8 @@
             "state": "translated",
             "value": "Classify every comment in this thread"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sklasyfikuj każdy komentarz w tym wątku"}}
       }
     },
     "remoteDetail.originAutomatic": {
@@ -1239,7 +1250,8 @@
             "state": "translated",
             "value": "Use automatic assessment"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Użyj automatycznej oceny"}}
       }
     },
     "remoteDetail.originManual": {
@@ -1250,7 +1262,8 @@
             "state": "translated",
             "value": "Set by you"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ustawione przez Ciebie"}}
       }
     },
     "remoteDetail.originMenuHint": {
@@ -1261,7 +1274,8 @@
             "state": "translated",
             "value": "Changes how this comment is classified."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zmienia sposób klasyfikacji tego komentarza."}}
       }
     },
     "remoteDetail.threadOriginMenuHint": {
@@ -1272,7 +1286,8 @@
             "state": "translated",
             "value": "Changes how every comment in this thread is classified."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zmienia sposób klasyfikacji każdego komentarza w tym wątku."}}
       }
     },
     "remoteDetail.originCancel": {
@@ -1283,7 +1298,8 @@
             "state": "translated",
             "value": "Cancel"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Anuluj"}}
       }
     },
     "remoteDetail.originConfirm": {
@@ -1294,7 +1310,8 @@
             "state": "translated",
             "value": "Change"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zmień"}}
       }
     },
     "remoteDetail.threadOriginAiTitle": {
@@ -1305,7 +1322,8 @@
             "state": "translated",
             "value": "Mark every comment in this thread as AI?"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oznaczyć każdy komentarz w tym wątku jako AI?"}}
       }
     },
     "remoteDetail.threadOriginUncertainTitle": {
@@ -1316,7 +1334,8 @@
             "state": "translated",
             "value": "Mark every comment in this thread as AI uncertain?"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oznaczyć każdy komentarz w tym wątku jako niepewne AI?"}}
       }
     },
     "remoteDetail.threadOriginHumanTitle": {
@@ -1327,7 +1346,8 @@
             "state": "translated",
             "value": "Mark every comment in this thread as human?"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oznaczyć każdy komentarz w tym wątku jako napisany przez człowieka?"}}
       }
     },
     "remoteDetail.threadOriginAutomaticTitle": {
@@ -1338,7 +1358,8 @@
             "state": "translated",
             "value": "Return this thread to automatic assessment?"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przywrócić automatyczną ocenę tego wątku?"}}
       }
     },
     "remoteDetail.threadOriginMessage.%lld": {
@@ -1361,7 +1382,8 @@
               }
             }
           }
-        }
+        },
+        "pl": {"variations": {"plural": {"one": {"stringUnit": {"state": "translated", "value": "Ta zmiana dotyczy %lld opublikowanego komentarza. Prywatne wersje robocze nie mają klasyfikacji i pozostaną bez zmian."}}, "few": {"stringUnit": {"state": "translated", "value": "Ta zmiana dotyczy %lld opublikowanych komentarzy. Prywatne wersje robocze nie mają klasyfikacji i pozostaną bez zmian."}}, "many": {"stringUnit": {"state": "translated", "value": "Ta zmiana dotyczy %lld opublikowanych komentarzy. Prywatne wersje robocze nie mają klasyfikacji i pozostaną bez zmian."}}, "other": {"stringUnit": {"state": "translated", "value": "Ta zmiana dotyczy wszystkich %lld opublikowanych komentarzy. Prywatne wersje robocze nie mają klasyfikacji i pozostaną bez zmian."}}}}}
       }
     },
     "remoteDetail.originResume.%lld": {
@@ -1384,7 +1406,8 @@
               }
             }
           }
-        }
+        },
+        "pl": {"variations": {"plural": {"one": {"stringUnit": {"state": "translated", "value": "Ta zmiana pozwoli automatyzacji opublikować %lld odpowiedź w wersji roboczej."}}, "few": {"stringUnit": {"state": "translated", "value": "Ta zmiana pozwoli automatyzacji opublikować %lld odpowiedzi w wersji roboczej."}}, "many": {"stringUnit": {"state": "translated", "value": "Ta zmiana pozwoli automatyzacji opublikować %lld odpowiedzi w wersji roboczej."}}, "other": {"stringUnit": {"state": "translated", "value": "Ta zmiana pozwoli automatyzacji opublikować %lld odpowiedzi w wersji roboczej."}}}}}
       }
     },
     "remoteDetail.originResumeCountdown.%lld": {
@@ -1395,7 +1418,8 @@
             "state": "translated",
             "value": "Automation continues in %lld s."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja będzie kontynuowana za %lld s."}}
       }
     },
     "remoteDetail.originUndo": {
@@ -1406,7 +1430,8 @@
             "state": "translated",
             "value": "Undo"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Cofnij"}}
       }
     },
     "remoteDetail.originContinueNow": {
@@ -1417,7 +1442,8 @@
             "state": "translated",
             "value": "Continue now"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kontynuuj teraz"}}
       }
     },
     "remoteDetail.extraContext": {

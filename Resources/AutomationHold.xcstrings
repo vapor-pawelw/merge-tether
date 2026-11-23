@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "Why automation is waiting"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dlaczego automatyzacja czeka"}}
       }
     },
     "automation.hold.packageDisabled": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "Assistant automation is turned off in Settings."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja asystenta jest wyłączona w Ustawieniach."}}
       }
     },
     "automation.hold.ignored": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "This merge request is excluded from automation."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ten merge request jest wykluczony z automatyzacji."}}
       }
     },
     "automation.hold.closed": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "Automatic follow-up only runs on open merge requests."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyczna kontynuacja działa tylko dla otwartych merge requestów."}}
       }
     },
     "automation.hold.scopePaused": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "Automation is paused or outside the enabled scope for this merge request."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja jest wstrzymana lub ten merge request znajduje się poza włączonym zakresem."}}
       }
     },
     "automation.hold.draftPaused": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "Automation is paused while this merge request is Draft. Enable automation for this draft or mark it ready."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja jest wstrzymana, gdy ten merge request ma status Draft. Włącz automatyzację dla wersji roboczej lub oznacz ją jako gotową."}}
       }
     },
     "automation.hold.runnerUnsupported": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "Follow-up uses a shell runner. Choose the assistant runner in Settings."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kontynuacja używa powłoki. Wybierz w Ustawieniach asystenta."}}
       }
     },
     "automation.hold.notConfigured": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "The follow-up title or prompt is empty. Complete the rule in Settings."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Tytuł lub prompt kontynuacji jest pusty. Uzupełnij regułę w Ustawieniach."}}
       }
     },
     "automation.hold.projectExcluded": {
@@ -97,7 +105,8 @@
             "state": "translated",
             "value": "The Author feedback rule excludes this repository."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Reguła opinii autora wyklucza to repozytorium."}}
       }
     },
     "automation.hold.workflowExcluded": {
@@ -108,7 +117,8 @@
             "state": "translated",
             "value": "The new-discussion workflow excludes this repository, target branch or labels."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przepływ nowych dyskusji wyklucza to repozytorium, gałąź docelową lub etykiety."}}
       }
     },
     "automation.hold.ruleDisabled": {
@@ -119,7 +129,8 @@
             "state": "translated",
             "value": "Automatic handling of author feedback is off. Enable Author feedback or an assistant workflow for new discussions in Settings."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyczna obsługa opinii autora jest wyłączona. Włącz ją lub przepływ asystenta dla nowych dyskusji w Ustawieniach."}}
       }
     },
     "automation.hold.assistantUnavailable": {
@@ -130,7 +141,8 @@
             "state": "translated",
             "value": "The selected assistant CLI is not ready. Check installation and sign-in in Settings."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wybrany interfejs CLI asystenta nie jest gotowy. Sprawdź instalację i logowanie w Ustawieniach."}}
       }
     },
     "automation.hold.retryRequired": {
@@ -141,7 +153,8 @@
             "state": "translated",
             "value": "A previous attempt stopped. Review its result and retry explicitly; stopped work is not automatically repeated."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Poprzednia próba została zatrzymana. Sprawdź jej wynik i ponów ją jawnie; zatrzymana praca nie jest powtarzana automatycznie."}}
       }
     },
     "automation.hold.readinessUnknown": {
@@ -152,7 +165,8 @@
             "state": "translated",
             "value": "Current Draft status could not be read. Refresh the merge request before automation can continue."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się odczytać bieżącego statusu Draft. Odśwież merge request przed wznowieniem automatyzacji."}}
       }
     },
     "automation.hold.loginRequired": {
@@ -163,7 +177,8 @@
             "state": "translated",
             "value": "The selected CLI needs sign-in. Use the sign-in banner above to restore access."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wybrany interfejs CLI wymaga logowania. Użyj powyższego banera, aby odzyskać dostęp."}}
       }
     },
     "automation.hold.rateLimited": {
@@ -174,7 +189,8 @@
             "state": "translated",
             "value": "The selected CLI has reached its usage limit. Use the banner above to inspect the reset time or retry queued work."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wybrany interfejs CLI osiągnął limit użycia. Użyj powyższego banera, aby sprawdzić czas resetu lub ponowić zadania w kolejce."}}
       }
     }
   },

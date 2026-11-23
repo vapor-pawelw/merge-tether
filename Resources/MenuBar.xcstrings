@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "MergeTether"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "MergeTether"}}
       }
     },
     "menuBar.open": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "Open MergeTether"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz MergeTether"}}
       }
     },
     "menuBar.clear": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "No actions need your attention"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak działań wymagających Twojej uwagi"}}
       }
     },
     "menuBar.quit": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "Quit MergeTether"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zakończ MergeTether"}}
       }
     },
     "menuBar.attention.%lld": {
@@ -65,7 +69,8 @@
               }
             }
           }
-        }
+        },
+        "pl": {"variations": {"plural": {"one": {"stringUnit": {"state": "translated", "value": "%lld pozycja wymaga Twojej uwagi"}}, "few": {"stringUnit": {"state": "translated", "value": "%lld pozycje wymagają Twojej uwagi"}}, "many": {"stringUnit": {"state": "translated", "value": "%lld pozycji wymaga Twojej uwagi"}}, "other": {"stringUnit": {"state": "translated", "value": "Pozycje wymagające Twojej uwagi: %lld"}}}}}
       }
     }
   },

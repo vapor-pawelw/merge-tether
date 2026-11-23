@@ -461,7 +461,8 @@
             "state": "translated",
             "value": "Pin to top"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przypnij u góry"}}
       }
     },
     "board.unpin": {
@@ -472,7 +473,8 @@
             "state": "translated",
             "value": "Unpin"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Odepnij"}}
       }
     },
     "board.details": {
@@ -483,7 +485,8 @@
             "state": "translated",
             "value": "Show details"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pokaż szczegóły"}}
       }
     },
     "board.add": {
@@ -494,7 +497,8 @@
             "state": "translated",
             "value": "Add merge request\u2026"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dodaj merge request…"}}
       }
     },
     "board.stale": {
@@ -505,7 +509,8 @@
             "state": "translated",
             "value": "Could not refresh GitLab. Previously loaded items are still available."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się odświeżyć GitLaba. Wcześniej wczytane elementy są nadal dostępne."}}
       }
     },
     "board.stale.retry": {
@@ -523,7 +528,8 @@
             "state": "translated",
             "value": "Remove from my list"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Usuń z mojej listy"}}
       }
     },
     "board.remove.explanation": {
@@ -534,7 +540,8 @@
             "state": "translated",
             "value": "Remove this MR from Reviewing, stop its active agent runs and pause its automation. Its GitLab assignments and drafts are kept. You can add it again manually."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Usuń ten MR z listy Przeglądam, zatrzymaj jego aktywne uruchomienia agentów i wstrzymaj automatyzację. Przypisania w GitLabie i wersje robocze zostaną zachowane. Możesz dodać go ponownie ręcznie."}}
       }
     },
     "board.intent.review": {
@@ -545,7 +552,8 @@
             "state": "translated",
             "value": "Review requested"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Poproszono o przegląd"}}
       }
     },
     "board.intent.followUp": {
@@ -556,7 +564,8 @@
             "state": "translated",
             "value": "Feedback to address"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uwagi do uwzględnienia"}}
       }
     },
     "board.intent.pipeline": {
@@ -567,7 +576,8 @@
             "state": "translated",
             "value": "Pipeline needs attention"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wymaga uwagi: pipeline"}}
       }
     },
     "board.intent.conflict": {
@@ -578,7 +588,8 @@
             "state": "translated",
             "value": "Merge conflicts need attention"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wymaga uwagi: konflikty scalania"}}
       }
     },
     "board.intent.refresh": {
@@ -589,7 +600,8 @@
             "state": "translated",
             "value": "MR state changed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zmienił się stan MR"}}
       }
     },
     "board.intent.retry": {
@@ -600,7 +612,8 @@
             "state": "translated",
             "value": "Try again"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Spróbuj ponownie"}}
       }
     },
     "board.intent.handleFeedback": {
@@ -611,7 +624,8 @@
             "state": "translated",
             "value": "Handle feedback"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uwzględnij uwagi"}}
       }
     },
     "board.intent.handlePipeline": {
@@ -622,7 +636,8 @@
             "state": "translated",
             "value": "Diagnose pipeline"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zdiagnozuj pipeline"}}
       }
     },
     "board.intent.handleConflict": {
@@ -633,7 +648,8 @@
             "state": "translated",
             "value": "Resolve conflicts"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozwiąż konflikty"}}
       }
     },
     "board.proposal.addAndHandle": {
@@ -644,7 +660,8 @@
             "state": "translated",
             "value": "Add and handle"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dodaj i obsłuż"}}
       }
     },
     "board.proposal.ignore": {
@@ -655,7 +672,8 @@
             "state": "translated",
             "value": "Ignore this MR"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zignoruj ten MR"}}
       }
     },
     "board.proposal.ignoreExplanation": {
@@ -666,7 +684,8 @@
             "state": "translated",
             "value": "Keep this merge request off your board and acknowledge its notifications. You can add it again manually."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pozostaw to merge request poza tablicą i potwierdź jego powiadomienia. Możesz dodać go ponownie ręcznie."}}
       }
     },
     "board.event.markRead": {
@@ -677,7 +696,8 @@
             "state": "translated",
             "value": "Mark read"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oznacz jako przeczytane"}}
       }
     },
     "board.event.read.%@": {
@@ -688,7 +708,8 @@
             "state": "translated",
             "value": "Marked as read: %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oznaczono jako przeczytane: %@"}}
       }
     },
     "board.event.open": {
@@ -699,7 +720,8 @@
             "state": "translated",
             "value": "Read in GitLab"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przeczytaj w GitLabie"}}
       }
     },
     "board.intent.cliRequired": {
@@ -724,7 +746,8 @@
             "state": "translated",
             "value": "Blocked"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zablokowany"}}
       }
     },
     "board.compact.drafts.%lld": {
@@ -747,7 +770,8 @@
               }
             }
           }
-        }
+        },
+        "pl": {"variations": {"plural": {"one": {"stringUnit": {"state": "translated", "value": "%lld wersja robocza"}}, "few": {"stringUnit": {"state": "translated", "value": "%lld wersje robocze"}}, "many": {"stringUnit": {"state": "translated", "value": "%lld wersji roboczych"}}, "other": {"stringUnit": {"state": "translated", "value": "%lld wersji roboczej"}}}}}
       }
     },
     "board.compact.conflict": {
@@ -758,7 +782,8 @@
             "state": "translated",
             "value": "Conflict"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Konflikt"}}
       }
     },
     "board.compact.pipelineFailed": {
@@ -769,7 +794,8 @@
             "state": "translated",
             "value": "CI failed"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "CI nie powiodło się"}}
       }
     },
     "board.compact.pipelineRunning": {
@@ -780,7 +806,8 @@
             "state": "translated",
             "value": "CI running"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "CI w toku"}}
       }
     },
     "board.compact.proposal": {
@@ -791,7 +818,8 @@
             "state": "translated",
             "value": "Proposal"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Propozycja"}}
       }
     },
     "board.compact.details": {
@@ -802,7 +830,8 @@
             "state": "translated",
             "value": "Details"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Szczegóły"}}
       }
     },
     "board.compact.cliRequired": {
@@ -820,7 +849,8 @@
             "state": "translated",
             "value": "Syncing merge requests\u2026"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Synchronizowanie merge requestów…"}}
       }
     },
     "board.initialSyncHelp": {
@@ -831,7 +861,8 @@
             "state": "translated",
             "value": "Saved work may be incomplete until the first sync finishes."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zapisane dane mogą być niekompletne do zakończenia pierwszej synchronizacji."}}
       }
     },
     "board.initialSyncFailed": {
@@ -842,7 +873,8 @@
             "state": "translated",
             "value": "Initial sync incomplete"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Początkowa synchronizacja nie została ukończona"}}
       }
     },
     "board.mergeRequest.number": {
@@ -853,7 +885,8 @@
             "state": "translated",
             "value": "Merge request %lld"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Merge request %lld"}}
       }
     },
     "board.empty.own.title": {
@@ -878,7 +911,8 @@
             "state": "translated",
             "value": "Loading merge requests…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wczytywanie merge requestów…"}}
       }
     },
     "board.empty.unavailable.title": {
@@ -889,7 +923,8 @@
             "state": "translated",
             "value": "Not loaded yet"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Jeszcze nie wczytano"}}
       }
     },
     "board.empty.unavailable.description": {
@@ -900,7 +935,8 @@
             "state": "translated",
             "value": "Choose Refresh to load this column."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wybierz Odśwież, aby wczytać tę kolumnę."}}
       }
     },
     "board.approvalRatio": {
@@ -925,7 +961,8 @@
             "state": "translated",
             "value": "Required approval counts are unavailable."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Liczba wymaganych zatwierdzeń jest niedostępna."}}
       }
     },
     "board.approvalsUnknownRatio": {
@@ -936,7 +973,8 @@
             "state": "translated",
             "value": "–/–"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "–/–"}}
       }
     }
   }

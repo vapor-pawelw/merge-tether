@@ -10,7 +10,8 @@
             "state": "translated",
             "value": "Author unavailable"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Autor niedostępny"}}
       }
     },
     "proposal.authorLoading": {
@@ -21,7 +22,8 @@
             "state": "translated",
             "value": "Loading MR author…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wczytywanie autora MR…"}}
       }
     },
     "proposal.moreReasons.%lld": {
@@ -32,7 +34,8 @@
             "state": "translated",
             "value": "+%1$lld"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "+%1$lld"}}
       }
     },
     "proposal.moreReasonsHelp": {
@@ -43,7 +46,8 @@
             "state": "translated",
             "value": "Show all reasons for this proposal."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pokaż wszystkie powody tej propozycji."}}
       }
     },
     "proposal.reason.review": {
@@ -54,7 +58,8 @@
             "state": "translated",
             "value": "You were asked to review this merge request."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Poproszono Cię o przegląd tego merge requesta."}}
       }
     },
     "proposal.reason.followUp": {
@@ -65,7 +70,8 @@
             "state": "translated",
             "value": "Reviewer feedback needs a follow-up."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uwagi recenzentów wymagają dalszego działania."}}
       }
     },
     "proposal.reason.pipeline": {
@@ -76,7 +82,8 @@
             "state": "translated",
             "value": "A failed pipeline needs attention."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nieudany pipeline wymaga uwagi."}}
       }
     },
     "proposal.reason.conflict": {
@@ -87,7 +94,8 @@
             "state": "translated",
             "value": "Merge conflicts need attention."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Konflikty scalania wymagają uwagi."}}
       }
     },
     "proposal.reason.refresh": {
@@ -98,7 +106,8 @@
             "state": "translated",
             "value": "An MR update needs to be checked."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Trzeba sprawdzić aktualizację MR."}}
       }
     },
     "proposal.reason.feedback": {
@@ -109,7 +118,8 @@
             "state": "translated",
             "value": "An unresolved discussion needs attention."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwarta dyskusja wymaga uwagi."}}
       }
     },
     "proposal.reason.merge": {
@@ -120,7 +130,8 @@
             "state": "translated",
             "value": "A merge decision is waiting."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oczekuje decyzja o scaleniu."}}
       }
     },
     "proposal.reason.drafts": {
@@ -131,7 +142,8 @@
             "state": "translated",
             "value": "Unpublished comments need review."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nieopublikowane komentarze wymagają przeglądu."}}
       }
     },
     "proposal.reason.unmanaged": {
@@ -142,7 +154,8 @@
             "state": "translated",
             "value": "This MR is not in your managed list."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Tego MR nie ma na liście zarządzanych."}}
       }
     }
   }

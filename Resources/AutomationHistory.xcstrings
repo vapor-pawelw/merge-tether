@@ -9,7 +9,8 @@
             "state": "translated",
             "value": "GitLab"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "GitLab"}}
       }
     },
     "automationHistory.source.mergeTether": {
@@ -20,7 +21,8 @@
             "state": "translated",
             "value": "MergeTether"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "MergeTether"}}
       }
     },
     "automationHistory.automated": {
@@ -31,7 +33,8 @@
             "state": "translated",
             "value": "Automated"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatycznie"}}
       }
     },
     "automationHistory.comment": {
@@ -42,7 +45,8 @@
             "state": "translated",
             "value": "Comment"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Komentarz"}}
       }
     },
     "automationHistory.systemNote": {
@@ -53,7 +57,8 @@
             "state": "translated",
             "value": "System note"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Notatka systemowa"}}
       }
     },
     "automationHistory.opened": {
@@ -64,7 +69,8 @@
             "state": "translated",
             "value": "Opened merge request"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwarto merge request"}}
       }
     },
     "automationHistory.reopened": {
@@ -75,7 +81,8 @@
             "state": "translated",
             "value": "Reopened merge request"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponownie otwarto merge request"}}
       }
     },
     "automationHistory.closed": {
@@ -86,7 +93,8 @@
             "state": "translated",
             "value": "Closed merge request"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zamknięto merge request"}}
       }
     },
     "automationHistory.merged": {
@@ -97,7 +105,8 @@
             "state": "translated",
             "value": "Merged merge request"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Scalono merge request"}}
       }
     },
     "automationHistory.stateChanged": {
@@ -108,7 +117,8 @@
             "state": "translated",
             "value": "Changed state to %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zmieniono stan na %@"}}
       }
     },
     "automationHistory.addedLabel": {
@@ -119,7 +129,8 @@
             "state": "translated",
             "value": "Added label %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dodano etykietę %@"}}
       }
     },
     "automationHistory.removedLabel": {
@@ -130,7 +141,8 @@
             "state": "translated",
             "value": "Removed label %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Usunięto etykietę %@"}}
       }
     },
     "automationHistory.changedLabel": {
@@ -141,7 +153,8 @@
             "state": "translated",
             "value": "Changed label %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zmieniono etykietę %@"}}
       }
     },
     "automationHistory.addedMilestone": {
@@ -152,7 +165,8 @@
             "state": "translated",
             "value": "Added milestone %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dodano kamień milowy %@"}}
       }
     },
     "automationHistory.removedMilestone": {
@@ -163,7 +177,8 @@
             "state": "translated",
             "value": "Removed milestone %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Usunięto kamień milowy %@"}}
       }
     },
     "automationHistory.changedMilestone": {
@@ -174,7 +189,8 @@
             "state": "translated",
             "value": "Changed milestone %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zmieniono kamień milowy %@"}}
       }
     },
     "automationHistory.openDiscussion": {
@@ -185,7 +201,8 @@
             "state": "translated",
             "value": "Jump to discussion"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przejdź do dyskusji"}}
       }
     },
     "automationHistory.partial": {
@@ -196,7 +213,8 @@
             "state": "translated",
             "value": "Some GitLab activity could not be loaded."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się wczytać części aktywności GitLab."}}
       }
     },
     "automationHistory.loading": {
@@ -207,7 +225,8 @@
             "state": "translated",
             "value": "Loading GitLab activity"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wczytywanie aktywności GitLab"}}
       }
     },
     "automationHistory.action.approved": {
@@ -218,7 +237,8 @@
             "state": "translated",
             "value": "Approved merge request"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zatwierdzono merge request"}}
       }
     },
     "automationHistory.action.publication": {
@@ -229,7 +249,8 @@
             "state": "translated",
             "value": "Published a comment"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Opublikowano komentarz"}}
       }
     },
     "automationHistory.action.enqueueMerge": {
@@ -240,7 +261,8 @@
             "state": "translated",
             "value": "Queued merge"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zakolejkowano scalanie"}}
       }
     },
     "automationHistory.action.approval": {
@@ -251,7 +273,8 @@
             "state": "translated",
             "value": "Automatically approved while findings were open."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatycznie zatwierdzono, gdy były otwarte uwagi."}}
       }
     },
     "automationHistory.environmentRecovery.queued": {
@@ -262,7 +285,8 @@
             "state": "translated",
             "value": "Started a fresh follow-up after a local temporary-file permission failure."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozpoczęto nową kontynuację po błędzie uprawnień do lokalnego pliku tymczasowego."}}
       }
     },
     "automationHistory.title": {
@@ -273,7 +297,8 @@
             "state": "translated",
             "value": "Event log"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dziennik zdarzeń"}}
       }
     },
     "automationHistory.empty": {
@@ -284,7 +309,8 @@
             "state": "translated",
             "value": "No events recorded for this merge request."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak zarejestrowanych zdarzeń dla tego merge requesta."}}
       }
     },
     "automationHistory.run.%lld": {
@@ -295,7 +321,8 @@
             "state": "translated",
             "value": "Agent attempt %lld"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Próba agenta %lld"}}
       }
     },
     "automationHistory.action.retry": {
@@ -306,7 +333,8 @@
             "state": "translated",
             "value": "Try again"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Spróbuj ponownie"}}
       }
     },
     "automationHistory.action.review": {
@@ -317,7 +345,8 @@
             "state": "translated",
             "value": "Review"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przegląd"}}
       }
     },
     "automationHistory.action.followUp": {
@@ -328,7 +357,8 @@
             "state": "translated",
             "value": "Author follow-up"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kontynuacja autora"}}
       }
     },
     "automationHistory.action.draftReply": {
@@ -339,7 +369,8 @@
             "state": "translated",
             "value": "Prepare reply"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przygotuj odpowiedź"}}
       }
     },
     "automationHistory.action.verification": {
@@ -350,7 +381,8 @@
             "state": "translated",
             "value": "Feedback verification"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Weryfikacja uwag"}}
       }
     },
     "automationHistory.action.conflict": {
@@ -361,7 +393,8 @@
             "state": "translated",
             "value": "Conflict resolution"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozwiązywanie konfliktów"}}
       }
     },
     "automationHistory.action.refresh": {
@@ -372,7 +405,8 @@
             "state": "translated",
             "value": "Refresh merge request"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Odśwież merge request"}}
       }
     },
     "automationHistory.origin.manual": {
@@ -383,7 +417,8 @@
             "state": "translated",
             "value": "Manual action"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ręczne działanie"}}
       }
     },
     "automationHistory.origin.automatic": {
@@ -394,7 +429,8 @@
             "state": "translated",
             "value": "Automatic action"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyczne działanie"}}
       }
     },
     "automationHistory.origin.unknown": {
@@ -405,7 +441,8 @@
             "state": "translated",
             "value": "Origin not recorded"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie zapisano źródła"}}
       }
     },
     "automationHistory.state.requested": {
@@ -416,7 +453,8 @@
             "state": "translated",
             "value": "Requested"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zażądano"}}
       }
     },
     "automationHistory.runID": {
@@ -427,7 +465,8 @@
             "state": "translated",
             "value": "Run ID"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Identyfikator uruchomienia"}}
       }
     },
     "automationHistory.queuedAt": {
@@ -438,7 +477,8 @@
             "state": "translated",
             "value": "Queued"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dodano do kolejki"}}
       }
     },
     "automationHistory.startedAt": {
@@ -449,7 +489,8 @@
             "state": "translated",
             "value": "Started"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozpoczęto"}}
       }
     },
     "automationHistory.finishedAt": {
@@ -460,7 +501,8 @@
             "state": "translated",
             "value": "Finished"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zakończono"}}
       }
     },
     "automationHistory.error": {
@@ -471,7 +513,8 @@
             "state": "translated",
             "value": "Reason / error"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Przyczyna / błąd"}}
       }
     },
     "automationHistory.summary": {
@@ -482,7 +525,8 @@
             "state": "translated",
             "value": "Result summary"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Podsumowanie wyniku"}}
       }
     },
     "automationHistory.head": {
@@ -493,7 +537,8 @@
             "state": "translated",
             "value": "Expected commit"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Oczekiwany commit"}}
       }
     },
     "automationHistory.eventID": {
@@ -504,7 +549,8 @@
             "state": "translated",
             "value": "Event ID"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Identyfikator zdarzenia"}}
       }
     },
     "automationHistory.context": {
@@ -515,7 +561,8 @@
             "state": "translated",
             "value": "Trigger context"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kontekst wyzwalający"}}
       }
     },
     "automationHistory.intentID": {
@@ -526,7 +573,8 @@
             "state": "translated",
             "value": "Action ID"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Identyfikator działania"}}
       }
     },
     "automationHistory.previousRunID": {
@@ -537,7 +585,8 @@
             "state": "translated",
             "value": "Previous run ID"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Identyfikator poprzedniego uruchomienia"}}
       }
     },
     "automationHistory.viewRun": {
@@ -548,7 +597,8 @@
             "state": "translated",
             "value": "View agent run"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wyświetl uruchomienie agenta"}}
       }
     },
     "automationHistory.origin": {
@@ -559,7 +609,8 @@
             "state": "translated",
             "value": "Origin"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Źródło"}}
       }
     },
     "automationHistory.execution.unavailable": {
