@@ -3,6 +3,25 @@ import Testing
 @testable import MergeTetherRemote
 
 @MainActor @Suite struct ConnectionTests {
+    @Test func anExternalReplacementDelaysReconnectInsteadOfEndingIt() {
+        var delay = 1.0
+        var waits: [Double] = []
+        for _ in 0..<5 {
+            let policy = RemoteConnection.reconnect(afterClose: 4001, delay: delay)
+            #expect(!policy.fatal)
+            waits.append(policy.wait ?? -1)
+            delay = policy.nextDelay
+        }
+        #expect(waits == [30, 60, 120, 240, 300])
+
+        let ordinary = RemoteConnection.reconnect(afterClose: 1006, delay: 16)
+        #expect(!ordinary.fatal && ordinary.wait == 16 && ordinary.nextDelay == 30)
+        for code in [4008, 4009] {
+            let policy = RemoteConnection.reconnect(afterClose: code, delay: 1)
+            #expect(policy.fatal && policy.wait == nil)
+        }
+    }
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["MT_RELAY_TEST_URL"] != nil))
     func nativePeersExchangeEncryptedMessagesThroughRealWorker() async throws {
         let origin = try #require(URL(string: ProcessInfo.processInfo.environment["MT_RELAY_TEST_URL"]!))

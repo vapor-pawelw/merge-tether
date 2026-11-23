@@ -99,12 +99,30 @@ import Foundation
             heartbeat.cancel()
             guard self.generation == generation else { return }
             socket = nil
-            let fatal = [4001, 4008, 4009].contains(task.closeCode.rawValue)
+            let policy = Self.reconnect(afterClose: task.closeCode.rawValue, delay: delay)
             task.cancel(with: .goingAway, reason: nil)
-            onStatus?(false, fatal)
-            if fatal { return }
-            do { try await Task.sleep(for: .seconds(delay + Double.random(in: 0...0.3))) } catch { return }
-            delay = min(delay * 2, 30)
+            onStatus?(false, policy.fatal)
+            guard let wait = policy.wait else { return }
+            do { try await Task.sleep(for: .seconds(wait + Double.random(in: 0...0.3))) } catch { return }
+            delay = policy.nextDelay
+        }
+    }
+
+    /// Ordinary drops back off up to 30 seconds. 4008/4009 report this client's own oversized or excessive
+    /// traffic and stop. 4001 means the relay replaced this socket with a newer one for the same role. This
+    /// process stops its own replaced sockets before reconnecting, so 4001 can come from another device, a
+    /// duplicate installation or the relay itself; it must not stop reconnection permanently. It backs off
+    /// for at least 30 seconds and up to five minutes, so a genuine duplicate does not keep displacing the
+    /// other peer in a tight loop.
+    nonisolated static func reconnect(afterClose code: Int, delay: Double) -> (fatal: Bool, wait: Double?, nextDelay: Double) {
+        switch code {
+        case 4008, 4009:
+            return (true, nil, delay)
+        case 4001:
+            let wait = min(max(delay, 30), 300)
+            return (false, wait, min(wait * 2, 300))
+        default:
+            return (false, delay, min(delay * 2, 30))
         }
     }
 }
