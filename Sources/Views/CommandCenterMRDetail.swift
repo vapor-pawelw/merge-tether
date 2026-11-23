@@ -298,6 +298,9 @@ private struct CommandCenterMRDetailContent: View {
             .onChange(of: monitor.attention.displayAIOriginCoordinator?.revision) { _, _ in
                 Task { await discussionStore.reloadOrigins(glab: monitor.glab) }
             }
+            .onChange(of: monitor.settings.automation.aiCommentCriteriaOverride) { _, _ in
+                refreshDiscussions()
+            }
             .onChange(of: monitor.commentOrigins.revision) { _, _ in
                 Task { await discussionStore.reloadOrigins(glab: monitor.glab) }
             }
@@ -382,7 +385,7 @@ private struct CommandCenterMRDetailContent: View {
                     username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
                     settings: monitor.settings)
                 GitLabRefreshButton(monitor: monitor, itemID: item.id, placement: .header) {
-                    if let target = discussionTarget { await discussionStore.refresh(target: target, glab: monitor.glab) }
+                    if let target = discussionTarget { await loadDiscussions(target) }
                 }
                 .buttonStyle(.plain)
                 .boardHeaderControlHover()
@@ -1141,8 +1144,10 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     private func loadDiscussions(_ target: MRDiscussionTarget) async {
-        await discussionStore.refresh(target: target, glab: monitor.glab)
+        let criteriaOverride = monitor.settings.automation.aiCommentCriteriaOverride
+        await discussionStore.refresh(target: target, glab: monitor.glab, criteriaOverride: criteriaOverride)
         guard !Task.isCancelled, discussionStore.target == target, discussionStore.hasLoaded, !discussionStore.hasError,
+              monitor.settings.automation.aiCommentCriteriaOverride == criteriaOverride,
               let request = presentationRow.displayRequest, let coordinator = monitor.attention.displayAIOriginCoordinator else { return }
         let notes = discussionStore.discussions.flatMap(\.notes), known = Set(discussionStore.origins.keys)
         Task { await coordinator.schedule(request: request, notes: notes, knownNoteIDs: known) }

@@ -45,6 +45,7 @@ extension AutomaticPublicationRestrictions {
 struct AutomaticPublicationPolicy: Equatable, Sendable {
     let mode: AutomationPublicationMode
     let restrictions: AutomaticPublicationRestrictions
+    var aiCommentCriteriaOverride: String? = nil
 
     func allows(_ draft: GitLabDraftNote, request: GitLabMergeRequest,
                 discussions: [GitLabMergeRequestDiscussion]?, userID: Int, host: String,
@@ -137,7 +138,7 @@ enum AutomationCheckpoint: CaseIterable {
 
 extension AutomationSettings {
     var automaticPublicationPolicy: AutomaticPublicationPolicy {
-        .init(mode: publicationMode, restrictions: publicationRestrictions)
+        .init(mode: publicationMode, restrictions: publicationRestrictions, aiCommentCriteriaOverride: aiCommentCriteriaOverride)
     }
     var needsAIAssessment: Bool { automaticPublicationPolicy.requiresAI }
     var publishesAllComments: Bool { publicationMode == .all }

@@ -417,7 +417,7 @@ final class MergeRequestAttentionMonitor {
             try await DraftProofRecoveryVerifier.verify($0, assistant: $1, model: $2)
         },
         assessAIOrigin: @escaping AICommentOriginCoordinator.Assess = {
-            try await AICommentOriginAssessor.verify(target: $0, notes: $1, assistant: $2, model: $3, thinking: $4)
+            try await AICommentOriginAssessor.verify(target: $0, notes: $1, assistant: $2, model: $3, thinking: $4, criteriaOverride: $5)
         }
     ) {
         self.glab = glab
@@ -453,7 +453,7 @@ final class MergeRequestAttentionMonitor {
                 let configured = assistant == .codex ? settings.automation.codexVerificationModel.rawValue
                     : settings.automation.claudeVerificationModel.rawValue
                 return model == configured && settings.automation.verificationThinking == thinking
-            })
+            }, criteriaOverride: { settings?.automation.aiCommentCriteriaOverride })
         self.aiOriginCoordinator = publicationOrigins
         self.displayAIOriginCoordinator = settings.map {
             AICommentDisplayCoordinator(glab: glab, settings: $0, assessmentDirectory: aiAssessmentDirectory,
@@ -2440,10 +2440,12 @@ final class MergeRequestAttentionMonitor {
             guard let id = note.id, id > 0 else { return nil }
             // The user's verdict also outranks a verified assistant identity.
             if AICommentOriginOverrideStore.override(for: note, host: host, projectID: projectID, iid: iid, in: directory) != nil {
-                return AICommentAssessmentStore.isAI(note, host: host, projectID: projectID, iid: iid, in: directory, now: now) ? id : nil
+                return AICommentAssessmentStore.isAI(note, host: host, projectID: projectID, iid: iid,
+                    criteriaOverride: policy.aiCommentCriteriaOverride, in: directory, now: now) ? id : nil
             }
             return verifiedIdentities.contains(note.author?.id ?? 0)
-                || AICommentAssessmentStore.isAI(note, host: host, projectID: projectID, iid: iid, in: directory, now: now) ? id : nil
+                || AICommentAssessmentStore.isAI(note, host: host, projectID: projectID, iid: iid,
+                    criteriaOverride: policy.aiCommentCriteriaOverride, in: directory, now: now) ? id : nil
         })
         return (aiIDs, botIDs)
     }
@@ -2537,7 +2539,8 @@ final class MergeRequestAttentionMonitor {
             guard let latest = try? await glab.fetchOwnDraftNotes(
                 projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id
             ), latest.contains(draft), AICommentAssessmentStore.safeForAutomaticPublication(draft),
-                  isCurrent(account), permitsAutomaticPublication(of: live, account: account) else { return false }
+                  isCurrent(account), settings.publicationPolicy(for: target) == policy,
+                  permitsAutomaticPublication(of: live, account: account) else { return false }
             guard permitsParticipantReply(draft, request: live, discussions: discussions, account: account) else { return false }
             permitted = true
             return true

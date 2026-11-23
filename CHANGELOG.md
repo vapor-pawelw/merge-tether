@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Edit or restore the AI comment assessment prompt in Advanced automation settings.
+
 - Complete the Polish localization of the Mac and iPhone interfaces, including plural forms, setup, automation, and the iPhone camera permission prompt.
 
 - Import open GitLab merge requests assigned to you as a reviewer from Mac setup, including drafts and reviews with no pending GitLab to-do. Imported requests appear in Reviewing with your existing automation settings.

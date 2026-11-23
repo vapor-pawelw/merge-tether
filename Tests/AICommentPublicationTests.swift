@@ -61,6 +61,15 @@ struct AICommentPublicationTests {
         #expect(instructions.contains("1-2-<noteID>.json"))
         #expect(!instructions.contains("record_ai_comment_assessment"))
         #expect(!instructions.contains("read_merge_request"))
+
+        let custom = "Look for the team review format."
+        let customInstructions = AICommentAssessmentStore.recordingInstructions(host: "gitlab.example.org", projectID: 1,
+            iid: 2, criteriaOverride: custom)
+        let customDirectory = AICommentAssessmentStore.scopedDirectory(AICommentAssessmentStore.directory, criteriaOverride: custom)
+        #expect(customInstructions.contains(custom))
+        #expect(!customInstructions.contains(AICommentOriginAssessor.criteriaInstructions))
+        #expect(customInstructions.contains(customDirectory.appending(path: "gitlab.example.org/1-2-<noteID>.json").path))
+        #expect(customInstructions.contains("exact UTF-8 source body"))
     }
 
     @Test func slashCommandsEvenInsideCodeFencesAreNotAutomaticallyPublished() throws {

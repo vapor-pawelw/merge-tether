@@ -540,7 +540,8 @@ enum AssistantAutomationRunner {
         let publication = settings.publicationPolicy(for: target)
         let aiAssessment = publication.requiresAI
             && (mrWorkflow != .followUp || followUpPush)
-            ? "\n\n" + AICommentAssessmentStore.recordingInstructions(host: work.host, projectID: work.projectID, iid: work.iid)
+            ? "\n\n" + AICommentAssessmentStore.recordingInstructions(host: work.host, projectID: work.projectID, iid: work.iid,
+                criteriaOverride: publication.aiCommentCriteriaOverride)
             : ""
         let publicationPolicy: String
         if mrWorkflow == .followUp && !followUpPush {

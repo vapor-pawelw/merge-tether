@@ -5,7 +5,8 @@ import MergeTetherRemote
 @MainActor enum RemoteMRDetailLoader {
     enum ReadError: Error { case changed }
 
-    static func load(source: GitLabMergeRequest, drafts: [GitLabDraftNote], glab: GlabService) async throws -> RemoteMRDetails {
+    static func load(source: GitLabMergeRequest, drafts: [GitLabDraftNote], glab: GlabService,
+                     criteriaOverride: String? = nil) async throws -> RemoteMRDetails {
         let revision = glab.accountRevision, executable = glab.glabPath
         guard let host = glab.resolvedHost, let username = glab.currentUsername,
               source.webURL.isGitLabMergeRequest(host: host, iid: source.iid),
@@ -22,7 +23,7 @@ import MergeTetherRemote
         try check(current)
         let store = MRDiscussionStore()
         async let discussionRead: Void = store.refresh(target: .init(host: host, username: username,
-            projectID: source.projectID, iid: source.iid, url: source.webURL), glab: glab)
+            projectID: source.projectID, iid: source.iid, url: source.webURL), glab: glab, criteriaOverride: criteriaOverride)
         async let counts = try? glab.fetchMergeRequestApprovalProgress(projectID: source.projectID, iid: source.iid, host: host)
         async let rules: RemoteApprovalRuleState? = try? glab.mergeRequestAPI(
             "/projects/\(source.projectID)/merge_requests/\(source.iid)/approval_state", host: host)

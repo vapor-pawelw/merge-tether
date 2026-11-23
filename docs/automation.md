@@ -249,6 +249,8 @@ The content heuristic combines precise references across code locations or detai
 
 Assessments record their criteria version. After a criteria change, older nonqualifying results are assessed again once under the current provider/model/reasoning setting; unchanged current results remain cached. Current qualifying content-bound evidence is retained. This does not change publication mode, scope, remote-fix proofs or other publication checks.
 
+Under **Settings → Automation → Advanced → AI comment assessment prompt**, edit the criteria for both comment badges and the AI condition for reply publication. Select **Restore Default Prompt** and then **Apply Changes** to return to the built-in criteria. A blank prompt also uses the built-in criteria. Assessments are reused only for the matching prompt. Bot identity checks, built-in attribution parsing and other publication requirements still apply.
+
 ### Optional publication conditions
 
 Expand **Publication filters** in Profile & permissions to restrict repositories, MR authors, source-comment authors or require verified/high-confidence AI-assisted feedback. **All eligible comments** ignores these filters. In conditional modes, all active conditions must match (AND). Within an author or repository list, any selected identity qualifies; an empty list adds no restriction. Explicit manual **Publish all** bypasses automation filters. Active scope and the other execution and publication checks still apply to automatic actions.

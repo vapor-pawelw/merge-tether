@@ -36,6 +36,7 @@ final class CommentOriginOverrideCenter {
     private let resume: Resume
     private let sleep: Sleep
     private let now: @MainActor () -> Date
+    private let criteriaOverride: @MainActor () -> String?
     /// Changes still inside their undo window, newest last.
     private(set) var pending: [Change] = []
     /// Bumped on every write so open conversations reload their badges.
@@ -43,9 +44,11 @@ final class CommentOriginOverrideCenter {
     @ObservationIgnored private var timers: [UUID: Task<Void, Never>] = [:]
 
     init(directory: URL, grace: Duration = gracePeriod, gain: @escaping Gain, resume: @escaping Resume,
+         criteriaOverride: @escaping @MainActor () -> String? = { nil },
          sleep: @escaping Sleep = { try await Task.sleep(for: $0) }, now: @escaping @MainActor () -> Date = { Date() }) {
         self.directory = directory; self.grace = grace; self.gain = gain; self.resume = resume
         self.sleep = sleep; self.now = now
+        self.criteriaOverride = criteriaOverride
     }
 
     func pending(for target: MRAutomationScope.Target) -> Change? {
@@ -76,7 +79,7 @@ final class CommentOriginOverrideCenter {
         var becomingAI: Set<Int> = []
         if classification == .ai {
             for note in selected where !AICommentAssessmentStore.isAI(note, host: target.host, projectID: target.projectID,
-                                                                      iid: iid, in: directory, now: now()) {
+                    iid: iid, criteriaOverride: criteriaOverride(), in: directory, now: now()) {
                 becomingAI.insert(note.id!)
             }
         }
