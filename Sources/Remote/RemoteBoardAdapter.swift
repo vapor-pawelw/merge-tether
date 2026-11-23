@@ -113,7 +113,7 @@ import MergeTetherRemote
     }
 
     static func board(monitor: TodoMonitorService, session: UUID, account: String,
-                      includesBoardOrder: Bool = false) -> RemoteBoard {
+                      includesBoardOrder: Bool = false, includesCardActions: Bool = false) -> RemoteBoard {
         let board = monitor.boardSnapshot
         let other = board.otherCards(jobs: monitor.assistantHandoffs, host: monitor.glab.resolvedHost,
             username: monitor.glab.currentUsername, pinnedCards: monitor.settings.boardPins)
@@ -232,6 +232,9 @@ import MergeTetherRemote
                         working: true, statusSymbol: MRActionEffect.aiCheck.symbol)
                 }
                 card.orderGroup = orderGroups[card.id]
+                if includesCardActions {
+                    RemoteCardActionContext(card: card, board: board, monitor: monitor)?.project(&card)
+                }
                 result.lanes[lane].cards[index] = card
             }
         }

@@ -11,6 +11,7 @@ public enum RemoteActionKind: String, Codable, Sendable { case publish, approve,
     case markReady
     case personalApprove, removeApproval
     case editReviewers
+    case editCard
     public var isPersonalApproval: Bool { self == .personalApprove || self == .removeApproval }
     public var requiresApprovalConfirmation: Bool { self == .approve || isPersonalApproval }
     // Sent only to clients that advertise draftRegenerationCapability.
@@ -243,6 +244,11 @@ public struct RemoteCard: Codable, Equatable, Identifiable, Sendable {
     public var issues: [RemoteMRIssue]?
     public var completionObservedAt: Date?
     public var orderGroup: RemoteBoardOrderGroup?
+    /// Pin state is independent of manual ordering, including when the board is read-only.
+    public var pinned: Bool?
+    public var automation: RemoteCardAutomation?
+    public var canRemoveFromBoard: Bool?
+    public var canAcknowledgeFinished: Bool?
     public init(id: String, title: String, project: String, url: URL?, head: String? = nil,
                 detail: String = "", drafts: [RemoteDraft] = [], actions: [RemoteAction] = [],
                 needsAttention: Bool? = nil, mergeRequestIID: Int? = nil, primaryCTA: RemoteCardCTA? = nil,
@@ -272,6 +278,7 @@ public struct RemoteBoard: Codable, Equatable, Sendable {
     public var automationPaused: Bool?
     public var lanes: [RemoteLane]
     public var draftRegeneration: RemoteDraftRegenerationControl?
+    public var cardAssistants: [RemoteCardAssistant]?
     public var issueTagsOmitted: Bool?
     public init(hostSession: UUID, account: String, updatedAt: Date? = nil, partial: Bool = false, lanes: [RemoteLane],
                 automationPaused: Bool? = nil, draftRegeneration: RemoteDraftRegenerationControl? = nil) {
@@ -332,12 +339,13 @@ public struct RemoteCommand: Codable, Equatable, Sendable {
         cardID.hasPrefix("completion:") && actionID == "seen"
     }
     public var isDraftRegeneration: Bool { cardID == RemoteDraftRegenerationControl.cardID }
+    public var isCardChange: Bool { actionID == RemoteCardChange.actionID }
     public var receiptIdentity: Self {
-        guard isDraftRegeneration, let argument else { return self }
+        guard isDraftRegeneration || isCardChange, let argument else { return self }
         if argument.hasPrefix("sha256:"), argument.utf8.count == 71,
            argument.dropFirst(7).allSatisfy({ "0123456789abcdef".contains($0) }) { return self }
         var receipt = self
-        // Store additional user instructions in command receipts by digest.
+        // Persist the identity of arguments without retaining user instructions.
         receipt.argument = "sha256:" + RemoteDraftRegenerationPage.token(Data(argument.utf8))
         return receipt
     }
@@ -373,6 +381,7 @@ public struct RemoteMessage: Codable, Sendable {
     public static let boardAvatarsCapability = "board-avatars-v1"
     public static let detailAvatarsCapability = "detail-avatars-v1"
     public static let boardOrderCapability = "board-order-v1"
+    public static let cardActionsCapability = "card-actions-v1"
     public enum Kind: String, Codable, Sendable { case hello, snapshot, command, accepted, result, receipt, receiptResult = "receipt-result", unavailable, hostReady = "host-ready", detailRequest = "detail-request", details, cancelDetails = "cancel-details"
         case draftRegenerationRequest = "draft-regeneration-request", draftRegenerationPage = "draft-regeneration-page"
         case avatarThumbnails = "avatar-thumbnails"
@@ -453,11 +462,19 @@ extension RemoteBoard {
     public func forClient(supportsCommentReview: Bool, supportsMergeActions: Bool = false, supportsMRControls: Bool = false,
                           supportsCommentOrigins: Bool = false, supportsMarkReady: Bool = false,
                           supportsDraftRegeneration: Bool = false, supportsPersonalApproval: Bool = false,
-                          supportsReviewerEditing: Bool = false) -> Self {
+                          supportsReviewerEditing: Bool = false, supportsCardActions: Bool = false) -> Self {
         var compatible = self
         if !supportsDraftRegeneration { compatible.draftRegeneration = nil }
+        if !supportsCardActions { compatible.cardAssistants = nil }
         for lane in compatible.lanes.indices {
             for card in compatible.lanes[lane].cards.indices {
+                if !supportsCardActions {
+                    compatible.lanes[lane].cards[card].actions.removeAll { $0.kind == .editCard }
+                    compatible.lanes[lane].cards[card].pinned = nil
+                    compatible.lanes[lane].cards[card].automation = nil
+                    compatible.lanes[lane].cards[card].canRemoveFromBoard = nil
+                    compatible.lanes[lane].cards[card].canAcknowledgeFinished = nil
+                }
                 if !supportsReviewerEditing {
                     compatible.lanes[lane].cards[card].actions.removeAll { $0.kind == .editReviewers }
                 }

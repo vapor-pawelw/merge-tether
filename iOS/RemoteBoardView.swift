@@ -396,7 +396,8 @@ struct RemoteCardView: View {
     }
     private var compactContent: some View {
         MRCardMetadataLayout(referenceToTitleSpacing: 11, titleToPeopleSpacing: 6,
-                             keepsBadgesUnderActions: card.presentation?.draftBadge != nil && !showsDraftStyle) {
+                             keepsBadgesUnderActions: card.presentation?.draftBadge != nil && !showsDraftStyle,
+                             alignsActionsAtTop: true) {
             repositoryReference
             title.opacity(contentOpacity)
             HStack(spacing: 0) {
@@ -406,7 +407,8 @@ struct RemoteCardView: View {
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: true, vertical: false)
             }
-            HStack { EmptyView() }
+            RemoteCardCornerActions(card: card, model: actionsModel, onOpenAction: onOpenCTA)
+                .fixedSize().zIndex(2)
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 if let dependencies = card.dependencies {
                     MRDependencyBadge(dependencies: dependencies)
@@ -466,10 +468,6 @@ struct RemoteCardView: View {
             if let iid = card.mergeRequestIID {
                 Text(verbatim: "!\(iid)").monospacedDigit().fixedSize().opacity(contentOpacity)
                 if let issues = card.issues, !issues.isEmpty { MRIssueTag(issues: issues).opacity(contentOpacity) }
-            }
-            if !expanded, card.orderGroup?.pinned == true {
-                Image(systemName: "pin.fill")
-                    .accessibilityLabel(Text(.Remote.remoteBoardPinned))
             }
         }
         .font(.caption).foregroundStyle(.secondary)

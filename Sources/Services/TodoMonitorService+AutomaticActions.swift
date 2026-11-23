@@ -23,13 +23,17 @@ extension TodoMonitorService {
         await setAutomaticActionPreference(enabled ? .default : .off, for: action, target: target)
     }
 
+    @discardableResult
     func setAutomaticActionPreference(_ preference: MRAutomationPreference, for action: MRAutomaticAction,
-                                      target: MRAutomationScope.Target) async {
-        guard target.iid != nil, settings.storedActionPreference(action, for: target) != preference else { return }
+                                      target: MRAutomationScope.Target) async -> Bool {
+        guard target.iid != nil else { return false }
+        guard settings.storedActionPreference(action, for: target) != preference else { return true }
         settings.setActionPreference(preference, for: action, target: target)
-        guard settings.save(), preference != .off, settings.automaticPublicWritesAllowed,
-              glab.resolvedHost == target.host, glab.currentUsername == target.username else { return }
+        guard settings.save() else { return false }
+        guard preference != .off, settings.automaticPublicWritesAllowed,
+              glab.resolvedHost == target.host, glab.currentUsername == target.username else { return true }
         if action == .merge { await authoredMergeRequests.resumeAutomaticMerge(for: target) }
         else { await attention.resumeAutomaticAction(action, for: target) }
+        return true
     }
 }

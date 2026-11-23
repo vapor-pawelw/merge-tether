@@ -36,6 +36,7 @@ extension RemoteActionKind {
         case .personalApprove: .Board.boardApprovalsApprove
         case .removeApproval: .Board.boardApprovalsRemove
         case .editReviewers: .Board.boardReviewersEdit
+        case .editCard: .CommandCenter.commandCenterActions
         case .markDone: .Remote.remoteMarkDone
         case .prepare: .Remote.remotePrepare
         case .handoff: .Remote.remoteHandoff

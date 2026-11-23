@@ -71,7 +71,7 @@ struct RemoteCardDetail: View {
                         .id(RemoteCardCTA.Destination.overview)
                         if current.primaryCTA?.destination == .setup {
                             Text(.Remote.remoteSetupOnMac).foregroundStyle(.secondary).id(RemoteCardCTA.Destination.setup)
-                        } else if !current.actions.contains(where: { $0.kind != .setCommentOrigin && $0.kind != .editReviewers }),
+                        } else if !current.actions.contains(where: { $0.kind != .setCommentOrigin && $0.kind != .editReviewers && $0.kind != .editCard }),
                                   current.primaryCTA?.destination == .actions {
                             Text(.Remote.remoteCompleteOnMac).foregroundStyle(.secondary)
                         }
@@ -382,7 +382,7 @@ struct RemoteCardDetail: View {
     private var buttonActions: [RemoteAction] {
         (actionCard?.actions ?? []).filter {
             $0.kind != .deleteDraft && $0.kind != .publishDraft && $0.kind != .setCommentOrigin
-                && !$0.kind.isPersonalApproval && $0.kind != .editReviewers && !$0.isAuthorFeedbackVerification
+                && !$0.kind.isPersonalApproval && $0.kind != .editReviewers && $0.kind != .editCard && !$0.isAuthorFeedbackVerification
         }
     }
 

@@ -9,6 +9,12 @@ details even when remote writes are unavailable; writes still require confirmati
 It has pairing, card details and actions;
 GitLab credentials and automation settings remain on the Mac.
 
+On an iPhone MR card, **…** offers link actions and the commands supported by the
+paired Mac. A filled pin shows the Mac's saved pin state in both ordering modes
+and is a shortcut to unpin. The lightning button shows the current MR policy and
+lets you confirm changes to the MR or its repository defaults on the Mac. With an
+older Mac or a disconnected phone, link actions still work for the last board.
+
 ## Architecture decision
 
 Direct LAN or a VPN tunnel would avoid a relay service but require inbound reachability

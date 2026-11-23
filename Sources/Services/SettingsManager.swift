@@ -95,6 +95,22 @@ final class SettingsManager {
     }
     var routedMRTodoReceipts: Set<MRTodoRouteReceipt>
     var boardPins: Set<BoardCardPin>
+
+    @discardableResult
+    func setBoardPin(_ pin: BoardCardPin, pinned: Bool) -> Bool {
+        var updated = boardPins
+        if pinned { updated.insert(pin) } else { updated.remove(pin) }
+        guard updated != boardPins else { return true }
+        persistenceStore.preserveCorruptValues()
+        guard persistenceStore.save(updated, forKey: Key.boardPins) else { return false }
+        guard persistenceStore.synchronize() else {
+            persistenceStore.save(boardPins, forKey: Key.boardPins)
+            persistenceStore.synchronize()
+            return false
+        }
+        boardPins = updated
+        return true
+    }
     var ownAutomationOffExpanded: Bool
     var reviewingAutomationOffExpanded: Bool
     var boardOrderingMethod: MRBoardOrderingMethod
