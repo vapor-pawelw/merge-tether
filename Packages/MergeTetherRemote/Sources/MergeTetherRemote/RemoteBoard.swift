@@ -407,6 +407,8 @@ public struct RemoteMessage: Codable, Sendable {
     public var reviewerResults: RemoteReviewerResults?
     /// True reads GitLab before answering. Otherwise the host returns its current board.
     public var refresh: Bool?
+    /// An explicit refresh of the issues shown in a single MR's Details.
+    public var refreshDetailIssues: Bool?
     public init(type: Kind, challenge: UUID? = nil, board: RemoteBoard? = nil,
                 command: RemoteCommand? = nil, result: RemoteCommandResult? = nil, capabilities: [String]? = nil,
                 detailRequest: RemoteDetailRequest? = nil, detailResponse: RemoteDetailResponse? = nil,
@@ -415,9 +417,11 @@ public struct RemoteMessage: Codable, Sendable {
                 draftRegenerationPage: RemoteDraftRegenerationPage? = nil,
                 cachedAvatarURLs: [URL]? = nil, avatarThumbnails: [RemoteAvatarThumbnail]? = nil,
                 boardOrderMove: RemoteBoardOrderMove? = nil, boardOrderApplied: Bool? = nil,
-                reviewerSearch: RemoteReviewerSearch? = nil, reviewerResults: RemoteReviewerResults? = nil) {
+                reviewerSearch: RemoteReviewerSearch? = nil, reviewerResults: RemoteReviewerResults? = nil,
+                refreshDetailIssues: Bool? = nil) {
         self.type = type; self.challenge = challenge; self.board = board; self.command = command; self.result = result
         self.refresh = refresh
+        self.refreshDetailIssues = refreshDetailIssues
         self.capabilities = capabilities
         self.detailRequest = detailRequest; self.detailResponse = detailResponse
         self.detailOrigins = detailOrigins

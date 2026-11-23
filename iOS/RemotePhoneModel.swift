@@ -49,6 +49,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     private(set) var isSynchronizingDetails = false
     private(set) var isManuallyRefreshingContent = false
     private var viewedCardID: String?
+    private var issueRefreshCardID: String?
     private var pendingActionPresentation: (id: UUID, card: RemoteCard)?
     var pendingActionCard: RemoteCard? {
         guard let pending = state.pending, pendingActionPresentation?.id == pending.id,
@@ -406,6 +407,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     func refreshDetailsFromGitLab(card: RemoteCard) async {
         await refreshManually { model in
             model.detailRecoveryAttempts = 0
+            model.issueRefreshCardID = card.id
             await model.requestDetails(card: card, force: true, fromGitLab: true)
         }
     }
@@ -466,7 +468,11 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     func requestDetails(card: RemoteCard, force: Bool = false, fromGitLab: Bool? = nil) async {
         guard supportsDetails, state.board?.cards.contains(where: { $0.id == card.id }) == true else { return }
         let opening = viewedCardID != card.id
-        if opening { detailRecoveryAttempts = 0; needsLiveDetailReload = false }
+        if opening {
+            detailRecoveryAttempts = 0
+            needsLiveDetailReload = false
+            if issueRefreshCardID != card.id { issueRefreshCardID = nil }
+        }
         viewedCardID = card.id
         // Older Macs only have the original live detail read. Keep it for opening Details.
         let live = fromGitLab ?? (needsLiveDetailReload || (opening && !supportsCachedDetails))
@@ -483,8 +489,10 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                   presentationIndependent: supportsDetailContext, cachedOnly: live ? nil : true) else { return }
         needsDetailReload = false; needsLiveDetailReload = false; isSynchronizingDetails = false
         let revision = connectionRevision
+        let refreshIssues = live && issueRefreshCardID == card.id
+        if refreshIssues { issueRefreshCardID = nil }
         do { try await connection.send(.init(type: .detailRequest, detailRequest: request,
-            cachedAvatarURLs: Array(avatarThumbnails.keys.prefix(64)))) }
+            cachedAvatarURLs: Array(avatarThumbnails.keys.prefix(64)), refreshDetailIssues: refreshIssues ? true : nil)) }
         catch {
             guard self.connection === connection, connectionRevision == revision, let current = state.board else { return }
             detailState.receive(.init(request: request, status: .unavailable), board: current)
@@ -496,6 +504,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         detailAvatarURLs.removeAll()
         pruneAvatarThumbnails()
         viewedCardID = nil; needsDetailReload = false; needsLiveDetailReload = false
+        issueRefreshCardID = nil
         isSynchronizingDetails = false; detailRecoveryAttempts = 0
         guard supportsDetails, let request, let connection else { return }
         Task { try? await connection.send(.init(type: .cancelDetails, detailRequest: request)) }

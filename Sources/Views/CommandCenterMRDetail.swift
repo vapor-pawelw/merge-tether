@@ -45,19 +45,6 @@ struct CommandCenterMRDetail: View {
     }
 }
 
-private struct MRDetailRepositoryLabel: View {
-    let path: String
-
-    var body: some View {
-        Text(verbatim: path.split(separator: "/").last.map(String.init) ?? path)
-            .foregroundStyle(Color.accentColor)
-            .fontWeight(.semibold)
-            .lineLimit(1).truncationMode(.middle)
-            .accessibilityLabel(Text(verbatim: path))
-            .modifier(MRRepositoryPathPopover(path: path))
-    }
-}
-
 private struct CommandCenterMRDetailContent: View {
     let item: MergeRequestAttentionMonitor.Item
     let catalogRow: MergeRequestBoardSnapshot.Row?
@@ -375,19 +362,15 @@ private struct CommandCenterMRDetailContent: View {
         let mergeActivity = progress.mergeActivity
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                Text(verbatim: "!\(item.id.iid)").monospacedDigit()
-                let issues = monitor.issueTags(for: presentationRow.displayRequest)
-                if !issues.isEmpty { MRIssueTag(issues: issues) }
-                if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
-                else if presentationRow.isDraft { BoardDraftBadge() }
-                MRDetailRepositoryLabel(path: presentationRow.displayURL.gitLabProjectPath)
-                if let author = presentationRow.displayRequest?.author {
-                    PersonLabel(person: author.person, avatarSize: 18)
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    BoardMRReferenceLine(iid: item.id.iid, projectID: item.id.projectID,
+                        repositoryPath: presentationRow.displayURL.gitLabProjectPath)
+                    let issues = monitor.issueTags(for: presentationRow.displayRequest)
+                    if !issues.isEmpty { MRIssueTag(issues: issues) }
+                    if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
+                    else if presentationRow.isDraft { BoardDraftBadge() }
                 }
-                if finishedState == nil {
-                    BoardMRApprovalBadge(row: presentationRow, monitor: monitor)
-                }
-                Spacer()
+                Spacer(minLength: 0)
                 HStack(spacing: 0) {
                     if finishedState == nil, let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
                         BoardAutomationToggle(monitor: monitor, target: target, projectPath: item.url.gitLabProjectPath,
@@ -410,12 +393,23 @@ private struct CommandCenterMRDetailContent: View {
                         .accessibilityLabel(Text(.CommandCenter.commandCenterOpenGitLab))
                     headerMenu
                 }
+                .fixedSize()
             }
             .font(.callout).foregroundStyle(.secondary)
             .zIndex(1)
             VStack(alignment: .leading, spacing: 4) {
                 Text(verbatim: presentationRow.displayTitle).font(.title2.weight(.semibold))
                     .lineLimit(3).textSelection(.enabled)
+                HStack(spacing: 0) {
+                    if let author = ReviewingContext(row: presentationRow).author {
+                        BoardCardAuthor(author: author)
+                    }
+                    Spacer(minLength: 16)
+                    if finishedState == nil {
+                        BoardMRApprovalBadge(row: presentationRow, monitor: monitor)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                }
                 if let request = presentationRow.displayRequest {
                     Label { Text(verbatim: request.sourceBranch + " → " + request.targetBranch) } icon: {
                         Image(systemName: "arrow.triangle.branch")

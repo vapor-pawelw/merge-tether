@@ -125,6 +125,103 @@ extension GlabService {
         return issues.compactMap(\.displayIssue)
     }
 
+    func fetchIssueCandidates(for request: GitLabMergeRequest, host: String) async throws -> [MRIssueCandidate] {
+        guard request.projectID > 0, request.iid > 0, request.webURL.isGitLabMergeRequest(host: host, iid: request.iid)
+        else { throw GlabError.decoding("Invalid merge request identity") }
+        if let relations = try? await fetchWorkItemRelations(for: request, host: host) {
+            return relations
+        }
+        try Task.checkCancellation()
+        let endpoint = "/projects/\(request.projectID)/merge_requests/\(request.iid)"
+        async let closing = fetchLegacyIssueCandidates("\(endpoint)/closes_issues", request: request, host: host, relation: .closing)
+        async let related = fetchLegacyIssueCandidates("\(endpoint)/related_issues", request: request, host: host, relation: .related)
+        let (closingIssues, relatedIssues) = try await (closing, related)
+        return closingIssues + relatedIssues
+    }
+
+    func fetchIssueReferencedMergeRequests(for request: GitLabMergeRequest, host: String) async throws -> [GitLabMergeRequest] {
+        // A local !123 reference stays in the MR's project. Ignore qualified references and deduplicate before fetching.
+        let text = String(request.title.prefix(300)) + "\n" + String((request.description ?? "").prefix(6_000))
+        let matches = text.matches(of: /(?:^|[^\w\/!])!([1-9][0-9]*)\b/)
+        var seen = Set([request.iid])
+        let ids = matches.compactMap { Int($0.1) }.filter { seen.insert($0).inserted }.prefix(2)
+        var results: [GitLabMergeRequest] = []
+        for iid in ids {
+            try Task.checkCancellation()
+            do {
+                let related = try await fetchMergeRequest(projectID: request.projectID, iid: iid, host: host)
+                if related.webURL.isGitLabMergeRequest(host: host, iid: iid) { results.append(related) }
+            } catch let GlabError.nonZeroExit(_, diagnostic) where
+                GlabError.hasHTTPStatus(403, in: diagnostic) || GlabError.hasHTTPStatus(404, in: diagnostic) {
+                continue
+            }
+        }
+        return results
+    }
+
+    private func fetchLegacyIssueCandidates(_ endpoint: String, request: GitLabMergeRequest, host: String,
+                                            relation: MRIssueCandidate.Relation) async throws -> [MRIssueCandidate] {
+        let data = try await readMergeRequestAPIResponse(endpoint, host: host, arguments: ["--paginate"], timeout: 15,
+                                                         authorizeLaunch: nil)
+        return try await Self.decodeLegacyIssueCandidates(data, request: request, relation: relation)
+    }
+
+    private nonisolated static func decodeLegacyIssueCandidates(_ data: Data, request: GitLabMergeRequest,
+                                                               relation: MRIssueCandidate.Relation) async throws -> [MRIssueCandidate] {
+        try GlabPaginatedJSON.decode(GitLabClosingIssue.self, from: data).compactMap { $0.candidate(in: request, relation: relation) }
+    }
+
+    private func fetchWorkItemRelations(for request: GitLabMergeRequest, host: String) async throws -> [MRIssueCandidate]? {
+        let query = """
+        query MergeTetherWorkItems($projectPath: ID!, $iid: String!) {
+          project(fullPath: $projectPath) {
+            mergeRequest(iid: $iid) {
+              workItemRelations(first: 100) {
+                nodes { linkType workItem { iid title webUrl description } }
+              }
+            }
+          }
+        }
+        """
+        // Fixed query with variables. This path can only read work item relations.
+        let data = try await readMergeRequestAPIResponse("graphql", host: host,
+            arguments: ["--raw-field", "query=\(query)", "--raw-field", "projectPath=\(request.webURL.gitLabProjectPath)",
+                        "--raw-field", "iid=\(request.iid)"], timeout: 15, authorizeLaunch: nil)
+        return try await Self.decodeWorkItemRelations(data)
+    }
+
+    private nonisolated static func decodeWorkItemRelations(_ data: Data) async throws -> [MRIssueCandidate]? {
+        struct Envelope: Decodable {
+            let data: Data?
+            struct Data: Decodable { let project: Project? }
+            struct Project: Decodable { let mergeRequest: MergeRequest? }
+            struct MergeRequest: Decodable { let workItemRelations: Connection? }
+            struct Connection: Decodable { let nodes: [Node] }
+            struct Node: Decodable {
+                let linkType: String
+                let workItem: WorkItem?
+                struct WorkItem: Decodable {
+                    let iid: String
+                    let title: String
+                    let webUrl: URL?
+                    let description: String?
+                }
+            }
+        }
+        let response = try JSONDecoder().decode(Envelope.self, from: data)
+        return response.data?.project?.mergeRequest?.workItemRelations?.nodes.compactMap { node in
+            guard let item = node.workItem, let iid = Int(item.iid), iid > 0 else { return nil }
+            let issue = RemoteMRIssue(reference: "#\(iid)", title: GitLabClosingIssue.singleLine(item.title, limit: 160), url: item.webUrl)
+            let relation: MRIssueCandidate.Relation = switch node.linkType.uppercased() {
+            case "CLOSES": .closing
+            case "RELATED": .related
+            default: .mentioned
+            }
+            return .init(issue: .init(reference: issue.reference, title: issue.title, url: issue.linkURL),
+                         relation: relation, description: item.description)
+        }
+    }
+
     func fetchFileSHA256(projectID: Int, path: String, ref: String, host: String) async throws -> String {
         struct File: Decodable {
             let filePath: String
@@ -754,6 +851,19 @@ extension GlabService {
         _ endpoint: String, host: String, arguments: [String], timeout: TimeInterval,
         authorizeLaunch: (@MainActor @Sendable () -> Bool)?, decode: (Data) throws -> Value
     ) async throws -> Value {
+        let data = try await readMergeRequestAPIResponse(endpoint, host: host, arguments: arguments,
+                                                         timeout: timeout, authorizeLaunch: authorizeLaunch)
+        do {
+            return try decode(data)
+        } catch {
+            throw GlabError.decoding(error.localizedDescription)
+        }
+    }
+
+    private func readMergeRequestAPIResponse(
+        _ endpoint: String, host: String, arguments: [String], timeout: TimeInterval,
+        authorizeLaunch: (@MainActor @Sendable () -> Bool)?
+    ) async throws -> Data {
         guard let glabPath else { throw GlabError.glabNotInstalled }
         let output: ProcessRunner.Output
         do {
@@ -773,10 +883,6 @@ extension GlabService {
         guard output.exitCode == 0 else {
             throw GlabError.classify(exitCode: output.exitCode, stderr: output.stderr)
         }
-        do {
-            return try decode(output.stdout)
-        } catch {
-            throw GlabError.decoding(error.localizedDescription)
-        }
+        return output.stdout
     }
 }

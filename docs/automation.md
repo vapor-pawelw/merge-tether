@@ -385,14 +385,28 @@ Mac and iPhone show a tag beside the MR number when a task is in scope. A single
 linked task opens in the browser. A reference without a known URL is displayed
 as text. A count opens a list of the tasks and their available links.
 
-The Mac reads GitLab's closing issues when it discovers a tracked MR or its
-context changes. Ordinary polls reuse a successful response for ten minutes.
-Refreshing an MR from its Mac details or finishing an app-managed
-agent run requests a fresh read. When Details opens or an agent run succeeds,
-the configured verifier can also look for explicit external task references
-in the MR title and description under the existing automation permissions.
-The source branch supplies context. The verifier needs a source excerpt for
-each accepted task, and an external URL must appear in that excerpt.
+The Mac reads the MR's linked work items, including **Relates to**, from GitLab.
+Hosts without the GraphQL relation field supply candidates through the closing
+and related issues REST endpoints. The configured verifier uses its existing
+model and reasoning settings to judge which tasks the MR implements, including
+references found in its title and description. Closing links are strong
+evidence. Related items, dependencies, background references and mentions
+appear only when the verifier finds concrete work for that task in the MR.
+Additional text references require a source excerpt, and their URLs must appear
+in that excerpt. Equivalent issue URLs and repeated references are deduplicated
+within each MR. For related or mentioned candidates, up to two same-project MRs
+referenced in the current MR's text can corroborate the scope of a follow-up.
+
+Under the existing automation permissions, a board refresh puts the due MRs,
+including drafts, in one background verifier request and saves a separate result
+for each MR. Board and detail refreshes complete independently of issue checks
+and show confirmed tags as soon as they are available. Ordinary polls
+reuse a successful response for ten minutes and skip the verifier when the
+refreshed evidence matches the saved result. A manual board refresh requests a
+fresh batch. Very large boards continue with remaining due MRs on later polls
+when the request reaches its input limit. **Refresh from GitLab** in MR Details
+reassesses that MR independently on Mac and iPhone. Opening Details can assess
+an uncached MR, and a successful app-managed agent run requests a fresh check.
 
 Successful results, including empty results, are saved under the Mac
 installation's Application Support directory and keyed to the account and MR

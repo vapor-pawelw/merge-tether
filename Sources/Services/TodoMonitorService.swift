@@ -14,6 +14,8 @@ final class TodoMonitorService {
     var draftRegeneration: DraftRegenerationCoordinator { attention.draftRegeneration }
     let authoredMergeRequests: AuthoredMergeRequestMonitor
     @ObservationIgnored var mergeRequestIssues: MRIssueCoordinator?
+    @ObservationIgnored var forcedIssueBoardRevision: UInt64?
+    @ObservationIgnored var issueDetailsRefreshes = 0
     private var boardDisplayMetadata = MRDisplayMetadataCache()
     @ObservationIgnored private let boardProjectorCache: ObservedPresentationCache<MRBoardProjector?>
     @ObservationIgnored let boardSnapshotCache: ObservedPresentationCache<MergeRequestBoardSnapshot>
@@ -304,6 +306,9 @@ final class TodoMonitorService {
             self?.recordBoardDisplayRequest(request, for: target, url: request.webURL,
                 accountRevision: revision, readStartedAt: readStartedAt)
         }
+        attention.onIssueCatalogRefreshed = { [weak self] requests in
+            self?.assessCatalogIssues(requests)
+        }
         authoredMergeRequests.onObservedMergeRequests = { [weak self] requests, observedAt in
             self?.recordOwnedLifecycleObservations(requests, observedAt: observedAt)
         }
@@ -370,7 +375,7 @@ final class TodoMonitorService {
                 await self.refreshNow()
                 if handoff.operationalExecution?.state == .succeeded {
                     let work = handoff.key.work
-                    await self.refreshIssueMetadata(projectID: work.projectID, iid: work.iid,
+                    self.enqueueIssueMetadataRefresh(projectID: work.projectID, iid: work.iid,
                         host: work.host, username: handoff.key.username)
                 }
             }
@@ -976,6 +981,7 @@ final class TodoMonitorService {
     /// A visible user request may join a background read. Its intent remains until the
     /// existing catalog children settle; it never changes their fetch or action policy.
     func refreshManually() async {
+        markBoardIssueRefresh()
         await refreshProgress.perform(scope: .global, accountRevision: glab.accountRevision,
             currentAccountRevision: { self.glab.accountRevision },
             isRefreshing: { self.isLoading || self.attention.isLoading || self.authoredMergeRequests.isLoading },
@@ -983,13 +989,15 @@ final class TodoMonitorService {
     }
 
     func refreshFromGitLab(for id: MergeRequestAttentionMonitor.Item.ID) async {
+        issueDetailsRefreshes += 1
+        defer { issueDetailsRefreshes -= 1 }
         let host = glab.resolvedHost, username = glab.currentUsername, revision = glab.accountRevision
         await refreshProgress.perform(scope: .mergeRequest(id), accountRevision: glab.accountRevision,
             currentAccountRevision: { self.glab.accountRevision },
             isRefreshing: { self.isLoading || self.attention.isLoading || self.authoredMergeRequests.isLoading },
             refresh: { await self.forceRefreshFromGitLab() })
         if let host, let username, revision == glab.accountRevision {
-            await refreshIssueMetadata(projectID: id.projectID, iid: id.iid, host: host, username: username)
+            enqueueIssueMetadataRefresh(projectID: id.projectID, iid: id.iid, host: host, username: username)
         }
     }
 

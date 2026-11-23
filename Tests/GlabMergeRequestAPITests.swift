@@ -103,6 +103,26 @@ struct GlabMergeRequestAPITests {
         }
     }
 
+    @Test func workItemCandidatesIncludeAnExplicitRelatesToLink() async throws {
+        try await withFakeGlab(workItemRelations: true) { glab in
+            let request = try await glab.fetchMergeRequest(projectID: 34, iid: 12, host: host)
+            let candidates = try await glab.fetchIssueCandidates(for: request, host: host)
+            #expect(candidates.map(\.relation) == [.related])
+            #expect(candidates.first?.issue.linkURL?.absoluteString == "https://\(host)/group/repo/-/work_items/19")
+            #expect(candidates.first?.description == "Implement the checked workflow")
+        }
+    }
+
+    @Test func legacyGitLabSuppliesClosingAndRelatedCandidates() async throws {
+        try await withFakeGlab { glab in
+            let request = try await glab.fetchMergeRequest(projectID: 34, iid: 12, host: host)
+            let candidates = try await glab.fetchIssueCandidates(for: request, host: host)
+            #expect(candidates.map(\.issue.reference) == ["#42", "PAY-73", "#19"])
+            #expect(candidates.map(\.relation) == [.closing, .closing, .related])
+            #expect(candidates.last?.issue.linkURL?.absoluteString == "https://\(host)/group/repo/-/issues/19")
+        }
+    }
+
     @Test func reviewerSuggestionsSearchProjectUsersAndExcludeBlockedAccounts() async throws {
         try await withFakeGlab { glab in
             let matches = try await glab.searchProjectReviewers(projectID: 34, query: "a+b &", host: host)
@@ -402,6 +422,7 @@ struct GlabMergeRequestAPITests {
 
     private func withFakeGlab(
         expectMerge: Bool = false,
+        workItemRelations: Bool = false,
         _ body: (GlabService) async throws -> Void
     ) async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -474,6 +495,16 @@ struct GlabMergeRequestAPITests {
             ;;
           'api /projects/34/merge_requests/12/closes_issues --hostname \(host) --paginate')
             printf '%s\\n' '[{"id":101,"iid":42,"title":"Prevent duplicate retries","web_url":"https://\(host)/other/project/-/issues/42"}]' '[{"id":"PAY-73","title":"Export date"}]'
+            ;;
+          'api /projects/34/merge_requests/12/related_issues --hostname \(host) --paginate')
+            printf '%s' '[{"id":102,"iid":19,"project_id":34,"title":"Handle a related workflow"}]'
+            ;;
+          'api graphql --hostname \(host) --raw-field query=query MergeTetherWorkItems'*' --raw-field projectPath=group/repo --raw-field iid=12')
+            if \(workItemRelations ? "true" : "false"); then
+              printf '%s' '{"data":{"project":{"mergeRequest":{"workItemRelations":{"nodes":[{"linkType":"RELATED","workItem":{"iid":"19","title":"Handle the workflow","webUrl":"https://\(host)/group/repo/-/work_items/19","description":"Implement the checked workflow"}}]}}}}}'
+            else
+              printf '%s' '{"errors":[{"message":"Field workItemRelations does not exist"}]}'
+            fi
             ;;
           'api /projects/34/merge_requests?state=opened&scope=all&per_page=100 --hostname \(host) --paginate')
             printf '%s' '[\(request)]'
