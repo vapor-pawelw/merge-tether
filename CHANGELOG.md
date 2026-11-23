@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
-- Pilot **Review with Read-Only Tools** for manual Codex and Claude reviews on Mac. Use the existing GitLab sign-in to browse relevant context and prepare private draft notes.
+- Add **Full review** to the Mac MR menu. Codex or Claude can review the entire current change and prepare private drafts using your existing GitLab sign-in.
 
 - Show the tasks a merge request implements beside its number on Mac and iPhone. Open a single linked task directly or browse multiple tasks in a popover. Read closing issues from GitLab and use the configured assistant to assess external references in the MR.
 
