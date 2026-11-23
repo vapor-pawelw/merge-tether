@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Refresh GitLab after the Mac wakes. Keep the Mac awake during active agent tasks on external power, with an option in Automation settings.
+
 - Bind comment review completion to its account and revision across Mac, iPhone and automatic publication. Recheck comments and drafts before opening the path to re-review.
 
 - Preselect **Safe** during automation setup so new users start with private drafts and confirm public GitLab actions.

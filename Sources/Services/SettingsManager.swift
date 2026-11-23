@@ -59,6 +59,7 @@ final class SettingsManager {
     /// overrides presets and per-MR choices at runtime without changing them.
     private(set) var automationGloballyEnabled: Bool
     var confirmGlobalAutomationChanges: Bool
+    var keepMacAwakeDuringAgentTasks: Bool
     /// Automation as configured. Presentation reads this so the killswitch only stops execution
     /// and never changes how cards, menus or groupings look.
     var configuredAutomation: AutomationSettings { automation.ignoringGlobalSuspension }
@@ -124,6 +125,7 @@ final class SettingsManager {
         let globallyEnabled = defaults.bool(forKey: Key.automationGloballyEnabled)
         automationGloballyEnabled = globallyEnabled
         confirmGlobalAutomationChanges = defaults.bool(forKey: Key.confirmGlobalAutomationChanges)
+        keepMacAwakeDuringAgentTasks = defaults.bool(forKey: Key.keepMacAwakeDuringAgentTasks)
         var runtimeAutomation = loadedAutomation
         runtimeAutomation.isGloballySuspended = !globallyEnabled
         automation = runtimeAutomation
@@ -243,6 +245,7 @@ final class SettingsManager {
         defaults.set(notificationsEnabled, forKey: Key.notificationsEnabled)
         defaults.set(autoHandledEventBannersEnabled, forKey: Key.autoHandledEventBannersEnabled)
         defaults.set(confirmGlobalAutomationChanges, forKey: Key.confirmGlobalAutomationChanges)
+        defaults.set(keepMacAwakeDuringAgentTasks, forKey: Key.keepMacAwakeDuringAgentTasks)
         defaults.set(onboardingCompleted, forKey: Key.onboardingCompleted)
         defaults.set(launchAtLoginPreference, forKey: Key.launchAtLoginPreference)
         if let glabPath {
@@ -403,6 +406,7 @@ final class SettingsManager {
             Key.autoHandledEventBannersEnabled: true,
             Key.automationGloballyEnabled: true,
             Key.confirmGlobalAutomationChanges: true,
+            Key.keepMacAwakeDuringAgentTasks: true,
             Key.boardGrouping: MRBoardGrouping.withoutAutomation.rawValue,
             Key.ownAutomationOffExpanded: true,
             Key.reviewingAutomationOffExpanded: true,
@@ -419,6 +423,7 @@ final class SettingsManager {
         static let automation = "automation"
         static let automationGloballyEnabled = "automationGloballyEnabled"
         static let confirmGlobalAutomationChanges = "confirmGlobalAutomationChanges"
+        static let keepMacAwakeDuringAgentTasks = "keepMacAwakeDuringAgentTasks"
         static let automationReceipts = "automationReceipts"
         static let automationAttemptReceipts = "automationAttemptReceipts"
         static let authorFeedbackAttempts = "authorFeedbackAttempts"

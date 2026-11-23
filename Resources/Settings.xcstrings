@@ -111,6 +111,28 @@
         }
       }
     },
+    "settings.automation.keep.mac.awake": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep Mac awake during agent tasks on external power"
+          }
+        }
+      }
+    },
+    "settings.automation.keep.mac.awake.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The display can sleep. Your Mac follows its usual sleep settings on battery and between agent tasks."
+          }
+        }
+      }
+    },
     "settings.automation.workspace.choose": {
       "extractionState": "manual",
       "localizations": {

@@ -37,15 +37,17 @@ enum AssistantUsageRunner {
         let healthCapture = HealthCapture()
         let launchCapture = LaunchCapture()
         do {
-            let output = try await ProcessRunner.run(executable, arguments: arguments, environment: environment,
-                currentDirectory: currentDirectory, timeout: timeout, input: input, outputDirectory: outputDirectory, onOutput: {
-                    capture.set(AssistantUsageParser.parse($0.stdout, assistant: usage.assistant, model: usage.model))
-                    if let issue = AssistantCLIHealthIssue.parse($0, assistant: usage.assistant), healthCapture.recordFirst() {
-                        let observedAt = Date()
-                        Task { @MainActor in health.record(issue, assistant: usage.assistant, executable: executable,
-                            startedAt: startedAt, observedAt: observedAt) }
-                    }
-                }, authorizeLaunch: authorizeLaunch, onStarted: { launchCapture.markStarted() })
+            let output = try await AssistantPowerActivity.whileRunning {
+                try await ProcessRunner.run(executable, arguments: arguments, environment: environment,
+                    currentDirectory: currentDirectory, timeout: timeout, input: input, outputDirectory: outputDirectory, onOutput: {
+                        capture.set(AssistantUsageParser.parse($0.stdout, assistant: usage.assistant, model: usage.model))
+                        if let issue = AssistantCLIHealthIssue.parse($0, assistant: usage.assistant), healthCapture.recordFirst() {
+                            let observedAt = Date()
+                            Task { @MainActor in health.record(issue, assistant: usage.assistant, executable: executable,
+                                startedAt: startedAt, observedAt: observedAt) }
+                        }
+                    }, authorizeLaunch: authorizeLaunch, onStarted: { launchCapture.markStarted() })
+            }
             if let issue = AssistantCLIHealthIssue.parse(output, assistant: usage.assistant) {
                 await health.record(issue, assistant: usage.assistant, executable: executable, startedAt: startedAt,
                     observedAt: Date())

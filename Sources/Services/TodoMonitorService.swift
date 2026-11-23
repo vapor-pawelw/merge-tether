@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -248,6 +249,8 @@ final class TodoMonitorService {
             attention?.authorFeedbackCoordinator?.reviewContext(for: request, fingerprint: fingerprint)
         })
     private var timer: Timer?
+    @ObservationIgnored private var wakeObserver: NSObjectProtocol?
+    @ObservationIgnored private var wakeRefreshPending = false
     private var hasCompletedFirstFetch: Bool { todoStore.hasCompletedFirstFetch }
 
     init(
@@ -280,6 +283,7 @@ final class TodoMonitorService {
         self.attention = MergeRequestAttentionMonitor(glab: glab, settings: settings,
                                                        authorFeedbackAssessmentDirectory: feedbackAssessments)
         self.authoredMergeRequests = AuthoredMergeRequestMonitor(settings: settings, glab: glab)
+        AssistantPowerActivity.configure(enabled: settings.keepMacAwakeDuringAgentTasks)
         todoStore.onAcknowledged = { [weak self] id in
             if self?.failedAutomationTodoID == id { self?.failedAutomationTodoID = nil }
         }
@@ -918,12 +922,36 @@ final class TodoMonitorService {
                 await self?.refreshNow()
             }
         }
+        if wakeObserver == nil, ApplicationLaunchMode.resolve(environment: ProcessInfo.processInfo.environment) == .application {
+            wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification,
+                object: NSWorkspace.shared, queue: .main) { [weak self] _ in
+                Task { @MainActor in await self?.refreshAfterSystemWake() }
+            }
+        }
     }
 
     func stopTimer() {
         stopAutomaticRetries()
         timer?.invalidate()
         timer = nil
+        wakeRefreshPending = false
+        if let wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
+            self.wakeObserver = nil
+        }
+    }
+
+    func refreshAfterSystemWake() async {
+        guard timer != nil else { return }
+        wakeRefreshPending = true
+        await refreshNow()
+    }
+
+    func setKeepMacAwakeDuringAgentTasks(_ enabled: Bool) {
+        guard settings.keepMacAwakeDuringAgentTasks != enabled else { return }
+        settings.keepMacAwakeDuringAgentTasks = enabled
+        settings.save()
+        AssistantPowerActivity.configure(enabled: enabled)
     }
 
     func markMenuOpened() {
@@ -958,7 +986,14 @@ final class TodoMonitorService {
     }
 
     func refreshNow() async {
-        guard !Task.isCancelled, todoStore.beginRefresh() else { return }
+        repeat {
+            guard !Task.isCancelled, todoStore.beginRefresh() else { return }
+            wakeRefreshPending = false
+            await refreshInbox()
+        } while wakeRefreshPending && timer != nil
+    }
+
+    private func refreshInbox() async {
         refreshAvailableAssistants()
         refreshAssistantRelay()
         defer {
@@ -1151,7 +1186,7 @@ final class TodoMonitorService {
     }
 
     func prepareForTermination() {
-        stopAutomaticRetries()
+        stopTimer()
         attention.automationConfigurationChanged()
         automation.cancelRunningScripts()
         AssistantAutomationRunner.prepareForTermination(settings: settings)

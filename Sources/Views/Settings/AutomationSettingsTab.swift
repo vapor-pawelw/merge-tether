@@ -477,6 +477,16 @@ struct AutomationSettingsTab: View {
         ReviewParticipationSettingsSection(monitor: monitor)
         WorkerExecutionTimeoutSettingsView(policy: $draft.workerExecutionTimeout, repositories: timeoutRepositories)
         Section {
+            Toggle(isOn: Binding(
+                get: { settings.keepMacAwakeDuringAgentTasks },
+                set: { monitor.setKeepMacAwakeDuringAgentTasks($0) }
+            )) {
+                Text(.Settings.settingsAutomationKeepMacAwake)
+            }
+        } footer: {
+            Text(.Settings.settingsAutomationKeepMacAwakeHelp)
+        }
+        Section {
             HStack {
                 TextField(text: $draft.assistantWorkspace) {
                     Text(.Settings.settingsAutomationWorkspace)
