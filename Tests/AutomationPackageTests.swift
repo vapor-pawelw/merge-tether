@@ -606,8 +606,8 @@ struct AutomationPackageTests {
         #expect(settings.authorFeedback.promptTemplate == "My custom task")
     }
 
-    @Test func onboardingOffersFullByDefaultOnlyBeforeTheUserHasChosen() {
-        #expect(AutomationPreset.onboardingDefault(for: .undecided) == .full)
+    @Test func onboardingOffersSafeByDefaultOnlyBeforeTheUserHasChosen() {
+        #expect(AutomationPreset.onboardingDefault(for: .undecided) == .safe)
         #expect(AutomationPreset.onboardingDefault(for: .enabled) == nil)
         #expect(AutomationPreset.onboardingDefault(for: .disabled) == nil)
     }

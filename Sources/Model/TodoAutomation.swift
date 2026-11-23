@@ -142,7 +142,7 @@ enum AutomationPreset: String, CaseIterable, Codable, Hashable, Sendable {
     }
 
     static func onboardingDefault(for decision: AutomationPackageDecision) -> Self? {
-        decision == .undecided ? .full : nil
+        decision == .undecided ? .safe : nil
     }
 }
 

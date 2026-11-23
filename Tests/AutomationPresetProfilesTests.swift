@@ -152,7 +152,6 @@ struct AutomationPresetProfilesTests {
     }
     @Test func fourPublicChoicesKeepTheLegacyProfileOutOfThePicker() {
         #expect(AutomationPreset.allCases == [.manual, .safe, .trusted, .full])
-        #expect(AutomationPreset.onboardingDefault(for: .undecided) == .full)
     }
 
     @Test(arguments: [AutomationPreset.manual, .safe, .trusted, .full])
