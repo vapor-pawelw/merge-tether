@@ -6,19 +6,15 @@ final class AssistantSetupSession {
     let assistant: AutomationAssistant
     private(set) var status: AssistantDependencyStatus?
     private(set) var isWorking = false
-    private(set) var failed = false
     private(set) var canCommit = false
     private let probe: @MainActor (AutomationAssistant) async -> AssistantDependencyStatus
-    private let install: @MainActor (AutomationAssistant) async throws -> Void
     private var generation = UUID()
     private var cancelled = false
 
     init(assistant: AutomationAssistant,
-         probe: @escaping @MainActor (AutomationAssistant) async -> AssistantDependencyStatus = AssistantCLI.detect,
-         install: @escaping @MainActor (AutomationAssistant) async throws -> Void = AssistantCLI.install) {
+         probe: @escaping @MainActor (AutomationAssistant) async -> AssistantDependencyStatus = AssistantCLI.detect) {
         self.assistant = assistant
         self.probe = probe
-        self.install = install
     }
     func verify() async -> Bool {
         guard !cancelled else { return false }
@@ -26,7 +22,6 @@ final class AssistantSetupSession {
         generation = current
         isWorking = true
         canCommit = false
-        failed = false
         let result = await probe(assistant)
         guard current == generation, !Task.isCancelled, !cancelled else { return false }
         status = result
@@ -35,23 +30,6 @@ final class AssistantSetupSession {
         return canCommit
     }
 
-    func installAndVerify() async -> Bool {
-        guard !cancelled, !isWorking else { return false }
-        let current = generation
-        isWorking = true
-        failed = false
-        do {
-            try await install(assistant)
-            guard current == generation, !Task.isCancelled else { return false }
-            return await verify()
-        } catch {
-            guard current == generation else { return false }
-            isWorking = false
-            failed = true
-            canCommit = false
-            return false
-        }
-    }
     func cancel() {
         cancelled = true
         generation = UUID()

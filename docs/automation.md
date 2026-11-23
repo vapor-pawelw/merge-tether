@@ -64,7 +64,7 @@ When all feedback is verified, required replies are published and the existing a
 
 ## CLI setup and execution
 
-Choose **No coding agent**, **Codex CLI**, or **Claude CLI** in **Settings → General → Coding agent**. A verified provider change saves immediately and applies to manual agent actions and automation. Setup verifies the executable, supported headless options and sign-in before accepting a selection. A missing or incompatible CLI can be installed through the provider’s official installer; sign-in opens Terminal. Cancelling or failing setup keeps the previous selection.
+Choose **No coding agent**, **Codex CLI**, or **Claude CLI** in **Settings → General → Coding agent**. A verified provider change saves immediately and applies to manual agent actions and automation. Setup verifies the executable, supported headless options and sign-in before accepting a selection. For a missing or incompatible CLI, setup opens the provider’s installation guide. Follow the guide and choose **Check again** when the CLI is available. Sign-in opens Terminal. Cancelling or failing setup keeps the previous selection.
 
 The CLI requirement applies even when automatic re-review verification is off. Desktop installation does not establish CLI readiness. Dependency checks run independently of GitLab polling. An action that needs an agent offers to open the agent settings when the CLI is unavailable. Affected merge requests show a hold with a setup and resume action. Manual publication and other GitLab actions that do not require an agent remain available.
 

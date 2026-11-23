@@ -1772,10 +1772,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Install or update CLI"
+            "value": "Open CLI installation guide"
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Zainstaluj lub uaktualnij CLI"}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz instrukcję instalacji CLI"}}
       }
     },
     "settings.assistant.setup.installHelp": {
@@ -1784,10 +1784,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Use the button below to run the provider’s CLI installer, then sign in if needed."
+            "value": "Follow the provider’s instructions to install or update the CLI, then return here and check again."
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Poniższy przycisk uruchomi instalator CLI dostawcy. Po instalacji zaloguj się, jeśli to konieczne."}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Zainstaluj lub uaktualnij CLI zgodnie z instrukcją dostawcy, a potem wróć tutaj i sprawdź ponownie."}}
       }
     },
     "settings.assistant.setup.signIn": {

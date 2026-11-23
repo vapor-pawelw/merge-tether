@@ -175,26 +175,22 @@ struct AssistantDependenciesTests {
         #expect(await task.value == false)
         #expect(!setup.canCommit)
     }
-    @MainActor @Test func failedInstallationAndMissingCLIKeepSelectionUncommitted() async {
-        let setup = AssistantSetupSession(assistant: .codex,
-            probe: { _ in .missingCLI }, install: { _ in throw AssistantCLI.SetupError.installationFailed })
-        #expect(await setup.verify() == false)
-        #expect(await setup.installAndVerify() == false)
-        #expect(!setup.canCommit)
+    @Test(arguments: AutomationAssistant.allCases)
+    func installationGuidesUseOfficialDocumentation(_ assistant: AutomationAssistant) {
+        let guide = AssistantCLI.installationGuide(for: assistant)
+        #expect(guide.scheme == "https")
+        #expect(guide.host == (assistant == .codex ? "learn.chatgpt.com" : "code.claude.com"))
+        #expect(guide.path == (assistant == .codex ? "/docs/codex/cli" : "/docs/en/setup"))
     }
 
-    @MainActor @Test func cancellingInstallationRejectsLateInstallerSuccess() async {
-        var resume: CheckedContinuation<Void, Error>?
-        let setup = AssistantSetupSession(assistant: .claude,
-            probe: { _ in .ready(URL(fileURLWithPath: "/example/cli")) },
-            install: { _ in try await withCheckedThrowingContinuation { resume = $0 } })
-        let task = Task { await setup.installAndVerify() }
-        for _ in 0..<1000 where resume == nil { await Task.yield() }
-        guard let resume else { Issue.record("Installation must be awaited"); return }
-        setup.cancel()
-        resume.resume()
-        #expect(await task.value == false)
+    @MainActor @Test func recheckingAfterExternalInstallationUpdatesReadiness() async {
+        var state: AssistantDependencyStatus = .missingCLI
+        let setup = AssistantSetupSession(assistant: .codex, probe: { _ in state })
+        #expect(await setup.verify() == false)
         #expect(!setup.canCommit)
+        state = .ready(URL(fileURLWithPath: "/example/cli"))
+        #expect(await setup.verify())
+        #expect(setup.canCommit)
     }
 
     @MainActor @Test func olderSuccessfulCheckCannotOverrideANewerFailedCheck() async {

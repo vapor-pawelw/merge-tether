@@ -83,25 +83,13 @@ enum AssistantCLI {
         return failure
     }
 
-    enum SetupError: Error { case installationFailed }
+    enum SetupError: Error { case loginLaunchFailed }
 
-    static func install(_ assistant: AutomationAssistant) async throws {
-        let url = URL(string: assistant == .codex ? "https://chatgpt.com/codex/install.sh" : "https://claude.ai/install.sh")!
-        let (data, response) = try await URLSession.shared.data(from: url)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200, !data.isEmpty, data.count < 2_000_000 else {
-            throw SetupError.installationFailed
+    static func installationGuide(for assistant: AutomationAssistant) -> URL {
+        switch assistant {
+        case .codex: URL(string: "https://learn.chatgpt.com/docs/codex/cli#install-codex")!
+        case .claude: URL(string: "https://code.claude.com/docs/en/setup#install-claude-code")!
         }
-        try Task.checkCancellation()
-        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        defer { try? FileManager.default.removeItem(at: folder) }
-        let script = folder.appending(path: "install.sh")
-        try data.write(to: script)
-        var env = environment
-        env["CODEX_NON_INTERACTIVE"] = "1"
-        let output = try await ProcessRunner.run(URL(fileURLWithPath: "/bin/bash"), arguments: [script.path],
-                                                 environment: env, currentDirectory: .homeDirectory, timeout: 180)
-        guard output.exitCode == 0 else { throw SetupError.installationFailed }
     }
 
     @MainActor
@@ -115,6 +103,6 @@ enum AssistantCLI {
         try Data(command.utf8).write(to: script, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
         // .command uses the user's macOS file association for terminal scripts.
-        guard NSWorkspace.shared.open(script) else { throw SetupError.installationFailed }
+        guard NSWorkspace.shared.open(script) else { throw SetupError.loginLaunchFailed }
     }
 }
