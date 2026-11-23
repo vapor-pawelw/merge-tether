@@ -106,7 +106,16 @@ enum AICommentAssessmentStore {
         return [current, legacy]
     }
 
-    /// Pending verdicts preserve a completed opinion, but are never read by publication eligibility.
+    nonisolated static func pendingSealContext(for path: URL) -> String {
+        "ai-pending:" + path.standardizedFileURL.path
+    }
+
+    private nonisolated static func requiresPendingSeal(_ verdict: AICommentOriginAssessment.Note,
+        purpose: AICommentAssessment.Purpose?) -> Bool {
+        purpose != .display && verdict.classification == .aiAssisted && verdict.confidence != .uncertain
+    }
+
+    /// A pending opinion that can enable publication must already have app authentication.
     nonisolated static func pendingVerdict(for note: GitLabMergeRequestDiscussion.Note, target: MRAutomationScope.Target,
         assistant: AutomationAssistant, model: String, thinking: VerificationThinking = .high,
         purpose: AICommentAssessment.Purpose? = nil, in directory: URL) throws -> AICommentOriginAssessment.Note? {
@@ -116,9 +125,11 @@ enum AICommentAssessmentStore {
             do { data = try Data(contentsOf: path) }
             catch let error as CocoaError where error.code == .fileReadNoSuchFile { continue }
             guard data.count < 16384 else { throw AICommentOriginAssessor.AssessmentError.invalidEvidence }
-            let pending = try JSONDecoder().decode(PendingVerdict.self, from: data)
+            let payload = EvidenceSeal.open(data, context: pendingSealContext(for: path))
+            let pending = try JSONDecoder().decode(PendingVerdict.self, from: payload ?? data)
             guard pending.version == 1, pending.context == context else { throw AICommentOriginAssessor.AssessmentError.invalidEvidence }
             try AICommentOriginAssessor.validate(.init(notes: [pending.verdict]), noteIDs: [context.noteID])
+            if payload == nil, requiresPendingSeal(pending.verdict, purpose: purpose) { continue }
             return pending.verdict
         }
         return nil
@@ -139,7 +150,10 @@ enum AICommentAssessmentStore {
             attributes: [.posixPermissions: 0o700])
         let redacted = AICommentOriginAssessment.Note(noteID: verdict.noteID, classification: verdict.classification,
             confidence: verdict.confidence, evidence: GlabService.redactWorkflowEvidence(verdict.evidence))
-        try JSONEncoder().encode(PendingVerdict(version: 1, context: context, verdict: redacted)).write(to: path, options: .atomic)
+        let encoded = try JSONEncoder().encode(PendingVerdict(version: 1, context: context, verdict: redacted))
+        let sealed = try? EvidenceSeal.seal(encoded, context: pendingSealContext(for: path))
+        if sealed == nil, requiresPendingSeal(redacted, purpose: purpose) { return redacted }
+        try (sealed ?? encoded).write(to: path, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
         return redacted
     }
@@ -237,8 +251,8 @@ enum AICommentAssessmentStore {
         return record
     }
 
-    nonisolated static func sealContext(host: String, projectID: Int, iid: Int, noteID: Int) -> String {
-        "ai-assessment:\(host):\(projectID):\(iid):\(noteID)"
+    nonisolated static func sealContext(for path: URL) -> String {
+        "ai-assessment:" + path.standardizedFileURL.path
     }
 
     nonisolated static func result(
@@ -251,10 +265,10 @@ enum AICommentAssessmentStore {
     nonisolated static func stored(
         for note: GitLabMergeRequestDiscussion.Note, host: String, projectID: Int, iid: Int, in directory: URL
     ) -> (record: AICommentAssessment, sealed: Bool)? {
-        guard let id = note.id, let body = note.body, !body.isEmpty,
-              let data = try? Data(contentsOf: fileURL(host: host, projectID: projectID, iid: iid, noteID: id, in: directory)),
-              data.count < 16384 else { return nil }
-        let payload = EvidenceSeal.open(data, context: sealContext(host: host, projectID: projectID, iid: iid, noteID: id))
+        guard let id = note.id, let body = note.body, !body.isEmpty else { return nil }
+        let path = fileURL(host: host, projectID: projectID, iid: iid, noteID: id, in: directory)
+        guard let data = try? Data(contentsOf: path), data.count < 16384 else { return nil }
+        let payload = EvidenceSeal.open(data, context: sealContext(for: path))
         guard let record = try? JSONDecoder().decode(AICommentAssessment.self, from: payload ?? data) else { return nil }
         guard [1, 2].contains(record.version) && record.host == host && record.projectID == projectID && record.iid == iid
             && record.noteID == id && AICommentOriginAssessment.Classification(rawValue: record.classification) != nil
@@ -286,8 +300,7 @@ enum AICommentAssessmentStore {
             try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let encoded = try JSONEncoder().encode(record)
             // Without the signing key the record is still useful for display, but never authorizes publication.
-            let stored = (try? EvidenceSeal.seal(encoded, context: sealContext(host: target.host,
-                projectID: target.projectID, iid: iid, noteID: result.noteID))) ?? encoded
+            let stored = (try? EvidenceSeal.seal(encoded, context: sealContext(for: path))) ?? encoded
             try stored.write(to: path, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
             written.append(record)

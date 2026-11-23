@@ -806,7 +806,9 @@ struct AICommentOriginTests {
             for: note(), target: target, assistant: .codex, model: "cheap", thinking: .medium, in: directory)
         let pendingDirectory = directory.appending(path: ".pending-origin-verdicts")
         let path = try #require(FileManager.default.contentsOfDirectory(at: pendingDirectory, includingPropertiesForKeys: nil).first)
-        var journal = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+        let payload = try #require(try EvidenceSeal.open(Data(contentsOf: path),
+            context: AICommentAssessmentStore.pendingSealContext(for: path)))
+        var journal = try #require(JSONSerialization.jsonObject(with: payload) as? [String: Any])
         var context = try #require(journal["context"] as? [String: Any])
         context.removeValue(forKey: "thinking")
         journal["context"] = context
@@ -858,12 +860,39 @@ struct AICommentOriginTests {
         try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
         let payload = try JSONEncoder().encode(record)
         // A seal made for another MR's note cannot be moved onto this one.
-        try EvidenceSeal.seal(payload, context: AICommentAssessmentStore.sealContext(host: target.host, projectID: 7, iid: 14, noteID: 10))
-            .write(to: path)
+        let otherPath = AICommentAssessmentStore.fileURL(host: target.host, projectID: 7, iid: 14, noteID: 10, in: directory)
+        try EvidenceSeal.seal(payload, context: AICommentAssessmentStore.sealContext(for: otherPath)).write(to: path)
         #expect(AICommentAssessmentStore.assessment(for: source, host: target.host, projectID: 7, iid: 13, in: directory) == nil)
-        try EvidenceSeal.seal(payload, context: AICommentAssessmentStore.sealContext(host: target.host, projectID: 7, iid: 13, noteID: 10))
-            .write(to: path)
+        try EvidenceSeal.seal(payload, context: AICommentAssessmentStore.sealContext(for: path)).write(to: path)
         #expect(AICommentAssessmentStore.assessment(for: source, host: target.host, projectID: 7, iid: 13, in: directory) != nil)
+    }
+
+    @Test func unsealedPendingAIResultCannotAuthorizePublication() throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let source = note()
+        let verdict = try #require(positive([source]).notes.first)
+        try AICommentAssessmentStore.preservePendingVerdict(verdict, for: source, target: target,
+            assistant: .codex, model: "cheap", purpose: .publication, in: directory)
+        let path = try #require(FileManager.default.contentsOfDirectory(
+            at: directory.appending(path: ".pending-origin-verdicts"), includingPropertiesForKeys: nil).first)
+        let data = try Data(contentsOf: path)
+        let legacyPayload = try #require(EvidenceSeal.open(data, context: AICommentAssessmentStore.pendingSealContext(for: path)))
+        try legacyPayload.write(to: path)
+        #expect(try AICommentAssessmentStore.pendingVerdict(for: source, target: target, assistant: .codex,
+            model: "cheap", purpose: .publication, in: directory) == nil)
+    }
+
+    @Test func sealedAssessmentCannotChangeCriteriaDirectories() throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let source = note()
+        try AICommentAssessmentStore.persist(positive([source]), target: target, notes: [source], assistant: .codex,
+            model: "cheap", in: directory)
+        let refined = AICommentAssessmentStore.scopedDirectory(directory, criteriaOverride: "Apply more selective criteria")
+        let from = AICommentAssessmentStore.fileURL(host: target.host, projectID: 7, iid: 13, noteID: 10, in: directory)
+        let to = AICommentAssessmentStore.fileURL(host: target.host, projectID: 7, iid: 13, noteID: 10, in: refined)
+        try FileManager.default.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: from, to: to)
+        #expect(AICommentAssessmentStore.assessment(for: source, host: target.host, projectID: 7, iid: 13, in: refined) == nil)
     }
 
     @Test func unsealedOverridesCanOnlyNarrowPublication() throws {
