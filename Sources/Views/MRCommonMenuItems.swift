@@ -108,6 +108,7 @@ struct CopyMergeRequestLinkButton: View {
 struct MRCommonMenuItems: View {
     let item: MergeRequestAttentionMonitor.Item
     let monitor: TodoMonitorService
+    var boardPin: BoardCardPin? = nil
     var onRemove: (() -> Void)? = nil
     @State private var startingReview = false
     private var isFinished: Bool { MergeRequestFinishedState(item.mergeRequest) != nil }
@@ -125,6 +126,7 @@ struct MRCommonMenuItems: View {
         } else {
             MarkMergeRequestReadyButton(item: item, monitor: monitor)
         }
+        Divider()
         if !isFinished, monitor.canRunReview(for: item) {
             Button {
                 guard let consent = confirmManualReview(for: item, monitor: monitor) else { return }
@@ -141,10 +143,14 @@ struct MRCommonMenuItems: View {
         }
         AssistantContextMenu(mergeRequestURL: item.url, title: item.title,
                              settings: monitor.settings)
+        if let boardPin {
+            Divider()
+            BoardPinButton(pin: boardPin, settings: monitor.settings, placement: .menu)
+        }
         if !isFinished,
            let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
             MRAutomationScopeMenu(monitor: monitor, target: target, projectPath: item.url.gitLabProjectPath,
-                isDraft: item.section == .draftMergeRequests, showsLeadingDivider: true)
+                isDraft: item.section == .draftMergeRequests, showsLeadingDivider: boardPin == nil)
         }
         if !isFinished, let onRemove {
             Divider()

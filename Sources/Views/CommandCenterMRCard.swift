@@ -106,7 +106,12 @@ private struct CommandCenterMRCardContent: View {
         .boardCardInteraction(
             background: colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(white: 0.95),
             backgroundOpacity: contentOpacity, onDetails: onDetails)
-        .contextMenu { menuItems }
+        .contextMenu {
+            Button(action: onDetails) {
+                Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
+            }
+            menuItems
+        }
         .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
             Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
         } message: { Text(.Board.boardRemoveExplanation) }
@@ -277,16 +282,21 @@ private struct CommandCenterMRCardContent: View {
         .fixedSize(horizontal: true, vertical: false)
     }
 
+    private var cardPin: BoardCardPin? {
+        .mergeRequest(host: monitor.glab.resolvedHost, username: monitor.glab.currentUsername,
+            projectID: item.id.projectID, iid: item.id.iid)
+    }
+
     private var cardActions: some View {
         HStack(spacing: 0) {
+            if let cardPin, monitor.settings.boardPins.contains(cardPin) {
+                BoardPinButton(pin: cardPin, settings: monitor.settings)
+            }
             if finishedState == nil, let scopeTarget {
                 BoardAutomationToggle(monitor: monitor, target: scopeTarget,
                     projectPath: item.url.gitLabProjectPath, isDraft: isDraft,
                     policy: MREffectivePolicySummary.presentation(row: row, monitor: monitor).0)
             }
-            BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
-                username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
-                settings: monitor.settings)
             CopyMergeRequestLinkButton(url: item.url, placement: .header)
             moreMenu
         }
@@ -466,8 +476,7 @@ private struct CommandCenterMRCardContent: View {
     }
 
     @ViewBuilder private var menuItems: some View {
-        Button(action: onDetails) { Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") } }
-        MRCommonMenuItems(item: item, monitor: monitor,
+        MRCommonMenuItems(item: item, monitor: monitor, boardPin: cardPin,
             onRemove: allowsRemoval ? { confirmRemoval = true } : nil)
     }
 

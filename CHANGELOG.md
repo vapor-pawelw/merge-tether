@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Pin and unpin a merge request from the Mac board card's More menu. Pinned cards show an unpin button next to automation. The menu groups agent actions separately, and selecting the card opens Details.
+
 - Keep merge request messages beside the approvals and tags when they overlap vertically, and let messages below them use the full card width. Place bottom actions below both areas on Mac and iPhone.
 
 - Give the Mac card's More menu the same 24 pt square as the other action buttons. Center the action row vertically with the repository reference.
