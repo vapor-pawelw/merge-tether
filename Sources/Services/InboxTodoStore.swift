@@ -145,7 +145,7 @@ final class InboxTodoStore {
             settings.save()
         case .failure(let error):
             lastError = error
-            Log.monitor.error("Mark-as-done failed for \(todo.id, privacy: .public): \(String(describing: error), privacy: .public)")
+            Log.monitor.error("Mark-as-done failed for \(todo.id, privacy: .public): \(String(describing: error), privacy: .private)")
         }
     }
 }

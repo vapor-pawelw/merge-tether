@@ -1106,7 +1106,7 @@ final class TodoMonitorService {
             }
 
         case .failure(let err):
-            Log.monitor.error("Refresh failed: \(String(describing: err), privacy: .public)")
+            Log.monitor.error("Refresh failed: \(String(describing: err), privacy: .private)")
             lastError = err
             // A transient read failure retains the last account-bound inbox.
         }

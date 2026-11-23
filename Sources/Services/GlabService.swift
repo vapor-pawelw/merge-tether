@@ -200,7 +200,7 @@ final class GlabService {
             return .success(todos)
         } catch {
             let snippet = String(data: output.stdout.prefix(200), encoding: .utf8) ?? ""
-            Log.glab.error("Decode failed: \(error.localizedDescription, privacy: .public) — \(snippet, privacy: .public)")
+            Log.glab.error("Decode failed: \(error.localizedDescription, privacy: .private) — \(snippet, privacy: .private)")
             return .failure(.decoding(error.localizedDescription))
         }
     }
