@@ -299,7 +299,7 @@ struct AuthorFeedbackMergeTests {
             settings.save()
             await monitor.resumeAutomaticMerge(for: target)
             #expect(gitlab.has("merged") == (gate == "ready"))
-            #expect(gitlab.has("queued") == (gate == "pipeline"))
+            #expect(!gitlab.has("queued"))
         }
     }
 

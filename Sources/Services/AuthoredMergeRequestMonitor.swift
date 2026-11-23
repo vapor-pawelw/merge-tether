@@ -334,7 +334,9 @@ final class AuthoredMergeRequestMonitor {
             guard isCurrent(account), glab.accountRevision == revision else { return }
 
             let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
+            // Keep the ordinary automatic merge's final feedback check after CI, close to the write.
             if status.mayAutoMerge, let policy = evaluation.policy, request.sha != nil,
+               policy.usesMergeTrain || policy.action == .mergeNow,
                automaticMergeTarget == nil || (automaticMergeTarget?.projectID == request.projectID && automaticMergeTarget?.iid == request.iid),
                isCurrent(account), glab.accountRevision == revision, permitsAutomaticMerge(request, account: account),
                !AssistantAutomationRunner.isWorking(on: work),

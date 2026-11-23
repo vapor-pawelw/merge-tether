@@ -583,6 +583,69 @@ import Testing
         }
     }
 
+    @Test(arguments: ["ready", "newFeedback", "manualQueue"])
+    func ordinaryAutomaticMergeWaitsForAFreshCheckAfterCI(_ scenario: String) async throws {
+        try await fixture { glab, gitlab, request in
+            let suite = "OrdinaryAutomaticMergeAfterCI.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let settings = SettingsManager(defaults: defaults)
+            settings.onboardingCompleted = true
+            settings.notificationsEnabled = false
+            settings.automation.packageDecision = .enabled
+            settings.automation.autoMergeEnabled = true
+            gitlab.write("ordinary-project")
+            gitlab.write("pipeline-running")
+            gitlab.write("outcome", "queued")
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in true })
+            var assessedNoteIDs: [Int] = []
+            let assessment = ReReviewAssessment(notes: [
+                .init(noteID: 10, state: .blocking, reason: "The new requirement is still outstanding.")
+            ])
+            monitor.authorFeedbackAllowsMerge = { _, discussions, authorID in
+                assessedNoteIDs = discussions.flatMap(\.notes).compactMap(\.id)
+                return assessment.hasNoRemainingAuthorWork(in: discussions, authorID: authorID)
+            }
+
+            monitor.refreshIfNeeded()
+            while monitor.isLoading { await Task.yield() }
+
+            let running = try #require(monitor.requests.first)
+            #expect(running.action == .enqueue)
+            #expect(running.mayMergeManually)
+            #expect(running.submissionState == .none)
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+            #expect(settings.mergeSubmissions.isEmpty)
+
+            if scenario == "manualQueue" {
+                #expect(await monitor.mergeManually(request, action: .enqueue) == .queued)
+            } else {
+                if scenario == "newFeedback" { gitlab.write("drift", "newFeedback") }
+                gitlab.remove("pipeline-running")
+                gitlab.write("pipeline-success")
+                gitlab.write("outcome", "merged")
+                monitor.refreshIfNeeded()
+                while monitor.isLoading { await Task.yield() }
+            }
+
+            let writes = gitlab.requests.filter { $0.method != "GET" }
+            if scenario == "newFeedback" {
+                #expect(assessedNoteIDs == [10])
+                #expect(writes.isEmpty)
+                #expect(monitor.requests.first?.request.headPipeline?.status == "success")
+                #expect(monitor.requests.first?.submissionState == MergeSubmissionState.none)
+                #expect(settings.mergeSubmissions.isEmpty)
+            } else {
+                #expect(writes.count == 1)
+                let write = try #require(writes.first)
+                #expect(write.endpoint == "/projects/1/merge_requests/2/merge" && write.method == "PUT")
+                #expect(write.arguments.contains("auto_merge=true") == (scenario == "manualQueue"))
+                #expect(settings.mergeSubmissions.first?.state == (scenario == "manualQueue" ? .queued : .merged))
+                #expect(gitlab.requests.filter { $0.endpoint.hasSuffix("/approval_state") }.count >= 2)
+            }
+        }
+    }
+
     @Test func aUserOwnedQueueIsNotAutomaticallyReplacedAfterItDisappears() async throws {
         try await fixture { glab, gitlab, _ in
             let suite = "ObservedMergeQueue.\(UUID())"
@@ -1037,7 +1100,7 @@ import Testing
         }
     }
 
-    @Test(arguments: [false, true], ["mergeNow", "autoMerge", "mergeTrain"])
+    @Test(arguments: [false, true], ["mergeNow", "mergeTrain", "runningTrain"])
     func manualAndAutomaticSubmissionUseGitLabsCurrentApprovals(_ automatic: Bool, _ mode: String) async throws {
         try await fixture { glab, gitlab, request in
             let suite = "MergeWithCurrentApprovals.\(UUID())"
@@ -1048,12 +1111,12 @@ import Testing
             settings.automation.applyPreset(.full, for: .codex)
             settings.automation.allowAssistantTools = true
             settings.automation.autoMergeEnabled = automatic
-            let train = mode == "mergeTrain"
-            let action: MergeSubmissionAction = mode == "mergeNow" ? .mergeNow : .enqueue
-            let outcome: MergeSubmissionState = train ? .inTrain : action == .enqueue ? .queued : .merged
+            let train = mode != "mergeNow"
+            let action: MergeSubmissionAction = train ? .enqueue : .mergeNow
+            let outcome: MergeSubmissionState = train ? .inTrain : .merged
             if !train { gitlab.write("ordinary-project") }
-            if mode == "autoMerge" { gitlab.write("pipeline-running") }
-            gitlab.write("outcome", train ? "train-only" : action == .enqueue ? "queued" : "merged")
+            if mode == "runningTrain" { gitlab.write("pipeline-running") }
+            gitlab.write("outcome", train ? "train-only" : "merged")
             let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in true })
             if automatic { monitor.refreshIfNeeded() }
             else { monitor.setVisible(true) }
@@ -1126,6 +1189,8 @@ import Testing
                 if gitlab.has("pipeline-running") {
                     object["detailed_merge_status"] = "ci_still_running"
                     object["head_pipeline"] = ["id": 4, "status": "running"]
+                } else if gitlab.has("pipeline-success") {
+                    object["head_pipeline"] = ["id": 4, "status": "success"]
                 }
                 if drift == "head" { object["sha"] = String(repeating: "b", count: 40) }
                 if drift == "target" { object["target_branch"] = "parent" }
@@ -1150,7 +1215,7 @@ import Testing
                     }
                     return try InMemoryGitLab.json([["id": "train", "notes": notes]])
                 }
-                return InMemoryGitLab.output(drift == "newFeedback" ? #"[{"id":"new","notes":[{"id":10,"author":{"id":7},"system":false,"body":"New condition"}]}]"# : "[]")
+                return InMemoryGitLab.output(drift == "newFeedback" ? #"[{"id":"new","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":false,"body":"New condition"}]}]"# : "[]")
             case "/projects/1/repository/branches/main":
                 return try InMemoryGitLab.json(["commit": ["id": String(repeating: "b", count: 40)]])
             case "/projects/1/repository/branches/feature":
