@@ -114,8 +114,7 @@ private struct CommandCenterMRCardContent: View {
     }
 
     @ViewBuilder private var cardHeading: some View {
-        BoardMRReferenceLine(iid: item.id.iid, projectID: item.id.projectID,
-            repositoryPath: row.displayURL.gitLabProjectPath, contentOpacity: contentOpacity)
+        cardReference
         Button(action: onDetails) {
             BoardCardTitle(title: row.displayTitle, repositoryPath: row.displayURL.gitLabProjectPath,
                 titleColor: !isDraft && isMuted ? .secondary : .primary)
@@ -134,6 +133,20 @@ private struct CommandCenterMRCardContent: View {
         }
         cardActions.zIndex(1)
         statusBadges.zIndex(1)
+    }
+
+    @ViewBuilder private var cardReference: some View {
+        let reference = BoardMRReferenceLine(iid: item.id.iid, projectID: item.id.projectID,
+            repositoryPath: row.displayURL.gitLabProjectPath, contentOpacity: contentOpacity)
+        let issues = monitor.issueTags(for: row.displayRequest)
+        if issues.isEmpty {
+            reference
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                reference
+                MRIssueTag(issues: issues).opacity(contentOpacity)
+            }
+        }
     }
 
     private var cardStatus: some View {

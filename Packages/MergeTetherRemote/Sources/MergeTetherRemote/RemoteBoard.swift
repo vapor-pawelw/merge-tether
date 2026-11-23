@@ -203,6 +203,26 @@ public struct RemoteApprovalProgress: Codable, Equatable, Sendable {
     }
 }
 
+public struct RemoteMRIssue: Codable, Equatable, Hashable, Sendable {
+    public let reference: String
+    public let title: String?
+    public let url: URL?
+
+    public init(reference: String, title: String? = nil, url: URL? = nil) {
+        self.reference = reference
+        self.title = title
+        self.url = url
+    }
+
+    public var linkURL: URL? {
+        guard let url, url.absoluteString.utf8.count <= 2_048,
+              let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              ["https", "http"].contains(parts.scheme?.lowercased() ?? ""),
+              let host = parts.host, !host.isEmpty, parts.user == nil, parts.password == nil else { return nil }
+        return url
+    }
+}
+
 public struct RemoteCard: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var title: String
@@ -220,6 +240,7 @@ public struct RemoteCard: Codable, Equatable, Identifiable, Sendable {
     public var dependencies: RemoteMRDependencies?
     public var approvals: RemoteApprovalProgress?
     public var contextRevision: String?
+    public var issues: [RemoteMRIssue]?
     public var completionObservedAt: Date?
     public var orderGroup: RemoteBoardOrderGroup?
     public init(id: String, title: String, project: String, url: URL?, head: String? = nil,
@@ -251,6 +272,7 @@ public struct RemoteBoard: Codable, Equatable, Sendable {
     public var automationPaused: Bool?
     public var lanes: [RemoteLane]
     public var draftRegeneration: RemoteDraftRegenerationControl?
+    public var issueTagsOmitted: Bool?
     public init(hostSession: UUID, account: String, updatedAt: Date? = nil, partial: Bool = false, lanes: [RemoteLane],
                 automationPaused: Bool? = nil, draftRegeneration: RemoteDraftRegenerationControl? = nil) {
         self.hostSession = hostSession; self.account = account; self.updatedAt = updatedAt
@@ -396,6 +418,34 @@ public struct RemoteMessage: Codable, Sendable {
         self.boardOrderMove = boardOrderMove
         self.boardOrderApplied = boardOrderApplied
         self.reviewerSearch = reviewerSearch; self.reviewerResults = reviewerResults
+    }
+}
+
+extension RemoteMessage {
+    /// Leave room for the board itself when optional issue metadata would exceed the transport limit.
+    public func fittingIssueTags() -> Self {
+        guard type == .snapshot, let board, board.lanes.contains(where: { $0.cards.contains { $0.issues != nil } }),
+              let size = try? JSONEncoder().encode(self).count, size > RemoteCipher.maximumPayloadBytes else { return self }
+        var result = self
+        var shortened = board
+        for lane in shortened.lanes.indices {
+            for card in shortened.lanes[lane].cards.indices {
+                shortened.lanes[lane].cards[card].issues = shortened.lanes[lane].cards[card].issues?.map {
+                    .init(reference: $0.reference, url: $0.url)
+                }
+            }
+        }
+        result.board = shortened
+        if let size = try? JSONEncoder().encode(result).count, size <= RemoteCipher.maximumPayloadBytes { return result }
+        for lane in shortened.lanes.indices {
+            for card in shortened.lanes[lane].cards.indices { shortened.lanes[lane].cards[card].issues = nil }
+        }
+        shortened.issueTagsOmitted = true
+        result.board = shortened
+        if let size = try? JSONEncoder().encode(result).count, size <= RemoteCipher.maximumPayloadBytes { return result }
+        // An otherwise valid legacy-size snapshot may have no bytes left even for the omission flag.
+        result.board?.issueTagsOmitted = nil
+        return result
     }
 }
 

@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import MergeTetherRemote
 
 extension GlabService {
     func fetchMergeRequestApprovalProgress(projectID: Int, iid: Int, host: String) async throws -> MergeRequestApprovalProgress? {
@@ -115,6 +116,13 @@ extension GlabService {
             throw GlabError.decoding("GitLab returned a different merge request")
         }
         return request
+    }
+
+    func fetchClosingIssues(projectID: Int, iid: Int, host: String) async throws -> [RemoteMRIssue] {
+        guard projectID > 0, iid > 0 else { throw GlabError.decoding("Invalid merge request identity") }
+        let issues: [GitLabClosingIssue] = try await fetchMergeRequestPages(
+            "/projects/\(projectID)/merge_requests/\(iid)/closes_issues", host: host)
+        return issues.compactMap(\.displayIssue)
     }
 
     func fetchFileSHA256(projectID: Int, path: String, ref: String, host: String) async throws -> String {

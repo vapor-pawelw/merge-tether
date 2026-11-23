@@ -465,6 +465,7 @@ struct RemoteCardView: View {
             if expanded { Spacer(minLength: 4) }
             if let iid = card.mergeRequestIID {
                 Text(verbatim: "!\(iid)").monospacedDigit().fixedSize().opacity(contentOpacity)
+                if let issues = card.issues, !issues.isEmpty { MRIssueTag(issues: issues).opacity(contentOpacity) }
             }
             if !expanded, card.orderGroup?.pinned == true {
                 Image(systemName: "pin.fill")

@@ -149,6 +149,8 @@ import MergeTetherRemote
                         item.authorFeedbackStatus?.fingerprint ?? ""] + feedbackIDs
                     card = self.card(item, account: account, extraActions: extras, context: context)
                     card = self.presentation(card, model: presentation)
+                    let issues = monitor.issueTags(for: row.displayRequest)
+                    if !issues.isEmpty { card.issues = issues }
                     if let head = card.head, let host = monitor.glab.resolvedHost,
                        let username = monitor.glab.currentUsername, account == "\(username)@\(host)" {
                         let target = MRAutomationScope.Target(host: host, username: username, projectID: item.id.projectID, iid: item.id.iid)

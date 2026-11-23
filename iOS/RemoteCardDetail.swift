@@ -28,6 +28,7 @@ struct RemoteCardDetail: View {
     }
     private func headerCard(_ details: RemoteMRDetails?) -> RemoteCard {
         var card = current
+        if model.state.board?.issueTagsOmitted == true { card.issues = details?.issues }
         if let approvals = details?.approvals {
             card.approvals = approvals.progress ?? card.approvals
             card.presentation?.approvalPeople = approvals.people

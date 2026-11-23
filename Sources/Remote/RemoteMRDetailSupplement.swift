@@ -19,6 +19,7 @@ import MergeTetherRemote
         let item = row.evidenceMatchesCatalogContext ? row.item : row.displayItem
         guard let request = row.displayRequest, let host = monitor.glab.resolvedHost,
               let username = monitor.glab.currentUsername else { return }
+        details.issues = monitor.issueTags(for: request)
         let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
         let people = request.personDirectory(approvals: item.approvalProgress, notes: item.feedback)
         let assessment = details.discussionFingerprint.flatMap {

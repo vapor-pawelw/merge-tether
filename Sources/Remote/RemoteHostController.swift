@@ -317,7 +317,7 @@ extension RemoteConnection: RemoteHostTransport {}
             var board = snapshot()
             if !fresh { board.partial = true }
             do { try await active.send(.init(type: .snapshot, challenge: challenge, board: board,
-                capabilities: Self.boardCapabilities)) }
+                capabilities: Self.boardCapabilities).fittingIssueTags()) }
             catch { failed = true; try? await active.send(.init(type: .unavailable)); return }
             if message.capabilities?.contains(RemoteMessage.boardAvatarsCapability) == true {
                 guard avatarChallenge == challenge else { return }
@@ -331,7 +331,7 @@ extension RemoteConnection: RemoteHostTransport {}
             let applied = board.permitsOrderMove(move) && applyBoardOrderMove(move)
             if applied { board = snapshot() }
             do { try await active.send(.init(type: .snapshot, challenge: challenge, board: board,
-                capabilities: Self.boardCapabilities, boardOrderApplied: applied)) }
+                capabilities: Self.boardCapabilities, boardOrderApplied: applied).fittingIssueTags()) }
             catch { failed = true; try? await active.send(.init(type: .unavailable)) }
         case .receipt:
             guard let command = message.command, let challenge = message.challenge, let pairing else { return }
@@ -485,6 +485,7 @@ extension RemoteConnection: RemoteHostTransport {}
         cancelDetailAvatars()
         clearOriginSubscription()
         let cachedOnly = request.cachedOnly == true
+        monitor.requestIssueAssessment(for: source)
         let nextRead = lastDetailRead.addingTimeInterval(1)
         let digest = card.detailContextDigest
         detailTask?.cancel(); activeDetailRequest = request
@@ -569,7 +570,11 @@ extension RemoteConnection: RemoteHostTransport {}
         let cached = recentDetails[request.cardID].flatMap { $0.digest == digest ? $0 : nil }
         let discussionRead = monitor.glab.cachedDiscussions(projectID: source.projectID, iid: source.iid)
         let newerDiscussions = discussionRead.map { $0.readAt > (cached?.readAt ?? .distantPast) } ?? false
-        if let cached, !newerDiscussions, checkedAt <= cached.readAt { return cached.details }
+        if let cached, !newerDiscussions, checkedAt <= cached.readAt {
+            var details = cached.details
+            details.issues = monitor.issueTags(for: source)
+            return details
+        }
         let item = row.evidenceMatchesCatalogContext ? row.item : row.displayItem
         var details = await Task.detached(priority: .userInitiated) {
             RemoteMRDetailLoader.project(request: source, progress: item.approvalProgress, rules: nil, reviewers: nil,

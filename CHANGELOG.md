@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Show the tasks a merge request implements beside its number on Mac and iPhone. Open a single linked task directly or browse multiple tasks in a popover. Read closing issues from GitLab and use the configured assistant to assess external references in the MR.
+
 - Refresh GitLab after the Mac wakes. Keep the Mac awake during active agent tasks on external power, with an option in Automation settings.
 
 - Bind comment review completion to its account and revision across Mac, iPhone and automatic publication. Recheck comments and drafts before opening the path to re-review.
