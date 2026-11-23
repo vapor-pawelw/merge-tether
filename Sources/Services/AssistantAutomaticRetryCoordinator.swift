@@ -77,7 +77,8 @@ final class AssistantAutomaticRetryCoordinator {
             requested = false
             if reconcileRecordedChildren() { settings.save(); onChange?() }
             let jobs = settings.assistantHandoffs
-            let assessments = AssistantAutomaticRetryPolicy.assess(jobs.map { candidate($0) }, attempts: settings.assistantAutomaticRetryAttempts)
+            let candidates = jobs.filter { $0.readOnlyReview != true }.map { candidate($0) }
+            let assessments = AssistantAutomaticRetryPolicy.assess(candidates, attempts: settings.assistantAutomaticRetryAttempts)
             var plans: [AssistantAutomaticRetryPolicy.Plan] = []
             var exhausted: Set<UUID> = []
             for assessment in assessments {

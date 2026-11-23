@@ -125,6 +125,13 @@ extension GlabService {
         return issues.compactMap(\.displayIssue)
     }
 
+    func fetchReviewSourceFile(projectID: Int, path: String, head: String, host: String) async throws -> Data {
+        guard projectID > 0 else { throw CancellationError() }
+        let encoded = try Self.encodeRepositoryFilePath(path, ref: head)
+        return try await mergeRequestAPI("/projects/\(projectID)/repository/files/\(encoded)/raw?ref=\(head)",
+            host: host, decode: { $0 })
+    }
+
     func fetchFileSHA256(projectID: Int, path: String, ref: String, host: String) async throws -> String {
         struct File: Decodable {
             let filePath: String

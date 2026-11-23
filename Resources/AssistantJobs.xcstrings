@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "assistant.jobs.read.only.review": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review with Read-Only Tools (Pilot)"
+          }
+        }
+      }
+    },
     "assistant.jobs.title": {
       "extractionState": "manual",
       "localizations": {

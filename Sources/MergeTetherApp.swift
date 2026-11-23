@@ -4,6 +4,17 @@ import SwiftUI
 @main
 enum MergeTetherMain {
     @MainActor static func main() {
+        let arguments = Array(CommandLine.arguments.dropFirst())
+        if arguments == ["--review-mcp"] {
+            ReviewToolClient.serve()
+            return
+        }
+        if arguments.first == "--review-cli" {
+            let reply = ReviewToolClient.call(Array(arguments.dropFirst()))
+            let stream = reply.failed ? FileHandle.standardError : .standardOutput
+            stream.write(Data((reply.text + "\n").utf8))
+            exit(reply.failed ? 1 : 0)
+        }
         if ApplicationLaunchMode.resolve(environment: ProcessInfo.processInfo.environment) == .testHost {
             let application = NSApplication.shared
             let delegate = MergeTetherTestHostDelegate()

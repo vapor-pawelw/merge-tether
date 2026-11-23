@@ -98,6 +98,14 @@ The same bounded read recovery applies before automatic approval and workflow ad
 
 When an assigned check needs an installed, configured local runtime that is stopped, workers may start it through its service CLI and verify readiness before reporting a blocker. For an active OrbStack Docker context, they check `orbctl status` and `docker info`, bound startup to 60 seconds, then reconcile local Git state before retrying the failed check once. They do not install tools, change global runtime versions or Docker contexts, edit global hooks, relax checks, reset services, or replay remote writes. Coding-agent GUI integration remains outside the headless task.
 
+### Review with Read-Only Tools (Pilot)
+
+Start this manual review from the MR card menu on Mac. It uses the selected Codex or Claude CLI and your existing GitLab sign-in. MergeTether supplies the same `mergetether` tool to either provider. The tool exposes `--help`, `context`, `diff`, `discussions`, `file show`, `work-item show` and `change show`. Repository files are read at the source commit under review. Work items and other changes can be read in the current project and other active repositories configured in Scope on the same GitLab host.
+
+The provider receives only the review tool for those queries. GitLab credentials stay with the app-side adapter for these calls. The provider CLI itself still runs under your Mac account with its normal sign-in. A blocked tool or changed review context can stop the review. Each response has a 512 KiB limit, and a session accepts up to 128 reads.
+
+The agent returns draft proposals. MergeTether checks the live account, merge request, discussions and private drafts before saving them. This pilot produces private Draft Notes and does not issue an approval verdict. It stays opt-in while the existing manual and automatic review paths remain available.
+
 ## Agent usage estimates
 
 **Settings → Agent usage** compares work started by MergeTether through Codex CLI and Claude CLI. Overall and role cards separate coding-agent work (reviews, follow-ups, conflicts and pipeline fixes) from lightweight verification and classification, with reported input/cached/output tokens and unknown or partial runs. Choose Today, 7 days, 30 days, the current month or all tracked time. Provider bars can group by hour, day, ISO week or month; hover for the bucket's estimate and separate Codex/Claude amounts. The graph shows at most the latest 1,000 buckets and marks truncation; summary totals still cover the entire selected range.
