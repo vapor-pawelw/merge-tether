@@ -27,6 +27,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     private var supportsCachedDetails = false
     private(set) var supportsOriginUpdates = false
     private(set) var supportsDraftRegeneration = false
+    /// The Mac accepts structured style presets. Free-form instructions are never sent from the phone.
+    private(set) var supportsDraftRegenerationStyles = false
     private(set) var supportsReviewerBatches = false
     var boardOrderMoveRejected = false
     private(set) var draftRegenerationLoadFailed = false
@@ -313,6 +315,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                 if accepted, message.type == .result, let result = message.result, result.status != .running {
                     await self.finishAction(result)
                 }
+                    self.supportsDraftRegenerationStyles = self.supportsDraftRegeneration
+                        && message.capabilities?.contains(RemoteMessage.draftRegenerationStylesCapability) == true
                 if accepted, message.type == .accepted, let command = self.state.pending,
                    command.isDraftRegeneration, command.actionID == RemoteDraftRegenerationControl.applyID {
                     await self.refresh(fromGitLab: false)
@@ -679,10 +683,11 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         })
     }
 
-    func startDraftRegeneration(_ scope: DraftRegenerationScope, instructions: String?) async -> Bool {
+    func startDraftRegeneration(_ scope: DraftRegenerationScope, style: DraftRegenerationStyle?) async -> Bool {
         let count = draftRegenerationCount(for: scope)
-        guard count > 0, (instructions?.utf8.count ?? 0) <= DraftRegenerationScope.maximumInstructionsBytes else { return false }
-        return await performDraftRegeneration(.start(scope: scope, count: count, instructions: instructions),
+        // A Mac that predates style presets would ignore the field, so never send one it did not announce.
+        guard count > 0, style == nil || supportsDraftRegenerationStyles else { return false }
+        return await performDraftRegeneration(.start(scope: scope, count: count, instructions: nil, style: style),
                                               kind: .startDraftRegeneration) == .completed
     }
 
@@ -863,6 +868,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         let challenge = UUID(), revision = connectionRevision
         receiptChallenge = challenge; receiptRevision = revision
         do { try await connection.send(.init(type: .receipt, challenge: challenge, command: recovery.command)) }
+        supportsDraftRegenerationStyles = false
         catch {
             guard self.connection === connection, connectionRevision == revision, receiptChallenge == challenge else { return }
             self.error = true

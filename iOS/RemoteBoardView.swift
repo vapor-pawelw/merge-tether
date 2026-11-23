@@ -290,7 +290,15 @@ extension RemotePhoneModel {
             mergeRequestCount: { self.draftRegenerationMergeRequestCount },
             isLoading: { self.draftRegenerationIsLoading }, loadFailed: { self.draftRegenerationLoadFailed },
             reload: { await self.reloadDraftRegeneration() },
-            start: { await self.startDraftRegeneration($0, instructions: $1) },
+            guidanceChoices: supportsDraftRegenerationStyles ? .styles : .none,
+            start: { scope, guidance in
+                // The phone offers only Mac-defined styles; free-form instructions stay local to the Mac.
+                switch guidance {
+                case nil: await self.startDraftRegeneration(scope, style: nil)
+                case .style(let style)?: await self.startDraftRegeneration(scope, style: style)
+                case .instructions?: false
+                }
+            },
             apply: { await self.applyDraftRegeneration($0, batchID: $1) },
             discard: { await self.discardDraftRegeneration($0) })
     }

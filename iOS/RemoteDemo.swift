@@ -214,7 +214,9 @@ import MergeTetherRemote
             if delay { try await Task.sleep(for: .seconds(8)) }
             if message.refresh == true { try await Task.sleep(for: .milliseconds(300)); board.updatedAt = .now; self.board = board }
             var capabilities = [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability]
-            if board.draftRegeneration != nil { capabilities.append(RemoteMessage.draftRegenerationCapability) }
+            if board.draftRegeneration != nil {
+                capabilities += [RemoteMessage.draftRegenerationCapability, RemoteMessage.draftRegenerationStylesCapability]
+            }
             await onMessage?(.init(type: .snapshot, challenge: message.challenge, board: board,
                 capabilities: capabilities + (slowResponses ? [RemoteMessage.detailPreviewCapability] : [])))
         } else if let request = message.draftRegenerationRequest {
@@ -296,7 +298,7 @@ import MergeTetherRemote
 
     private func performRegeneration(_ operation: RemoteDraftRegenerationOperation?) -> RemoteCommandResult.Status {
         switch operation {
-        case .start(let scope, _, _)?:
+        case .start(let scope, _, _, _)?:
             let proposals = [
                 DraftRegenerationProposal(projectID: 1, iid: 42, draftID: 1, mergeRequestTitle: "Add a clearer payment confirmation",
                     original: "Handled the retry case and added coverage for the duplicate response.",

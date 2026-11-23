@@ -56,7 +56,8 @@ extension RemoteConnection: RemoteHostTransport {}
         RemoteMessage.mrControlsCapability, RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability,
         RemoteMessage.detailPreviewCapability, RemoteMessage.cachedDetailsCapability, RemoteMessage.draftRegenerationCapability,
         RemoteMessage.boardOrderCapability, RemoteMessage.personalApprovalCapability, RemoteMessage.reviewerEditingCapability,
-        RemoteMessage.reviewerBatchCapability, RemoteMessage.cardActionsCapability
+        RemoteMessage.reviewerBatchCapability, RemoteMessage.cardActionsCapability,
+        RemoteMessage.draftRegenerationStylesCapability
     ]
     private let readAvatarThumbnail: @Sendable (URL) async -> Data?
     @ObservationIgnored private(set) var avatarTask: Task<Void, Never>?
@@ -769,12 +770,13 @@ extension RemoteConnection: RemoteHostTransport {}
         guard phoneSupportsDraftRegeneration, let operation = RemoteDraftRegenerationOperation(argument: argument) else { return .changed }
         let coordinator = monitor.draftRegeneration
         switch (action.kind, operation) {
-        case (.startDraftRegeneration, .start(let scope, let count, let instructions)):
-            guard count > 0, count == coordinator.count(for: scope),
-                  (instructions?.utf8.count ?? 0) <= DraftRegenerationScope.maximumInstructionsBytes,
+        case (.startDraftRegeneration, .start(let scope, let count, let instructions, let style)):
+            // Free-form text from the phone would become assistant instructions; only Mac-defined styles are accepted.
+            guard instructions == nil, count > 0, count == coordinator.count(for: scope),
                   coordinator.scopeToken(for: .all) == action.token,
                   let scopeToken = coordinator.scopeToken(for: scope) else { return .changed }
-            return coordinator.start(scope, instructions: instructions, expectedToken: scopeToken) ? .completed : .changed
+            return coordinator.startRemote(scope, instructions: nil, style: style, expectedToken: scopeToken)
+                ? .completed : .changed
         case (.applyDraftRegeneration, .apply(let batchID, let proposalIDs)):
             let ids = Set(proposalIDs)
             guard ids.count == proposalIDs.count, !ids.isEmpty, let batch = coordinator.batch,

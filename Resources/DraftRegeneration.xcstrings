@@ -1114,6 +1114,91 @@
         }
       }
     },
+    "draftRegeneration.styleConcise": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Make it more concise"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zwięźlej"
+          }
+        }
+      }
+    },
+    "draftRegeneration.styleFriendlier": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Make it friendlier"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bardziej przyjaźnie"
+          }
+        }
+      }
+    },
+    "draftRegeneration.styleMoreDetailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Explain the reasoning"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wyjaśnij uzasadnienie"
+          }
+        }
+      }
+    },
+    "draftRegeneration.styleMoreDirect": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Make it more direct"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bardziej bezpośrednio"
+          }
+        }
+      }
+    },
+    "draftRegeneration.stylesHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your Mac applies the chosen style. Custom instructions are available only on the Mac."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac zastosuje wybrany styl. Własne instrukcje można dodać tylko na Macu."
+          }
+        }
+      }
+    },
     "draftRegeneration.title": {
       "extractionState": "manual",
       "localizations": {

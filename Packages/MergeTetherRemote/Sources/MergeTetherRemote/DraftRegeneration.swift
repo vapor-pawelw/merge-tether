@@ -9,6 +9,17 @@ public enum DraftRegenerationScope: Codable, Equatable, Sendable {
     case draft(projectID: Int, iid: Int, draftID: Int)
 }
 
+/// A fixed rewriting preference that a paired phone may request.
+///
+/// Remote clients never send prompt text. The Mac maps each case to its own wording,
+/// so a phone cannot add instructions to the assistant run.
+public enum DraftRegenerationStyle: String, Codable, CaseIterable, Equatable, Sendable {
+    case concise
+    case friendlier
+    case moreDetailed
+    case moreDirect
+}
+
 public struct DraftRegenerationProposal: Codable, Equatable, Identifiable, Sendable {
     public enum Issue: String, Codable, Sendable { case unchanged, outdated, changed, unavailable, failed, saved }
 
@@ -91,7 +102,9 @@ public struct RemoteDraftRegenerationControl: Codable, Equatable, Sendable {
 }
 
 public enum RemoteDraftRegenerationOperation: Codable, Equatable, Sendable {
-    case start(scope: DraftRegenerationScope, count: Int, instructions: String?)
+    /// Remote hosts reject a non-nil `instructions` value; it remains decodable so legacy
+    /// phones receive an explicit refusal instead of a malformed command.
+    case start(scope: DraftRegenerationScope, count: Int, instructions: String?, style: DraftRegenerationStyle? = nil)
     case apply(batchID: UUID, proposalIDs: [String])
     case discard(batchID: UUID)
 

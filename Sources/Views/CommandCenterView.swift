@@ -313,7 +313,14 @@ extension TodoMonitorService {
         return DraftRegenerationSheet(presentation: presentation, isAvailable: { coordinator.isAvailable },
             batch: { coordinator.batch }, count: { coordinator.count(for: $0) },
             mergeRequestCount: { coordinator.mergeRequestCount },
-            start: { requireCodingAssistant(self) && coordinator.start($0, instructions: $1) },
+            start: { scope, guidance in
+                let instructions: String? = switch guidance {
+                case nil: nil
+                case .instructions(let text)?: text
+                case .style(let style)?: DraftRegenerationCoordinator.instructions(for: style)
+                }
+                return requireCodingAssistant(self) && coordinator.start(scope, instructions: instructions)
+            },
             apply: { await coordinator.apply($0, batchID: $1) },
             discard: { coordinator.discard($0) })
     }
