@@ -1409,8 +1409,19 @@ final class TodoMonitorService {
         refreshRuntimeAssistantAvailability()
     }
 
-    func retryAssistantJob(_ id: UUID) async {
-        guard let job = assistantHandoffs.first(where: { $0.id == id }), !job.isObsoleteReminder else { return }
+    /// The result of one retry request. Callers that report the outcome elsewhere (such as to a paired phone)
+    /// must use this value: `assistantJobActionError` is shared UI state that concurrent actions overwrite.
+    enum AssistantJobRetryOutcome: Equatable {
+        case queued(UUID)
+        /// The retry was not needed any more; a notice explains why.
+        case obsolete
+        case unavailable
+        case failed
+    }
+
+    @discardableResult
+    func retryAssistantJob(_ id: UUID) async -> AssistantJobRetryOutcome {
+        guard let job = assistantHandoffs.first(where: { $0.id == id }), !job.isObsoleteReminder else { return .unavailable }
         let target = MRAutomationScope.Target(host: job.key.work.host, username: job.key.username,
             projectID: job.key.work.projectID, iid: job.key.work.iid)
         settings.recordAutomationEvent(target: target, action: .retry, origin: .manual, state: .requested, jobID: id)
@@ -1422,13 +1433,14 @@ final class TodoMonitorService {
             authoredMergeRequests.workflow.synchronizeAssistantJobs()
             settings.recordAutomationEvent(target: target, action: .retry, origin: .manual, state: .queued,
                 jobID: replacement.id, relatedJobID: id)
+            return .queued(replacement.id)
         } catch {
             if let pipelineError = error as? AssistantAutomationRunner.HandoffError, pipelineError.isObsoletePipelineRetry {
                 assistantJobActionNotices[id] = pipelineError.localizedDescription
                 settings.recordAutomationEvent(target: target, action: .retry, origin: .manual, state: .completed,
                     message: pipelineError.localizedDescription, jobID: id)
                 await forceRefreshFromGitLab()
-                return
+                return .obsolete
             } else if let known = error as? AssistantAutomationRunner.HandoffError {
                 assistantJobActionError = known.localizedDescription
             } else if error as? AssistantJobExecutor.ExecutionError == .cliUnavailable {
@@ -1446,6 +1458,7 @@ final class TodoMonitorService {
             settings.recordAutomationEvent(target: target, action: .retry, origin: .manual, state: .failed,
                 message: String(describing: error), jobID: id)
             Log.monitor.error("Could not retry assistant job: \(String(describing: error), privacy: .private)")
+            return .failed
         }
     }
 

@@ -564,6 +564,29 @@ import Testing
         #expect(settings.assistantHandoffs.count == 1)
     }
 
+    @Test func retryReportsItsOwnOutcomeRegardlessOfTheSharedActionError() async throws {
+        let (settings, name, defaults) = try fixture()
+        defer { defaults.removePersistentDomain(forName: name) }
+        settings.glabPath = URL(fileURLWithPath: "/usr/bin/false")
+        let unretryable = job(state: nil)
+        settings.assistantHandoffs = [unretryable]
+        let glab = GlabService()
+        let monitor = TodoMonitorService(settings: settings, glab: glab)
+        defer { monitor.stopTimer() }
+        glab.resolvedHost = "gitlab.example.org"
+        glab.currentUsername = "me"
+        try #require(monitor.assistantHandoffs.map(\.id) == [unretryable.id])
+
+        // Another action's failure must not decide this request's result, and vice versa.
+        monitor.assistantJobActionError = "Synthetic concurrent failure"
+        #expect(await monitor.retryAssistantJob(UUID()) == .unavailable)
+        #expect(monitor.assistantJobActionError == "Synthetic concurrent failure")
+
+        #expect(await monitor.retryAssistantJob(unretryable.id) == .failed)
+        monitor.assistantJobActionError = nil
+        #expect(settings.assistantHandoffs.map(\.id) == [unretryable.id])
+    }
+
     @Test func retryOfExistingCLIRunUsesAnUnprefixedTitle() async throws {
         let (settings, name, defaults) = try fixture()
         defer { defaults.removePersistentDomain(forName: name) }

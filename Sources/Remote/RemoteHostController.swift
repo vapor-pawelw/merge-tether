@@ -812,8 +812,11 @@ extension RemoteConnection: RemoteHostTransport {}
             return monitor.currentMRTodoIntents.first(where: { $0.id == id })?.state == .failed ? .failed : .completed
         }
         if action.kind == .retryJob, let id = UUID(uuidString: String(action.id.dropFirst(4))) {
-            await monitor.retryAssistantJob(id)
-            return monitor.assistantJobActionError == nil ? .completed : .failed
+            switch await monitor.retryAssistantJob(id) {
+            case .queued, .obsolete: return .completed
+            case .unavailable: return .changed
+            case .failed: return .failed
+            }
         }
         if card.id.hasPrefix("todo:"), let todo = monitor.currentAccountTodos.first(where: { "todo:\($0.id)" == card.id }) {
             switch action.kind {
@@ -991,8 +994,7 @@ extension RemoteConnection: RemoteHostTransport {}
             return .completed
         case .runReview:
             guard action.id == "runReview", monitor.canRunReview(for: item) else { return .changed }
-            await monitor.runReview(for: item, confirmed: monitor.manualReviewConsent(for: item))
-            return monitor.assistantJobActionError == nil ? .completed : .failed
+            return await monitor.runReview(for: item, confirmed: monitor.manualReviewConsent(for: item)) ? .completed : .failed
         case .publishDraft:
             guard let id = suffix("publishDraft:").flatMap(Int.init),
                   let draft = item.drafts.first(where: { $0.id == id }), DraftPublicationRisk(draft: draft) == nil,
