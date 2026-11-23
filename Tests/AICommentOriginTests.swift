@@ -168,7 +168,7 @@ struct AICommentOriginTests {
         #expect(!AICommentAssessmentStore.eligible(draft, discussions: discussions, userID: 5, duoUserIDs: [],
             host: target.host, projectID: 7, iid: 13, in: directory))
         let path = AICommentAssessmentStore.fileURL(host: target.host, projectID: 7, iid: 13, noteID: 10, in: directory)
-        let storedJSON = try JSONSerialization.jsonObject(with: Data(contentsOf: path))
+        let storedJSON = try JSONSerialization.jsonObject(with: SealedAssessmentFile.payload(at: path))
         var raw = try #require(storedJSON as? [String: Any])
         raw["purpose"] = "unrecognized"
         try JSONSerialization.data(withJSONObject: raw).write(to: path)
@@ -250,7 +250,7 @@ struct AICommentOriginTests {
         let stored = try #require(AICommentAssessmentStore.result(for: note(), host: target.host, projectID: 7, iid: 13, in: directory))
         #expect(stored.classification == classification.rawValue)
         let path = AICommentAssessmentStore.fileURL(host: target.host, projectID: 7, iid: 13, noteID: 10, in: directory)
-        let metadata = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+        let metadata = try #require(JSONSerialization.jsonObject(with: SealedAssessmentFile.payload(at: path)) as? [String: Any])
         #expect(metadata["thinking"] as? String == "high")
         #expect(metadata["username"] as? String == target.username)
         #expect(metadata["authorID"] as? Int == 9)
@@ -466,7 +466,7 @@ struct AICommentOriginTests {
             evidence: "Combined content signals assessed for this exact comment.", classification: classification)
         let path = AICommentAssessmentStore.fileURL(host: target.host, projectID: 7, iid: 13, noteID: 10, in: directory)
         try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(record).write(to: path)
+        try SealedAssessmentFile.write(record, to: path)
         let expected = variant == "high" || variant == "very_high"
         #expect(AICommentAssessmentStore.isAI(source, host: target.host, projectID: 7, iid: 13, in: directory) == expected)
         #expect(!AICommentAssessmentStore.isAI(note(body: "Edited source"), host: target.host, projectID: 7, iid: 13, in: directory))
@@ -495,7 +495,7 @@ struct AICommentOriginTests {
         await settle(coordinator)
         #expect(calls == 1)
         #expect(AICommentAssessmentStore.isAI(source, host: target.host, projectID: 7, iid: 13, in: directory))
-        let saved = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+        let saved = try #require(JSONSerialization.jsonObject(with: SealedAssessmentFile.payload(at: path)) as? [String: Any])
         #expect(saved["criteriaVersion"] as? Int == AICommentOriginAssessor.criteriaVersion)
         let restarted = AICommentOriginCoordinator(directory: directory, assess: assess,
             fetchCurrent: { _ in [source] }, isCurrent: { _, _, _, _ in true })
@@ -512,7 +512,7 @@ struct AICommentOriginTests {
         let record: [String: Any] = ["version": 1, "host": target.host, "projectID": 7, "iid": 13, "noteID": 10,
             "bodySHA256": AICommentAssessmentStore.digest(note.body!), "confidence": "very_high",
             "evidence": ["Generated review structure", "Specific supporting context"]]
-        try JSONSerialization.data(withJSONObject: record).write(to: path)
+        try SealedAssessmentFile.write(JSONSerialization.data(withJSONObject: record), to: path)
         let assessment = AICommentAssessmentStore.assessment(for: note, host: target.host, projectID: 7, iid: 13, in: directory)
         #expect(assessment?.evidence == "Generated review structure\nSpecific supporting context")
         #expect(AICommentAssessmentStore.assessment(for: self.note(body: "Edited"), host: target.host, projectID: 7, iid: 13, in: directory) == nil)
@@ -752,7 +752,7 @@ struct AICommentOriginTests {
             assistant: .codex, model: "cheap", thinking: .high, in: directory) == nil)
     }
 
-    @Test func lateUncertainAssessmentCannotOverwriteCurrentWorkerPositiveButStillRecordsOtherUnknowns() async throws {
+    @Test func anUnsealedWorkerPositiveNeitherAuthorizesNorSurvivesTheAppsOwnAssessment() async throws {
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
         let notes = [note(), note(11, body: "A second source with uncertain origin")]
         var release: CheckedContinuation<Void, Never>?
@@ -769,11 +769,54 @@ struct AICommentOriginTests {
         let path = AICommentAssessmentStore.fileURL(host: target.host, projectID: 7, iid: 13, noteID: 10, in: directory)
         try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONEncoder().encode(workerRecord).write(to: path, options: .atomic)
+        // A plain record written outside the app is visible as a hint but never counts as AI.
+        #expect(AICommentAssessmentStore.result(for: notes[0], host: target.host, projectID: 7, iid: 13, in: directory) != nil)
+        #expect(AICommentAssessmentStore.assessment(for: notes[0], host: target.host, projectID: 7, iid: 13, in: directory) == nil)
         continuation.resume()
         await settle(coordinator)
-        #expect(AICommentAssessmentStore.assessment(for: notes[0], host: target.host, projectID: 7, iid: 13, in: directory)?.evidence == workerRecord.evidence)
-        let other = AICommentAssessmentStore.result(for: notes[1], host: target.host, projectID: 7, iid: 13, in: directory)
-        #expect(other?.classification == "uncertain")
-        #expect(AICommentAssessmentStore.assessment(for: notes[1], host: target.host, projectID: 7, iid: 13, in: directory) == nil)
+        for note in notes {
+            let stored = try #require(AICommentAssessmentStore.stored(for: note, host: target.host, projectID: 7, iid: 13, in: directory))
+            #expect(stored.sealed && stored.record.classification == "uncertain")
+            #expect(AICommentAssessmentStore.assessment(for: note, host: target.host, projectID: 7, iid: 13, in: directory) == nil)
+        }
+    }
+
+    @Test func onlyAnAppSealedRecordForTheSameMergeRequestAndNoteQualifies() throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let source = note()
+        let record = AICommentAssessment(version: 2, host: target.host, projectID: 7, iid: 13, noteID: 10,
+            bodySHA256: AICommentAssessmentStore.digest(source.body!), confidence: "very_high", evidence: "Exact AI provenance.")
+        let path = AICommentAssessmentStore.fileURL(host: target.host, projectID: 7, iid: 13, noteID: 10, in: directory)
+        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let payload = try JSONEncoder().encode(record)
+        // A seal made for another MR's note cannot be moved onto this one.
+        try EvidenceSeal.seal(payload, context: AICommentAssessmentStore.sealContext(host: target.host, projectID: 7, iid: 14, noteID: 10))
+            .write(to: path)
+        #expect(AICommentAssessmentStore.assessment(for: source, host: target.host, projectID: 7, iid: 13, in: directory) == nil)
+        try EvidenceSeal.seal(payload, context: AICommentAssessmentStore.sealContext(host: target.host, projectID: 7, iid: 13, noteID: 10))
+            .write(to: path)
+        #expect(AICommentAssessmentStore.assessment(for: source, host: target.host, projectID: 7, iid: 13, in: directory) != nil)
+    }
+
+    @Test func unsealedOverridesCanOnlyNarrowPublication() throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let source = note()
+        let key = AICommentOriginOverrideStore.Key(host: target.host, projectID: 7, iid: 13, noteID: 10)
+        func record(_ classification: AICommentOriginOverride.Classification) -> AICommentOriginOverride {
+            .init(version: 1, host: target.host, username: target.username, projectID: 7, iid: 13, noteID: 10,
+                  authorID: source.author!.id, bodySHA256: AICommentAssessmentStore.digest(source.body!),
+                  classification: classification, createdAt: .distantPast, activatesAt: .distantPast)
+        }
+        let path = AICommentOriginOverrideStore.fileURL(key, in: directory)
+        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(record(.ai)).write(to: path)
+        #expect(AICommentOriginOverrideStore.stored(key, in: directory) == nil)
+        #expect(!AICommentAssessmentStore.isAI(source, host: target.host, projectID: 7, iid: 13, in: directory))
+        try encoder.encode(record(.human)).write(to: path)
+        #expect(AICommentOriginOverrideStore.stored(key, in: directory)?.classification == .human)
+        try AICommentOriginOverrideStore.save(record(.ai), in: directory)
+        #expect(AICommentOriginOverrideStore.stored(key, in: directory)?.classification == .ai)
+        #expect(AICommentAssessmentStore.isAI(source, host: target.host, projectID: 7, iid: 13, in: directory))
     }
 }

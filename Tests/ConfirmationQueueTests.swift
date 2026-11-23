@@ -464,7 +464,10 @@ import MergeTetherRemote
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let record = AICommentAssessment(version: 1, host: "gitlab.example.org", projectID: 1, iid: 2,
                 noteID: noteID, bodySHA256: AICommentAssessmentStore.digest(body), confidence: "very_high", evidence: "Verified AI provenance")
-            try JSONEncoder().encode(record).write(to: directory.appending(path: "1-2-\(noteID).json"))
+            // Simulates the app's own sealed result; plain records never authorize publication.
+            try EvidenceSeal.seal(JSONEncoder().encode(record), context: AICommentAssessmentStore.sealContext(
+                host: "gitlab.example.org", projectID: 1, iid: 2, noteID: noteID))
+                .write(to: directory.appending(path: "1-2-\(noteID).json"))
         }
 
         func verifyFollowUpDrafts() throws {
@@ -3398,7 +3401,8 @@ import MergeTetherRemote
         try harness.recordVerdict("objections", head: head)
         let lateProof = AICommentAssessment(version: 1, host: host, projectID: 1, iid: 2, noteID: 41,
             bodySHA256: AICommentAssessmentStore.digest("Later AI finding"), confidence: "very_high", evidence: "Verified AI provenance")
-        try JSONEncoder().encode(lateProof).write(to: harness.folder.appending(path: "late-ai-assessment.json"))
+        try EvidenceSeal.seal(JSONEncoder().encode(lateProof), context: AICommentAssessmentStore.sealContext(
+            host: host, projectID: 1, iid: 2, noteID: 41)).write(to: harness.folder.appending(path: "late-ai-assessment.json"))
         try await harness.poll()
         let preview = try #require(harness.monitor.currentItems.first)
         #expect(preview.automaticDraftIDs == [12])

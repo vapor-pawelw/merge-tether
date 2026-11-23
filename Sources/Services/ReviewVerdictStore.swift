@@ -356,11 +356,18 @@ enum ReviewVerdictStore {
     }
 
     /// Digests of the user's own drafts seen on this MR, so their published comments don't invalidate a verdict.
+    /// Only an app-sealed list counts. An unsealed or older list is ignored, so the user's published
+    /// comments invalidate the verdict as unknown comments would and the MR needs a fresh review.
     nonisolated static func seenDrafts(host: String, projectID: Int, iid: Int, in directory: URL = directory) -> Set<String> {
         let url = draftsURL(host: host, projectID: projectID, iid: iid, in: directory)
         guard let data = try? Data(contentsOf: url), data.count < 100_000,
-              let digests = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+              let payload = EvidenceSeal.open(data, context: seenDraftsContext(host: host, projectID: projectID, iid: iid)),
+              let digests = try? JSONDecoder().decode([String].self, from: payload) else { return [] }
         return Set(digests)
+    }
+
+    nonisolated static func seenDraftsContext(host: String, projectID: Int, iid: Int) -> String {
+        "seen-drafts:\(host):\(projectID):\(iid)"
     }
 
     nonisolated static func rememberDrafts(_ drafts: [GitLabDraftNote], host: String, projectID: Int, iid: Int, in directory: URL = directory) {
@@ -371,7 +378,9 @@ enum ReviewVerdictStore {
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
                                                     attributes: [.posixPermissions: 0o700])
-            try JSONEncoder().encode(Array(known.union(new)).sorted().suffix(500)).write(to: url, options: .atomic)
+            let encoded = try JSONEncoder().encode(Array(known.union(new)).sorted().suffix(500))
+            try EvidenceSeal.seal(encoded, context: seenDraftsContext(host: host, projectID: projectID, iid: iid))
+                .write(to: url, options: .atomic)
         } catch {
             Log.monitor.error("Could not remember review drafts: \(String(describing: error), privacy: .private)")
         }

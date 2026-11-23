@@ -60,6 +60,23 @@ import Testing
                                    publishedDrafts: [AICommentAssessmentStore.digest("Thanks")]))
     }
 
+    @Test func unsealedSeenDraftListsAreIgnored() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = ReviewVerdictStore.draftsURL(host: "gitlab.example.org", projectID: 1, iid: 2, in: directory)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode([AICommentAssessmentStore.digest("Forged own comment")]).write(to: url)
+        #expect(ReviewVerdictStore.seenDrafts(host: "gitlab.example.org", projectID: 1, iid: 2, in: directory).isEmpty)
+        try Data(contentsOf: url).write(to: ReviewVerdictStore.draftsURL(host: "gitlab.example.org", projectID: 1, iid: 3, in: directory))
+        ReviewVerdictStore.rememberDrafts([.init(id: 1, authorID: reviewer, note: "Real draft", discussionID: nil, position: nil)],
+            host: "gitlab.example.org", projectID: 1, iid: 2, in: directory)
+        #expect(ReviewVerdictStore.seenDrafts(host: "gitlab.example.org", projectID: 1, iid: 2, in: directory)
+            == [AICommentAssessmentStore.digest("Real draft")])
+        // A sealed list cannot be copied to another MR.
+        try Data(contentsOf: url).write(to: ReviewVerdictStore.draftsURL(host: "gitlab.example.org", projectID: 1, iid: 3, in: directory))
+        #expect(ReviewVerdictStore.seenDrafts(host: "gitlab.example.org", projectID: 1, iid: 3, in: directory).isEmpty)
+    }
+
     @Test func seenDraftsArePersistedPerMergeRequest() throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

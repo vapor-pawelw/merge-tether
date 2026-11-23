@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import LocalAuthentication
 import Security
+import os
 
 /// Only authenticated, app-validated completions can restore execution state.
 @MainActor
@@ -19,17 +20,15 @@ enum AssistantJobJournal {
         var reviewTarget: ReviewTargetBinding? = nil
     }
     private struct Sealed: Codable { let payload: Data; let signature: Data }
-    private static let testing = Bundle.allBundles.contains { $0.bundleURL.pathExtension == "xctest" }
-        || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    private static let testing = EvidenceSeal.testing
     private static let directory = testing
         ? FileManager.default.temporaryDirectory.appendingPathComponent("MergeTether-CheckpointTests-\(UUID())")
         : InstallationStorage.current.checkpoints
     private static let keyLoader: AssistantCheckpointKeyLoader = {
-        if testing {
-            let bytes = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
+        if let bytes = EvidenceSeal.testingKey {
             return AssistantCheckpointKeyLoader(initial: bytes) { bytes }
         }
-        return AssistantCheckpointKeyLoader { try? AssistantJobJournal.readKey() }
+        return AssistantCheckpointKeyLoader(publish: EvidenceSeal.install) { try? AssistantJobJournal.readKey() }
     }()
     static var isKeyReady: Bool { keyLoader.cached != nil }
     static func hasCheckpoint(_ id: UUID) -> Bool {
@@ -198,10 +197,14 @@ enum AssistantJobJournal {
 /// Keychain consent must never block startup, result capture, or Quit on the main actor.
 @MainActor
 final class AssistantCheckpointKeyLoader {
-    private(set) var cached: Data?
+    private(set) var cached: Data? { didSet { publish?(cached) } }
     private var loading = false
     private let load: @Sendable () -> Data?
-    init(initial: Data? = nil, load: @escaping @Sendable () -> Data?) { cached = initial; self.load = load }
+    private let publish: (@Sendable (Data?) -> Void)?
+    init(initial: Data? = nil, publish: (@Sendable (Data?) -> Void)? = nil, load: @escaping @Sendable () -> Data?) {
+        cached = initial; self.load = load; self.publish = publish
+        publish?(initial)
+    }
 
     func key(timeout: Duration) async -> Data? {
         if let cached { return cached }
@@ -220,5 +223,41 @@ final class AssistantCheckpointKeyLoader {
             try? await Task.sleep(for: .milliseconds(10))
         }
         return cached
+    }
+}
+
+/// Seals trust records written off the main actor with the checkpoint signing key once the app has loaded it.
+/// Workers share the user account but not this Keychain-held key, so they cannot forge a sealed record.
+/// Until the key is available, sealing fails and reads treat records as unauthenticated.
+enum EvidenceSeal {
+    private struct Sealed: Codable { let payload: Data; let signature: Data }
+    nonisolated static let testing = Bundle.allBundles.contains { $0.bundleURL.pathExtension == "xctest" }
+        || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    nonisolated static let testingKey: Data? = testing ? SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) } : nil
+    private nonisolated static let key = OSAllocatedUnfairLock<Data?>(initialState: testingKey)
+
+    nonisolated static func install(_ bytes: Data?) {
+        guard let bytes, bytes.count == 32 else { return }
+        key.withLock { $0 = bytes }
+    }
+
+    nonisolated static var isReady: Bool { key.withLock { $0 != nil } }
+
+    struct Unavailable: Error {}
+
+    nonisolated static func seal(_ payload: Data, context: String) throws -> Data {
+        guard let bytes = key.withLock({ $0 }) else { throw Unavailable() }
+        let authenticated = Data((context + "\0").utf8) + payload
+        return try JSONEncoder().encode(Sealed(payload: payload,
+            signature: Data(HMAC<SHA256>.authenticationCode(for: authenticated, using: SymmetricKey(data: bytes)))))
+    }
+
+    /// The authenticated payload, or nil for a plain, forged, re-contexted or unverifiable record.
+    nonisolated static func open(_ data: Data, context: String) -> Data? {
+        guard data.count < 1_500_000, let bytes = key.withLock({ $0 }),
+              let sealed = try? JSONDecoder().decode(Sealed.self, from: data),
+              HMAC<SHA256>.isValidAuthenticationCode(sealed.signature,
+                authenticating: Data((context + "\0").utf8) + sealed.payload, using: SymmetricKey(data: bytes)) else { return nil }
+        return sealed.payload
     }
 }

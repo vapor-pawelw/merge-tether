@@ -84,7 +84,10 @@ final class AICommentOriginCoordinator {
             }
             if AICommentOriginOverrideStore.override(for: note, host: target.host, projectID: target.projectID,
                 iid: target.iid!, in: overrideDirectory) != nil { return false }
-            if let record = AICommentAssessmentStore.result(for: note, host: target.host, projectID: target.projectID, iid: target.iid!, in: directory) {
+            if let (record, sealed) = AICommentAssessmentStore.stored(for: note, host: target.host,
+                projectID: target.projectID, iid: target.iid!, in: directory) {
+                // An unsealed publication record, such as one a worker wrote, is re-assessed by the app.
+                guard purpose == .display || sealed else { return true }
                 if record.qualifiesAsAI && (purpose == .display || record.purpose != .display) { return false }
                 if record.provider == assistant.rawValue && record.model == model
                     && record.criteriaVersion == AICommentOriginAssessor.criteriaVersion
@@ -187,6 +190,8 @@ final class AICommentOriginCoordinator {
                             let matches = live.filter { $0.id == original.id }
                             return matches.count == 1 && matches[0].body == original.body && matches[0].author?.id == original.author?.id
                         }) else { throw CancellationError() }
+                        // Publication evidence is sealed with the checkpoint key; without it the record is display-only.
+                        if self.purpose != .display { _ = await AssistantJobJournal.loadKey() }
                         let written = try AICommentAssessmentStore.persist(result, target: target, notes: request.notes,
                             assistant: request.assistant, model: request.model, thinking: request.thinking, purpose: self.purpose, in: self.directory)
                         for note in request.notes {
