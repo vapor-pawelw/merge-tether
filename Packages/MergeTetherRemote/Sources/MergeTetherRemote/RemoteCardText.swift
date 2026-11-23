@@ -22,8 +22,8 @@ public struct RemoteCardSelection: Identifiable, Equatable, Sendable {
 /// the card's explanation adds nothing, and older hosts may still send such repeats.
 public extension RemoteCard {
     func hasSameActionContext(as other: RemoteCard) -> Bool {
-        id == other.id && title == other.title && project == other.project && url == other.url
-            && head == other.head && contextRevision == other.contextRevision && drafts == other.drafts
+        guard id == other.id, title == other.title, project == other.project, url == other.url else { return false }
+        return head == other.head && contextRevision == other.contextRevision && drafts == other.drafts
     }
 
     var detailContextDigest: String? {
@@ -56,8 +56,9 @@ public extension RemoteCard {
 
     /// Policy lines already stated by the card itself, mirroring the Mac summary's exclusions.
     func visiblePolicy(_ policy: [String]) -> [String] {
+        let cardText = [detail, presentation?.status ?? "", presentation?.nextStep ?? ""]
         var shown: [String] = []
-        for line in policy where !Self.repeats(line, in: [detail, presentation?.status ?? "", presentation?.nextStep ?? ""] + shown) {
+        for line in policy where !Self.repeats(line, in: cardText + shown) {
             shown.append(line)
         }
         return shown

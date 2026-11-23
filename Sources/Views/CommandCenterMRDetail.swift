@@ -96,7 +96,11 @@ private struct CommandCenterMRDetailContent: View {
     private var presentationItem: MergeRequestAttentionMonitor.Item { presentationRow.item }
     private var jobs: [AssistantAutomationRunner.Handoff] {
         guard let work, let target else { return [] }
-        return monitor.assistantHandoffs.filter { $0.key.work == work && $0.key.username == target.username && !$0.isObsoleteReminder }.sorted { $0.createdAt > $1.createdAt }
+        let matchingJobs = monitor.assistantHandoffs.filter { job in
+            guard job.key.work == work, job.key.username == target.username else { return false }
+            return !job.isObsoleteReminder
+        }
+        return matchingJobs.sorted { $0.createdAt > $1.createdAt }
     }
     private var presentationRow: MergeRequestBoardSnapshot.Row {
         catalogRow ?? .init(item: item, latestJob: jobs.first, intents: monitor.mrTodoIntents(for: item),
@@ -161,7 +165,7 @@ private struct CommandCenterMRDetailContent: View {
         let discussions = discussionSnapshot
         let presentation = MRCardPresentation(row: presentationRow, monitor: monitor, allowsRemoval: isReviewed)
         ScrollViewReader { proxy in
-            ScrollView {
+            let scrollView = ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     header(presentation).id(Anchor.overview)
                     // The decision the user has to make leads; merge state and automation rules support it.
@@ -213,7 +217,7 @@ private struct CommandCenterMRDetailContent: View {
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .disclosureGroupStyle(MRDetailDisclosureStyle())
+            let withInsets = scrollView.disclosureGroupStyle(MRDetailDisclosureStyle())
             .background(.background)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if finishedState == nil { selectedPublicationActions }
@@ -236,7 +240,7 @@ private struct CommandCenterMRDetailContent: View {
                     }, onContinue: { Task { await monitor.commentOrigins.continueNow(change.id) } })
                 }
             }
-            .task(id: initialSection) {
+            let withTasks = withInsets.task(id: initialSection) {
                 pendingInitialAnchor = nil
                 if needsHumanAttention && item.authorFeedbackStatus?.needsAttention == true { feedbackExpanded = true }
                 switch initialSection {
@@ -288,7 +292,7 @@ private struct CommandCenterMRDetailContent: View {
                     do { try await Task.sleep(for: .seconds(30)) } catch { return }
                 }
             }
-            .onChange(of: monitor.attention.confirmationStates[item.id]) { old, current in
+            let withObservers = withTasks.onChange(of: monitor.attention.confirmationStates[item.id]) { old, current in
                 if old?.isBusy == true && current?.isBusy != true { refreshDiscussions() }
             }
             .onChange(of: monitor.attention.displayAIOriginCoordinator?.revision) { _, _ in
@@ -321,7 +325,7 @@ private struct CommandCenterMRDetailContent: View {
                 discussionStore.cancel()
                 publicationSession.close()
             }
-            .alert(Text(feedbackDecisionConfirmation?.isReset == true
+            withObservers.alert(Text(feedbackDecisionConfirmation?.isReset == true
                 ? .FeedbackSuggestions.feedbackSuggestionsResetTitle : .FeedbackSuggestions.feedbackSuggestionsIgnoreTitle),
                 isPresented: Binding(get: { feedbackDecisionConfirmation != nil },
                     set: { if !$0 { feedbackDecisionConfirmation = nil } }), presenting: feedbackDecisionConfirmation) { choice in
@@ -395,6 +399,21 @@ private struct CommandCenterMRDetailContent: View {
         }
         .font(.callout).foregroundStyle(.secondary)
         .zIndex(1)
+    }
+
+    private var dependencyHoldReason: LocalizedStringResource? {
+        guard let request = item.mergeRequest else { return nil }
+        let context = MergeRequestDependencySummary.Context(request)
+        guard let status = monitor.authoredMergeRequests.requests.first(where: {
+            MergeRequestDependencySummary.Context($0.request) == context
+        }) else { return nil }
+        let hasDependencyBlocker = status.blockers.contains { blocker in
+            switch blocker {
+            case .dependencies, .stackTarget, .dependencyEvidence: true
+            default: false
+            }
+        }
+        return hasDependencyBlocker ? status.dependencyReadiness.holdReason : nil
     }
 
     private func header(_ progress: MRCardPresentation) -> some View {
@@ -471,11 +490,7 @@ private struct CommandCenterMRDetailContent: View {
             if let dependencies = item.dependencies, dependencies.hasPresentation {
                 MRDependencyRow(summary: dependencies, projectID: item.id.projectID)
             }
-            if let request = item.mergeRequest,
-               let status = monitor.authoredMergeRequests.requests.first(where: {
-                   MergeRequestDependencySummary.Context($0.request) == MergeRequestDependencySummary.Context(request)
-               }), status.blockers.contains(where: { [.dependencies, .stackTarget, .dependencyEvidence].contains($0) }),
-               let reason = status.dependencyReadiness.holdReason {
+            if let reason = dependencyHoldReason {
                 Text(reason).font(.callout).foregroundStyle(.secondary)
             }
             if finishedState != nil {
@@ -1069,8 +1084,9 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     private func openDiscussion(noteID: Int, discussionID: String?, in snapshot: MRDiscussionSnapshot) -> Bool {
-        guard let thread = snapshot.threads.first(where: {
-            (discussionID == nil || $0.discussionID == discussionID) && $0.notes.contains { $0.id == noteID }
+        guard let thread = snapshot.threads.first(where: { thread in
+            if let discussionID, thread.discussionID != discussionID { return false }
+            return thread.notes.contains { $0.id == noteID }
         }) else { return false }
         commentsExpanded = true
         discussionNavigation = .init(anchor: .init(threadID: thread.id))

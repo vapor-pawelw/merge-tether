@@ -19,21 +19,25 @@ struct MREffectivePolicySummary: View {
         let target = monitor.scopeTarget(projectID: row.id.projectID, iid: row.id.iid, url: row.item.url)
         let request = row.displayRequest
         let sameContext = row.evidenceMatchesCatalogContext
-        let status = monitor.authoredMergeRequests.hasSyncedCurrentCatalog && sameContext
-            ? monitor.authoredMergeRequests.requests.first { status in
-                status.request.projectID == row.id.projectID && status.request.iid == row.id.iid
-                    && request.map { current in
-                        MergeRequestDependencySummary.Context(status.request) == .init(current)
-                            && status.request.semanticContextFingerprint == current.semanticContextFingerprint
-                            && status.request.draft == current.draft
-                    } == true
-            } : nil
+        let status: AuthoredMergeRequestStatus?
+        if monitor.authoredMergeRequests.hasSyncedCurrentCatalog, sameContext, let request {
+            let context = MergeRequestDependencySummary.Context(request)
+            status = monitor.authoredMergeRequests.requests.first { status in
+                let candidate = status.request
+                guard candidate.projectID == row.id.projectID, candidate.iid == row.id.iid,
+                      MergeRequestDependencySummary.Context(candidate) == context else { return false }
+                return candidate.semanticContextFingerprint == request.semanticContextFingerprint && candidate.draft == request.draft
+            }
+        } else {
+            status = nil
+        }
         let catalogCurrent = monitor.attention.hasSyncedCurrentCatalog || monitor.authoredMergeRequests.hasSyncedCurrentCatalog
         let submission = status?.displayedSubmissionState ?? (catalogCurrent && request?.hasQueuedMerge == true ? .queued : .none)
+        let readState = MREffectivePolicyPresentation.ReadState(catalogCurrent: catalogCurrent, row: row,
+            input: monitor.boardRowInput(for: row))
         let input = MREffectivePolicyPresentation.Input(request: request, target: target, settings: monitor.settings,
             assistantReady: monitor.assistantDependencies.available.contains(monitor.settings.automation.assistant),
-            readState: .init(catalogCurrent: catalogCurrent, row: row, input: monitor.boardRowInput(for: row)),
-            submission: submission,
+            readState: readState, submission: submission,
             cliHold: monitor.cliHealth.hold(for: monitor.settings.automation.assistant)?.issue.kind)
         return (.init(input: input), status?.displayedSubmissionState.title)
     }

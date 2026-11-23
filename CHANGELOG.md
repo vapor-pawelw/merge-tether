@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Simplify Swift expressions that can hit compiler type-checking limits when building the Mac or iPhone app from source.
+
 - Add **Full review** to the Mac MR menu. Codex or Claude can review the entire current change and prepare private drafts using your existing GitLab sign-in.
 
 - Require a task ID, a link or an explicit task label before displaying a task from MR text.

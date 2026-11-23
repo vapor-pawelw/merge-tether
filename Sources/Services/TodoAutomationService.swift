@@ -461,16 +461,18 @@ final class TodoAutomationService {
         let proofs = [current, preflight].compactMap { $0 }
         let archived = FollowUpVerificationStore.contextReceipts(work: work, username: username,
             settings: settings, in: followUpDirectory)
-        return (proofs + archived).contains { proof in
-            proof.version == 1 && proof.runID == origin.id && proof.host == work.host
-                && proof.projectID == request.projectID && proof.iid == request.iid
-                && proof.username == username && proof.userID == request.author.id
-                && proof.headSHA == request.sha && proof.sourceProjectID == request.sourceProjectID
-                && proof.sourceBranch == request.sourceBranch
-                && !proof.files.isEmpty && proof.files.count <= 20
-                && Set(proof.files.map(\.path)).count == proof.files.count
-                && proof.files.allSatisfy(Self.validRecoveryFile)
-                && (proof.semanticContextFingerprint == nil || proof.semanticContextFingerprint == request.semanticContextFingerprint)
+        let availableProofs = proofs + archived
+        return availableProofs.contains { proof in
+            guard proof.version == 1, proof.runID == origin.id, proof.host == work.host,
+                  proof.projectID == request.projectID, proof.iid == request.iid,
+                  proof.username == username, proof.userID == request.author.id,
+                  proof.headSHA == request.sha, proof.sourceProjectID == request.sourceProjectID,
+                  proof.sourceBranch == request.sourceBranch else { return false }
+            guard !proof.files.isEmpty, proof.files.count <= 20 else { return false }
+            let paths = Set(proof.files.map(\.path))
+            guard paths.count == proof.files.count, proof.files.allSatisfy(Self.validRecoveryFile) else { return false }
+            guard let fingerprint = proof.semanticContextFingerprint else { return true }
+            return fingerprint == request.semanticContextFingerprint
         }
     }
 

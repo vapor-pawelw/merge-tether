@@ -551,9 +551,15 @@ final class MergeWorkflowMonitor {
             if hasReviewed && (changedHead || !newReplies.isEmpty || staleUnreported) {
                 let observation = Observation(glab: glab, account: account, request: request)
                 let ids = newReplies.sorted()
-                let token = staleUnreported && !changedHead && ids.isEmpty
-                    ? head + "-context-" + (staleContext ?? "")
-                    : (returnToken ?? head) + (ids.isEmpty ? "" : "-replies-" + ids.map(String.init).joined(separator: ","))
+                let token: String
+                if staleUnreported, !changedHead, ids.isEmpty {
+                    token = "\(head)-context-\(staleContext ?? "")"
+                } else if ids.isEmpty {
+                    token = returnToken ?? head
+                } else {
+                    let replyIDs = ids.map { String($0) }.joined(separator: ",")
+                    token = "\(returnToken ?? head)-replies-\(replyIDs)"
+                }
                 var scope = IncrementalReviewScope(currentHead: head)
                 let observedReviewHead = previous.head == diagnosedHead ? nil : previous.head
                 let reviewedBaseline = previous.reviewedHead == head ? observedReviewHead : previous.reviewedHead ?? observedReviewHead

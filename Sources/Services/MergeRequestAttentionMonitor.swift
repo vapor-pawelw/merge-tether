@@ -2217,13 +2217,18 @@ final class MergeRequestAttentionMonitor {
                 if let request = uncertainRequest, let discussions = uncertainDiscussions,
                    MRAttentionRecord.sameContext(reviewedRequest, request),
                    snapshot.matches(request, discussions: discussions, publishedDrafts: publicDrafts + [uncertainDraft], userID: user.id) {
-                    let matches = discussions.flatMap { thread in thread.notes.filter { note in
-                        note.system != true && note.author?.id == user.id && note.author?.username == account.username
-                            && note.id.map { $0 > 0 && !uncertainBeforeIDs.contains($0) } == true
-                            && note.body == uncertainDraft.note
-                            && (uncertainDraft.discussionID == nil || uncertainDraft.discussionID == thread.id)
-                            && (uncertainDraft.position == nil || uncertainDraft.position == note.position)
-                    } }
+                    let matchingThreads = discussions.filter { thread in
+                        guard let discussionID = uncertainDraft.discussionID else { return true }
+                        return discussionID == thread.id
+                    }
+                    let notes = matchingThreads.flatMap(\.notes)
+                    let matches = notes.filter { note in
+                        guard note.system != true, note.author?.id == user.id, note.author?.username == account.username,
+                              let id = note.id, id > 0, !uncertainBeforeIDs.contains(id),
+                              note.body == uncertainDraft.note else { return false }
+                        guard let position = uncertainDraft.position else { return true }
+                        return position == note.position
+                    }
                     if matches.count == 1 { rememberPublicDraft(uncertainDraft) }
                 }
             }

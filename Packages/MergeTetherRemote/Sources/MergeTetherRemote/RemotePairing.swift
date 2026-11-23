@@ -28,9 +28,10 @@ public struct RemotePairing: Codable, Equatable, Sendable {
               let issued = fields["issued"].flatMap({ TimeInterval($0) }), let expires = fields["expires"].flatMap({ TimeInterval($0) }),
               issued.isFinite, expires.isFinite else { throw RemoteProtocolError.invalid }
         let origin: URL
+        let queryItems = parts.queryItems
         if parts.scheme == "mergetether", parts.host == "pair", parts.path.isEmpty, parts.user == nil, parts.password == nil, parts.port == nil,
-           parts.queryItems?.count == 1, parts.queryItems?.first?.name == "relay",
-           let raw = parts.queryItems?.first?.value, let parsed = URL(string: raw) { origin = parsed }
+           queryItems?.count == 1, let queryItem = queryItems?.first, queryItem.name == "relay",
+           let raw = queryItem.value, let parsed = URL(string: raw) { origin = parsed }
         else {
             guard parts.query == nil, var clean = URLComponents(url: url, resolvingAgainstBaseURL: false) else { throw RemoteProtocolError.invalid }
             clean.fragment = nil

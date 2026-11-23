@@ -28,15 +28,16 @@ enum MRIssueAssessor {
                 .init(reference: "!\($0.iid)", title: MRIssueAssessor.bounded($0.title, limit: 300),
                       description: MRIssueAssessor.bounded($0.description ?? "", limit: 600))
             }
-            let ordered = candidates.filter { $0.relation == .closing }
-                + candidates.filter { $0.relation == .related } + candidates.filter { $0.relation == .mentioned }
+            var ordered = candidates.filter { $0.relation == .closing }
+            ordered.append(contentsOf: candidates.filter { $0.relation == .related })
+            ordered.append(contentsOf: candidates.filter { $0.relation == .mentioned })
             var seen: Set<String> = []
-            self.candidates = ordered.compactMap { candidate in
+            let uniqueCandidates = ordered.compactMap { candidate -> MRIssueCandidate? in
                 guard let key = MRIssueAssessor.identity(candidate.issue), seen.insert(key).inserted else { return nil }
                 return .init(issue: candidate.issue, relation: candidate.relation,
                     description: candidate.description.map { MRIssueAssessor.bounded($0, limit: 350) })
             }
-            .prefix(24).map { $0 }
+            self.candidates = Array(uniqueCandidates.prefix(24))
         }
     }
 

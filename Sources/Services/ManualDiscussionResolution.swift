@@ -111,7 +111,8 @@ enum ManualDiscussionResolution {
 
     @MainActor static func prepare(_ expected: GitLabMergeRequest, monitor: TodoMonitorService,
                                    expectedFingerprint: String? = nil) async throws -> Prepared {
-        let glab = monitor.glab, settings = monitor.settings
+        let glab = monitor.glab
+        let settings = monitor.settings
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { throw GlabError.notAuthenticated }
         let revision = glab.accountRevision
         let configuration = try MergeSubmissionFingerprint.configuration(settings)
@@ -126,7 +127,8 @@ enum ManualDiscussionResolution {
         guard let fingerprint = ReviewVerdict.fingerprint(threads),
               expectedFingerprint == nil || expectedFingerprint == fingerprint else { throw CancellationError() }
         let drafts = try await glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: user.id)
-        var assessment = monitor.attention.authorFeedbackCoordinator?.assessment(for: request, fingerprint: fingerprint)
+        let coordinator = monitor.attention.authorFeedbackCoordinator
+        var assessment = coordinator?.assessment(for: request, fingerprint: fingerprint)
         if assessment == nil, drafts == 0 {
             assessment = try await ManualFeedbackVerification.assess(request: request, discussions: threads,
                 user: user, host: host, settings: settings, glab: glab)

@@ -7,7 +7,10 @@ struct BoardPinButton: View {
     let settings: SettingsManager
     var placement: Placement = .header
 
-    private var isPinned: Bool { pin.map { settings.boardPins.contains($0) } ?? false }
+    private var isPinned: Bool {
+        guard let pin else { return false }
+        return settings.boardPins.contains(pin)
+    }
     private var title: LocalizedStringResource { isPinned ? .Board.boardUnpin : .Board.boardPin }
     private var symbol: String { isPinned ? "pin.fill" : "pin" }
 

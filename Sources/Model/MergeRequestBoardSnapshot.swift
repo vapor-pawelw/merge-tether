@@ -350,12 +350,20 @@ struct MergeRequestBoardSnapshot {
             .init(id: .init(host: host, username: username, item: .completion($0.id)), content: .completion($0))
         }
         let rows = own + reviewed + otherMergeRequests
-        let latest = Dictionary(grouping: jobs.filter { !$0.isObsoleteReminder && $0.key.work.host == host && $0.key.username == username }, by: \.key.work)
-            .values.compactMap { $0.max { $0.createdAt < $1.createdAt } }
-            .sorted {
-                $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt > $1.createdAt
+        let accountJobs = jobs.filter { job in
+            !job.isObsoleteReminder && job.key.work.host == host && job.key.username == username
+        }
+        let jobsByWork = Dictionary(grouping: accountJobs, by: \.key.work)
+        let newestByWork: [AssistantAutomationRunner.Handoff] = jobsByWork.values.compactMap { runs in
+            runs.max { $0.createdAt < $1.createdAt }
+        }
+        let latestJobs = newestByWork.sorted { lhs, rhs in
+            if lhs.createdAt == rhs.createdAt {
+                return lhs.id.uuidString < rhs.id.uuidString
             }
-        for job in latest {
+            return lhs.createdAt > rhs.createdAt
+        }
+        for job in latestJobs {
             let target = MRAutomationScope.Target(host: host, username: username, projectID: job.key.work.projectID, iid: job.key.work.iid)
             guard !ignoredTargets.contains(target),
                   job.execution?.state.isActive == true || Row.jobNeedsAttention(job.execution?.state),

@@ -61,9 +61,9 @@ struct MREventLogView: View {
     private var timeline: some View {
         let resource = discussionTarget.map { resourceActivity.snapshot(target: $0, revision: monitor.glab.accountRevision) }
         let gitLab = (resource?.entries ?? []) + (discussions?.entries ?? [])
-        let history = target.map {
-            MRAutomationHistory(target: $0, handoffs: monitor.assistantHandoffs,
-                workflows: monitor.authoredMergeRequests.workflow.entries,
+        let history = target.map { target -> MRAutomationHistory in
+            let workflows = monitor.authoredMergeRequests.workflow.entries
+            return MRAutomationHistory(target: target, handoffs: monitor.assistantHandoffs, workflows: workflows,
                 events: monitor.settings.automationEvents, gitLab: gitLab)
         }
         let entries = history?.entries ?? []

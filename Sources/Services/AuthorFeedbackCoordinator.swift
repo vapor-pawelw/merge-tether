@@ -68,10 +68,12 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
         }
     }
     var primaryFinding: AuthorFeedbackPolicy.Finding? {
-        findings.first { $0.state == .needsChanges }
-            ?? findings.first { $0.state == .needsVerification && $0.manualDecision == nil }
-            ?? findings.first { replyNoteIDs.contains($0.id) }
-            ?? findings.first { $0.manualDecision != nil }
+        if let needsChanges = findings.first(where: { $0.state == .needsChanges }) { return needsChanges }
+        if let needsVerification = findings.first(where: { $0.state == .needsVerification && $0.manualDecision == nil }) {
+            return needsVerification
+        }
+        if let needsReply = findings.first(where: { replyNoteIDs.contains($0.id) }) { return needsReply }
+        return findings.first { $0.manualDecision != nil }
     }
     var hasVisibleDetails: Bool {
         phase != .complete || !findings.isEmpty || !codeReviewRequests.isEmpty || !followUpNoteIDs.isEmpty
@@ -83,9 +85,10 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
         } ?? findings
         var seen: Set<[String]> = []
         return ordered.filter { finding in
-            let key = [String(finding.sourceNoteID ?? finding.id),
-                finding.summary?.split(whereSeparator: \.isWhitespace).joined(separator: " ") ?? "",
-                finding.reason?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""]
+            let sourceID = String(finding.sourceNoteID ?? finding.id)
+            let summary = finding.summary?.split(whereSeparator: \.isWhitespace).joined(separator: " ") ?? ""
+            let reason = finding.reason?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let key = [sourceID, summary, reason]
             return seen.insert(key).inserted
         }
     }
@@ -868,12 +871,13 @@ final class AuthorFeedbackCoordinator {
             if settings.automaticWritesAllowed, !followUp.isEmpty { await onNeedsWork?(request, followUp, input.fingerprint,
                 residual(input, assessment: assessment, notes: followUp, stoppedFollowUps: prepared.stoppedFollowUps)) }
             guard isCurrent(input) else { throw CancellationError() }
+            let addressedNoteIDs = Self.addressedNoteIDs(in: assessment).subtracting(owedNotes)
             var completed = AuthorFeedbackStatus(head: request.sha ?? "", fingerprint: input.fingerprint,
                 semanticContextFingerprint: request.semanticContextFingerprint,
                 phase: drafts.isEmpty ? .complete : .waitingPublication, pendingDraftCount: drafts.count,
                 followUpNoteIDs: followUp,
                 replyNoteIDs: Set(repliesByThread.keys),
-                addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .rejected || $0.state == .informational }.map(\.noteID)).subtracting(owedNotes),
+                addressedNoteIDs: addressedNoteIDs,
                 completedFollowUpJobID: input.completedFollowUpJobID)
             completed.feedbackDecisionRevision = input.decisionRevision
             completed.reviewParticipationRevision = input.reviewParticipationRevision
@@ -985,12 +989,12 @@ final class AuthorFeedbackCoordinator {
             }
         accepted.subtract(accountKinds.compactMap { $0.value == .automation ? $0.key : nil })
         accepted.subtract(settings.reviewParticipationPreferences.botIDs(host: host, username: input.user.username))
+        let addressedNoteIDs = Self.addressedNoteIDs(in: assessment).subtracting(owedNotes).subtracting(acknowledgementFailures.keys)
         var completed = AuthorFeedbackStatus(head: request.sha ?? "", fingerprint: input.fingerprint,
             semanticContextFingerprint: request.semanticContextFingerprint, phase: drafted.isEmpty ? .complete : .waitingPublication,
             findings: findings, codeReviewRequests: assessment.reviewRequests,
             acceptedReviewerIDs: accepted, followUpNoteIDs: followUp, replyNoteIDs: missingReplies,
-            addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .rejected || $0.state == .informational }.map(\.noteID))
-                .subtracting(owedNotes).subtracting(acknowledgementFailures.keys),
+            addressedNoteIDs: addressedNoteIDs,
             completedFollowUpJobID: input.completedFollowUpJobID)
         completed.feedbackDecisionRevision = input.decisionRevision
         completed.reviewParticipationRevision = input.reviewParticipationRevision
@@ -1001,6 +1005,16 @@ final class AuthorFeedbackCoordinator {
         statuses[input.target] = completed
         recordSettlement(input, settled: !changed && !updated)
         if changed || updated { notifyChange(input, updatedDiscussions: changed ? threads : nil) }
+    }
+
+    private static func addressedNoteIDs(in assessment: ReReviewAssessment) -> Set<Int> {
+        let addressedNotes = assessment.notes.filter { note in
+            switch note.state {
+            case .addressed, .rejected, .informational: true
+            default: false
+            }
+        }
+        return Set(addressedNotes.map(\.noteID))
     }
 
     private func excludedReplyAuthors(_ input: Input) -> Set<Int> {

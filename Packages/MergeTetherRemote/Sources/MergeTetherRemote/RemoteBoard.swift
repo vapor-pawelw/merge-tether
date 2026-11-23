@@ -318,7 +318,8 @@ public struct RemoteAvatarThumbnail: Codable, Equatable, Sendable {
     static func eligibleURLs(_ urls: [URL]) -> [URL] {
         var seen = Set<URL>()
         return urls.filter { url in
-            url.scheme?.lowercased() == "https" && url.absoluteString.utf8.count <= 1024 && seen.insert(url).inserted
+            guard url.scheme?.lowercased() == "https", url.absoluteString.utf8.count <= 1024 else { return false }
+            return seen.insert(url).inserted
         }
     }
 }
@@ -487,7 +488,9 @@ extension RemoteBoard {
                     compatible.lanes[lane].cards[card].presentation?.automaticApprovalOff = nil
                 }
                 if !supportsMarkReady {
-                    let removed = Set(compatible.lanes[lane].cards[card].actions.filter { $0.kind == .markReady }.map(\.id))
+                    let actions = compatible.lanes[lane].cards[card].actions
+                    let markReadyActions = actions.filter { $0.kind == .markReady }
+                    let removed = Set(markReadyActions.map(\.id))
                     compatible.lanes[lane].cards[card].actions.removeAll { $0.kind == .markReady }
                     if let id = compatible.lanes[lane].cards[card].primaryCTA?.actionID, removed.contains(id) {
                         compatible.lanes[lane].cards[card].primaryCTA = nil
@@ -511,7 +514,12 @@ extension RemoteBoard {
                     compatible.lanes[lane].cards[card].primaryCTA = nil
                 }
                 if !supportsCommentReview {
-                    compatible.lanes[lane].cards[card].actions.removeAll { $0.kind == .deleteDraft || $0.kind == .finishCommentReview }
+                    compatible.lanes[lane].cards[card].actions.removeAll { action in
+                        switch action.kind {
+                        case .deleteDraft, .finishCommentReview: true
+                        default: false
+                        }
+                    }
                 }
             }
         }

@@ -71,8 +71,10 @@ public struct RemoteDetailRequest: Codable, Equatable, Sendable {
         return Set(withLegacyIssueMetadata.compactMap { try? RemoteDigest.token($0) })
     }
     public var isValid: Bool {
-        cardID.utf8.count <= 128 && account.utf8.count <= 1_024 && cardDigest.utf8.count == 64
-            && (contentDigest == nil || contentDigest?.utf8.count == 64)
+        guard cardID.utf8.count <= 128, account.utf8.count <= 1_024,
+              cardDigest.utf8.count == 64 else { return false }
+        guard let contentDigest else { return true }
+        return contentDigest.utf8.count == 64
     }
 }
 
@@ -158,7 +160,9 @@ public struct RemoteApprovalDetails: Codable, Equatable, Sendable {
     }
     public var orderedPeople: [RemoteApprovalPerson] {
         guard let viewer = viewerApproval else { return people }
-        return people.filter { $0.id == viewer.id } + people.filter { $0.id != viewer.id }
+        let viewerEntries = people.filter { $0.id == viewer.id }
+        let otherPeople = people.filter { $0.id != viewer.id }
+        return viewerEntries + otherPeople
     }
     public init(progress: RemoteApprovalProgress?, people: [RemoteApprovalPerson] = [], rules: [RemoteApprovalRule]? = nil,
                 requirementsSatisfied: Bool? = nil, historyAvailable: Bool = false, viewerApprovalID: Int? = nil) {
@@ -615,9 +619,14 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
         var cached = value
         cached.details = details
         displayCache[id] = cached
-        if displayCache.count > 16, let oldest = displayCache.keys.filter({ $0 != id }).min(by: {
-            (displayCache[$0]?.details?.checkedAt ?? .distantPast) < (displayCache[$1]?.details?.checkedAt ?? .distantPast)
-        }) {
+        guard displayCache.count > 16 else { return }
+        let olderIDs = displayCache.keys.filter { $0 != id }
+        let oldest = olderIDs.min { lhs, rhs in
+            let lhsCheckedAt = displayCache[lhs]?.details?.checkedAt ?? Date.distantPast
+            let rhsCheckedAt = displayCache[rhs]?.details?.checkedAt ?? Date.distantPast
+            return lhsCheckedAt < rhsCheckedAt
+        }
+        if let oldest {
             displayCache.removeValue(forKey: oldest)
         }
     }

@@ -57,8 +57,8 @@ enum GlabError: Error, Equatable, Sendable {
         case 504: "gateway timeout"
         default: nil
         }
-        let bareStatus = reason.map { #"|\b"# + String(status) + #"\s+"# + $0 + #"\b"# } ?? ""
-        return diagnostic.range(of: #"(?i)\bHTTP(?:/[0-9.]+)?\s+"# + String(status) + #"\b"# + bareStatus,
-                                options: .regularExpression) != nil
+        let bareStatus = reason.map { reason in #"|\b\#(status)\s+\#(reason)\b"# } ?? ""
+        let pattern = #"(?i)\bHTTP(?:/[0-9.]+)?\s+\#(status)\b\#(bareStatus)"#
+        return diagnostic.range(of: pattern, options: .regularExpression) != nil
     }
 }

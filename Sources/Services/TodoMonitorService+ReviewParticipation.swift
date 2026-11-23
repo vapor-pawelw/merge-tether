@@ -52,10 +52,17 @@ extension TodoMonitorService {
             let work = job.key.work
             let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: work.projectID, iid: work.iid, host: host)
             guard glab.accountRevision == revision, glab.currentUsername == account else { throw CancellationError() }
-            let selected = Set(job.feedbackNoteIDs ?? discussions?.flatMap(\.notes).compactMap(\.id) ?? [])
-            if discussions == nil || discussions?.flatMap(\.notes).contains(where: { $0.author?.id == identity.entityID && $0.id.map(selected.contains) == true }) == true {
+            guard let discussions else {
                 cancelAssistantJob(job.id)
+                continue
             }
+            let notes = discussions.flatMap(\.notes)
+            let selected = Set(job.feedbackNoteIDs ?? notes.compactMap(\.id))
+            let includesExcludedAuthor = notes.contains { note in
+                guard note.author?.id == identity.entityID, let id = note.id else { return false }
+                return selected.contains(id)
+            }
+            if includesExcludedAuthor { cancelAssistantJob(job.id) }
         }
         for item in attention.currentOpenItems {
             attention.retryAuthorFeedback(item.id)

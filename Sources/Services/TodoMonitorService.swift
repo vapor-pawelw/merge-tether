@@ -245,12 +245,13 @@ final class TodoMonitorService {
         return router
     }()
     private let cancelPolicyJob: @MainActor (UUID, SettingsManager) -> Void
-    @ObservationIgnored private lazy var feedbackLaunches = MRFeedbackLaunchCoordinator(
-        settings: settings, glab: glab, automation: automation, inbox: todoStore,
-        providers: assistantDependencies, health: cliHealth,
-        residualLookup: { [weak attention = attention] request, fingerprint in
+    @ObservationIgnored private lazy var feedbackLaunches: MRFeedbackLaunchCoordinator = {
+        let residualLookup: @MainActor (GitLabMergeRequest, String) -> AuthorFeedbackResidual? = { [weak attention = attention] request, fingerprint in
             attention?.authorFeedbackCoordinator?.reviewContext(for: request, fingerprint: fingerprint)
-        })
+        }
+        return MRFeedbackLaunchCoordinator(settings: settings, glab: glab, automation: automation,
+            inbox: todoStore, providers: assistantDependencies, health: cliHealth, residualLookup: residualLookup)
+    }()
     private var timer: Timer?
     @ObservationIgnored private var wakeObserver: NSObjectProtocol?
     @ObservationIgnored private var wakeRefreshPending = false
@@ -845,14 +846,18 @@ final class TodoMonitorService {
     }
 
     private func resolveAutomationTarget(from address: String) async throws -> (target: MRAutomationScope.Target, projectPath: String, request: GitLabMergeRequest?) {
+        let wrongHost = GlabError.decoding("Use a URL on the current GitLab host")
         guard let host = glab.resolvedHost, let username = glab.currentUsername,
               let url = URL(string: address.trimmingCharacters(in: .whitespacesAndNewlines)),
               let expected = URLComponents(string: "https://\(host)"),
               let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let scheme = parts.scheme, ["https", "http"].contains(scheme),
-              parts.host?.lowercased() == expected.host?.lowercased(), parts.user == nil, parts.password == nil,
-              (parts.port ?? (scheme == "https" ? 443 : 80)) == (expected.port ?? (scheme == "https" ? 443 : 80))
-        else { throw GlabError.decoding("Use a URL on the current GitLab host") }
+              parts.host?.lowercased() == expected.host?.lowercased(), parts.user == nil, parts.password == nil
+        else { throw wrongHost }
+        let defaultPort = scheme == "https" ? 443 : 80
+        let expectedPort = expected.port ?? defaultPort
+        let port = parts.port ?? defaultPort
+        guard port == expectedPort else { throw wrongHost }
         let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let components = path.components(separatedBy: "/-/merge_requests/")
         let projectPath = components[0]

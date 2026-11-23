@@ -53,7 +53,10 @@ import CryptoKit
     private func accept(_ frame: Frame, now: Date) throws {
         guard pairing.peerPublicKey == nil || pairing.peerPublicKey == frame.senderKey else { throw RemoteProtocolError.invalid }
         let milliseconds = now.timeIntervalSince1970 * 1000
-        seen = seen.filter { milliseconds - Double($0.value) <= 60_000 }
+        seen = seen.filter { entry in
+            let age = milliseconds - Double(entry.value)
+            return age <= 60_000
+        }
         guard seen[frame.nonce] == nil else { throw RemoteProtocolError.ignored }
         guard seen.count < 2048 else { throw RemoteProtocolError.invalid }
         if pairing.peerPublicKey == nil {

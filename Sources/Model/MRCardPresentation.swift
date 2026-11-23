@@ -94,7 +94,8 @@ struct MRCardPresentation {
     }
 
     init(row: MergeRequestBoardSnapshot.Row, monitor: TodoMonitorService, allowsRemoval: Bool) {
-        self.init(row: row, monitor: monitor, allowsRemoval: allowsRemoval, input: monitor.boardRowInput(for: row))
+        let input = monitor.boardRowInput(for: row)
+        self.init(row: row, monitor: monitor, allowsRemoval: allowsRemoval, input: input)
     }
 
     init(row: MergeRequestBoardSnapshot.Row, monitor: TodoMonitorService, allowsRemoval: Bool,
@@ -106,10 +107,14 @@ struct MRCardPresentation {
                 assistantPreparing: ready || input.assistantChecking,
                 publicationPolicy: monitor.settings.publicationPolicy(for: $0))
         } ?? [] : []
-        let mergeStatus = monitor.authoredMergeRequests.hasSyncedCurrentCatalog && row.evidenceMatchesCatalogContext
-            ? monitor.authoredMergeRequests.requests.first {
-                $0.request.projectID == row.id.projectID && $0.request.iid == row.id.iid
-            } : nil
+        let mergeStatus: AuthoredMergeRequestStatus?
+        if monitor.authoredMergeRequests.hasSyncedCurrentCatalog, row.evidenceMatchesCatalogContext {
+            mergeStatus = monitor.authoredMergeRequests.requests.first { status in
+                status.request.projectID == row.id.projectID && status.request.iid == row.id.iid
+            }
+        } else {
+            mergeStatus = nil
+        }
         let showsAutomaticMergePolicyHold = if let target, let request = row.displayRequest, mergeStatus?.automaticMergePolicyHold != nil {
             monitor.settings.permitsAutomaticAction(.merge, for: request, target: target)
         } else { false }

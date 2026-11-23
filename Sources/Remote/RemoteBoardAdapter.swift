@@ -4,14 +4,15 @@ import MergeTetherRemote
 @MainActor enum RemoteBoardAdapter {
     static func card(_ completion: MergeRequestLifecycleLedger.CompletionReceipt, account: String) -> RemoteCard {
         let state = completion.kind == .merged ? MergeRequestFinishedState.merged : .closed
+        let project = completion.url.gitLabProjectPath
+        let repository = String(project.split(separator: "/").last ?? "")
+        let detail: LocalizedStringResource = completion.kind == .merged ? .MRLifecycle.completionMerged : .MRLifecycle.completionClosed
+        let presentation = RemoteCardText(author: completion.author?.person.displayName, repository: repository,
+            draftBadge: String(localized: state.badge),
+            authorUsername: completion.author?.username, authorAvatarURL: completion.author?.avatarURL)
         var card = RemoteCard(id: "completion:\(completion.id)", title: completion.title,
-            project: completion.url.gitLabProjectPath, url: completion.url,
-            detail: String(localized: completion.kind == .merged ? .MRLifecycle.completionMerged : .MRLifecycle.completionClosed),
-            needsAttention: false, mergeRequestIID: completion.target.iid,
-            presentation: .init(author: completion.author?.person.displayName,
-                repository: completion.url.gitLabProjectPath.split(separator: "/").last.map(String.init) ?? "",
-                draftBadge: String(localized: state.badge),
-                authorUsername: completion.author?.username, authorAvatarURL: completion.author?.avatarURL),
+            project: project, url: completion.url, detail: String(localized: detail),
+            needsAttention: false, mergeRequestIID: completion.target.iid, presentation: presentation,
             completionObservedAt: completion.observedAt)
         if let token = try? RemoteDigest.token([account, try RemoteDigest.token(completion)]) {
             card.actions = [.init(id: "seen", kind: .markDone, token: token)]
@@ -55,15 +56,20 @@ import MergeTetherRemote
             if item.canConfirmReReview, item.reReviewReadiness?.canConfirm == true { kinds.append(.reReview) }
             if item.canFinishCommentReview { kinds.append(.finishCommentReview) }
         }
-        let metadata = item.drafts.flatMap { draft in
+        let metadata = item.drafts.flatMap { draft -> [String] in
             [String(draft.authorID), draft.discussionID ?? "", String(describing: draft.resolveDiscussion),
              draft.position?.newPath ?? "", String(describing: draft.position?.newLine),
              draft.position?.oldPath ?? "", String(describing: draft.position?.oldLine)]
         }
-        if let content = try? RemoteDigest.token(card),
-           let token = try? RemoteDigest.token([account, content, item.reReviewFingerprint ?? "",
-               item.observedDiscussionFingerprint ?? "", item.mergeRequest?.semanticContextFingerprint ?? "",
-               String(item.requiresCommentReview), item.commentReviewSnapshot?.discussionFingerprint ?? ""] + metadata + context) {
+        let actionToken = (try? RemoteDigest.token(card)).flatMap { content -> String? in
+            var parts: [String] = [account, content, item.reReviewFingerprint ?? "",
+                item.observedDiscussionFingerprint ?? "", item.mergeRequest?.semanticContextFingerprint ?? "",
+                String(item.requiresCommentReview), item.commentReviewSnapshot?.discussionFingerprint ?? ""]
+            parts.append(contentsOf: metadata)
+            parts.append(contentsOf: context)
+            return try? RemoteDigest.token(parts)
+        }
+        if let token = actionToken {
             card.actions = Array(Set(kinds.map(\.rawValue))).sorted().compactMap { raw in
                 guard let kind = RemoteActionKind(rawValue: raw) else { return nil }
                 if kind == .publish {
@@ -299,7 +305,10 @@ import MergeTetherRemote
             blocker = currentBlocker
         }
         var card = original
-        card.presentation = card.presentation ?? .init(repository: request.webURL.gitLabProjectPath.split(separator: "/").last.map(String.init) ?? "")
+        if card.presentation == nil {
+            let repository = request.webURL.gitLabProjectPath.split(separator: "/").last ?? ""
+            card.presentation = .init(repository: String(repository))
+        }
         let dependencyHold = waitingStatus?.hasCurrentDependencyHold == true
             && checked?.request.detailedMergeStatus == "merge_request_blocked"
         let knownMergeFailure = checked?.blockers.contains { reason in
@@ -598,12 +607,15 @@ import MergeTetherRemote
         let chips: [RemoteCardChip] = model.chips.map { .init(title: String(localized: $0.title), symbol: $0.symbol) }
         let steps = model.stepChain.map { $0.steps.map { String(localized: $0) } }
         let pendingDrafts = model.working ? nil : MRPendingDraftsSummary(item: model.row.item)
+        let repository = card.project.split(separator: "/").last ?? Substring(card.project)
+        let retryCTA: RemoteCardCTA? = human?.action == .retryRun
+            ? .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewRun), destination: .assistantRuns) : nil
         card.presentation = .init(author: authorName,
-            repository: card.project.split(separator: "/").last.map(String.init) ?? card.project,
+            repository: String(repository),
             draftBadge: draftBadge,
             status: model.status, nextStep: model.nextStep, working: model.working,
             chips: chips,
-            secondaryCTA: human?.action == .retryRun ? .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewRun), destination: .assistantRuns) : nil,
+            secondaryCTA: retryCTA,
             authorUsername: authorUsername, authorAvatarURL: authorAvatarURL,
             steps: steps, currentStep: model.stepChain?.current,
             pendingDrafts: pendingDrafts.map { String(localized: $0.message) }, statusSymbol: model.activityEffect?.symbol,

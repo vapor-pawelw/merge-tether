@@ -158,9 +158,15 @@ struct MRBoardProjector {
     init(input: Input, semanticFingerprint: @escaping (GitLabMergeRequest) -> String = { $0.semanticContextFingerprint }) {
         self.input = input
         var facts = RequestFacts.Index(input.requestFacts, semanticFingerprint: semanticFingerprint)
-        let items = (input.attention?.evidence ?? []) + (input.attention?.attention ?? []) + (input.attention?.catalog ?? [])
-        let requests = items.compactMap(\.mergeRequest) + input.authored.map(\.request) + input.retainedRequests
-            + input.pipelineHandoffs.map(\.event.mergeRequest) + input.displayRequests + input.pipelineEvidence
+        var items = input.attention?.evidence ?? []
+        items.append(contentsOf: input.attention?.attention ?? [])
+        items.append(contentsOf: input.attention?.catalog ?? [])
+        var requests = items.compactMap(\.mergeRequest)
+        requests.append(contentsOf: input.authored.map(\.request))
+        requests.append(contentsOf: input.retainedRequests)
+        requests.append(contentsOf: input.pipelineHandoffs.map(\.event.mergeRequest))
+        requests.append(contentsOf: input.displayRequests)
+        requests.append(contentsOf: input.pipelineEvidence)
         for request in requests { facts.prepare(request) }
         requestFacts = facts
     }

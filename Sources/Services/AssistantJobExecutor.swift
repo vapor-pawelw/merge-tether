@@ -362,7 +362,7 @@ enum AssistantJobExecutor {
                   verdict.hasCompleteFindings(in: discussions, drafts: drafts),
                   drafts.count <= 100, Set(drafts.compactMap(\.id)).count == drafts.count,
                   drafts.allSatisfy({ ($0.id ?? 0) > 0 && $0.authorID == user.id && $0.note != nil }),
-                  (try? JSONEncoder().encode(drafts).count).map({ $0 <= 131_072 }) == true,
+                  let encodedDrafts = try? JSONEncoder().encode(drafts), encodedDrafts.count <= 131_072,
                   ReviewVerdictStore.verdict(host: work.host, projectID: work.projectID, iid: work.iid,
                     user: user, in: directory) == verdict else { return nil }
             return .init(verdict: verdict, drafts: drafts)

@@ -243,7 +243,8 @@ private struct DraftRegenerationResults: View {
             }
     }
     private var selectable: Set<String> {
-        Set(batch.proposals.filter { $0.issue == nil && $0.replacement != nil }.map(\.id))
+        let validProposals = batch.proposals.filter { $0.issue == nil && $0.replacement != nil }
+        return Set(validProposals.map(\.id))
     }
     private var saving: Bool { batch.phase == .saving }
     private var ready: Bool { batch.phase == .ready && !isLoading && !loadFailed }

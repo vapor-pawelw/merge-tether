@@ -182,10 +182,16 @@ struct AuthorFeedbackPolicy {
             // consent nor permission to resolve the original GitLab discussion.
             if blocked.isEmpty, thread.contains(where: { !(verdicts[$0.id ?? 0]?.ignoredDecisionIDs ?? []).isEmpty }) { continue }
             let waiting = purelyInformational ? [] : participants.filter { participant in
-                blocked.contains(where: { $0.id == participant.id }) || accountKinds[participant.id] != .automation
-                    && !approvedReviewerIDs.contains(participant.id) && !thread.filter {
-                    $0.author?.id == participant.id && ($0.id == rootID || verdicts[$0.id ?? 0].map { [.addressed, .rejected].contains($0.state) } == true)
-                }.allSatisfy(accepted)
+                if blocked.contains(where: { $0.id == participant.id }) { return true }
+                guard accountKinds[participant.id] != .automation,
+                      !approvedReviewerIDs.contains(participant.id) else { return false }
+                let feedback = thread.filter { note in
+                    guard note.author?.id == participant.id else { return false }
+                    if note.id == rootID { return true }
+                    guard let state = verdicts[note.id ?? 0]?.state else { return false }
+                    return state == .addressed || state == .rejected
+                }
+                return !feedback.allSatisfy(accepted)
             }
             let localConcern = remaining.first { $0.state == .blocking } ?? remaining.first
             let explanation = blocked.isEmpty ? verdicts[rootID]
