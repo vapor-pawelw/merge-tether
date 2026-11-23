@@ -381,9 +381,9 @@ The reply row shows the waiting private draft count first. **Published reply fro
 
 ## Issues implemented by a merge request
 
-Mac and iPhone show a tag beside the MR number when a task is in scope. A single
-linked task opens in the browser. A reference without a known URL is displayed
-as text. A count opens a list of the tasks and their available links.
+Mac and iPhone show a tag beside the MR number when a task is in scope. Select a
+linked task to open or copy its link. A reference without a known URL is
+displayed as text. A count opens a list of the tasks and their available links.
 
 The Mac reads the MR's linked work items, including **Relates to**, from GitLab.
 Hosts without the GraphQL relation field supply candidates through the closing
@@ -393,7 +393,8 @@ references found in its title and description. Closing links are strong
 evidence. Related items, dependencies, background references and mentions
 appear only when the verifier finds concrete work for that task in the MR.
 Additional text references require a source excerpt, and their URLs must appear
-in that excerpt. Equivalent issue URLs and repeated references are deduplicated
+in that excerpt. A task mentioned by name alone requires an explicit task label
+in the MR text. Equivalent issue URLs and repeated references are deduplicated
 within each MR. For related or mentioned candidates, up to two same-project MRs
 referenced in the current MR's text can corroborate the scope of a follow-up.
 

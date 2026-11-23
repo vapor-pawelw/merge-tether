@@ -422,7 +422,7 @@ struct RemoteCardView: View {
 
     private var expandedHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     HStack(alignment: .firstTextBaseline, spacing: 5) {
                         repositoryReference
@@ -458,7 +458,7 @@ struct RemoteCardView: View {
             }
             if let iid = card.mergeRequestIID {
                 Text(verbatim: "!\(iid)").monospacedDigit().fixedSize().opacity(contentOpacity)
-                if let issues = card.issues, !issues.isEmpty { MRIssueTag(issues: issues).opacity(contentOpacity) }
+                if let issues = card.issues, !issues.isEmpty { MRIssueTag(issues: issues) }
             }
         }
         .font(.caption).foregroundStyle(.secondary)

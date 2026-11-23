@@ -38,7 +38,7 @@ final class MRIssueCoordinator {
         let force: Bool
     }
 
-    private nonisolated static let version = 3
+    private nonisolated static let version = 4
     private static let refreshInterval: TimeInterval = 600
     private static let retryInterval: TimeInterval = 30
     private let file: URL?
@@ -72,7 +72,7 @@ final class MRIssueCoordinator {
         self.readReferencedRequests = readReferencedRequests
         self.assess = assess
         if let file {
-            cacheLoad = Task(priority: .background) { [weak self] in
+            cacheLoad = Task(priority: .utility) { [weak self] in
                 let saved = await Self.readCache(file)
                 guard let self else { return }
                 records = saved
@@ -156,7 +156,7 @@ final class MRIssueCoordinator {
 
     private func drain() {
         guard task == nil, cacheLoad == nil, !pendingBoard.isEmpty || !pendingSingles.isEmpty else { return }
-        task = Task(priority: .background) { [weak self] in await self?.processPending() }
+        task = Task(priority: .utility) { [weak self] in await self?.processPending() }
     }
 
     private func processPending() async {

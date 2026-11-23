@@ -358,68 +358,73 @@ private struct CommandCenterMRDetailContent: View {
         }
     }
 
+    private var headerReference: some View {
+        HStack(spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                BoardMRReferenceLine(iid: item.id.iid, projectID: item.id.projectID,
+                    repositoryPath: presentationRow.displayURL.gitLabProjectPath)
+                let issues = monitor.issueTags(for: presentationRow.displayRequest)
+                if !issues.isEmpty { MRIssueTag(issues: issues) }
+                if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
+                else if presentationRow.isDraft { BoardDraftBadge() }
+            }
+            Spacer(minLength: 0)
+            HStack(spacing: 0) {
+                if finishedState == nil, let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
+                    BoardAutomationToggle(monitor: monitor, target: target, projectPath: item.url.gitLabProjectPath,
+                        isDraft: presentationRow.isDraft, policy: automationPolicy)
+                }
+                BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
+                    username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
+                    settings: monitor.settings)
+                GitLabRefreshButton(monitor: monitor, itemID: item.id, placement: .header) {
+                    if let target = discussionTarget { await discussionStore.refresh(target: target, glab: monitor.glab) }
+                }
+                .buttonStyle(.plain)
+                .boardHeaderControlHover()
+                .accessibilityLabel(Text(.MRFreshness.mrFreshnessRefresh))
+                CopyMergeRequestLinkButton(url: item.url, placement: .header)
+                Link(destination: item.url) { BoardCardActionIcon(systemName: "arrow.up.right.square") }
+                    .buttonStyle(.plain)
+                    .boardHeaderControlHover()
+                    .help(Text(.CommandCenter.commandCenterOpenGitLab))
+                    .accessibilityLabel(Text(.CommandCenter.commandCenterOpenGitLab))
+                headerMenu
+            }
+            .fixedSize()
+        }
+        .font(.callout).foregroundStyle(.secondary)
+        .zIndex(1)
+    }
+
     private func header(_ progress: MRCardPresentation) -> some View {
         let mergeActivity = progress.mergeActivity
         return VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    BoardMRReferenceLine(iid: item.id.iid, projectID: item.id.projectID,
-                        repositoryPath: presentationRow.displayURL.gitLabProjectPath)
-                    let issues = monitor.issueTags(for: presentationRow.displayRequest)
-                    if !issues.isEmpty { MRIssueTag(issues: issues) }
-                    if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
-                    else if presentationRow.isDraft { BoardDraftBadge() }
-                }
-                Spacer(minLength: 0)
-                HStack(spacing: 0) {
-                    if finishedState == nil, let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
-                        BoardAutomationToggle(monitor: monitor, target: target, projectPath: item.url.gitLabProjectPath,
-                            isDraft: presentationRow.isDraft, policy: automationPolicy)
+            VStack(alignment: .leading, spacing: 2) {
+                headerReference
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(verbatim: presentationRow.displayTitle).font(.title2.weight(.semibold))
+                        .lineLimit(3).textSelection(.enabled)
+                    HStack(spacing: 0) {
+                        if let author = ReviewingContext(row: presentationRow).author {
+                            BoardCardAuthor(author: author)
+                        }
+                        Spacer(minLength: 16)
+                        if finishedState == nil {
+                            BoardMRApprovalBadge(row: presentationRow, monitor: monitor)
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
                     }
-                    BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
-                        username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
-                        settings: monitor.settings)
-                    GitLabRefreshButton(monitor: monitor, itemID: item.id, placement: .header) {
-                        if let target = discussionTarget { await discussionStore.refresh(target: target, glab: monitor.glab) }
+                    if let request = presentationRow.displayRequest {
+                        Label { Text(verbatim: request.sourceBranch + " → " + request.targetBranch) } icon: {
+                            Image(systemName: "arrow.triangle.branch")
+                        }
+                        .font(.callout.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel(Text(.MRDiscussions.mrDiscussionsBranches(request.sourceBranch, request.targetBranch)))
                     }
-                    .buttonStyle(.plain)
-                    .boardHeaderControlHover()
-                    .accessibilityLabel(Text(.MRFreshness.mrFreshnessRefresh))
-                    CopyMergeRequestLinkButton(url: item.url, placement: .header)
-                    Link(destination: item.url) { BoardCardActionIcon(systemName: "arrow.up.right.square") }
-                        .buttonStyle(.plain)
-                        .boardHeaderControlHover()
-                        .help(Text(.CommandCenter.commandCenterOpenGitLab))
-                        .accessibilityLabel(Text(.CommandCenter.commandCenterOpenGitLab))
-                    headerMenu
-                }
-                .fixedSize()
-            }
-            .font(.callout).foregroundStyle(.secondary)
-            .zIndex(1)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(verbatim: presentationRow.displayTitle).font(.title2.weight(.semibold))
-                    .lineLimit(3).textSelection(.enabled)
-                HStack(spacing: 0) {
-                    if let author = ReviewingContext(row: presentationRow).author {
-                        BoardCardAuthor(author: author)
-                    }
-                    Spacer(minLength: 16)
-                    if finishedState == nil {
-                        BoardMRApprovalBadge(row: presentationRow, monitor: monitor)
-                            .fixedSize(horizontal: true, vertical: false)
-                    }
-                }
-                if let request = presentationRow.displayRequest {
-                    Label { Text(verbatim: request.sourceBranch + " → " + request.targetBranch) } icon: {
-                        Image(systemName: "arrow.triangle.branch")
-                    }
-                    .font(.callout.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityLabel(Text(.MRDiscussions.mrDiscussionsBranches(request.sourceBranch, request.targetBranch)))
                 }
             }
-            .padding(.top, 2)
             MergeRequestDescription(source: presentationRow.displayRequest?.description,
                 title: .CommandCenter.commandCenterDescription, expandHint: .CommandCenter.commandCenterExpandDescription,
                 collapseHint: .CommandCenter.commandCenterCollapseDescription)

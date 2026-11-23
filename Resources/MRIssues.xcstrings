@@ -26,8 +26,15 @@
     "mr.issues.openLink": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Opens the issue in your browser" } },
-        "pl": { "stringUnit": { "state": "translated", "value": "Otwiera zadanie w przeglądarce" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Open link" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Otwórz link" } }
+      }
+    },
+    "mr.issues.linkActions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Shows options to open or copy the link" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Pokazuje opcje otwarcia lub skopiowania linku" } }
       }
     }
   },

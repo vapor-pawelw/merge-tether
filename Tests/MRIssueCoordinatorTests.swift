@@ -238,6 +238,19 @@ struct MRIssueCoordinatorTests {
         #expect(issues == [.init(reference: "#314", url: URL(string: url))])
     }
 
+    @Test func aNamedTaskNeedsAnExplicitTaskLabel() throws {
+        let capability = "Powiązana zdolność: Automatyzujemy obieg dokumentów"
+        let task = "- **Zadanie:** Przywrócić podpis elektroniczny"
+        let earlierTask = "task: Redesign the form"
+        let input = MRIssueAssessor.Input(request: try request([capability, task, "An earlier " + earlierTask].joined(separator: "\n")))
+        let findings: [MRIssueAssessor.Response.Finding] = [
+            .init(relation: .scope, reference: "Automatyzujemy obieg dokumentów", title: nil, url: nil, evidence: capability),
+            .init(relation: .scope, reference: "Przywrócić podpis elektroniczny", title: nil, url: nil, evidence: task),
+            .init(relation: .scope, reference: "Redesign the form", title: nil, url: nil, evidence: earlierTask)
+        ]
+        #expect(try MRIssueAssessor.issues(from: findings, input: input) == [.init(reference: "Przywrócić podpis elektroniczny")])
+    }
+
     private func request(_ description: String, iid: Int = 12, draft: Bool = false) throws -> GitLabMergeRequest {
         let value: [String: Any] = [
             "project_id": 34, "iid": iid, "title": "Example merge request", "description": description,

@@ -65,7 +65,7 @@ import MergeTetherRemote
         guard mergeRequestIssues != nil else { return }
         let target = MRAutomationScope.Target(host: host, username: username, projectID: projectID, iid: iid)
         let revision = glab.accountRevision
-        Task(priority: .background) { [weak self] in
+        Task(priority: .utility) { [weak self] in
             guard let self, let mergeRequestIssues, isCurrentIssueAccount(target, revision: revision) else { return }
             let startedAt = Date()
             guard let request = try? await glab.fetchMergeRequest(projectID: projectID, iid: iid, host: host),

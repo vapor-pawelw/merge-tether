@@ -73,7 +73,7 @@ enum MRIssueAssessor {
     }
 
     static func issues(from findings: [Response.Finding], input: Input) throws -> [RemoteMRIssue] {
-        try findings.filter { $0.relation == .scope }.map { finding in
+        try findings.filter { $0.relation == .scope }.compactMap { finding in
             let url = finding.url.flatMap { urls(in: finding.evidence).contains($0) ? URL(string: $0) : nil }
             guard !finding.reference.isEmpty, finding.reference.count <= 100,
                   !finding.evidence.isEmpty, finding.evidence.count <= 1_000,
@@ -83,7 +83,29 @@ enum MRIssueAssessor {
             else { throw Failure.invalidEvidence }
             let title = finding.title.flatMap { finding.evidence.contains($0) ? GitLabClosingIssue.singleLine($0, limit: 160) : nil }
             let issue = RemoteMRIssue(reference: reference, title: title == reference ? nil : title, url: url)
+            guard issue.linkURL != nil || isTaskIdentifier(reference)
+                    || isExplicitTaskName(reference, in: finding.evidence, input: input)
+            else { return nil }
             return .init(reference: issue.reference, title: issue.title, url: issue.linkURL)
+        }
+    }
+
+    private static func isTaskIdentifier(_ reference: String) -> Bool {
+        reference.wholeMatch(of: /(?:[\w.-]+\/)*[\w.-]*#[1-9][0-9]*/) != nil
+            || reference.wholeMatch(of: /[A-Za-z][A-Za-z0-9_]*-[1-9][0-9]*/) != nil
+    }
+
+    private static func isExplicitTaskName(_ reference: String, in evidence: String, input: Input) -> Bool {
+        let taskLabels = ["task", "issue", "ticket", "work item", "zadanie", "zgłoszenie"]
+        let formatting = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "-+*_`\"'„“”"))
+        let name = reference.trimmingCharacters(in: formatting)
+        let sourceLines = [input.title, input.description].flatMap { $0.split(whereSeparator: \.isNewline) }
+        return sourceLines.contains { line in
+            guard evidence.contains(line.trimmingCharacters(in: .whitespaces)) else { return false }
+            let fields = line.split(separator: ":", maxSplits: 1)
+            guard fields.count == 2 else { return false }
+            let label = fields[0].trimmingCharacters(in: formatting).lowercased()
+            return taskLabels.contains(label) && fields[1].trimmingCharacters(in: formatting) == name
         }
     }
 
@@ -186,7 +208,9 @@ enum MRIssueAssessor {
             refer to an actual task. If nothing qualifies, an empty list is valid.
             For additional tasks absent from the candidates, return a reference copied from the supplied evidence.
             For a URL ending in /issues/123 or /work_items/123, #123 is also valid.
-            A short explicit task name is acceptable if no ID is present.
+            If there is no issue ID or URL, use a name only when it appears on an explicit task line such as
+            "Task: Restore signature validation" or "Zadanie: Przywrócić walidację podpisu". Include that label
+            and its full line in the evidence. A capability, goal, initiative, section heading, or description of work is not a task.
             Copy one exact, contiguous title or description excerpt, up to 1000 characters, as evidence,
             including the reference and words that support the relation. Copy an optional title and exact URL only when
             the same excerpt binds them to the task. Return null for missing values. Never construct a URL.
