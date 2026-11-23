@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Move **Run setup again** to General settings, below the coding agent picker.
+
 - Edit or restore the AI comment assessment prompt in Advanced automation settings.
 
 - Complete the Polish localization of the Mac and iPhone interfaces, including plural forms, setup, automation, and the iPhone camera permission prompt.

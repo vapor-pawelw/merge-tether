@@ -4,6 +4,7 @@ import UserNotifications
 
 struct GeneralSettingsTab: View {
     @Bindable var monitor: TodoMonitorService
+    @Environment(\.openWindow) private var openWindow
 
     @State private var launchAtLogin: Bool = LaunchAtLoginService.isEnabled
 
@@ -30,6 +31,12 @@ struct GeneralSettingsTab: View {
                 PersistenceDegradedBanner(settings: monitor.settings)
             } footer: {
                 Text(.Settings.settingsAssistantUseHelp)
+            }
+
+            Section {
+                Button(.Settings.settingsIntegrationRunSetupAgain) {
+                    openWindow(id: "onboarding")
+                }
             }
 
             Section {
