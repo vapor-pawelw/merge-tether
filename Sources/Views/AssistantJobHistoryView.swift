@@ -89,6 +89,20 @@ struct AssistantJobRow: View {
                 if let error = execution.errorExplanation, error != execution.attentionExplanation {
                     Text(verbatim: GlabService.redactWorkflowEvidence(error)).foregroundStyle(.orange).textSelection(.enabled)
                 }
+                if let effects = execution.remoteEffects, !effects.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label {
+                            Text(.AssistantJobs.assistantJobsAuditHeading)
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle")
+                        }
+                        ForEach(effects) { effect in
+                            Text(effect.title)
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                }
                 if let output = execution.output, !output.isEmpty {
                     DisclosureGroup(isExpanded: $transcriptExpanded) {
                         if transcriptExpanded {

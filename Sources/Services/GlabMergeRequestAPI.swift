@@ -7,8 +7,8 @@ extension GlabService {
         return counts.progress(projectID: projectID, iid: iid)
     }
 
-    func fetchMergeRequestApprovalCounts(projectID: Int, iid: Int, host: String) async throws -> GitLabMergeRequestApprovalCounts {
-        try await mergeRequestAPI("/projects/\(projectID)/merge_requests/\(iid)/approvals", host: host)
+    func fetchMergeRequestApprovalCounts(projectID: Int, iid: Int, host: String, timeout: TimeInterval = 15) async throws -> GitLabMergeRequestApprovalCounts {
+        try await mergeRequestAPI("/projects/\(projectID)/merge_requests/\(iid)/approvals", host: host, timeout: timeout)
     }
 
     func fetchAuthenticatedUser(host: String, expectedUsername: String) async throws -> GitLabAuthenticatedUser {
@@ -316,12 +316,12 @@ extension GlabService {
     }
 
     func fetchMergeRequestDiscussions(
-        projectID: Int, iid: Int, host: String
+        projectID: Int, iid: Int, host: String, timeout: TimeInterval = 45
     ) async throws -> [GitLabMergeRequestDiscussion] {
         let revision = accountRevision, executable = glabPath, readAt = Date()
         let discussions: [GitLabMergeRequestDiscussion] = try await fetchMergeRequestPages(
             "/projects/\(projectID)/merge_requests/\(iid)/discussions?per_page=100",
-            host: host
+            host: host, timeout: timeout
         )
         if !Task.isCancelled, revision == accountRevision, executable == glabPath, host == resolvedHost, currentUsername != nil {
             rememberDiscussions(discussions, projectID: projectID, iid: iid, readAt: readAt)
@@ -710,12 +710,12 @@ extension GlabService {
         }
     }
 
-    private func fetchMergeRequestPages<Item: Decodable>(_ endpoint: String, host: String) async throws -> [Item] {
+    private func fetchMergeRequestPages<Item: Decodable>(_ endpoint: String, host: String, timeout: TimeInterval = 45) async throws -> [Item] {
         try await mergeRequestAPI(
             endpoint,
             host: host,
             arguments: ["--paginate"],
-            timeout: 45,
+            timeout: timeout,
             decode: { try GlabPaginatedJSON.decode(Item.self, from: $0) }
         )
     }

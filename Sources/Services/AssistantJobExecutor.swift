@@ -214,6 +214,10 @@ enum AssistantJobExecutor {
         let authorization = WorkerLaunchAuthorization(request: request)
         let accountRevision = glab.accountRevision
         let beforeLaunch: @Sendable () async throws -> Void = { @MainActor in
+            if AssistantWorkerAudit.activeRunIndex(handoff, in: settings) != nil {
+                authorization.auditBaseline = await AssistantWorkerAudit.capture(for: request, host: handoff.key.work.host,
+                    user: user, accountRevision: accountRevision, glab: glab)
+            }
             if requiresLiveWorkflowRule(handoff) || handoff.draftRepair != nil || handoff.pipelineReservation != nil {
                 let latest = try await glab.fetchMergeRequest(projectID: handoff.key.work.projectID,
                     iid: handoff.key.work.iid, host: handoff.key.work.host)
@@ -247,6 +251,11 @@ enum AssistantJobExecutor {
                 return false
             }
         }
+        func auditRemoteEffects() async {
+            guard let baseline = authorization.auditBaseline else { return }
+            await AssistantWorkerAudit.recordChanges(since: baseline, handoff: handoff, request: request,
+                user: user, accountRevision: accountRevision, glab: glab, settings: settings)
+        }
         do {
         if handoff.key.assistant == .codex {
             try Data(AssistantJobResult.schema.utf8).write(to: invocation.schemaURL, options: .atomic)
@@ -279,11 +288,14 @@ enum AssistantJobExecutor {
         }
         } catch {
             if let denial = authorization.denial { throw denial }
+            if capturedOutput != nil { await auditRemoteEffects() }
+            else if case ProcessRunner.RunError.timedOut = error { await auditRemoteEffects() }
             if let capturedOutput, !(error is CancellationError) {
                 throw AssistantJobFailure(error: error, output: capturedOutput)
             }
             throw error
         }
+        await auditRemoteEffects()
         let transcript = GlabService.redactWorkflowEvidence(String(decoding: output.stdout, as: UTF8.self) + "\n" + output.stderr)
         let outcome = AssistantJobCoordinator.Outcome(result: result, output: transcript)
         await recordGeneratedDrafts(result, baseline: generationBaseline, user: user, request: request,
@@ -436,6 +448,7 @@ enum AssistantJobExecutor {
     private final class WorkerLaunchAuthorization {
         var request: GitLabMergeRequest
         var denial: (any Error)?
+        var auditBaseline: AssistantWorkerAudit.Snapshot?
         init(request: GitLabMergeRequest) { self.request = request }
     }
 

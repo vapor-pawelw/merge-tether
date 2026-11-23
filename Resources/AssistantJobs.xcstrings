@@ -34,6 +34,61 @@
         }
       }
     },
+    "assistant.jobs.audit.heading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitLab changes observed during this run. Check the merge request to confirm who made them."
+          }
+        }
+      }
+    },
+    "assistant.jobs.audit.published.comment": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New published comment from your account"
+          }
+        }
+      }
+    },
+    "assistant.jobs.audit.approval": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New approval from your account"
+          }
+        }
+      }
+    },
+    "assistant.jobs.audit.resolved.discussion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Discussion resolved by your account outside this task’s permissions"
+          }
+        }
+      }
+    },
+    "assistant.jobs.audit.source.head": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Source commit changed while push was disabled for this run"
+          }
+        }
+      }
+    },
     "assistant.jobs.transcript": {
       "extractionState": "manual",
       "localizations": {
