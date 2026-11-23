@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import os
 import Testing
 @testable import MergeTether
 
@@ -106,6 +107,22 @@ struct ProcessRunnerTests {
         #expect(String(decoding: output.stdout, as: UTF8.self) == "ready")
         #expect(output.stderr == "diagnostic")
         #expect(start.duration(to: clock.now) < .seconds(2))
+    }
+
+    @Test("a command that exited successfully is not reported as timed out")
+    func successfulExitWinsAgainstTheDeadline() async throws {
+        for _ in 0..<10 {
+            for deadline in [0.0005, 0.001, 0.002, 0.004] {
+                let exitCode = OSAllocatedUnfairLock(initialState: Int32?.none)
+                do {
+                    let output = try await ProcessRunner.run(URL(fileURLWithPath: "/usr/bin/true"),
+                        environment: [:], timeout: deadline, onOutput: { output in exitCode.withLock { $0 = output.exitCode } })
+                    #expect(output.exitCode == 0)
+                } catch ProcessRunner.RunError.timedOut {
+                    #expect(exitCode.withLock { $0 } != 0)
+                }
+            }
+        }
     }
 
     @Test("force-stops a process that ignores termination after timing out")

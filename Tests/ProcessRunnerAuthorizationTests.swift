@@ -79,6 +79,18 @@ struct ProcessRunnerAuthorizationTests {
         #expect(admission.checks == (reason == "denied" ? 1 : 0))
     }
 
+    @Test func cancellationBeforeAnUnguardedLaunchNeverStartsTheProcess() async throws {
+        let fixture = try fixture()
+        defer { try? FileManager.default.removeItem(at: fixture.folder) }
+        let task = Task.detached {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await ProcessRunner.run(fixture.executable, environment: [:], timeout: 5,
+                onStarted: { try? Data().write(to: fixture.marker) })
+        }
+        await #expect(throws: CancellationError.self) { try await task.value }
+        #expect(!FileManager.default.fileExists(atPath: fixture.marker.path))
+    }
+
     @Test func guardedLaunchFailuresRetainTheirErrorClassification() async {
         do {
             _ = try await ProcessRunner.run(URL(fileURLWithPath: "/nonexistent/fixture-write"), environment: [:],

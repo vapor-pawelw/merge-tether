@@ -28,7 +28,7 @@ final class OwnedProcessTree: @unchecked Sendable {
 
     func start(_ pid: pid_t) {
         lock.lock()
-        root = Identity.read(pid)
+        root = Identity.read(pid, parentPID: getpid())
         collectLocked()
         lock.unlock()
         let task = Task.detached { [weak self] in
