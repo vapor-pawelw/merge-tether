@@ -702,7 +702,7 @@ struct AutomationPackageTests {
         var settings = AutomationSettings()
         settings.autoResolveOwnReviewThreads = false
         #expect(try !JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(settings)).autoResolveOwnReviewThreads)
-        #expect(settings.autoApproveEnabled)
+        #expect(!settings.autoApproveEnabled, "Automatic approval needs an explicit delivering profile or choice")
         settings.disableAssistantPackage()
         #expect(!settings.autoResolveOwnReviewThreads)
         settings.autoResolveOwnReviewThreads = true

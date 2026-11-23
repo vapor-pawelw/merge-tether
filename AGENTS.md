@@ -43,8 +43,10 @@ macOS GitLab inbox and MR automation. Read [README.md](README.md) for behavior,
 - Review-only work on someone else's MR must remain review-only. Keep conflict-push
   permission separate from follow-up push. Never resolve someone else's discussion
   without an explicit instruction. Preserve user-created drafts.
-- Approval verdicts bind the current commit and discussion text; resolution-only
-  changes preserve them, new or edited comments require re-review.
+- Approval verdicts bind the current commit, discussion text and the app-captured
+  target branch/base; resolution-only changes preserve them, new or edited comments
+  or a retarget require re-review. Automatic approval also needs the app's
+  deterministic gate; a verdict alone never approves.
 - GitLab errors retain the previous clickable inbox. Never clear it to represent failure.
 
 ## Changes and verification

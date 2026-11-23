@@ -12,7 +12,7 @@ Worker output is written to private files throughout execution. Validated comple
 2. Drafts wait on the relevant MR card. Open **Review and confirm** to read the complete discussion and private drafts, then publish the reviewed set or edit it in GitLab. Publication can also run automatically under the selected profile and publication mode.
 3. New commits or author replies trigger a new re-review task. The first poll establishes a baseline; later events are deduplicated across restarts.
 4. The agent checks each concern against the current remote head and records open or uncertain findings in the review verdict. It drafts a follow-up in your thread only when there is a substantive incoming reply that warrants an answer. With **Resolve my verified findings during re-review** enabled, it can resolve verified findings in threads whose first non-system note belongs to you. Turning the option off leaves resolution to you.
-5. Automatic approval requires a current review that meets your selected approval threshold, completed comment review, and no pending drafts, in addition to your automation scope and CLI readiness.
+5. Automatic approval requires a current review of the same target branch and diff base that meets your selected approval threshold, a passing pipeline on the same commit, a bounded change size, completed comment review, and no pending drafts, in addition to your automation scope and CLI readiness.
 
 In a thread started by someone else, the review worker drafts a reply only when direct evidence shows that a proposed solution, argument or factual claim is wrong in a way that could materially affect a technical or review decision. Acknowledgements, confirmations of fixes, minor corrections and uncertain disagreements stay in the review verdict or run result. The same rule applies to bot threads.
 
@@ -442,13 +442,13 @@ Workers can set `proposedSolution` when the draft recommends a concrete solution
 
 ## Automatic approval
 
-**Approve merge requests automatically** is enabled by Trusted and Max and disabled by Safe and Manual. Set **Automatically approve when** in **Settings → Automation → Profile & permissions**. Changing presets keeps your selected threshold.
+**Approve merge requests automatically** is enabled by Trusted and Max and disabled by Safe and Manual. It is off in new or recommended settings until you choose a delivering profile or turn it on. Set **Automatically approve when** in **Settings → Automation → Profile & permissions**. Changing presets keeps your selected threshold. Upgrades keep a saved permission and threshold; older settings without the permission inherit it only from an explicitly saved Trusted or Max profile.
 
 | Threshold | Remaining issues allowed |
 | --- | --- |
-| **No major issues remain** (default) | Minor code suggestions and editorial feedback. |
+| **No major issues remain** | Minor code suggestions and editorial feedback. |
 | **No code-related issues remain** | Editorial feedback, such as wording in the MR description. |
-| **No issues remain** | Approval requires no remaining issues. |
+| **No issues remain** (default) | Approval requires no remaining issues. |
 
 Each threshold considers active discussions from every participant, including general comments. Substantive issues, explicit approval requirements and unresolved uncertainty about major issues block automatic approval. A resolved thread and all its replies are excluded. Resolved discussions remain visible in GitLab. An existing private reply in a resolved thread stays private until you handle it.
 
@@ -460,8 +460,9 @@ Automatic approval also has these requirements.
 - No pending drafts and a completed comment-review checkpoint when one is pending.
 - An open MR you review, within the effective Draft and automation policy, which you have yet to approve.
 - The selected CLI is ready for automation.
+- Deterministic checks the review verdict cannot influence, made by the app on its own fresh single-MR reads, including the final read before the write: the current target project, target branch and diff base SHA equal those the app recorded from its own reads when it sealed the review, unchanged from the start of the review; the head pipeline passed on the same commit; and GitLab reports at most 50 changed files. An MR without a pipeline, with an unknown or capped change count, or whose review predates target binding keeps the manual **Approve** action instead.
 
-Approval is pinned to the checked source SHA. A new or edited comment invalidates the verdict; resolution-only changes preserve it. If GitLab refuses automatic approval, the app stops retrying that commit and retains the manual **Approve** action. Disable approval for an individual reviewed MR in its detail controls or automation scope settings. On someone else's MR, resolution remains limited to your own verified review findings; accepted-feedback resolution applies only when you own the MR.
+Approval is pinned to the checked source SHA, target branch and diff base. Retargeting an MR or a new diff base without a new commit withholds automatic approval until a fresh review. A new or edited comment invalidates the verdict; resolution-only changes preserve it. If GitLab refuses automatic approval, the app stops retrying that commit and retains the manual **Approve** action. Disable approval for an individual reviewed MR in its detail controls or automation scope settings. On someone else's MR, resolution remains limited to your own verified review findings; accepted-feedback resolution applies only when you own the MR.
 
 To make your own decision, open the approvals badge on an MR you review and choose **Approve** or **Remove approval**. Manual approval uses the displayed revision and the signed-in GitLab account. Removing approval sets **Approval → Off** for that MR and shows a confirmation. The orange Mac bolt marks this customization. The setting persists across commits and restarts. Set **Approval** back to **Default** or **On** from the Mac bolt to resume automatic approval under the current rules. Manual approval and removal leave the MR’s other automation settings in place.
 
@@ -469,7 +470,7 @@ The reviewer checks factual claims against the current commit and full changed-f
 
 Publishing an unchanged draft captured in that authenticated review completion can preserve the verdict. The app confirms the exact newly published notes and unchanged existing discussion text before authenticating the resulting fingerprint. Later or edited drafts, direct comments and unsigned draft-history caches cannot extend automatic approval under an older review.
 
-Old verdict files without an authenticated account or evidence of the reviewed title and description require a current app-managed review. An older objections verdict or unclassified active feedback requires a fresh review before the thresholds can apply. A verified GitLab Duo false positive from an authenticated earlier review can still qualify when the review covers the current title and description, and live bot identity and exact thread evidence match. This authenticates the origin of the review result. The app relies on the review worker's judgment.
+Old verdict files without an authenticated account or evidence of the reviewed title and description require a current app-managed review. An older objections verdict or unclassified active feedback requires a fresh review before the thresholds can apply. A verified GitLab Duo false positive from an authenticated earlier review can still qualify when the review covers the current title and description, and live bot identity and exact thread evidence match. This authenticates the origin of the review result. The app relies on the review worker's judgment for the findings themselves; the deterministic checks limit what that judgment alone can approve, but they are not a second review. A passing pipeline is defined by the MR's own CI configuration, so a hostile author can influence it, and GitLab's head-SHA check does not cover a retarget between the final read and the write.
 
 ## What each action may do
 

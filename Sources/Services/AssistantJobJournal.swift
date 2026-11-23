@@ -15,6 +15,8 @@ enum AssistantJobJournal {
         let finishedAt: Date
         var reviewVerdict: ReviewVerdict? = nil
         var reviewDrafts: [GitLabDraftNote]? = nil
+        /// Captured by the app from its own live read; older checkpoints have none and need a fresh review.
+        var reviewTarget: ReviewTargetBinding? = nil
     }
     private struct Sealed: Codable { let payload: Data; let signature: Data }
     private static let testing = Bundle.allBundles.contains { $0.bundleURL.pathExtension == "xctest" }
@@ -47,13 +49,16 @@ enum AssistantJobJournal {
     }
 
     static func save(_ outcome: AssistantJobCoordinator.Outcome, for handoff: AssistantAutomationRunner.Handoff,
-                     reviewVerdict: ReviewVerdict? = nil, reviewDrafts: [GitLabDraftNote]? = nil) async throws {
+                     reviewVerdict: ReviewVerdict? = nil, reviewDrafts: [GitLabDraftNote]? = nil,
+                     reviewTarget: ReviewTargetBinding? = nil) async throws {
         guard await loadKey() else { throw KeyError(status: errSecInteractionNotAllowed) }
-        try saveWithLoadedKey(outcome, for: handoff, reviewVerdict: reviewVerdict, reviewDrafts: reviewDrafts)
+        try saveWithLoadedKey(outcome, for: handoff, reviewVerdict: reviewVerdict, reviewDrafts: reviewDrafts,
+            reviewTarget: reviewTarget)
     }
 
     static func saveWithLoadedKey(_ outcome: AssistantJobCoordinator.Outcome, for handoff: AssistantAutomationRunner.Handoff,
-                                  reviewVerdict: ReviewVerdict? = nil, reviewDrafts: [GitLabDraftNote]? = nil) throws {
+                                  reviewVerdict: ReviewVerdict? = nil, reviewDrafts: [GitLabDraftNote]? = nil,
+                                  reviewTarget: ReviewTargetBinding? = nil) throws {
         guard let bytes = keyLoader.cached else { throw KeyError(status: errSecInteractionNotAllowed) }
         let signingKey = SymmetricKey(data: bytes)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
@@ -63,7 +68,8 @@ enum AssistantJobJournal {
                 summary: String(GlabService.redactWorkflowEvidence(outcome.result.summary).prefix(32_000)),
                 blocker: outcome.result.blocker.map { String(GlabService.redactWorkflowEvidence($0).prefix(300)) }),
             output: String(GlabService.redactWorkflowEvidence(outcome.output).prefix(262_144)), finishedAt: Date(),
-            reviewVerdict: reviewVerdict, reviewDrafts: reviewDrafts)
+            reviewVerdict: reviewVerdict, reviewDrafts: reviewDrafts,
+            reviewTarget: reviewVerdict == nil ? nil : reviewTarget)
         let payload = try JSONEncoder().encode(checkpoint)
         let sealed = Sealed(payload: payload, signature: Data(HMAC<SHA256>.authenticationCode(for: payload, using: signingKey)))
         let file = checkpointURL(for: handoff.id)
@@ -82,6 +88,13 @@ enum AssistantJobJournal {
               verdict.userID.map({ $0 > 0 }) == true, verdict.headSHA == handoff.expectedHeadSHA,
               verdict.discussionFingerprint != nil else { return nil }
         return verdict
+    }
+
+    /// The target the app observed when it sealed this review; nil for legacy or unbound completions.
+    static func reviewTarget(for handoff: AssistantAutomationRunner.Handoff) -> ReviewTargetBinding? {
+        guard let verdict = reviewVerdict(for: handoff), let target = checkpoint(for: handoff)?.reviewTarget,
+              target.headSHA == verdict.headSHA else { return nil }
+        return target
     }
 
     static func reviewDrafts(for handoff: AssistantAutomationRunner.Handoff) -> [GitLabDraftNote]? {

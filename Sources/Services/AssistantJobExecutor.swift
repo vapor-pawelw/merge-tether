@@ -334,8 +334,10 @@ enum AssistantJobExecutor {
         let outcome = AssistantJobCoordinator.Outcome(result: result, output: transcript)
         await recordGeneratedDrafts(result, baseline: generationBaseline, user: user, request: request,
             handoff: handoff, settings: settings, glab: glab)
-        let review = await reviewVerdictForCompletion(result, user: user, handoff: handoff, settings: settings, glab: glab)
-        do { try await AssistantJobJournal.save(outcome, for: handoff, reviewVerdict: review?.verdict, reviewDrafts: review?.drafts) }
+        let review = await reviewVerdictForCompletion(result, user: user, handoff: handoff, settings: settings, glab: glab,
+            reviewedRequest: request)
+        do { try await AssistantJobJournal.save(outcome, for: handoff, reviewVerdict: review?.verdict, reviewDrafts: review?.drafts,
+            reviewTarget: review?.target) }
         catch { Log.monitor.error("Could not checkpoint worker completion: \(String(describing: error), privacy: .private)") }
         try Task.checkCancellation()
         return outcome
@@ -345,11 +347,14 @@ enum AssistantJobExecutor {
     struct ReviewCompletionEvidence {
         let verdict: ReviewVerdict
         let drafts: [GitLabDraftNote]
+        /// From the app's own read after the worker finished; never from the worker or its helper.
+        var target: ReviewTargetBinding? = nil
     }
 
     @MainActor
     static func reviewVerdictForCompletion(_ result: AssistantJobResult, user: GitLabAuthenticatedUser,
         handoff: AssistantAutomationRunner.Handoff, settings: SettingsManager, glab: GlabService,
+        reviewedRequest: GitLabMergeRequest? = nil,
         directory: URL = ReviewVerdictStore.directory) async -> ReviewCompletionEvidence? {
         let work = handoff.key.work, revision = glab.accountRevision
         func current() -> Bool {
@@ -382,7 +387,12 @@ enum AssistantJobExecutor {
                   let encodedDrafts = try? JSONEncoder().encode(drafts), encodedDrafts.count <= 131_072,
                   ReviewVerdictStore.verdict(host: work.host, projectID: work.projectID, iid: work.iid,
                     user: user, in: directory) == verdict else { return nil }
-            return .init(verdict: verdict, drafts: drafts)
+            // Bind only a target that stayed the same from the launch read to this read; otherwise the
+            // verdict still records the review, but automatic approval requires a fresh one.
+            let target = ReviewTargetBinding(request)
+            let launchTarget = reviewedRequest.flatMap(ReviewTargetBinding.init)
+            return .init(verdict: verdict, drafts: drafts,
+                target: reviewedRequest == nil || launchTarget == target ? target : nil)
         } catch {
             Log.monitor.error("Could not authenticate review verdict: \(String(describing: error), privacy: .private)")
             return nil

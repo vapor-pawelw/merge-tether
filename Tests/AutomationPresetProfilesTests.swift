@@ -227,7 +227,7 @@ struct AutomationPresetProfilesTests {
         let suite = "ApprovalThreshold.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        #expect(try JSONDecoder().decode(AutomationSettings.self, from: Data("{}".utf8)).autoApprovalThreshold == .noMajorIssues)
+        #expect(try JSONDecoder().decode(AutomationSettings.self, from: Data("{}".utf8)).autoApprovalThreshold == .noIssues)
         let settings = SettingsManager(defaults: defaults)
         settings.automation.autoApprovalThreshold = .noCodeIssues
         settings.automation.applyPreset(.full, for: .codex)
@@ -239,6 +239,34 @@ struct AutomationPresetProfilesTests {
         restarted.automation.applyPreset(.trusted, for: .codex)
         #expect(restarted.automation.autoApprovalThreshold == .noCodeIssues)
         #expect(restarted.automation.matchingPreset == .trusted)
+    }
+
+    @Test func automaticApprovalDefaultsAreSafeAndUpgradesPreserveExplicitValues() throws {
+        // Fresh settings and legacy blobs without the key never approve on their own.
+        #expect(!AutomationSettings().autoApproveEnabled && AutomationSettings().autoApprovalThreshold == .noIssues)
+        var recommended = AutomationSettings()
+        recommended.applyRecommended(for: .codex)
+        #expect(!recommended.autoApproveEnabled)
+        func load(_ json: String) throws -> AutomationSettings {
+            try JSONDecoder().decode(AutomationSettings.self, from: Data(json.utf8))
+        }
+        #expect(try !load("{}").autoApproveEnabled)
+        #expect(try !load(#"{"packageDecision":"enabled"}"#).autoApproveEnabled)
+        #expect(try !load(#"{"packageDecision":"enabled","selectedPreset":"safe"}"#).autoApproveEnabled)
+        // A missing permission inherits only an explicitly stored delivering profile.
+        #expect(try load(#"{"packageDecision":"enabled","selectedPreset":"trusted"}"#).autoApproveEnabled)
+        #expect(try load(#"{"packageDecision":"enabled","selectedPreset":"full"}"#).autoApproveEnabled)
+        #expect(try !load(#"{"packageDecision":"disabled","selectedPreset":"trusted"}"#).autoApproveEnabled)
+        // Explicit values, including the former permissive defaults, are preserved.
+        let explicit = try load(#"{"packageDecision":"enabled","autoApproveEnabled":true,"autoApprovalThreshold":"noMajorIssues"}"#)
+        #expect(explicit.autoApproveEnabled && explicit.autoApprovalThreshold == .noMajorIssues)
+        #expect(try !load(#"{"packageDecision":"enabled","selectedPreset":"trusted","autoApproveEnabled":false}"#).autoApproveEnabled)
+        let roundTrip = try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(explicit))
+        #expect(roundTrip.autoApproveEnabled && roundTrip.autoApprovalThreshold == .noMajorIssues)
+        // Delivering profiles still grant the permission explicitly.
+        var trusted = AutomationSettings()
+        trusted.applyPreset(.trusted, for: .codex)
+        #expect(trusted.autoApproveEnabled && trusted.matchingPreset == .trusted)
     }
 
     @Test func changingPermissionsMarksAChosenProfileCustomizedWithoutReapplyingIt() {

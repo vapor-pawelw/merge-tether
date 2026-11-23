@@ -192,6 +192,15 @@ enum ReviewVerdictStore {
         return verdict
     }
 
+    /// The app-captured target sealed with this verdict's completion. Legacy completions have none, so their
+    /// verdicts never authorize automatic approval and the MR needs a fresh review first.
+    @MainActor
+    static func authenticatedTarget(for verdict: ReviewVerdict, settings: SettingsManager?) -> ReviewTargetBinding? {
+        guard let runID = verdict.runID, let run = settings?.assistantHandoffs.first(where: { $0.id == runID }),
+              AssistantJobJournal.reviewVerdict(for: run) == verdict else { return nil }
+        return AssistantJobJournal.reviewTarget(for: run)
+    }
+
     @MainActor
     static func authenticatedReviewDrafts(for verdict: ReviewVerdict, settings: SettingsManager?) -> [GitLabDraftNote]? {
         guard let runID = verdict.runID, let run = settings?.assistantHandoffs.first(where: { $0.id == runID }),
@@ -202,7 +211,7 @@ enum ReviewVerdictStore {
     @MainActor
     static func automaticallyApproves(_ verdict: ReviewVerdict, head: String,
         discussions: [GitLabMergeRequestDiscussion], user: GitLabAuthenticatedUser,
-        threshold: AutoApprovalThreshold = .noMajorIssues, semanticContextFingerprint: String,
+        threshold: AutoApprovalThreshold = .noIssues, semanticContextFingerprint: String,
         legacyDuoThreadsVerified: Bool = false,
         in directory: URL = directory) -> Bool {
         guard !verdict.requiresFreshReview(forSemanticContext: semanticContextFingerprint),

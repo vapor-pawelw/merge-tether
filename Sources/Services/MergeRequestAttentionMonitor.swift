@@ -1073,7 +1073,7 @@ final class MergeRequestAttentionMonitor {
                     let autoApproves = item.mergeRequest.map {
                         autoApproveApplies(to: $0, host: host, username: account.username)
                     } ?? false
-                    let approvalThreshold = settings?.automation.autoApprovalThreshold ?? .noMajorIssues
+                    let approvalThreshold = settings?.automation.autoApprovalThreshold ?? .noIssues
                     let target = commentReviewTarget(item.id, account: account)
                     let approvalOptedOut = settings.map {
                         $0.automation.scope[target] != .paused && $0.actionPreference(.approval, for: target) == .off
@@ -1082,6 +1082,9 @@ final class MergeRequestAttentionMonitor {
                         host: host, username: user.username)
                     let authenticatedVerdict = ReviewVerdictStore.authenticatedVerdict(host: host,
                         projectID: item.id.projectID, iid: item.id.iid, user: user, settings: settings, in: verdictDirectory)
+                    let reviewedTarget = authenticatedVerdict.flatMap {
+                        ReviewVerdictStore.authenticatedTarget(for: $0, settings: settings)
+                    }
                     group.addTask { [glab] in
                         var updated = item
                         var contextDraftIDs: Set<Int> = []
@@ -1112,7 +1115,8 @@ final class MergeRequestAttentionMonitor {
                                host: host, projectID: request.projectID, iid: request.iid, user: user, in: verdictDirectory
                            )?.headSHA == head {
                             let check = await Self.approvalCheck(request, user: user, host: host,
-                                glab: glab, verdict: authenticatedVerdict)
+                                glab: glab, verdict: authenticatedVerdict,
+                                automaticGate: autoApproves && authenticatedVerdict != nil ? (head, reviewedTarget) : nil)
                             let currentVerdict = check.discussions.map {
                                 ReviewVerdictStore.verdict(host: host, projectID: request.projectID, iid: request.iid, user: user, in: verdictDirectory)?
                                     .approves(head: head, discussions: $0, reviewerID: user.id,
@@ -1128,7 +1132,7 @@ final class MergeRequestAttentionMonitor {
                                     legacyDuoThreadsVerified: check.discussionsReady, in: verdictDirectory)
                             } else { automaticContext = false }
                             // After GitLab refused an automatic approval, offer the button instead of retrying.
-                            let automatic = autoApproves && head != failedHead && automaticContext
+                            let automatic = autoApproves && head != failedHead && automaticContext && check.automaticGatePassed
                                 && authenticatedVerdict == ReviewVerdictStore.verdict(host: host, projectID: request.projectID,
                                     iid: request.iid, user: user, in: verdictDirectory)
                             let classifiedReviewAllowsApproval = authenticatedVerdict?.verdict == .classifiedFindings && automaticContext
@@ -1749,14 +1753,18 @@ final class MergeRequestAttentionMonitor {
         /// The user is a reviewer, has not approved yet and has no unresolved thread of their own.
         var ownReady = false
         var discussionsReady = false
+        /// The deterministic automatic-approval gate passed on a fresh single-MR read.
+        var automaticGatePassed = false
     }
 
     private nonisolated static func approvalCheck(
         _ request: GitLabMergeRequest, user: GitLabAuthenticatedUser, host: String, glab: GlabService,
-        verdict: ReviewVerdict?
+        verdict: ReviewVerdict?, automaticGate: (head: String, reviewed: ReviewTargetBinding?)? = nil
     ) async -> ApprovalCheck {
         async let reviewers = try? glab.fetchMergeRequestReviewers(projectID: request.projectID, iid: request.iid, host: host)
         async let discussions = try? glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
+        // List reads carry no diff refs, pipeline or change count, so the gate needs a single-MR read.
+        async let gatePassed = automaticApprovalGatePasses(request, gate: automaticGate, host: host, glab: glab)
         guard let reviewers = await reviewers, let discussions = await discussions,
               let me = reviewers.first(where: { $0.user.id == user.id }), me.state != "approved" else { return ApprovalCheck() }
         let ownOpen = discussions.contains { discussion in
@@ -1764,7 +1772,17 @@ final class MergeRequestAttentionMonitor {
             return first.author?.id == user.id && first.resolvable == true && first.resolved == false
         }
         let ready = try? await approvalDiscussionsReady(discussions, verdict: verdict, user: user, host: host, glab: glab)
-        return ApprovalCheck(discussions: discussions, ownReady: !ownOpen, discussionsReady: ready == true)
+        return ApprovalCheck(discussions: discussions, ownReady: !ownOpen, discussionsReady: ready == true,
+            automaticGatePassed: await gatePassed)
+    }
+
+    private nonisolated static func automaticApprovalGatePasses(
+        _ request: GitLabMergeRequest, gate: (head: String, reviewed: ReviewTargetBinding?)?, host: String, glab: GlabService
+    ) async -> Bool {
+        guard let gate, gate.reviewed != nil,
+              let live = try? await glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
+        else { return false }
+        return AutomaticApprovalGate.permits(live, head: gate.head, reviewed: gate.reviewed)
     }
 
     private nonisolated static func approvalDiscussionsReady(
@@ -2904,7 +2922,7 @@ final class MergeRequestAttentionMonitor {
             if requiresAuthenticatedVerdict, let verdict {
                 covered = ReviewVerdictStore.automaticallyApproves(verdict, head: head,
                     discussions: evidence.discussions, user: user,
-                    threshold: self.settings?.automation.autoApprovalThreshold ?? .noMajorIssues,
+                    threshold: self.settings?.automation.autoApprovalThreshold ?? .noIssues,
                     semanticContextFingerprint: current.semanticContextFingerprint,
                     legacyDuoThreadsVerified: evidence.discussionsReady, in: self.verdictDirectory)
             } else {
@@ -2921,6 +2939,9 @@ final class MergeRequestAttentionMonitor {
                 && current.sha == head && current.author.id != user.id && evidence.drafts.isEmpty
                 && covered
                 && (!automatic || self.autoApproveApplies(to: current, host: account.host, username: account.username))
+                // App-owned, model-independent proof re-checked against this fresh read, including the final one.
+                && (!automatic || AutomaticApprovalGate.permits(current, head: head,
+                    reviewed: evidence.checkedVerdict.flatMap { ReviewVerdictStore.authenticatedTarget(for: $0, settings: self.settings) }))
         }
         @MainActor func confirmed(_ progress: MergeRequestApprovalProgress?, for request: GitLabMergeRequest) -> Bool {
             if submitted {
@@ -3109,7 +3130,7 @@ final class MergeRequestAttentionMonitor {
                     if let verdict = ReviewVerdictStore.authenticatedVerdict(host: account.host, projectID: item.id.projectID,
                         iid: item.id.iid, user: user, settings: settings, in: verdictDirectory), verdict.verdict == .classifiedFindings {
                         return request.state == "opened" && ReviewVerdictStore.automaticallyApproves(verdict, head: request.sha ?? "",
-                            discussions: discussions, user: user, threshold: settings?.automation.autoApprovalThreshold ?? .noMajorIssues,
+                            discussions: discussions, user: user, threshold: settings?.automation.autoApprovalThreshold ?? .noIssues,
                             semanticContextFingerprint: request.semanticContextFingerprint, in: verdictDirectory)
                     }
                     return ReviewVerdictStore.verdict(host: account.host, projectID: item.id.projectID, iid: item.id.iid, user: user, in: verdictDirectory)?

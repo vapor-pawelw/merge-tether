@@ -240,8 +240,10 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var publishAIRepliesWithoutConfirmation = true {
         didSet { publicationPolicyMode = nil }
     }
-    var autoApproveEnabled = true
-    var autoApprovalThreshold: AutoApprovalThreshold = .noMajorIssues
+    /// Off unless a delivering profile or the user turns it on; a review verdict alone never approves.
+    var autoApproveEnabled = false
+    /// The strictest threshold unless the user chose another one. Stored choices are preserved.
+    var autoApprovalThreshold: AutoApprovalThreshold = .noIssues
     var autoResolveOwnReviewThreads = true
     var autoResolveAcceptedFeedback = true
     var autoMergeProjects = ""
@@ -344,7 +346,11 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         publishDraftsWithoutConfirmation = try values.decodeIfPresent(Bool.self, forKey: .publishDraftsWithoutConfirmation) ?? false
         autoResolveOwnReviewThreads = try values.decodeIfPresent(Bool.self, forKey: .autoResolveOwnReviewThreads) ?? true
         autoResolveAcceptedFeedback = try values.decodeIfPresent(Bool.self, forKey: .autoResolveAcceptedFeedback) ?? true
-        autoApproveEnabled = try values.decodeIfPresent(Bool.self, forKey: .autoApproveEnabled) ?? true
+        // Every encoded blob stores this key, so its value is preserved. A blob without it predates
+        // the setting; it inherits only an explicitly stored delivering profile, otherwise it stays off.
+        if let stored = try values.decodeIfPresent(Bool.self, forKey: .autoApproveEnabled) {
+            autoApproveEnabled = stored
+        }
         if let threshold = try values.decodeIfPresent(String.self, forKey: .autoApprovalThreshold) {
             autoApprovalThreshold = AutoApprovalThreshold(rawValue: threshold) ?? .noIssues
         }
@@ -356,6 +362,10 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         allowAssistantTools = try values.decodeIfPresent(Bool.self, forKey: .allowAssistantTools) ?? false
         assistantToolProjects = try values.decodeIfPresent(String.self, forKey: .assistantToolProjects) ?? ""
         packageDecision = try values.decodeIfPresent(AutomationPackageDecision.self, forKey: .packageDecision) ?? .undecided
+        if !values.contains(.autoApproveEnabled) {
+            let storedPreset = (try? values.decodeIfPresent(AutomationPreset.self, forKey: .selectedPreset)) ?? nil
+            autoApproveEnabled = packageDecision == .enabled && (storedPreset == .trusted || storedPreset == .full)
+        }
         allowAutomaticPublicActions = try values.decodeIfPresent(Bool.self, forKey: .allowAutomaticPublicActions) ?? true
         publishAIRepliesWithoutConfirmation = try values.decodeIfPresent(Bool.self, forKey: .publishAIRepliesWithoutConfirmation)
             ?? (packageDecision != .disabled)
