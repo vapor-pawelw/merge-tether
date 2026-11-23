@@ -1,12 +1,20 @@
 """Conservative, reviewed change-to-test mapping. Unmapped changes run everything."""
 
 from fnmatch import fnmatchcase
+from functools import lru_cache
 from pathlib import Path
 import os
+import re
 import subprocess
 
 
-TASKS = ["tools", "helpers", "remote"]
+TASKS = ["tools", "helpers", "remote", "relay", "ios"]
+
+# Top-level Swift type declarations; test suites follow the `...Tests` naming convention.
+DECLARATION = re.compile(
+    r"^(?:@\w+(?:\([^)\n]*\))?\s+)*(?:(?:public|internal|private|fileprivate|final|nonisolated|indirect)\s+)*"
+    r"(?:struct|class|enum|actor|protocol)\s+([A-Z]\w*)", re.M)
+RELAY_PREFIXES = ("Services/RemoteRelay/", "prototypes/remote-relay/")
 
 # These groups include callers, not only the suite named after the edited type.
 GROUPS = {
@@ -16,15 +24,29 @@ GROUPS = {
                      "MergeRequestBoardSnapshotTests", "InboxSnapshotTests", "RemoteBoardAdapterTests",
                      "ConfirmedAttentionSnapshotTests", "UserAttentionTests", "ReviewingContextTests",
                      "BoardRefreshStateTests", "BoardCardPinTests",
-                     "MRActivityTimelineTests", "BoardApprovalProgressTests", "CommentReviewSnapshotTests"],
+                     "MRActivityTimelineTests", "BoardApprovalProgressTests", "CommentReviewSnapshotTests",
+                     "AuthorFeedbackCoordinatorTests", "BoardPresentationCacheTests", "CommandCenterDisplayFrameTests",
+                     "ConfirmationQueueTests", "MRBoardManualOrderTests", "MRBoardProjectorTests",
+                     "MREffectivePolicyPresentationTests", "MRWaitingStatusTests", "MergeSubmissionTests",
+                     "RemoteHostDetailTests"],
     "feedback": ["AuthorFeedbackPolicyTests", "AuthorFeedbackCoordinatorTests", "AuthorFeedbackMergeTests",
                  "ReReviewAssessmentTests", "ReReviewVerifierTests", "VerifiedAuthorFeedbackTests",
                  "ConfirmationQueueTests", "MergeRequestTodoRoutingTests", "DraftProofRecoveryTests",
                  "FollowUpPushPermissionTests", "MRHumanActionTests", "RemoteBoardAdapterTests",
                  "MergeWorkflowExecutionTests", "TodoAutomationTests", "MRNoticeClassifierTests",
                  "FeedbackSuggestionDecisionsTests", "FeedbackSuggestionDecisionActionTests",
-                 "CommentReviewSnapshotTests", "AuthoredMergeRequestStatusTests", "GlabMergeRequestAPITests"],
+                 "CommentReviewSnapshotTests", "AuthoredMergeRequestStatusTests", "GlabMergeRequestAPITests",
+                 # Verdict invalidation, readiness, discussion and routing consumers of the mapped types.
+                 "AssistantJobExecutionTests", "AssistantJobInvocationTests", "AttentionAutomationTests",
+                 "AuthorFeedbackPresentationTests", "AutoHandledEventBannerTests", "BoardAttentionPresenterTests",
+                 "CommandCenterDisplayFrameTests", "MRCommentCitationTests", "MRDiscussionMarkdownCacheTests",
+                 "MRDiscussionPresentationTests", "MRDiscussionSnapshotTests", "ManualDiscussionResolutionTests",
+                 "MergeActionReadinessTests", "MergeRequestBoardSnapshotTests", "MergeSubmissionTests",
+                 "ModelEvaluationTests", "PersonDirectoryTests", "ProposalMRContextTests", "ReReviewCoordinatorTests",
+                 "RemoteMRControlsTests", "RemoteMRDetailLoaderTests", "ReviewingContextTests",
+                 "StalePipelineJobTests", "TodoMonitorPersistenceGuardTests"],
 }
+GROUPS["usage"] += ["AssistantCLIHealthTests", "AssistantJobCoordinatorTests", "MRNoticeClassifierTests"]
 
 RULES = [
     ("Sources/Model/AssistantUsage*.swift", "usage"),
@@ -45,6 +67,76 @@ RULES = [
     ("Sources/Model/ReReviewAssessment.swift", "feedback"),
     ("Sources/Model/MergeRequestTodoRouting.swift", "feedback"),
 ]
+
+
+def declared_types(text):
+    return DECLARATION.findall(text)
+
+
+@lru_cache(maxsize=None)
+def _test_declarations(repo):
+    """Top-level suites and helper types declared by each top-level Swift test file."""
+    index = {}
+    for path in sorted((repo / "Tests").glob("*.swift")):
+        names = declared_types(path.read_text(errors="replace"))
+        index[path.name] = ([name for name in names if name.endswith("Tests")],
+                            [name for name in names if not name.endswith("Tests")])
+    return index
+
+
+def test_declarations(repo):
+    return _test_declarations(Path(repo).resolve())
+
+
+def declared_suites(repo):
+    return {suite for suites, _ in test_declarations(repo).values() for suite in suites}
+
+
+def changed_test_file_suites(repo, path):
+    """Every suite in a changed file, plus suites in files using its shared top-level fixtures."""
+    index = test_declarations(repo)
+    suites, helpers = index.get(Path(path).name, ([], []))
+    selected = set(suites) or {Path(path).stem}
+    if helpers:
+        pattern = re.compile(r"\b(?:" + "|".join(map(re.escape, helpers)) + r")\b")
+        for name, (other_suites, _) in index.items():
+            if name != Path(path).name and pattern.search((repo / "Tests" / name).read_text(errors="replace")):
+                selected.update(other_suites)
+    return selected
+
+
+@lru_cache(maxsize=None)
+def _ios_patterns(repo):
+    """Sources and resources compiled into MergeTetheriOS, read from Project.swift."""
+    try:
+        source = (repo / "Project.swift").read_text()
+    except OSError:
+        return ()
+    start = source.find('name: "MergeTetheriOS"')
+    if start < 0:
+        return ()
+    end = source.find(".target(", start)
+    block = source[start:end if end > 0 else len(source)]
+    patterns = []
+    for key in ("sources", "resources"):
+        match = re.search(key + r":\s*\[(.*?)\]", block, re.S)
+        if match:
+            patterns += re.findall(r'"([^"]+)"', match.group(1))
+    return tuple(patterns)
+
+
+def ios_patterns(repo):
+    return _ios_patterns(Path(repo).resolve())
+
+
+def glob_matches(path, pattern):
+    expression = re.escape(pattern).replace(r"\*\*/", "(?:.*/)?").replace(r"\*\*", ".*").replace(r"\*", "[^/]*")
+    return re.fullmatch(expression, path) is not None
+
+
+def affects_ios(repo, path):
+    return (path.startswith(("iOS/", "Packages/MergeTetherRemote/Sources/")) or path == "Project.swift"
+            or any(glob_matches(path, pattern) for pattern in ios_patterns(repo)))
 
 
 def git(repo, *arguments):
@@ -80,8 +172,17 @@ def select_paths(repo, paths):
         return full_plan(paths, "No change set established; run the full suite")
     suites, tasks, reasons = set(), set(), []
     for path in paths:
-        if path.endswith(".md") and (path in {"AGENTS.md", "README.md", "CHANGELOG.md"} or path.startswith("docs/")):
+        if affects_ios(repo, path):
+            tasks.add("ios")
+        if path == "CHANGELOG.md":
+            # Bundled What's New resource and release-workflow input, not only documentation.
+            tasks.add("tools")
+            reasons.append(f"{path}: changelog structure checks")
+        elif path.endswith(".md") and (path in {"AGENTS.md", "README.md"} or path.startswith("docs/")):
             reasons.append(f"{path}: documentation only")
+        elif path.startswith(RELAY_PREFIXES):
+            tasks.add("relay")
+            reasons.append(f"{path}: relay Worker tests")
         elif path.startswith("Tests/TestTools/") and path.endswith(".py"):
             tasks.add("tools")
             reasons.append(f"{path}: test tooling")
@@ -92,8 +193,9 @@ def select_paths(repo, paths):
             tasks.add("remote")
             reasons.append(f"{path}: remote package tests")
         elif path.startswith("Tests/") and path.count("/") == 1 and path.endswith("Tests.swift") and (repo / path).is_file():
-            suites.add(Path(path).stem)
-            reasons.append(f"{path}: changed suite")
+            changed = changed_test_file_suites(repo, path)
+            suites.update(changed)
+            reasons.append(f"{path}: changed suite file ({', '.join(sorted(changed))})")
         else:
             matches = [group for pattern, group in RULES if fnmatchcase(path, pattern)]
             if not matches:
@@ -101,7 +203,8 @@ def select_paths(repo, paths):
             for group in matches:
                 suites.update(GROUPS[group])
             reasons.append(f"{path}: {', '.join(matches)} and their consumers")
-    missing = [suite for suite in suites if not (repo / "Tests" / f"{suite}.swift").is_file()]
+    available = declared_suites(repo)
+    missing = [suite for suite in suites if suite not in available]
     if missing:
         return full_plan(paths, f"Selection references missing suites: {', '.join(sorted(missing))}")
     return dict(mode="targeted" if suites else "none", suites=[f"MergeTetherTests/{suite}" for suite in sorted(suites)],

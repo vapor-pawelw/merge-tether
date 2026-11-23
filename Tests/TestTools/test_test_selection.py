@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import shutil
@@ -145,10 +146,98 @@ class TestSelectionTests(unittest.TestCase):
             self.assertIn("staged.swift", self.selector.changed_paths(repo)[0])
 
     def test_all_mapping_groups_reference_existing_test_suites(self):
+        available = self.selector.declared_suites(REPO)
         for group, suites in self.selector.GROUPS.items():
             for suite in suites:
                 with self.subTest(group=group, suite=suite):
-                    self.assertTrue((REPO / "Tests" / f"{suite}.swift").is_file())
+                    self.assertIn(suite, available)
+
+    # Deliberate exceptions: (mapped source, suite) pairs whose reference is incidental.
+    MAPPING_COVERAGE_EXCEPTIONS = set()
+
+    def test_mapping_groups_cover_suites_referencing_mapped_types(self):
+        """Every suite naming a type declared only in a mapped file must run with that mapping."""
+        counts, declarations = {}, {}
+        for path in REPO.glob("Sources/**/*.swift"):
+            names = self.selector.declared_types(path.read_text(errors="replace"))
+            declarations[path.relative_to(REPO).as_posix()] = names
+            for name in names:
+                counts[name] = counts.get(name, 0) + 1
+        suites_by_file = {name: suites for name, (suites, _) in self.selector.test_declarations(REPO).items()}
+        texts = {name: (REPO / "Tests" / name).read_text(errors="replace") for name in suites_by_file}
+        for pattern, group in self.selector.RULES:
+            mapped = [path for path in declarations if self.selector.fnmatchcase(path, pattern)]
+            self.assertTrue(mapped, pattern)
+            for path in mapped:
+                unique = [name for name in declarations[path] if counts[name] == 1]
+                if not unique:
+                    continue
+                reference = re.compile(r"\b(?:" + "|".join(map(re.escape, unique)) + r")\b")
+                for name, text in texts.items():
+                    if not reference.search(text):
+                        continue
+                    for suite in suites_by_file[name]:
+                        if (path, suite) in self.MAPPING_COVERAGE_EXCEPTIONS:
+                            continue
+                        with self.subTest(source=path, suite=suite):
+                            self.assertIn(suite, self.selector.GROUPS[group])
+
+    def test_ios_source_change_selects_ios_build(self):
+        plan = self.selector.select_paths(REPO, ["iOS/RemoteBoardView.swift"])
+        self.assertIn("ios", plan["tasks"])
+
+    def test_shared_ios_view_change_selects_ios_build(self):
+        for path in ["Sources/Views/MRCardMetadataLayout.swift", "Resources/Remote.xcstrings",
+                     "Packages/MergeTetherRemote/Sources/MergeTetherRemote/Models.swift"]:
+            with self.subTest(path=path):
+                self.assertIn("ios", self.selector.select_paths(REPO, [path])["tasks"])
+        self.assertNotIn("ios", self.selector.select_paths(REPO, ["Sources/Model/AssistantUsage.swift"])["tasks"])
+
+    def test_ios_sources_are_read_from_the_project_manifest(self):
+        patterns = self.selector.ios_patterns(REPO)
+        self.assertIn("iOS/**/*.swift", patterns)
+        self.assertIn("Sources/Views/MRCardMetadataLayout.swift", patterns)
+        self.assertTrue(self.selector.glob_matches("iOS/Nested/View.swift", "iOS/**/*.swift"))
+        self.assertTrue(self.selector.glob_matches("iOS/View.swift", "iOS/**/*.swift"))
+        self.assertFalse(self.selector.glob_matches("Sources/iOS/View.swift", "iOS/**/*.swift"))
+
+    def test_full_plan_includes_ios_build_and_relay_tests(self):
+        plan = self.selector.full_plan([], "fixture")
+        self.assertIn("ios", plan["tasks"])
+        self.assertIn("relay", plan["tasks"])
+
+    def test_relay_worker_change_runs_node_relay_tests_without_xcode(self):
+        for path in ["Services/RemoteRelay/worker.mjs", "prototypes/remote-relay/test/admission.test.mjs"]:
+            with self.subTest(path=path):
+                plan = self.selector.select_paths(REPO, [path])
+                self.assertEqual(plan["mode"], "none")
+                self.assertEqual(plan["tasks"], ["relay"])
+
+    def test_changelog_is_checked_as_a_release_input(self):
+        plan = self.selector.select_paths(REPO, ["CHANGELOG.md"])
+        self.assertEqual(plan["mode"], "none")
+        self.assertEqual(plan["tasks"], ["tools"])
+
+    def test_changed_test_file_selects_every_suite_it_declares(self):
+        for path, suite in [("Tests/VerifiedAuthorFeedbackTests.swift", "AuthorFeedbackPresentationTests"),
+                            ("Tests/RemoteHostStartupTests.swift", "RemoteHostSessionTests"),
+                            ("Tests/MRDiscussionPresentationTests.swift", "MRDiscussionMarkdownCacheTests")]:
+            with self.subTest(path=path):
+                plan = self.selector.select_paths(REPO, [path])
+                self.assertEqual(plan["mode"], "targeted")
+                self.assertIn(f"MergeTetherTests/{suite}", plan["suites"])
+                self.assertIn(f"MergeTetherTests/{Path(path).stem}", plan["suites"])
+
+    def test_shared_fixture_in_a_suite_file_selects_its_consumers(self):
+        for path, fixture in [("Tests/ReReviewAssessmentTests.swift", "FeedbackManualDecisionFixture"),
+                              ("Tests/SettingsManagerTests.swift", "PersistenceFaultDefaults")]:
+            with self.subTest(path=path):
+                consumers = {name for name, (suites, _) in self.selector.test_declarations(REPO).items()
+                             if name != Path(path).name and fixture in (REPO / "Tests" / name).read_text()}
+                self.assertTrue(consumers)
+                plan = self.selector.select_paths(REPO, [path])
+                for name in consumers:
+                    self.assertIn(f"MergeTetherTests/{Path(name).stem}", plan["suites"])
 
     def test_missing_git_history_and_empty_scope_fall_back_to_full(self):
         with tempfile.TemporaryDirectory() as folder:

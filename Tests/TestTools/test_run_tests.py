@@ -1,5 +1,6 @@
 import importlib.util
 import csv
+import shutil
 import gzip
 import json
 import os
@@ -20,6 +21,23 @@ class TimingReportTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("run_tests", SCRIPT)
         self.runner = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.runner)
+
+    @staticmethod
+    def isolated_script(root, project_references=""):
+        """A runner copy in a committed fixture checkout with a generated-project stand-in."""
+        repo = root / "repo"
+        (repo / "scripts").mkdir(parents=True)
+        for name in ["run-tests.py", "test_selection.py"]:
+            shutil.copyfile(SCRIPT.parent / name, repo / "scripts" / name)
+        (repo / "mise.toml").write_text('[tools]\ntuist = "4.180.0"\n')
+        (repo / ".gitignore").write_text(".test-results/\n__pycache__/\n")
+        (repo / "MergeTether.xcodeproj").mkdir()
+        (repo / "MergeTether.xcodeproj/project.pbxproj").write_text(project_references)
+        for arguments in (["init", "-q", "-b", "main"], ["add", "."],
+                          ["-c", "core.hooksPath=/dev/null", "-c", "user.name=Test",
+                           "-c", "user.email=test@example.test", "commit", "-qm", "fixture"]):
+            subprocess.run(["git", "-C", str(repo), *arguments], check=True, capture_output=True)
+        return repo / "scripts" / "run-tests.py"
 
     @staticmethod
     def event(timestamp, test_id, status=None):
@@ -135,7 +153,8 @@ else:
 """)
             exporter.chmod(0o755)
             results = root / "results"
-            completed = subprocess.run([sys.executable, str(SCRIPT), "--only-testing", "MergeTetherTests/FixtureTests", "--results-dir", str(results)],
+            script = self.isolated_script(root)
+            completed = subprocess.run([sys.executable, str(script), "--only-testing", "MergeTetherTests/FixtureTests", "--results-dir", str(results)],
                                        env=dict(os.environ, PATH=f"{root}:{os.environ['PATH']}"),
                                        capture_output=True, text=True)
             self.assertEqual(completed.returncode, 65, completed.stderr + completed.stdout)
@@ -159,7 +178,7 @@ else:
                 reader = exporter.read_text()
                 reader = reader[:reader.index("else:\n")] + "else:\n    print(json.dumps(" + repr(summary) + "))\n"
                 exporter.write_text(reader)
-                completed = subprocess.run([sys.executable, str(SCRIPT), "--only-testing", "MergeTetherTests/FixtureTests", "--results-dir", str(results)],
+                completed = subprocess.run([sys.executable, str(script), "--only-testing", "MergeTetherTests/FixtureTests", "--results-dir", str(results)],
                                            env=dict(os.environ, PATH=f"{root}:{os.environ['PATH']}"),
                                            capture_output=True, text=True)
                 self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
@@ -172,7 +191,7 @@ else:
             exporter.write_text(reader)
             executable.write_text(executable.read_text().replace("sys.exit(0)",
                 "print('MergeTether test guard rejected service CLI /fixture/glab'); sys.exit(0)"))
-            completed = subprocess.run([sys.executable, str(SCRIPT), "--only-testing", "MergeTetherTests/FixtureTests", "--results-dir", str(results)],
+            completed = subprocess.run([sys.executable, str(script), "--only-testing", "MergeTetherTests/FixtureTests", "--results-dir", str(results)],
                                        env=dict(os.environ, PATH=f"{root}:{os.environ['PATH']}"),
                                        capture_output=True, text=True)
             self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
@@ -199,7 +218,7 @@ elif 'test-without-building' in sys.argv:
 """)
             executable.chmod(0o755)
             results = root / "results"
-            process = subprocess.Popen([sys.executable, str(SCRIPT), "--only-testing", "MergeTetherTests/FixtureTests", "--results-dir", str(results)],
+            process = subprocess.Popen([sys.executable, str(self.isolated_script(root)), "--only-testing", "MergeTetherTests/FixtureTests", "--results-dir", str(results)],
                                        env=dict(os.environ, PATH=f"{root}:{os.environ['PATH']}"),
                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             try:
@@ -253,6 +272,100 @@ elif 'test-without-building' in sys.argv:
                                     env=dict(os.environ, PATH=str(root)), capture_output=True, text=True)
             self.assertEqual(result.returncode, 2)
             self.assertEqual(important.read_text(), "unowned build")
+
+    def fake_xcodebuild(self, root):
+        executable = root / "bin" / "xcodebuild"
+        executable.parent.mkdir()
+        executable.write_text(f"""#!{sys.executable}
+import json, pathlib, sys
+with pathlib.Path({str(root / 'xcodebuild-calls.jsonl')!r}).open('a') as calls:
+    calls.write(json.dumps(sys.argv[1:]) + '\\n')
+print('Xcode fixture')
+""")
+        executable.chmod(0o755)
+        return dict(os.environ, PATH=f"{executable.parent}:{os.environ['PATH']}")
+
+    def test_untracked_suite_missing_from_project_fails_before_build(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script = self.isolated_script(root, "/* ExistingTests.swift */")
+            (script.parents[1] / "Tests").mkdir()
+            (script.parents[1] / "Tests/ExistingTests.swift").write_text("struct ExistingTests {}\n")
+            (script.parents[1] / "Tests/NewSuiteTests.swift").write_text("struct NewSuiteTests {}\n")
+            results = root / "results"
+            completed = subprocess.run([sys.executable, str(script), "--only-testing", "MergeTetherTests/NewSuiteTests",
+                                        "--results-dir", str(results)], env=self.fake_xcodebuild(root),
+                                       capture_output=True, text=True, timeout=30)
+            self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+            self.assertIn("tuist generate", completed.stderr)
+            self.assertIn("Tests/NewSuiteTests.swift", completed.stderr)
+            calls = [json.loads(line) for line in (root / "xcodebuild-calls.jsonl").read_text().splitlines()]
+            self.assertEqual(calls, [["-version"]])
+            report = json.loads(next(results.glob("run-*/report.json")).read_text())
+            self.assertIn("stale", report["error"])
+            self.assertNotIn("build", report["phases"])
+
+    def test_project_matching_sources_proceeds(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            (repo / "Tests").mkdir()
+            (repo / "Tests/ExistingTests.swift").write_text("struct ExistingTests {}\n")
+            subprocess.run(["git", "-C", temporary, "init", "-q"], check=True)
+            self.assertIsNone(self.runner.stale_project_sources(repo))
+            (repo / "MergeTether.xcodeproj").mkdir()
+            (repo / "MergeTether.xcodeproj/project.pbxproj").write_text("/* ExistingTests.swift */")
+            self.assertEqual(self.runner.stale_project_sources(repo), [])
+            self.assertIsNone(self.runner.project_problem(repo))
+            (repo / "Tests/AddedTests.swift").write_text("struct AddedTests {}\n")
+            self.assertEqual(self.runner.stale_project_sources(repo), ["Tests/AddedTests.swift"])
+
+    def test_ios_task_uses_ios_scheme_without_signing(self):
+        root = Path("/fixture/results")
+        command, _ = self.runner.task_commands(Path("/fixture/repo"), root)["ios"]
+        self.assertEqual(command[0], "xcodebuild")
+        self.assertEqual(command[command.index("-scheme") + 1], "MergeTetheriOS")
+        self.assertEqual(command[command.index("-destination") + 1], "generic/platform=iOS Simulator")
+        self.assertEqual(command[command.index("-derivedDataPath") + 1], str(root / "iOSBuild"))
+        self.assertIn("CODE_SIGNING_ALLOWED=NO", command)
+        self.assertEqual(command[-1], "build")
+
+    def test_relay_task_requires_installed_dependencies_and_supported_node(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            command, _ = self.runner.task_commands(repo, repo / "results")["relay"]
+            self.assertEqual(command, ["npm", "test", "--prefix", "prototypes/remote-relay"])
+            problem = self.runner.relay_problem(repo, dict(os.environ))
+            self.assertIn("npm ci --prefix prototypes/remote-relay", problem)
+            (repo / "prototypes/remote-relay/node_modules").mkdir(parents=True)
+            bin_directory = repo / "bin"
+            bin_directory.mkdir()
+            node = bin_directory / "node"
+            for version, expected in [("v20.11.0", "Node.js 22+"), ("v22.3.0", None)]:
+                with self.subTest(version=version):
+                    node.write_text(f"#!/bin/sh\necho {version}\n")
+                    node.chmod(0o755)
+                    problem = self.runner.relay_problem(repo, dict(os.environ, PATH=str(bin_directory)))
+                    if expected is None:
+                        self.assertIsNone(problem)
+                    else:
+                        self.assertIn(expected, problem)
+
+    def test_missing_relay_dependencies_fail_the_run_instead_of_skipping(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script = self.isolated_script(root)
+            (script.parents[1] / "prototypes/remote-relay").mkdir(parents=True)
+            (script.parents[1] / "prototypes/remote-relay/package.json").write_text("{}\n")
+            subprocess.run(["git", "-C", str(script.parents[1]), "add", "."], check=True)
+            results = root / "results"
+            completed = subprocess.run([sys.executable, str(script), "--base", "HEAD", "--results-dir", str(results)],
+                                       env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"),
+                                       capture_output=True, text=True, timeout=30)
+            self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+            self.assertIn("npm ci", completed.stderr)
+            report = json.loads(next(results.glob("run-*/report.json")).read_text())
+            self.assertEqual(report["selection"]["tasks"], ["relay"])
+            self.assertNotIn("relay", report["phases"])
 
     def test_phase_timeout_stops_a_hung_child(self):
         with tempfile.TemporaryDirectory() as temporary:

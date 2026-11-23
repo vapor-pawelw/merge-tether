@@ -145,6 +145,7 @@ single-instance lock regardless of bundle identifier.
 
 ```bash
 mise exec -- tuist generate --no-open
+npm ci --prefix prototypes/remote-relay  # relay Worker test dependencies (Node.js 22+)
 python3 scripts/run-tests.py
 ```
 
@@ -162,7 +163,7 @@ Passing an additional result-bundle argument to that wrapper does not fix this.
 ```bash
 python3 scripts/run-tests.py --plan  # inspect paths, reasons, suites and extra tasks
 python3 scripts/run-tests.py         # run those checks
-python3 scripts/run-tests.py --full  # all app and standalone repository tests
+python3 scripts/run-tests.py --full  # all app, standalone and relay tests plus the iOS build
 ```
 
 Default selection uses the merge base with local `main`, including committed
@@ -176,17 +177,22 @@ fall back to full verification. The runner prints its decision and retains it in
 
 | Change | Checks |
 | --- | --- |
-| Search, usage accounting, mapped presentation types/views | Feature suites and their mapped consumers |
-| Author-feedback policy, verifier or router | Feedback, publication, merge, routing and presentation consumer suites |
-| Existing top-level Swift test only | Changed suite |
+| Usage accounting, mapped presentation types/views | Feature suites and their mapped consumers |
+| Author-feedback policy, verifier or router | Feedback, verdict, readiness, publication, merge, routing and presentation consumer suites |
+| Existing top-level Swift test file only | Every suite declared in that file, plus suites using its shared top-level fixtures |
 | Test tooling or helper tests only | Corresponding Python tests, without Xcode |
 | Remote package tests only | Swift package tests, without the app host |
+| Relay Worker (`Services/RemoteRelay`) or relay prototype/tests | Node relay tests, without Xcode |
+| `CHANGELOG.md` | Changelog structure checks (bundled What's New resource and release input) |
+| iOS sources, resources or shared files listed for `MergeTetheriOS` in `Project.swift` | Also builds the iOS app (`MergeTetheriOS`, simulator, unsigned) |
 | Documentation only | No executable checks |
 | Shared models/settings, GitLab/process transport, test support, project graph, resources or unknown paths | Full verification |
 
 Mappings live in `scripts/test_selection.py`. They are a reviewed allowlist,
 not a Swift dependency analysis: add narrow mappings only after checking callers
-and their failure/concurrency coverage. An unknown view is not automatically a
+and their failure/concurrency coverage. A tooling test requires every suite that
+names a type declared only in a mapped file to belong to that mapping's group;
+record deliberate exceptions in its explicit allowlist. An unknown view is not automatically a
 visual-only change, because views can dispatch remote actions. For a confirmed
 layout/color/wording-only edit, explicitly use `--build-only` and inspect the UI.
 For TDD or focused investigation, repeat `--only-testing` for the regression and
@@ -198,10 +204,15 @@ suite after every small edit. A selected run establishes only its recorded scope
 Xcode startup and compilation still cost seconds even when test bodies are fast.
 
 Full verification includes the app suite, `Tests/TestTools`,
-`Tests/AutomationHelpers` and `Packages/MergeTetherRemote`.
+`Tests/AutomationHelpers`, `Packages/MergeTetherRemote`, the relay Worker tests
+in `prototypes/remote-relay` and an unsigned simulator build of `MergeTetheriOS`.
+Missing relay dependencies or an older Node.js fail the run with an install hint;
+they are never skipped. Before any Xcode phase the runner checks that every Swift
+file under `Sources/`, `Tests/`, `iOS/` and the remote package sources appears in
+the generated project, and stops with a regeneration hint when it does not.
 Standalone phases retain their own compressed logs and exit codes.
-The Swift package uses an owned scratch build directory, cleaned with Derived
-Data unless `--reuse-build` was requested.
+The Swift package and iOS build use owned scratch build directories, cleaned with
+Derived Data unless `--reuse-build` was requested.
 Pairing-store tests inject an in-memory Security client and exercise the real
 encoding, replacement/removal rules, Keychain query policy and failure handling.
 They do not access the login Keychain or require interactive authorization.
