@@ -63,7 +63,12 @@ public struct RemoteDetailRequest: Codable, Equatable, Sendable {
         let candidates = supported + withoutApprovalNote
         let compatible = card.dependencies?.predecessors.contains(where: { $0.sources != nil }) == true
             ? candidates + candidates.map(\.withoutDependencySources) : candidates
-        return Set(compatible.compactMap { try? RemoteDigest.token($0) })
+        let withLegacyIssueMetadata = card.issues == nil ? compatible : compatible + compatible.map { version in
+            var version = version
+            version.issues = nil
+            return version
+        }
+        return Set(withLegacyIssueMetadata.compactMap { try? RemoteDigest.token($0) })
     }
     public var isValid: Bool {
         cardID.utf8.count <= 128 && account.utf8.count <= 1_024 && cardDigest.utf8.count == 64
@@ -289,6 +294,7 @@ public struct RemoteMRDetails: Codable, Equatable, Sendable {
     public var proposedSolutionDraftIDs: [Int]?
     /// Additive; older hosts send none and older phones ignore it.
     public var automation: RemoteAutomationStatus?
+    public var issues: [RemoteMRIssue]?
 
     public var avatarThumbnailURLs: [URL] {
         let fields = metadata + feedback + (usage ?? [])
@@ -337,6 +343,7 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
                 return Array(value.prefix(maximum))
             }
             details.description = details.description.map { text($0, 16_000) }
+            details.issues = details.issues.map { list($0, 100) }
             if let branches = details.branches {
                 details.branches = .init(source: text(branches.source, 4_000), target: text(branches.target, 4_000))
             }
@@ -420,6 +427,7 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
                 details.draftContexts = nil
                 details.proposedSolutionDraftIDs = nil
             }
+            else if details.issues?.isEmpty == false { details.issues = nil }
             else if details.threads?.contains(where: { $0.notes.contains { $0.extraContext != nil } }) == true {
                 details.threads = details.threads?.map { thread in
                     var thread = thread

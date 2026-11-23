@@ -258,10 +258,20 @@ private struct CommandCenterMRCardContent: View {
     }
 
     private var metadataHeader: some View {
-        MRCardMetadataLayout {
-            BoardMRReferenceLine(iid: item.id.iid, projectID: item.id.projectID,
-                repositoryPath: row.displayURL.gitLabProjectPath, contentOpacity: contentOpacity)
-                .padding(.top, 4)
+        let issues = monitor.issueTags(for: row.displayRequest)
+        let reference = BoardMRReferenceLine(iid: item.id.iid, projectID: item.id.projectID,
+            repositoryPath: row.displayURL.gitLabProjectPath, contentOpacity: contentOpacity)
+        return MRCardMetadataLayout {
+            Group {
+                if issues.isEmpty { reference }
+                else {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        reference
+                        MRIssueTag(issues: issues).opacity(contentOpacity)
+                    }
+                }
+            }
+            .padding(.top, 4)
             metadataControls.fixedSize(horizontal: true, vertical: false)
         }
     }

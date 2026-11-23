@@ -288,6 +288,7 @@ private struct CommandCenterMRDetailContent: View {
             }
             .task(id: discussionTarget) {
                 initialDiscussionAttemptFinished = false
+                monitor.requestIssueAssessment(for: presentationRow.displayRequest)
                 guard let target = discussionTarget else {
                     discussionStore.clear()
                     initialDiscussionAttemptFinished = true
@@ -375,6 +376,8 @@ private struct CommandCenterMRDetailContent: View {
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Text(verbatim: "!\(item.id.iid)").monospacedDigit()
+                let issues = monitor.issueTags(for: presentationRow.displayRequest)
+                if !issues.isEmpty { MRIssueTag(issues: issues) }
                 if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
                 else if presentationRow.isDraft { BoardDraftBadge() }
                 MRDetailRepositoryLabel(path: presentationRow.displayURL.gitLabProjectPath)

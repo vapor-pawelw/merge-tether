@@ -12,6 +12,7 @@ final class TodoMonitorService {
     let attention: MergeRequestAttentionMonitor
     var draftRegeneration: DraftRegenerationCoordinator { attention.draftRegeneration }
     let authoredMergeRequests: AuthoredMergeRequestMonitor
+    @ObservationIgnored var mergeRequestIssues: MRIssueCoordinator?
     private var boardDisplayMetadata = MRDisplayMetadataCache()
     @ObservationIgnored private let boardProjectorCache: ObservedPresentationCache<MRBoardProjector?>
     @ObservationIgnored let boardSnapshotCache: ObservedPresentationCache<MergeRequestBoardSnapshot>
@@ -275,11 +276,12 @@ final class TodoMonitorService {
         self.automation = automation
         self.cancelPolicyJob = cancelPolicyJob
         // Test hosts keep verifier results in memory so suites never share persisted assessments.
-        let feedbackAssessments = ApplicationLaunchMode.resolve(environment: ProcessInfo.processInfo.environment) == .application
-            ? AuthorFeedbackAssessmentStore.directory : nil
+        let isApplication = ApplicationLaunchMode.resolve(environment: ProcessInfo.processInfo.environment) == .application
+        let feedbackAssessments = isApplication ? AuthorFeedbackAssessmentStore.directory : nil
         self.attention = MergeRequestAttentionMonitor(glab: glab, settings: settings,
                                                        authorFeedbackAssessmentDirectory: feedbackAssessments)
         self.authoredMergeRequests = AuthoredMergeRequestMonitor(settings: settings, glab: glab)
+        if isApplication { self.mergeRequestIssues = makeIssueCoordinator() }
         todoStore.onAcknowledged = { [weak self] id in
             if self?.failedAutomationTodoID == id { self?.failedAutomationTodoID = nil }
         }
@@ -360,7 +362,14 @@ final class TodoMonitorService {
             FollowUpVerificationStore.synchronizeRuns(settings: self.settings)
             self.authoredMergeRequests.workflow.synchronizeAssistantJobs()
             self.wakeAutomaticRetries()
-            Task { await self.refreshNow() }
+            Task {
+                await self.refreshNow()
+                if handoff.operationalExecution?.state == .succeeded {
+                    let work = handoff.key.work
+                    await self.refreshIssueMetadata(projectID: work.projectID, iid: work.iid,
+                        host: work.host, username: handoff.key.username)
+                }
+            }
         }
 
         settings.onAutomationChanged = { [weak self] previous in
@@ -707,6 +716,7 @@ final class TodoMonitorService {
         guard metadata.record(request, for: target, url: url, readStartedAt: readStartedAt,
                               account: original, currentAccount: current) else { return }
         boardDisplayMetadata = metadata
+        mergeRequestIssues?.observe(request, target: target, revision: accountRevision, at: readStartedAt)
     }
 
     private var boardDisplayAccount: MRDisplayMetadataCache.Account? {
@@ -943,10 +953,14 @@ final class TodoMonitorService {
     }
 
     func refreshFromGitLab(for id: MergeRequestAttentionMonitor.Item.ID) async {
+        let host = glab.resolvedHost, username = glab.currentUsername, revision = glab.accountRevision
         await refreshProgress.perform(scope: .mergeRequest(id), accountRevision: glab.accountRevision,
             currentAccountRevision: { self.glab.accountRevision },
             isRefreshing: { self.isLoading || self.attention.isLoading || self.authoredMergeRequests.isLoading },
             refresh: { await self.forceRefreshFromGitLab() })
+        if let host, let username, revision == glab.accountRevision {
+            await refreshIssueMetadata(projectID: id.projectID, iid: id.iid, host: host, username: username)
+        }
     }
 
     func refreshFeedbackDecisions(for target: MRAutomationScope.Target, revision: UInt64) async {
@@ -1194,6 +1208,7 @@ final class TodoMonitorService {
             cancelPolicyJob(handoff.id, settings)
         }
         attention.automationConfigurationChanged(outsideScope: scopeOnly ? cancellationScope : nil)
+        mergeRequestIssues?.cancelAssessments()
         assistantDependencies.refresh(force: !scopeOnly)
         authoredMergeRequests.automationConfigurationChanged(outsideScope: scopeOnly ? cancellationScope : nil)
         authoredMergeRequests.workflow.synchronizeAssistantJobs()
@@ -1233,6 +1248,7 @@ final class TodoMonitorService {
             guard !settings.ignoredMergeRequests.contains(target) else { continue }
             settings.mrLifecycleLedger.record(request, for: target, now: observedAt,
                 autoRemoveFinished: true)
+            mergeRequestIssues?.observe(request, target: target, revision: glab.accountRevision, at: observedAt)
         }
         settings.save()
         deliverLifecycleTransitions()

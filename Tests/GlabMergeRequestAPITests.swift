@@ -93,6 +93,16 @@ struct GlabMergeRequestAPITests {
     private let host = "gitlab.example.test"
     private let sha = "0123456789abcdef0123456789abcdef01234567"
 
+    @Test func closingIssuesUseTheNativeEndpointAndRetainExternalReferencesWithoutURLs() async throws {
+        try await withFakeGlab { glab in
+            let issues = try await glab.fetchClosingIssues(projectID: 34, iid: 12, host: host)
+            #expect(issues.map(\.reference) == ["#42", "PAY-73"])
+            #expect(issues.first?.linkURL?.absoluteString == "https://\(host)/other/project/-/issues/42")
+            #expect(issues.last?.linkURL == nil)
+            #expect(issues.last?.title == "Export date")
+        }
+    }
+
     @Test func reviewerSuggestionsSearchProjectUsersAndExcludeBlockedAccounts() async throws {
         try await withFakeGlab { glab in
             let matches = try await glab.searchProjectReviewers(projectID: 34, query: "a+b &", host: host)
@@ -385,6 +395,9 @@ struct GlabMergeRequestAPITests {
             ;;
           'api /projects/34/merge_requests/12/approvals --hostname \(host)')
             printf '%s' '{"project_id":34,"iid":12,"approvals_required":2,"approvals_left":1,"approved_by":[{"user":{"id":7,"username":"reviewer"}}]}'
+            ;;
+          'api /projects/34/merge_requests/12/closes_issues --hostname \(host) --paginate')
+            printf '%s\\n' '[{"id":101,"iid":42,"title":"Prevent duplicate retries","web_url":"https://\(host)/other/project/-/issues/42"}]' '[{"id":"PAY-73","title":"Export date"}]'
             ;;
           'api /projects/34/merge_requests?state=opened&scope=all&per_page=100 --hostname \(host) --paginate')
             printf '%s' '[\(request)]'

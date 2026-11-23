@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Show the tasks a merge request implements beside its number on Mac and iPhone. Open a single linked task directly or browse multiple tasks in a popover. Read closing issues from GitLab and use the configured assistant to assess external references in the MR.
+
 - Use roughly 12 pt above the title and 8 pt between the title and author on Mac and iPhone merge request cards.
 
 - Add or remove reviewers from the approvals popover on Mac and iPhone. Search by name or GitLab username. Make the iPhone approvals badge more compact and keep its tap area within the badge.

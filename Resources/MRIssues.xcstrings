@@ -1,0 +1,35 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "mr.issues.count": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "variations": { "plural": {
+          "one": { "stringUnit": { "state": "translated", "value": "%lld issue" } },
+          "other": { "stringUnit": { "state": "translated", "value": "%lld issues" } }
+        } } },
+        "pl": { "variations": { "plural": {
+          "one": { "stringUnit": { "state": "translated", "value": "%lld zadanie" } },
+          "few": { "stringUnit": { "state": "translated", "value": "%lld zadania" } },
+          "many": { "stringUnit": { "state": "translated", "value": "%lld zadań" } },
+          "other": { "stringUnit": { "state": "translated", "value": "%lld zadania" } }
+        } } }
+      }
+    },
+    "mr.issues.inScope": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Issues in scope" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Zadania w zakresie MR" } }
+      }
+    },
+    "mr.issues.openLink": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Opens the issue in your browser" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Otwiera zadanie w przeglądarce" } }
+      }
+    }
+  },
+  "version": "1.0"
+}

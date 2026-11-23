@@ -3,6 +3,38 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct CardPresentationTests {
+    @Test func issueTagsSurviveTheWireWithoutChangingDetailIdentity() throws {
+        let wire = Data(##"{"id":"mr:1:2","title":"Fix retries","project":"g/p","head":"head","detail":"","drafts":[],"actions":[],"issues":[{"reference":"#123","title":"Retry payments","url":"https://gitlab.example.test/g/p/-/issues/123"},{"reference":"PAY-73"}]}"##.utf8)
+        let upgraded = try JSONDecoder().decode(RemoteCard.self, from: wire)
+        let legacy = RemoteCard(id: "mr:1:2", title: "Fix retries", project: "g/p", url: nil, head: "head")
+        let board = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [.init(id: .own, cards: [upgraded])])
+
+        let encoded = try JSONEncoder().encode(upgraded)
+        let decoded = try JSONSerialization.jsonObject(with: encoded)
+        let object = try #require(decoded as? [String: Any])
+        let issues = object["issues"] as? [[String: String]]
+        #expect(issues?.compactMap { $0["reference"] } == ["#123", "PAY-73"])
+        #expect(issues?.last?["url"] == nil)
+        #expect(try RemoteDetailRequest(card: legacy, board: board).matches(board))
+        #expect(upgraded.detailContextDigest == legacy.detailContextDigest)
+    }
+
+    @Test func issueNamesCanBeTrimmedToFitWithoutLosingTheirLinksOrBoardActions() throws {
+        var card = RemoteCard(id: "mr:1:2", title: "Fix retries", project: "g/p", url: nil,
+            detail: String(repeating: "x", count: 130_200), actions: [.init(id: "review", kind: .runReview, token: "current")])
+        let url = try #require(URL(string: "https://gitlab.example.test/g/p/-/issues/123"))
+        card.issues = [.init(reference: "#123", title: String(repeating: "y", count: 900), url: url)]
+        let board = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [.init(id: .own, cards: [card])])
+        let message = RemoteMessage(type: .snapshot, board: board)
+
+        let fitted = message.fittingIssueTags()
+
+        #expect(try JSONEncoder().encode(message).count > RemoteCipher.maximumPayloadBytes)
+        #expect(try JSONEncoder().encode(fitted).count <= RemoteCipher.maximumPayloadBytes)
+        #expect(fitted.board?.cards.first?.issues == [.init(reference: "#123", url: url)])
+        #expect(fitted.board?.cards.first?.actions == card.actions)
+    }
+
     @Test func onlyPlainOverviewShortcutsDuplicateTheCardTap() {
         #expect(RemoteCardCTA(title: "Show details", destination: .overview).duplicatesCardTap)
         #expect(!RemoteCardCTA(title: "Run", destination: .overview, actionID: "run").duplicatesCardTap)
