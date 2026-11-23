@@ -1081,6 +1081,53 @@ import MergeTetherRemote
         #expect(harness.settings.pendingCommentReviews.isEmpty)
     }
 
+    @Test func completionReadCannotCloseAReopenedCheckpoint() async throws {
+        let harness = try makeHarness(assistantWorked: false)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try await harness.poll()
+        try harness.write("drafts.json", "[]")
+        await harness.monitor.refreshPendingDrafts()
+        let displayed = try #require(harness.monitor.currentItems.first)
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        let revision = harness.settings.commentReviewRevision(for: target)
+        let original = try #require(harness.gitlab.handler)
+        harness.gitlab.handler = { call in
+            if call.endpoint.hasPrefix("/projects/1/merge_requests/2/draft_notes") {
+                harness.settings.completeCommentReview(for: target)
+                harness.settings.beginCommentReview(for: target)
+            }
+            return try await original(call)
+        }
+
+        let finished = await harness.monitor.finishCommentReview(displayed)
+        #expect(!finished)
+        #expect(harness.settings.pendingCommentReviews.contains(target))
+        #expect(harness.settings.commentReviewRevision(for: target) == revision + 1)
+    }
+
+    @Test func completionRechecksACommentAddedDuringTheDraftRead() async throws {
+        let harness = try makeHarness(assistantWorked: false)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try await harness.poll()
+        try harness.write("drafts.json", "[]")
+        await harness.monitor.refreshPendingDrafts()
+        let displayed = try #require(harness.monitor.currentItems.first)
+        let original = try #require(harness.gitlab.handler)
+        harness.gitlab.handler = { call in
+            if call.endpoint.hasPrefix("/projects/1/merge_requests/2/draft_notes") {
+                harness.gitlab.write("discussions.json", #"[{"id":"late","notes":[{"id":99,"author":{"id":9},"body":"New blocking feedback","system":false}]}]"#)
+            }
+            return try await original(call)
+        }
+
+        let finished = await harness.monitor.finishCommentReview(displayed)
+        #expect(!finished)
+        #expect(!harness.settings.pendingCommentReviews.isEmpty)
+        #expect(harness.monitor.confirmationStates[displayed.id] == .changed)
+    }
+
     @Test func persistedCommentReviewReachesTheActualMacCardAndAttentionProjection() async throws {
         let harness = try makeHarness(assistantWorked: false, authored: true)
         defer { harness.cleanUp() }
