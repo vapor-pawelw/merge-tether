@@ -171,6 +171,19 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         guard paired, connectionStatus(now: now()) != .connecting else { return }
         disconnect(); connect()
     }
+    /// App visibility, independent of SwiftUI so the policy can be tested on the host.
+    enum ScenePresence { case active, inactive, background }
+
+    /// `.inactive` also covers Control Center, Notification Center, system alerts and the app switcher.
+    /// Keep the connection (and any command in flight) until the app really moves to the background.
+    func sceneChanged(_ presence: ScenePresence) {
+        switch presence {
+        case .active: connect()
+        case .background: disconnect()
+        case .inactive: break
+        }
+    }
+
     func connect() {
         guard connection == nil, let pairing, relayConfiguration.accepts(origin: pairing.origin) else { return }
         connectingUntil = now().addingTimeInterval(45); connectionFailed = false; error = false
@@ -302,6 +315,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                         self.resetDraftRegenerationConnection()
                     }
                     self.supportsDraftRegeneration = message.capabilities?.contains(RemoteMessage.draftRegenerationCapability) == true
+                    self.supportsDraftRegenerationStyles = self.supportsDraftRegeneration
+                        && message.capabilities?.contains(RemoteMessage.draftRegenerationStylesCapability) == true
                     self.supportsReviewerBatches = message.capabilities?.contains(RemoteMessage.reviewerBatchCapability) == true
                     await self.synchronizeDraftRegeneration()
                     if let board = self.state.board { self.detailState.update(board: board) }
@@ -315,8 +330,6 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                 if accepted, message.type == .result, let result = message.result, result.status != .running {
                     await self.finishAction(result)
                 }
-                    self.supportsDraftRegenerationStyles = self.supportsDraftRegeneration
-                        && message.capabilities?.contains(RemoteMessage.draftRegenerationStylesCapability) == true
                 if accepted, message.type == .accepted, let command = self.state.pending,
                    command.isDraftRegeneration, command.actionID == RemoteDraftRegenerationControl.applyID {
                     await self.refresh(fromGitLab: false)
@@ -855,6 +868,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
 
     private func resetDraftRegenerationConnection() {
         supportsDraftRegeneration = false
+        supportsDraftRegenerationStyles = false
         suspendDraftRegenerationReads()
         resetDraftRegenerationPreview()
     }
@@ -868,7 +882,6 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         let challenge = UUID(), revision = connectionRevision
         receiptChallenge = challenge; receiptRevision = revision
         do { try await connection.send(.init(type: .receipt, challenge: challenge, command: recovery.command)) }
-        supportsDraftRegenerationStyles = false
         catch {
             guard self.connection === connection, connectionRevision == revision, receiptChallenge == challenge else { return }
             self.error = true
