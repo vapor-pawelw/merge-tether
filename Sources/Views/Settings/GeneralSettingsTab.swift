@@ -2,10 +2,17 @@ import SwiftUI
 
 struct GeneralSettingsTab: View {
     let monitor: TodoMonitorService
+    @Environment(\.openWindow) private var openWindow
     @State private var launchAtLogin: Bool = LaunchAtLoginService.isEnabled
 
     var body: some View {
         Form {
+            Section {
+                Button(.Settings.settingsIntegrationRunSetupAgain) {
+                    openWindow(id: "onboarding")
+                }
+            }
+
             Section {
                 Toggle(isOn: $launchAtLogin) {
                     Text(.Settings.settingsGeneralStartupLaunchAtLogin)

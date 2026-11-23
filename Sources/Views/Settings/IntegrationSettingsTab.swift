@@ -2,7 +2,6 @@ import SwiftUI
 
 struct IntegrationSettingsTab: View {
     @Bindable var monitor: TodoMonitorService
-    @Environment(\.openWindow) private var openWindow
 
     @State private var isRechecking = false
 
@@ -27,24 +26,16 @@ struct IntegrationSettingsTab: View {
                     Text(.Settings.settingsIntegrationAuthRow)
                 }
 
-                HStack {
-                    Button {
-                        isRechecking = true
-                        Task {
-                            await monitor.recheckIntegration()
-                            isRechecking = false
-                        }
-                    } label: {
-                        Text(.Settings.settingsIntegrationRecheck)
+                Button {
+                    isRechecking = true
+                    Task {
+                        await monitor.recheckIntegration()
+                        isRechecking = false
                     }
-                    .disabled(isRechecking)
-
-                    Button {
-                        openWindow(id: "onboarding")
-                    } label: {
-                        Text(.Settings.settingsIntegrationRunSetupAgain)
-                    }
+                } label: {
+                    Text(.Settings.settingsIntegrationRecheck)
                 }
+                .disabled(isRechecking)
             } header: {
                 Text(.Settings.settingsIntegrationGlabSection)
             } footer: {
