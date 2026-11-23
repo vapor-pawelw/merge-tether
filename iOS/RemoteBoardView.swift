@@ -400,13 +400,7 @@ struct RemoteCardView: View {
                              alignsActionsAtTop: true) {
             repositoryReference
             title.opacity(contentOpacity)
-            HStack(spacing: 0) {
-                author
-                Spacer(minLength: 16)
-                approvalBadge
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
+            people
             RemoteCardCornerActions(card: card, model: actionsModel, onOpenAction: onOpenCTA)
                 .fixedSize().zIndex(2)
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -428,10 +422,21 @@ struct RemoteCardView: View {
 
     private var expandedHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 6) {
-                repositoryReference
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        repositoryReference
+                        draftBadge
+                    }
+                    Spacer(minLength: 0)
+                    if card.pinned != nil || card.orderGroup?.pinned == true {
+                        RemoteCardPinButton(card: card, model: actionsModel)
+                    }
+                }
+                .font(.caption).foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 4) {
                     title
+                    people
                     if let branches {
                         Label { Text(verbatim: branches.source + " → " + branches.target) } icon: {
                             Image(systemName: "arrow.triangle.branch")
@@ -444,30 +449,16 @@ struct RemoteCardView: View {
             }
             MergeRequestDescription(source: mergeRequestDescription, title: .RemoteDetail.remoteDetailDescription,
                 expandHint: .RemoteDetail.remoteDetailExpandDescription, collapseHint: .RemoteDetail.remoteDetailCollapseDescription)
-            if card.presentation?.author != nil || card.presentation?.draftBadge != nil || card.id.hasPrefix("mr:") {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 8) {
-                        author
-                        Spacer(minLength: 0)
-                        detailBadges
-                    }
-                    VStack(alignment: .leading, spacing: 8) {
-                        author
-                        detailBadges
-                    }
-                }
-            }
         }
     }
     private var repositoryReference: some View {
-        HStack(alignment: .firstTextBaseline, spacing: expanded ? 8 : 4) {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
             if !card.project.isEmpty {
                 RemoteRepositoryLabel(name: card.repositoryName, path: card.project, contentOpacity: contentOpacity)
             }
-            if expanded { Spacer(minLength: 4) }
             if let iid = card.mergeRequestIID {
                 Text(verbatim: "!\(iid)").monospacedDigit().fixedSize().opacity(contentOpacity)
-                if let issues = card.issues, !issues.isEmpty { MRIssueTag(issues: issues).opacity(contentOpacity) }
+                if let issues = card.issues, !issues.isEmpty { MRIssueTag(issues: issues) }
             }
         }
         .font(.caption).foregroundStyle(.secondary)
@@ -481,11 +472,14 @@ struct RemoteCardView: View {
                 .opacity(contentOpacity)
         }
     }
-    private var detailBadges: some View {
-        HStack(spacing: 6) {
-            draftBadge
+    @ViewBuilder private var people: some View {
+        HStack(spacing: 0) {
+            author
+            Spacer(minLength: 16)
             approvalBadge
-        }.font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: true, vertical: false)
+        }
     }
     @ViewBuilder
     private var draftBadge: some View {

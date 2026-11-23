@@ -370,6 +370,7 @@ final class MergeRequestAttentionMonitor {
     private let approvalReadWait: ReadOnlyAssessmentRetry.Wait
     /// Called after MergeTether approved a merge request on its own.
     var onRefreshed: (() -> Void)?
+    var onIssueCatalogRefreshed: (([GitLabMergeRequest]) -> Void)?
     var onCommentReviewFinished: ((Item.ID) -> Void)?
     var onDisplayMetadataObserved: ((GitLabMergeRequest, MRAutomationScope.Target, UInt64, Date) -> Void)?
     var onAutomationEligibilityObserved: (() -> Void)?
@@ -1447,7 +1448,12 @@ final class MergeRequestAttentionMonitor {
             await requestReReviewsIfReady(for: request, feedback: feedback, draftCount: draftCount,
                                           account: account, user: user)
         }
-        if owned != nil, assigned != nil, !explicitFetchFailed { syncedCatalogRevision = revision }
+        if owned != nil, assigned != nil, !explicitFetchFailed {
+            syncedCatalogRevision = revision
+            if feedbackDecision == nil, automaticResume == nil {
+                onIssueCatalogRefreshed?(openItems.compactMap(\.mergeRequest))
+            }
+        }
         if automaticResume == nil || automaticResume?.action == .commentPublication {
             for item in results where item.drafts.isEmpty && item.requiresCommentReview
                 && (automaticResume == nil || automaticResume?.id == item.id) {

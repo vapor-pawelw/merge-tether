@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Require a task ID, a link or an explicit task label before displaying a task from MR text.
+- Open or copy work-item links from the tag menu on Mac and iPhone, including on draft cards.
+- Assess issue scope across the board in one background verifier request, including drafts, GitLab's related work items and references in the MR description. Refresh one MR independently and show each accepted issue once.
+- Match the MR details header to board cards on Mac and iPhone, with linked tasks beside the MR number and the author, approvals and branches under the title.
+
 - Show the tasks a merge request implements beside its number on Mac and iPhone. Open a single linked task directly or browse multiple tasks in a popover. Read closing issues from GitLab and use the configured assistant to assess external references in the MR.
 
 - Refresh GitLab after the Mac wakes. Keep the Mac awake during active agent tasks on external power, with an option in Automation settings.

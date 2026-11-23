@@ -308,6 +308,7 @@ extension RemoteConnection: RemoteHostTransport {}
             if !phoneSupportsOriginUpdates { clearOriginSubscription() }
             let fresh: Bool
             if message.refresh == true {
+                monitor.markBoardIssueRefresh()
                 fresh = await refreshSource(deadline: .now + .seconds(35))
             } else {
                 let settled = await RemoteRefreshBarrier.refresh(deadline: .now + .seconds(4), isRefreshing: {
@@ -341,7 +342,8 @@ extension RemoteConnection: RemoteHostTransport {}
             try? await active.send(.init(type: .receiptResult, challenge: challenge, result: result))
         case .detailRequest:
             guard phoneSupportsDetails, let request = message.detailRequest else { return }
-            beginDetails(request, cachedAvatarURLs: message.cachedAvatarURLs ?? [], connection: active)
+            beginDetails(request, cachedAvatarURLs: message.cachedAvatarURLs ?? [],
+                refreshIssueAssessment: message.refreshDetailIssues == true, connection: active)
         case .cancelDetails:
             if message.detailRequest?.id == detailAvatarRequest { cancelDetailAvatars() }
             if message.detailRequest == originSubscription?.request { clearOriginSubscription() }
@@ -473,7 +475,8 @@ extension RemoteConnection: RemoteHostTransport {}
         detailAvatarRequest = nil
     }
 
-    private func beginDetails(_ request: RemoteDetailRequest, cachedAvatarURLs: [URL], connection active: any RemoteHostTransport) {
+    private func beginDetails(_ request: RemoteDetailRequest, cachedAvatarURLs: [URL], refreshIssueAssessment: Bool,
+                              connection active: any RemoteHostTransport) {
         guard request.isValid, activeDetailRequest != request else { return }
         let board = snapshot()
         let sourceBoard = monitor.boardSnapshot
@@ -492,7 +495,12 @@ extension RemoteConnection: RemoteHostTransport {}
         cancelDetailAvatars()
         clearOriginSubscription()
         let cachedOnly = request.cachedOnly == true
-        monitor.requestIssueAssessment(for: source)
+        if refreshIssueAssessment, !cachedOnly,
+           let host = monitor.glab.resolvedHost, let username = monitor.glab.currentUsername {
+            monitor.enqueueIssueMetadataRefresh(projectID: source.projectID, iid: source.iid, host: host, username: username)
+        } else {
+            monitor.requestIssueAssessment(for: source)
+        }
         let nextRead = lastDetailRead.addingTimeInterval(1)
         let digest = card.detailContextDigest
         detailTask?.cancel(); activeDetailRequest = request

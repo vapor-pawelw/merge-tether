@@ -277,6 +277,7 @@ import MergeTetherRemote
         #expect(model.isManuallyRefreshingContent)
         if details {
             #expect(sent.type == .detailRequest && sent.refresh == nil)
+            #expect(sent.refreshDetailIssues == true)
             let request = try #require(sent.detailRequest)
             #expect(request.cardID == card.id && request.cachedOnly != true)
             await transport.onMessage?(.init(type: .details, detailResponse: .init(request: request,
@@ -284,6 +285,7 @@ import MergeTetherRemote
             #expect(model.detailState.details(for: card, board: board)?.description == "From GitLab")
         } else {
             #expect(sent.type == .hello && sent.refresh == true)
+            #expect(sent.refreshDetailIssues == nil)
             await f.reply(board: board, capabilities: capabilities)
         }
         await task.value

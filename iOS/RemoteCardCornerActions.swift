@@ -33,14 +33,7 @@ struct RemoteCardCornerActions: View {
     var body: some View {
         HStack(spacing: 0) {
             if pinned {
-                Button { submit(.pin(false)) } label: {
-                    icon("pin.fill").foregroundStyle(Color.accentColor)
-                }
-                .buttonStyle(.plain)
-                .disabled(!canEdit)
-                .accessibilityLabel(Text(.Board.boardUnpin))
-                .accessibilityValue(Text(.Remote.remoteBoardPinned))
-                .accessibilityIdentifier("remote.card.unpin.\(card.id)")
+                RemoteCardPinButton(card: card, model: model)
             }
             if let automation = card.automation {
                 Button { panel = .automation } label: {
@@ -156,6 +149,31 @@ struct RemoteCardCornerActions: View {
     private func submit(_ change: RemoteCardChange) {
         guard canEdit, let model else { return }
         Task { await model.changeCard(change, card: card) }
+    }
+}
+
+struct RemoteCardPinButton: View {
+    let card: RemoteCard
+    let model: RemotePhoneModel?
+
+    private var pinned: Bool { card.pinned ?? card.orderGroup?.pinned ?? false }
+
+    var body: some View {
+        Button {
+            guard let model else { return }
+            Task { await model.changeCard(.pin(!pinned), card: card) }
+        } label: {
+            Image(systemName: pinned ? "pin.fill" : "pin")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(pinned ? Color.accentColor : .secondary)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(model?.state.canAct() != true || !card.actions.contains { $0.kind == .editCard })
+        .accessibilityLabel(Text(pinned ? .Board.boardUnpin : .Board.boardPin))
+        .accessibilityValue(pinned ? Text(.Remote.remoteBoardPinned) : Text(verbatim: ""))
+        .accessibilityIdentifier("remote.card.\(pinned ? "unpin" : "pin").\(card.id)")
     }
 }
 

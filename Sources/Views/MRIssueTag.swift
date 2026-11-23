@@ -1,8 +1,13 @@
 import SwiftUI
 import MergeTetherRemote
+#if os(iOS)
+import Accessibility
+import UIKit
+#endif
 
 struct MRIssueTag: View {
     let issues: [RemoteMRIssue]
+    @Environment(\.openURL) private var openURL
     @State private var showsIssues = false
 
     var body: some View {
@@ -23,13 +28,11 @@ struct MRIssueTag: View {
             #endif
         } else if let issue = issues.first {
             if let url = issue.linkURL {
-                Link(destination: url) {
-                    capsule(Text(verbatim: issue.reference), icon: "arrow.up.right", tint: .accentColor)
+                linkMenu(url) {
+                    capsule(Text(verbatim: issue.reference), tint: .accentColor)
                 }
-                .buttonStyle(.plain)
                 .accessibilityIdentifier("mr.issues.link")
                 .accessibilityLabel(Text(verbatim: issue.reference))
-                .accessibilityHint(Text(.MRIssues.mrIssuesOpenLink))
                 .help(Text(verbatim: issue.title ?? issue.reference))
             } else {
                 capsule(Text(verbatim: issue.reference), tint: .secondary)
@@ -37,6 +40,32 @@ struct MRIssueTag: View {
                     .help(Text(verbatim: issue.title ?? issue.reference))
             }
         }
+    }
+
+    private func linkMenu<Content: View>(_ url: URL, @ViewBuilder label: () -> Content) -> some View {
+        Menu {
+            Button { openURL(url) } label: {
+                Label(.MRIssues.mrIssuesOpenLink, systemImage: "arrow.up.right.square")
+            }
+            #if os(macOS)
+            CopyMergeRequestLinkButton(url: url)
+            #else
+            Button {
+                UIPasteboard.general.url = url
+                AccessibilityNotification.Announcement(String(localized: .CommandCenter.commandCenterLinkCopied)).post()
+            } label: {
+                Label(.CommandCenter.commandCenterCopyLink, systemImage: "link")
+            }
+            #endif
+        } label: {
+            label()
+        }
+        #if os(macOS)
+        .menuStyle(.button)
+        #endif
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .accessibilityHint(Text(.MRIssues.mrIssuesLinkActions))
     }
 
     private func capsule(_ label: Text, icon: String? = nil, tint: Color) -> some View {
@@ -71,9 +100,7 @@ struct MRIssueTag: View {
             ForEach(Array(issues.enumerated()), id: \.offset) { index, issue in
                 if index > 0 { Divider() }
                 if let url = issue.linkURL {
-                    Link(destination: url) { issueRow(issue, isLink: true) }
-                        .buttonStyle(.plain)
-                        .accessibilityHint(Text(.MRIssues.mrIssuesOpenLink))
+                    linkMenu(url) { issueRow(issue, isLink: true) }
                 } else {
                     issueRow(issue, isLink: false)
                 }
@@ -93,10 +120,6 @@ struct MRIssueTag: View {
                 Text(verbatim: title).font(.callout).foregroundStyle(.primary)
             }
             Spacer(minLength: 0)
-            if isLink {
-                Image(systemName: "arrow.up.right").font(.caption2).foregroundStyle(Color.accentColor)
-                    .accessibilityHidden(true)
-            }
         }
         .multilineTextAlignment(.leading)
         .contentShape(Rectangle())

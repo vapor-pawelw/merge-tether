@@ -18,7 +18,10 @@ struct GitLabRefreshButton: View {
             Task {
                 defer { refreshing = false }
                 if let itemID { await monitor.refreshFromGitLab(for: itemID) }
-                else { await monitor.forceRefreshFromGitLab() }
+                else {
+                    monitor.markBoardIssueRefresh()
+                    await monitor.forceRefreshFromGitLab()
+                }
                 await afterRefresh()
             }
         } label: {
