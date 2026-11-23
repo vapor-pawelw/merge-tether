@@ -106,12 +106,7 @@ private struct CommandCenterMRCardContent: View {
         .boardCardInteraction(
             background: colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(white: 0.95),
             backgroundOpacity: contentOpacity, onDetails: onDetails)
-        .contextMenu {
-            Button(action: onDetails) {
-                Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
-            }
-            menuItems
-        }
+        .contextMenu { menuItems }
         .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
             Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
         } message: { Text(.Board.boardRemoveExplanation) }
