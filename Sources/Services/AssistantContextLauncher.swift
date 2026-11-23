@@ -79,7 +79,7 @@ enum AssistantContextLauncher {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                attributes: [.posixPermissions: 0o700])
         let file = directory.appending(path: "MR-context.txt")
-        try context.prompt.write(to: file, atomically: true, encoding: .utf8)
+        try context.url.absoluteString.write(to: file, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
         return file
     }

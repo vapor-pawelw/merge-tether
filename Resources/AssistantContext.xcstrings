@@ -91,10 +91,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Copy MR context"
+            "value": "Copy MR link"
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Kopiuj kontekst MR"}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Kopiuj link do MR"}}
       }
     },
     "assistant.context.failed": {
@@ -127,10 +127,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open a separate conversation with this MR’s link and title. Hold Option to choose another app."
+            "value": "Open a separate conversation with this MR’s link. Hold Option to choose another app."
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz osobną rozmowę z linkiem i tytułem tego MR. Przytrzymaj Option, aby wybrać inną aplikację."}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz osobną rozmowę z linkiem do tego MR. Przytrzymaj Option, aby wybrać inną aplikację."}}
       }
     },
     "assistant.context.startIn": {
@@ -199,10 +199,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Start a separate conversation with the MR’s link and title. Hold Option when selecting the menu action to choose another app for one conversation."
+            "value": "Start a separate conversation with the MR’s link. Hold Option when selecting the menu action to choose another app for one conversation."
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Rozpocznij osobną rozmowę z linkiem i tytułem tego MR. Przytrzymaj Option podczas wybierania działania w menu, aby wybrać inną aplikację dla jednej rozmowy."}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozpocznij osobną rozmowę z linkiem do MR. Przytrzymaj Option podczas wybierania działania z menu, aby wybrać inną aplikację dla jednej rozmowy."}}
       }
     },
     "assistant.context.chooseOpen": {
@@ -235,10 +235,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The MR context below is included automatically. Write your own message to start the terminal conversation."
+            "value": "The MR link below is included automatically. Write your message to start the terminal conversation."
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Poniższy kontekst MR zostanie dołączony automatycznie. Napisz własną wiadomość, aby rozpocząć rozmowę w terminalu."}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Poniższy link do MR zostanie dołączony automatycznie. Napisz wiadomość, aby rozpocząć rozmowę w terminalu."}}
       }
     }
   },

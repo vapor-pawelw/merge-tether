@@ -146,11 +146,11 @@ The app bundles `evidence.py` and `author_follow_up.py` under `Contents/Resource
 
 ## Optional manual agent actions
 
-An MR’s right-click menu and bottom-right **Actions** button offer the same actions. **Start conversation in…** opens the default app configured under **Settings → General → MR conversations**, independently of the automation provider. Hold **Option** to show **Start conversation with…** and choose an installed desktop app or CLI for one conversation; this does not change the default. The chooser also offers **Copy MR context**. If the default is unavailable, the chooser opens instead.
+An MR’s right-click menu and bottom-right **Actions** button offer the same actions. **Start conversation in…** opens the default app configured under **Settings → General → MR conversations**, independently of the automation provider. Hold **Option** to show **Start conversation with…** and choose an installed desktop app or CLI for one conversation; this does not change the default. The chooser also offers **Copy MR link**. If the default is unavailable, the chooser opens instead.
 
-ChatGPT and Claude Desktop attach a local UTF-8 text file containing only the MR link and title to a new conversation without a repository, leaving the message field empty. Context files remain in the app’s local Application Support directory so the assistant can read them later. With a version that supports prompt links, T3 Code opens a new draft without a project and fills the composer with the MR link and title. Add your request and send it in T3 Code.
+ChatGPT and Claude Desktop attach a local UTF-8 text file containing only the MR link to a new conversation without a repository, leaving the message field empty. Context files remain in the app’s local Application Support directory so the assistant can read them later. With a version that supports prompt links, T3 Code opens a new draft without a project and prefills the composer with `Regarding <MR link>,` so you can continue the sentence.
 
-CLI actions ask for your message before opening Terminal with it and the minimal MR context. Without a configured workspace, a CLI opens in a fresh empty folder. Desktop attachments and empty CLI folders both use the installation’s bundle-specific Application Support directory, including custom-identifier installations.
+CLI actions ask for your message before opening Terminal with the MR link and your message. Without a configured workspace, a CLI opens in a fresh empty folder. Desktop attachments and empty CLI folders both use the installation’s bundle-specific Application Support directory, including custom-identifier installations.
 
 Opening an external destination is not proof that its work completed. A manual session must coordinate ownership before fixing a pipeline already being handled elsewhere. MergeTether’s remote-evidence and publication rules still apply to drafts eligible for automatic publication.
 

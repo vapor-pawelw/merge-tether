@@ -103,7 +103,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Explain multi-step actions before running them from an MR card or Details. **Don't ask again** applies to the confirmed action.
 
-- Open a conversation draft in T3 Code from a merge request on Mac, with the MR link and title ready in the composer.
+- Start a T3 Code draft with `Regarding <MR link>,` and continue typing. ChatGPT, Claude Desktop, and terminal conversations receive only the link as MR context.
 
 - Shorten the pending draft summary and group it with the attention message. Add more room around the repository line and distinguish card backgrounds from the Mac board in both appearances.
 
