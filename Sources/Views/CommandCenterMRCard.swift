@@ -47,6 +47,11 @@ private struct CommandCenterMRCardContent: View {
     private var humanAction: MRHumanAction? { presentation.humanAction }
 
     private var contentOpacity: Double { isDraft ? 0.5 : 1 }
+    private var isNewReview: Bool { row.newReviewAssignedAt != nil }
+    private var showsInlineHide: Bool { isNewReview && row.waitsForReviewStart && reviewingContext.nextStep == .runReview }
+    private var newReviewTint: Color {
+        colorScheme == .dark ? Color(red: 0.38, green: 0.88, blue: 0.77) : Color(red: 0.04, green: 0.39, blue: 0.33)
+    }
 
     var body: some View {
         Group {
@@ -60,6 +65,12 @@ private struct CommandCenterMRCardContent: View {
                     statusTopPadding: humanAction == nil ? 0 : 8, statusOpacity: contentOpacity,
                     statusLayout: MRCardStatusLayout(heading: cardHeading, status: cardStatus.opacity(contentOpacity)),
                     statusTrailer: { mergeActionStatus }) { hasDirectMergeAction in
+                    if isNewReview && !showsInlineHide {
+                        Button(action: markReviewSeen) {
+                            Label { Text(.Board.boardReviewAssignmentSeen) } icon: { Image(systemName: "checkmark") }
+                        }
+                        .buttonStyle(.bordered)
+                    }
                     if humanAction?.action == .retryRun {
                         Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
                             .buttonStyle(.plain)
@@ -70,7 +81,12 @@ private struct CommandCenterMRCardContent: View {
                     } else {
                         primaryAction(hasDirectMergeAction: hasDirectMergeAction)
                     }
-                    reviewAssignmentActions
+                    if showsInlineHide {
+                        Button {
+                            monitor.removeReviewedMergeRequest(row.displayItem)
+                        } label: { Text(.Board.boardReviewAssignmentHide) }
+                        .buttonStyle(.plain)
+                    }
                     if presentation.showsAdditionalCommentReview || finishingCommentReview {
                         Button {
                             markReviewSeen()
@@ -100,13 +116,21 @@ private struct CommandCenterMRCardContent: View {
         .padding([.leading, .bottom, .trailing], 16)
         .padding(.top, contentTopInset)
         .overlay {
-            RoundedRectangle(cornerRadius: 8).strokeBorder(.primary.opacity(0.14), lineWidth: 1)
-                .opacity(contentOpacity)
-                .allowsHitTesting(false)
+            Group {
+                if isNewReview {
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(newReviewTint.opacity(0.65), lineWidth: 1)
+                        .shadow(color: newReviewTint.opacity(0.30), radius: 3)
+                } else {
+                    RoundedRectangle(cornerRadius: 8).strokeBorder(.primary.opacity(0.14), lineWidth: 1)
+                        .opacity(contentOpacity)
+                }
+            }
+            .allowsHitTesting(false)
         }
         .boardCardInteraction(
             background: colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(white: 0.95),
-            backgroundOpacity: contentOpacity, onDetails: onDetails)
+            backgroundOpacity: contentOpacity, onDetails: openDetails)
         .contextMenu { menuItems }
         .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
             Button(role: .destructive) { monitor.removeReviewedMergeRequest(row.displayItem) } label: { Text(.Board.boardRemove) }
@@ -286,8 +310,20 @@ private struct CommandCenterMRCardContent: View {
                 MRDependencyBadge(dependencies: dependencies)
             }
             if let date = row.newReviewAssignedAt {
-                BoardStatusChip(title: .Board.boardReviewAssignmentNew, tint: .accentColor)
-                    .help(Text(date, format: .dateTime.month().day().hour().minute()))
+                Button(action: markReviewSeen) {
+                    Label { Text(.Board.boardReviewAssignmentNew) } icon: {
+                        Circle().fill(newReviewTint).frame(width: 5, height: 5)
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(newReviewTint)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(newReviewTint.opacity(0.15), in: Capsule())
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(Text(.Board.boardReviewAssignmentSeen))
+                .help(Text(.Board.boardReviewAssignmentSeen) + Text(verbatim: "\n")
+                    + Text(date, format: .dateTime.month().day().hour().minute()))
             }
             if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
             else if isDraft { BoardDraftBadge(tint: draftBadgeTint) }
@@ -462,20 +498,6 @@ private struct CommandCenterMRCardContent: View {
         }
     }
 
-    @ViewBuilder private var reviewAssignmentActions: some View {
-        if row.newReviewAssignedAt != nil {
-            if row.waitsForReviewStart && reviewingContext.nextStep == .runReview {
-                Button {
-                    monitor.removeReviewedMergeRequest(row.displayItem)
-                } label: { Text(.Board.boardReviewAssignmentHide) }
-                .buttonStyle(.plain)
-            } else {
-                Button(action: markReviewSeen) { Text(.Board.boardReviewAssignmentSeen) }
-                    .buttonStyle(.plain)
-            }
-        }
-    }
-
     private func markReviewSeen() {
         monitor.markReviewAssignmentSeen(row.displayItem)
     }
@@ -517,7 +539,8 @@ private struct CommandCenterMRCardContent: View {
     }
 
     private var moreMenu: some View {
-        BoardActionsMenu(onClick: markReviewSeen) { menuItems }
+        let onClick: (() -> Void)? = isNewReview ? { markReviewSeen() } : nil
+        return BoardActionsMenu(onClick: onClick) { menuItems }
     }
 
     @ViewBuilder private var menuItems: some View {
