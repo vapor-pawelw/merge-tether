@@ -4,7 +4,7 @@ import Observation
 @MainActor @Observable
 final class SettingsNavigation {
     enum Tab: CaseIterable, Hashable {
-        case general, integration, mergeRequests, notifications, codingAgent, automation, usage
+        case general, codingAgent, automation, integration, mergeRequests, notifications
 
         var title: LocalizedStringResource {
             switch self {
@@ -14,7 +14,6 @@ final class SettingsNavigation {
             case .notifications: .Settings.settingsNotificationsTab
             case .codingAgent: .Settings.settingsCodingAgentTab
             case .automation: .Settings.settingsAutomationTab
-            case .usage: .AssistantUsage.assistantUsageTab
             }
         }
 
@@ -26,7 +25,6 @@ final class SettingsNavigation {
             case .notifications: "bell"
             case .codingAgent: "sparkles"
             case .automation: "bolt.circle"
-            case .usage: "chart.bar"
             }
         }
     }
@@ -89,7 +87,6 @@ struct SettingsView: View {
         case .notifications: NotificationsSettingsTab(monitor: monitor)
         case .codingAgent: CodingAgentSettingsTab(monitor: monitor)
         case .automation: AutomationSettingsTab(monitor: monitor)
-        case .usage: AssistantUsageSettingsTab()
         }
     }
 }

@@ -277,18 +277,6 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Suma zgłoszonych tokenów niedostępna"}}
       }
     },
-    "assistantUsageTab": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Agent usage"
-          }
-        },
-        "pl": {"stringUnit": {"state": "translated", "value": "Użycie asystentów"}}
-      }
-    },
     "assistantUsageDashboardTitle": {
       "extractionState": "manual",
       "localizations": {

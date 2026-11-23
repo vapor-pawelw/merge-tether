@@ -27,6 +27,10 @@ struct CodingAgentSettingsTab: View {
             } footer: {
                 Text(.Settings.settingsAssistantUseHelp)
             }
+
+            Section {
+                AssistantUsageSettingsContent()
+            }
         }
         .formStyle(.grouped)
     }

@@ -1,7 +1,7 @@
 import Charts
 import SwiftUI
 
-struct AssistantUsageSettingsTab: View {
+struct AssistantUsageSettingsContent: View {
     @State private var snapshot: AssistantUsageSnapshot?
     @State private var period: AssistantUsagePeriod = .last30Days
     @State private var granularity: AssistantUsageGranularity = .day
@@ -15,51 +15,48 @@ struct AssistantUsageSettingsTab: View {
     @State private var mergeRequestRanking: [AssistantUsageMergeRequestTotal] = []
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(.AssistantUsage.assistantUsageDashboardTitle).font(.title2.weight(.semibold))
-                    Spacer()
-                    Picker(selection: $period) {
-                        ForEach(AssistantUsagePeriod.allCases) { range in
-                            Text(range.title).tag(range)
-                        }
-                    } label: { Text(.AssistantUsage.assistantUsagePeriod) }
-                        .fixedSize()
-                }
-
-                if loadFailed {
-                    Label { Text(.AssistantUsage.assistantUsageUnavailable) } icon: {
-                        Image(systemName: "exclamationmark.triangle")
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(.AssistantUsage.assistantUsageDashboardTitle).font(.title2.weight(.semibold))
+                Spacer()
+                Picker(selection: $period) {
+                    ForEach(AssistantUsagePeriod.allCases) { range in
+                        Text(range.title).tag(range)
                     }
-                    .font(.caption).foregroundStyle(.secondary)
-                }
-
-                if let snapshot {
-                    dashboard(summary, chartData: chartData)
-                    trackingFooter(snapshot)
-                } else if !loadFailed {
-                    ProgressView().frame(maxWidth: .infinity)
-                }
-
-                if let legacyTotal {
-                    VStack(alignment: .leading, spacing: 8) {
-                        AssistantUsageTotalCard(title: .AssistantUsage.assistantUsageLegacyTitle,
-                            detail: .AssistantUsage.assistantUsageLegacyHelp, total: legacyTotal)
-                        Button {
-                            NSWorkspace.shared.activateFileViewerSelecting([InstallationStorage.current.legacy.usageFile])
-                        } label: { Text(.AssistantUsage.assistantUsageLegacySource) }
-                    }
-                } else if legacyLoadFailed {
-                    Label { Text(.AssistantUsage.assistantUsageLegacyUnavailable) } icon: {
-                        Image(systemName: "exclamationmark.triangle")
-                    }
-                    .font(.caption).foregroundStyle(.secondary)
-                }
-
-                estimateExplanation
+                } label: { Text(.AssistantUsage.assistantUsagePeriod) }
+                    .fixedSize()
             }
-            .padding(20)
+
+            if loadFailed {
+                Label { Text(.AssistantUsage.assistantUsageUnavailable) } icon: {
+                    Image(systemName: "exclamationmark.triangle")
+                }
+                .font(.caption).foregroundStyle(.secondary)
+            }
+
+            if let snapshot {
+                dashboard(summary, chartData: chartData)
+                trackingFooter(snapshot)
+            } else if !loadFailed {
+                ProgressView().frame(maxWidth: .infinity)
+            }
+
+            if let legacyTotal {
+                VStack(alignment: .leading, spacing: 8) {
+                    AssistantUsageTotalCard(title: .AssistantUsage.assistantUsageLegacyTitle,
+                        detail: .AssistantUsage.assistantUsageLegacyHelp, total: legacyTotal)
+                    Button {
+                        NSWorkspace.shared.activateFileViewerSelecting([InstallationStorage.current.legacy.usageFile])
+                    } label: { Text(.AssistantUsage.assistantUsageLegacySource) }
+                }
+            } else if legacyLoadFailed {
+                Label { Text(.AssistantUsage.assistantUsageLegacyUnavailable) } icon: {
+                    Image(systemName: "exclamationmark.triangle")
+                }
+                .font(.caption).foregroundStyle(.secondary)
+            }
+
+            estimateExplanation
         }
         .task(id: refreshID) { await refresh() }
         .task(id: boundaryRefreshID) { await refreshAtBoundaries() }

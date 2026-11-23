@@ -106,6 +106,12 @@ struct GlabConnectionTests {
         #expect(resumes == 1)
     }
 
+    @Test func settingsKeepAgentAndUsageTogetherInTheRequestedTabOrder() {
+        #expect(SettingsNavigation.Tab.allCases == [
+            .general, .codingAgent, .automation, .integration, .mergeRequests, .notifications
+        ])
+    }
+
     @Test(arguments: [false, true])
     func obsoleteSignInChecksCannotRestoreAnAccountAfterASwitch(_ returnsToOriginal: Bool) async throws {
         let gitlab = InMemoryGitLab()

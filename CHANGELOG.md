@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Combine agent configuration and usage in the **Agent** tab, reorder the settings tabs, and group startup and setup in **General**.
+
 - Give merge request settings, notifications, and coding agent setup their own Mac settings tabs. Find hidden assignments in a collapsed section under Merge requests. Mark newly visible assignments on upgrade when Reviewing already contained cards.
 
 - Keep the **Restore** button fully visible in expanded hidden merge request rows.

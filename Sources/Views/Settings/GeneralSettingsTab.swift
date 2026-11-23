@@ -8,12 +8,6 @@ struct GeneralSettingsTab: View {
     var body: some View {
         Form {
             Section {
-                Button(.Settings.settingsIntegrationRunSetupAgain) {
-                    openWindow(id: "onboarding")
-                }
-            }
-
-            Section {
                 Toggle(isOn: $launchAtLogin) {
                     Text(.Settings.settingsGeneralStartupLaunchAtLogin)
                 }
@@ -27,8 +21,14 @@ struct GeneralSettingsTab: View {
                         launchAtLogin = !newValue
                     }
                 }
-            } header: {
-                Text(.Settings.settingsGeneralStartupSection)
+
+                LabeledContent {
+                    Button(.Settings.settingsIntegrationRunSetupAgain) {
+                        openWindow(id: "onboarding")
+                    }
+                } label: {
+                    Text(.Onboarding.onboardingWindowTitle)
+                }
             }
         }
         .formStyle(.grouped)
