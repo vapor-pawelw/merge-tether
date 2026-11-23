@@ -22,7 +22,7 @@ import MergeTetherRemote
                         && permitsIssueAssessment(for: $0.request, target: $0.target)
                 }
             }
-            guard canAssess(), !Task.isCancelled else { return nil }
+            guard canAssess(), !Task.isCancelled, configuration.selectedAssistant != nil else { return nil }
             let status: AssistantDependencyStatus
             if let known = assistantDependencies.statuses[configuration.assistant], known.isReady { status = known }
             else { status = await assistantDependencies.check(configuration.assistant) }

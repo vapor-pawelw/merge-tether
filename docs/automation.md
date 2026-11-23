@@ -64,9 +64,9 @@ When all feedback is verified, required replies are published and the existing a
 
 ## CLI setup and execution
 
-Choose the provider in **Settings → Automation → Coding agent**. Setup verifies the executable, supported headless options and sign-in before accepting a selection. A missing or incompatible CLI can be installed through the provider’s official installer; sign-in opens Terminal. Cancelling or failing setup keeps the previous selection.
+Choose **No coding agent**, **Codex CLI**, or **Claude CLI** in **Settings → General → Coding agent**. A verified provider change saves immediately and applies to manual agent actions and automation. Setup verifies the executable, supported headless options and sign-in before accepting a selection. A missing or incompatible CLI can be installed through the provider’s official installer; sign-in opens Terminal. Cancelling or failing setup keeps the previous selection.
 
-The CLI requirement applies even when automatic re-review verification is off. Desktop installation does not establish CLI readiness. Dependency checks run independently of GitLab polling, and missing CLI/sign-in is shown in the main app. Manual publication and other explicit GitLab actions remain available.
+The CLI requirement applies even when automatic re-review verification is off. Desktop installation does not establish CLI readiness. Dependency checks run independently of GitLab polling. An action that needs an agent offers to open the agent settings when the CLI is unavailable. Affected merge requests show a hold with a setup and resume action. Manual publication and other GitLab actions that do not require an agent remain available.
 
 Codex reviews, feedback fixes, pipeline fixes, conflict work and reply corrections use the configured coding model and reasoning setting. Claude full tasks use the model configured in Claude CLI. The lightweight re-review readiness assessment has its own model setting.
 
@@ -168,7 +168,7 @@ Events that cannot be classified safely remain in **Inbox** for manual reading; 
 
 ## Automation profiles
 
-Choose a profile in **Settings → Automation → Profile & permissions**, then adjust individual permissions. Until automation is explicitly enabled, automatic GitLab writes and worker push or thread-resolution permissions remain off. Missing consent in older settings stays undecided regardless of saved feature flags. Running a review manually permits that review and private drafts; it does not enable later automatic approval, publication, merge, resolution, reactions, to-do acknowledgements or re-review requests. Explicit manual GitLab actions remain available. The page groups preparation, comment publication, delivery and completion. **Review & feedback** retains the trigger and repository rules; **MR Events** retains its event filters. **Advanced** keeps saved shell titles and commands, with their stored enabled/disabled state visible; they do not run automatically. Choosing a profile or migrating a legacy handler to the coding agent remains explicit. The app preserves existing settings across upgrades. Onboarding preselects **Safe** for a new automation setup.
+Choose a profile in **Settings → Automation → Profile & permissions**, then adjust individual permissions. Until automation is explicitly enabled, automatic GitLab writes and worker push or thread-resolution permissions remain off. Missing consent in older settings stays undecided regardless of saved feature flags. Running a review manually permits that review and private drafts; it does not enable later automatic approval, publication, merge, resolution, reactions, to-do acknowledgements or re-review requests. Explicit manual GitLab actions remain available. The page groups preparation, comment publication, delivery and completion. **Review & feedback** retains the trigger and repository rules; **MR Events** retains its event filters. **Advanced** keeps saved shell titles and commands, with their stored enabled/disabled state visible; they do not run automatically. Choosing a profile or migrating a legacy handler to the coding agent remains explicit. The app preserves existing settings across upgrades. Onboarding starts with **Manual** when no agent is selected. Choose a signed-in agent to enable the automation profiles during setup.
 
 | Profile | Automatic preparation | Publication and delivery |
 | --- | --- | --- |
@@ -181,7 +181,7 @@ The profile selector appears first, followed by its summary and the detailed per
 
 **Custom** becomes available after you create a nonmatching configuration. The form retains your latest custom permissions when you try another preset; an explicit save retains that choice across restarts. Choosing a preset does not erase the saved custom configuration. Returning to Custom restores the automation permissions and the profile-controlled AI requirement, while preserving current models, instructions, scope and other repository, author and event filters. Fresh installations with no custom configuration do not offer an empty Custom option. Older saved **With checkpoints** settings retain their permissions; they never acquire Trusted permissions on decode or upgrade.
 
-Global permissions, automatic review and feedback handling, verification, event modes and CI retry permissions are editable on **Profile & permissions**. **Coding agent** retains models and reasoning; **Review & feedback** retains handler details and repository restrictions; **MR Events** retains event filters and timing. These pages do not contain a second copy of the global permission switches.
+Global permissions, automatic review and feedback handling, verification, event modes and CI retry permissions are editable on **Profile & permissions**. **Models & reasoning** retains provider-specific model and reasoning options; **Review & feedback** retains handler details and repository restrictions; **MR Events** retains event filters and timing. These pages do not contain a second copy of the global permission switches.
 
 Safe has an independent public-action boundary. Private drafts and local preparation can continue, but enabling an individual delivery switch does not bypass that boundary. Explicit manual actions remain available. With follow-up push disabled, local code proposals remain in the task result rather than creating completion replies that imply a delivered fix.
 
@@ -199,7 +199,7 @@ MR event rules watch failed pipelines, new commits after review, author replies,
 
 Scope is always required. Empty additional project lists mean all repositories permitted by the active scope. Nonempty lists restrict the corresponding tool tasks, conflict pushes or default automatic merges to exact repository paths.
 
-Manage global scope and repository/MR overrides in **Settings → Automation → Scope**. Scope changes save immediately. Other automation pages use **Apply Changes**, preserving scope edits made in the meantime. Paused and closed MR overrides remain editable.
+Manage global scope and repository/MR overrides in **Settings → Automation → Scope**. Scope changes save immediately. Other automation pages use **Apply Changes**, preserving scope and coding-agent selections made in the meantime. Paused and closed MR overrides remain editable.
 
 With **Automation → On**, choose **Default**, **On**, or **Off** for comment publication and for auto-merge on your own MRs or auto-approval on reviewed MRs. **Default** for an action follows Settings. **On** enables the action for this MR under the usual public action permissions and checks. Auto-approval uses the configured threshold. Comment publication keeps the configured filters and uses eligible replies to AI feedback when automatic publication is off in Settings. The app checks and publishes eligible draft IDs individually. **Off** pauses the automatic action. Existing action overrides stay active until you choose a new Automation mode.
 
@@ -297,7 +297,7 @@ The verifier proves the selected committed files reached the remote revision. Me
 
 ## Re-review readiness
 
-**Settings → Automation → Coding agent → Re-review verification** is on for Safe, Trusted and Max, and off for Manual unless explicitly changed. It uses an independent verification model: Luna for Codex and Haiku for Claude by default.
+**Settings → Automation → Profile & permissions → Re-review verification** is on for Safe, Trusted and Max, and off for Manual unless explicitly changed. It uses an independent verification model: Luna for Codex and Haiku for Claude by default.
 
 **Verification reasoning** is shared by Codex and Claude across feedback verification, draft-claim checks and AI-assistance assessments. It offers Low, Medium and High, with High as the default for new and existing settings. Explicit saved choices are retained, including when applying a profile. The reasoning choice is separate from the coding agent’s reasoning setting.
 

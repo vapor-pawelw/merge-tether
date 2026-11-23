@@ -9,7 +9,7 @@ struct BoardMRIntentActions: View {
 
     private var needsCLI: Bool {
         row.attentionIntents.contains(where: { $0.state != .completed && $0.kind != .refresh })
-            && !monitor.availableAssistants.contains(monitor.settings.automation.assistant)
+            && !monitor.selectedAssistantReady
     }
 
     var body: some View {
@@ -55,7 +55,7 @@ struct BoardMRIntentActions: View {
                                 if let cta = MRActionCTA(intent: intent.kind) { MRActionLabel(title: title, cta: cta) }
                                 else { Text(title) }
                             }
-                            .disabled(starting.contains(intent.id) || !canRun(intent.kind))
+                            .disabled(starting.contains(intent.id))
                             .mrActionHelp(MRActionCTA(intent: intent.kind))
                         }
                     }
@@ -73,7 +73,10 @@ struct BoardMRIntentActions: View {
                 HStack {
                     BoardStatusChip(title: .Board.boardCompactCliRequired, symbol: "terminal", tint: .orange)
                         .help(Text(.Board.boardIntentCliRequired))
-                    Button { openSettings() } label: { Text(.Board.boardCompactSetupCli) }
+                    Button {
+                        SettingsNavigation.shared.showCodingAgent(openSettings: { openSettings() },
+                            onConfigured: { Task { await monitor.refreshFromGitLab(for: row.id) } })
+                    } label: { Text(.Settings.settingsAssistantResumeAction) }
                         .buttonStyle(.link)
                 }
             }
@@ -93,10 +96,6 @@ struct BoardMRIntentActions: View {
             chosen[intent.kind] = intent
         }
         return open.filter { chosen[$0.kind]?.id == $0.id }
-    }
-
-    private func canRun(_ kind: MRTodoIntent.Kind) -> Bool {
-        kind == .refresh || monitor.availableAssistants.contains(monitor.settings.automation.assistant)
     }
 
     static func title(_ kind: MRTodoIntent.Kind) -> LocalizedStringResource {

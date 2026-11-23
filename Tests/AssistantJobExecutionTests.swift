@@ -5,7 +5,7 @@ import Testing
 @Suite struct AssistantJobExecutionTests {
     @Test(arguments: [
         (AssistantJobExecutor.ExecutionError.disabledPermission, "This task is blocked by the current automation settings. Check Settings → Automation and this MR’s automation rules before trying again."),
-        (.cliUnavailable, "The selected agent CLI is unavailable. Check the agent in Settings → Automation, then try again."),
+        (.cliUnavailable, "The coding agent is unavailable. Check Settings → General → Coding agent, then try again."),
         (.wrongAccount, "The signed-in GitLab account or host has changed. Restore the account used for this run, then try again."),
         (.inactiveMergeRequest, "This merge request or its pipeline is no longer eligible for this task. Refresh the MR before starting a new run."),
         (.contextUnavailable, "The current merge request state or source commit is unavailable. Automatic work will wait for complete GitLab evidence."),

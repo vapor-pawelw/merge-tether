@@ -2227,6 +2227,7 @@ struct AuthorFeedbackCoordinatorTests {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
             defaults = try #require(UserDefaults(suiteName: suite))
             settings = SettingsManager(defaults: defaults)
+            settings.automation.selectedAssistant = .codex
             settings.automation.packageDecision = .enabled
             settings.automation.autoResolveAcceptedFeedback = true
             glab = gitlab.service(host: Self.host, username: "me")

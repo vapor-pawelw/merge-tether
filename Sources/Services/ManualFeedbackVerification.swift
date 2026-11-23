@@ -29,8 +29,10 @@ extension AutomationAssistant {
             return .init(notes: [])
         }
         let configuration = settings.automation
+        guard let assistant = configuration.selectedAssistant else { throw ReReviewVerifier.VerificationError.unavailable }
         let diff: Data = try await glab.mergeRequestAPI(
             "/projects/\(request.projectID)/merge_requests/\(request.iid)/raw_diffs", host: host, decode: { $0 })
+        guard settings.automation == configuration, !Task.isCancelled else { throw CancellationError() }
         let target = MRAutomationScope.Target(host: host, username: user.username, projectID: request.projectID, iid: request.iid)
         let model = configuration.assistant == .codex ? configuration.codexVerificationModel.rawValue : configuration.claudeVerificationModel.rawValue
         return try await ReReviewVerifier.verify(.init(authorID: user.id, headSHA: request.sha ?? "", title: request.title,
@@ -39,6 +41,6 @@ extension AutomationAssistant {
             semanticContextFingerprint: request.semanticContextFingerprint, thinking: configuration.verificationThinking,
             ignoredSuggestions: settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target),
             excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: user.username).sorted()),
-            assistant: configuration.assistant, model: model)
+            assistant: assistant, model: model)
     }
 }

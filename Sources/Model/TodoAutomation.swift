@@ -169,7 +169,17 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var codexVerificationModel: CodexReviewModel = .luna
     var claudeVerificationModel: ClaudeVerificationModel = .haiku
     var verificationThinking: VerificationThinking = .high
-    var assistant: AutomationAssistant = .codex
+    var assistant: AutomationAssistant = .codex {
+        didSet { assistantSelectionCleared = false }
+    }
+    private var assistantSelectionCleared = false
+    var selectedAssistant: AutomationAssistant? {
+        get { assistantSelectionCleared ? nil : assistant }
+        set {
+            if let newValue { assistant = newValue }
+            else { assistantSelectionCleared = true }
+        }
+    }
     var codexReviewModel: CodexReviewModel = .sol
     var codexReviewThinking: CodexReviewThinking = .high
     var claudeCodingModel: ClaudeCodingModel = .opus
@@ -322,6 +332,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         claudeVerificationModel = (try? values.decode(ClaudeVerificationModel.self, forKey: .claudeVerificationModel)) ?? .haiku
         verificationThinking = (try? values.decode(VerificationThinking.self, forKey: .verificationThinking)) ?? .high
         assistant = try values.decodeIfPresent(AutomationAssistant.self, forKey: .assistant) ?? assistant
+        assistantSelectionCleared = try values.decodeIfPresent(Bool.self, forKey: .assistantSelectionCleared) ?? false
         codexReviewModel = (try? values.decode(CodexReviewModel.self, forKey: .codexReviewModel)) ?? codexReviewModel
         codexReviewThinking = (try? values.decode(CodexReviewThinking.self, forKey: .codexReviewThinking)) ?? codexReviewThinking
         claudeCodingModel = (try? values.decode(ClaudeCodingModel.self, forKey: .claudeCodingModel)) ?? claudeCodingModel
@@ -417,6 +428,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encodeIfPresent(assistant, forKey: .assistant)
+        if assistantSelectionCleared { try values.encode(true, forKey: .assistantSelectionCleared) }
         try values.encodeIfPresent(assistantWorkspace, forKey: .assistantWorkspace)
         try values.encodeIfPresent(autoMergeEnabled, forKey: .autoMergeEnabled)
         try values.encodeIfPresent(conflictTasksEnabled, forKey: .conflictTasksEnabled)
@@ -459,7 +471,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case assistant, assistantWorkspace, autoMergeEnabled, conflictTasksEnabled, reviewRequested, authorFeedback
+        case assistant, assistantSelectionCleared, assistantWorkspace, autoMergeEnabled, conflictTasksEnabled, reviewRequested, authorFeedback
         case allowAssistantTools, assistantToolProjects, packageDecision, workflowRules, allowAutomaticPublicActions
         case autoApprovalThreshold
         case autoMergeProjects, allowConflictPush, allowFollowUpPush, conflictPushProjects, autoReReviewEnabled, publishDraftsWithoutConfirmation, publishAIRepliesWithoutConfirmation, autoApproveEnabled, autoResolveOwnReviewThreads
@@ -473,8 +485,8 @@ struct AutomationSettings: Codable, Equatable, Sendable {
 
     private enum RuleMigrationKeys: String, CodingKey { case isEnabled, markDoneOnSuccess }
 
-    mutating func applyPreset(_ preset: AutomationPreset, for assistant: AutomationAssistant) {
-        self.assistant = assistant
+    mutating func applyPreset(_ preset: AutomationPreset, for assistant: AutomationAssistant?) {
+        selectedAssistant = assistant
         if preset == .manual {
             let firstChoice = packageDecision == .undecided
             disableAssistantPackage()
@@ -522,7 +534,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     private func matchesPreset(_ preset: AutomationPreset) -> Bool {
         var actual = ignoringGlobalSuspension
         var expected = actual
-        expected.applyPreset(preset, for: assistant)
+        expected.applyPreset(preset, for: selectedAssistant)
         expected.baselinePreset = baselinePreset
         let expectedBotReplies = expected.publicationRestrictions.allowBotReplies
         expected.publicationRestrictions = publicationRestrictions
@@ -615,7 +627,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
             || workflowRules.enabled.contains { workflowRules[$0].mode == .assistant }
     }
 
-    var canClassifyIncomingNotices: Bool { hasAutomaticActionConsent && usesAssistant }
+    var canClassifyIncomingNotices: Bool { selectedAssistant != nil && hasAutomaticActionConsent && usesAssistant }
 
     var hasEnabledAutomation: Bool {
         hasAutomaticActionConsent && (usesAssistant || reviewRequested.isEnabled || authorFeedback.isEnabled || !workflowRules.enabled.isEmpty

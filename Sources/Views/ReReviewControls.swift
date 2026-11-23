@@ -3,6 +3,7 @@ import SwiftUI
 struct ReReviewControls: View {
     let item: MergeRequestAttentionMonitor.Item
     let monitor: MergeRequestAttentionMonitor
+    let requireAssistant: () -> Bool
     let assistant: AutomationAssistant
     /// While a new feedback check runs, an earlier verdict and its retry are out of date.
     var hidesStaleResult = false
@@ -64,7 +65,9 @@ struct ReReviewControls: View {
                 .controlSize(.small)
                 .disabled(isWorking)
                 if readiness == .unavailable || readiness == .failed {
-                    Button { openSettings() } label: { Text(.Menu.menuActionSettings) }
+                    Button {
+                        SettingsNavigation.shared.showCodingAgent(openSettings: { openSettings() })
+                    } label: { Text(.Menu.menuActionSettings) }
                         .buttonStyle(.link).font(.caption)
                 }
             }
@@ -89,6 +92,7 @@ struct ReReviewControls: View {
     private func retryButton(_ readiness: ReReviewReadiness) -> some View {
         Button {
             let isManual = readiness == .manual
+            guard isManual || requireAssistant() else { return }
             guard confirmMRAction(.verifyReReview, title: isManual ? .Settings.settingsAssistantSetupRecheck : .Menu.menuReReviewRetry,
                 variant: isManual ? "manual" : nil) else { return }
             isWorking = true

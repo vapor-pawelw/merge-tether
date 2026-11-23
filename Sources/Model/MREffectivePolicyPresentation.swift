@@ -92,8 +92,12 @@ struct MREffectivePolicyPresentation {
     /// Saved rules that read the same on every card; the card keeps only conditions that stop work.
     var routineClauses: [Clause] { clauses.filter(\.isRoutine) }
     var cardClauses: [Clause] { clauses.filter { !$0.isRoutine } }
-    enum SettingsAction { case chooseAutomationSettings }
-    var settingsAction: SettingsAction? { clauses.contains(.automationDecisionRequired) ? .chooseAutomationSettings : nil }
+    enum SettingsAction: Equatable { case chooseAutomationSettings, chooseCodingAgent }
+    var settingsAction: SettingsAction? {
+        if clauses.contains(.automationDecisionRequired) { return .chooseAutomationSettings }
+        if clauses.contains(.assistantUnavailable) { return .chooseCodingAgent }
+        return nil
+    }
 
     init(input: Input) {
         guard let request = input.request else { clauses = [.requiresVerification]; return }

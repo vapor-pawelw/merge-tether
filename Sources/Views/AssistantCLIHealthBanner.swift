@@ -4,7 +4,7 @@ struct AssistantCLIHealthBanner: View {
     let monitor: TodoMonitorService
     var body: some View {
         ForEach(AutomationAssistant.allCases.filter { provider in
-            provider == monitor.settings.automation.assistant || (monitor.cliHealth.hold(for: provider) != nil
+            provider == monitor.settings.automation.selectedAssistant || (monitor.cliHealth.hold(for: provider) != nil
                 && monitor.assistantHandoffs.contains {
                     $0.key.assistant == provider && !$0.isObsoleteReminder
                         && $0.execution.map { $0.state != .succeeded } == true
@@ -66,7 +66,7 @@ private struct AssistantCLIProviderHealthBanner: View {
                     Text(kind == .rateLimited ? .CLIHealth.cliHealthRetry : .CLIHealth.cliHealthRecheck)
                 }
                 .disabled(checking)
-                Button { openSettings() } label: { Text(.Menu.menuActionSettings) }
+                Button { SettingsNavigation.shared.showCodingAgent(openSettings: { openSettings() }) } label: { Text(.Menu.menuActionSettings) }
             }
             .font(.caption).padding(12).frame(maxWidth: .infinity, alignment: .leading)
             .background(.orange.opacity(0.1))

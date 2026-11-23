@@ -134,7 +134,8 @@ final class MRFeedbackLaunchCoordinator {
     func action(for item: Item) -> TodoAutomationService.ActionState? {
         guard let account, inbox.host == account.host, let request = item.authoredRequest,
               request.author.username == account.username, item.url.isGitLabMergeRequest(host: account.host, iid: item.id.iid),
-              providers.available.contains(settings.automation.assistant), health.hold(for: settings.automation.assistant) == nil else { return nil }
+              let assistant = settings.automation.selectedAssistant,
+              providers.available.contains(assistant), health.hold(for: assistant) == nil else { return nil }
         let rule = settings.automation.authorFeedback
         guard rule.runner == .assistant, rule.isConfigured, rule.includes(project: item.url.gitLabProjectPath) else { return nil }
         let operation = operations[.init(account: account, id: item.id)]

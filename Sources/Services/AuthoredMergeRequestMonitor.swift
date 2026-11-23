@@ -342,7 +342,7 @@ final class AuthoredMergeRequestMonitor {
                !AssistantAutomationRunner.isWorking(on: work),
                !hasUnfinishedAssistantWork(on: work, username: user.username, currentRequest: request) {
                 let configuration = settings.automation
-                guard await canAutomate(configuration.assistant), !Task.isCancelled,
+                guard configuration.selectedAssistant != nil, await canAutomate(configuration.assistant), !Task.isCancelled,
                       isCurrent(account), glab.accountRevision == revision, settings.automation == configuration else {
                     results.append(status)
                     continue
@@ -444,9 +444,10 @@ final class AuthoredMergeRequestMonitor {
     /// An explicit action has its own authorization; automatic scope and global
     /// switches still apply exclusively to background execution.
     func mergeManually(_ expected: GitLabMergeRequest, action: MergeSubmissionAction,
-                       verificationAssistant: AutomationAssistant? = nil) async -> MergeSubmissionState {
+                       verificationAssistant: AutomationAssistant? = nil,
+                       onAssistantRequired: (() -> Void)? = nil) async -> MergeSubmissionState {
         guard let host = glab.resolvedHost, let username = glab.currentUsername,
-              verificationAssistant == nil || verificationAssistant == settings.automation.assistant,
+              verificationAssistant == nil || verificationAssistant == settings.automation.selectedAssistant,
               !isMerging(expected) else { return .changed }
         let account = Account(host: host, username: username)
         let revision = glab.accountRevision
@@ -479,6 +480,9 @@ final class AuthoredMergeRequestMonitor {
             if outcome == .merged { requests.removeAll { $0.id == status.id } }
             else if let index = requests.firstIndex(where: { $0.id == status.id }) { requests[index].submissionState = outcome }
             return outcome
+        } catch ReReviewVerifier.VerificationError.unavailable {
+            onAssistantRequired?()
+            return .changed
         } catch is CancellationError {
             refreshIfNeeded()
             return .changed
@@ -528,7 +532,9 @@ final class AuthoredMergeRequestMonitor {
         let hasFeedback = GitLabMergeRequestDiscussion.activeForReview(discussions)
             .flatMap(\.notes).contains { $0.system != true && $0.author?.id != user.id }
         if hasFeedback, authorFeedbackAllowsMerge?(request, discussions, user.id) != true {
-            guard !automatic, verificationAssistant == configuration.assistant else { throw CancellationError() }
+            guard !automatic else { throw CancellationError() }
+            guard let selected = configuration.selectedAssistant else { throw ReReviewVerifier.VerificationError.unavailable }
+            guard verificationAssistant == selected else { throw CancellationError() }
             let assessment = try await ManualFeedbackVerification.assess(request: request, discussions: discussions,
                 user: user, host: account.host, settings: settings, glab: glab)
             let target = MRAutomationScope.Target(host: account.host, username: user.username, projectID: request.projectID, iid: request.iid)
@@ -747,7 +753,7 @@ final class AuthoredMergeRequestMonitor {
             let previousJob = previous.flatMap { conflictJob(for: $0, username: account.username) }
             guard ConflictAutomationPolicy.canStart(previous: previous, previousJob: previousJob,
                 username: account.username, allowsPush: allowPush) else { return }
-            guard await canAutomate(automation.assistant), !Task.isCancelled,
+            guard automation.selectedAssistant != nil, await canAutomate(automation.assistant), !Task.isCancelled,
                   isCurrent(account), glab.accountRevision == revision, settings.automation == automation,
                   preparingConflicts[work] != nil, runtimePermits(work, account: account),
                   !AssistantAutomationRunner.isWorking(on: work) else { return }
@@ -780,7 +786,7 @@ final class AuthoredMergeRequestMonitor {
                           runtimePermits(work, account: account) else { return }
                     let evidence = await glab.mergeWorkflowEvidence(projectID: request.projectID, iid: request.iid, host: host)
                     let stackPosition = await glab.stackPosition(for: work)
-                    guard await canAutomate(automation.assistant), !Task.isCancelled,
+                    guard automation.selectedAssistant != nil, await canAutomate(automation.assistant), !Task.isCancelled,
                           self.isCurrent(account), glab.accountRevision == revision, settings.automation == automation,
                           runtimePermits(work, account: account) else { throw CancellationError() }
                     let launch = ConflictLaunch(

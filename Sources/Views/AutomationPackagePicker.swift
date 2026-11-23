@@ -22,7 +22,7 @@ extension AutomationPreset {
         case .trusted: .AutomationProfiles.trustedDoes
         }
     }
-    func apply(to settings: inout AutomationSettings, assistant: AutomationAssistant) {
+    func apply(to settings: inout AutomationSettings, assistant: AutomationAssistant?) {
         settings.applyPreset(self, for: assistant)
     }
 }
@@ -133,7 +133,7 @@ struct AutomationSettingsProfilePicker: View {
             switch selection {
             case .preset(let preset):
                 lastCustom.wrappedValue = AutomationProfileSnapshot.custom(from: updated) ?? lastCustom.wrappedValue
-                updated.applyPreset(preset, for: updated.assistant)
+                updated.applyPreset(preset, for: updated.selectedAssistant)
             case .custom:
                 guard let snapshot = lastCustom.wrappedValue ?? AutomationProfileSnapshot.custom(from: updated) else { return }
                 snapshot.apply(to: &updated)
@@ -157,7 +157,7 @@ struct AutomationSettingsProfilePicker: View {
 }
 
 struct AutomationAssistantPicker: View {
-    @Binding var assistant: AutomationAssistant
+    @Binding var assistant: AutomationAssistant?
     let available: Set<AutomationAssistant>
     let onRefresh: () -> Void
     var statuses: [AutomationAssistant: AssistantDependencyStatus] = [:]
@@ -184,10 +184,14 @@ struct AutomationAssistantPicker: View {
                 .font(.caption)
             }
 
-            Picker(selection: Binding(get: { assistant }, set: { setupCandidate = $0 })) {
+            Picker(selection: Binding(get: { assistant }, set: { candidate in
+                if let candidate { setupCandidate = candidate }
+                else { assistant = nil }
+            })) {
+                Text(.Settings.settingsAssistantNone).tag(nil as AutomationAssistant?)
                 ForEach(AutomationAssistant.allCases, id: \.self) { candidate in
                     Text(candidate.displayName)
-                        .tag(candidate)
+                        .tag(candidate as AutomationAssistant?)
                 }
             } label: {
                 Text(.Settings.settingsAutomationAssistantPicker)
@@ -197,7 +201,9 @@ struct AutomationAssistantPicker: View {
                 Button(action: check) {
                     Text(.Settings.settingsAutomationPackageRecheck)
                 }
-                Button { setupCandidate = assistant } label: { Text(.Settings.settingsAssistantSetupAction) }
+                if let assistant {
+                    Button { setupCandidate = assistant } label: { Text(.Settings.settingsAssistantSetupAction) }
+                }
                 if let lastCheck {
                     Text(.Settings.settingsAutomationAssistantLastCheck(lastCheck.formatted(date: .omitted, time: .standard)))
                         .font(.caption)

@@ -9,7 +9,8 @@
             "state" : "translated",
             "value" : "Your automation settings are already configured. You can change them from Settings."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja jest już skonfigurowana. Możesz ją zmienić w ustawieniach."}}
       }
     },
     "onboarding.automation.body" : {
@@ -20,7 +21,8 @@
             "state" : "translated",
             "value" : "Choose whether MergeTether should automate MR work through a signed-in Codex or Claude CLI. You can also continue with manual actions only."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wybierz, czy MergeTether ma automatyzować pracę nad merge requestami przez zalogowane Codex CLI lub Claude CLI. Możesz też korzystać wyłącznie z ręcznych działań."}}
       }
     },
     "onboarding.automation.title" : {
@@ -31,7 +33,8 @@
             "state" : "translated",
             "value" : "Set up automation"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Skonfiguruj automatyzację"}}
       }
     },
     "onboarding.auth.body" : {
@@ -42,7 +45,8 @@
             "state" : "translated",
             "value" : "If you haven’t signed in, run this command in Terminal, then choose Re-check."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Jeśli logowanie jest jeszcze przed Tobą, uruchom to polecenie w Terminalu, a następnie wybierz „Sprawdź ponownie”."}}
       }
     },
     "onboarding.auth.notAuthenticated" : {
@@ -53,7 +57,8 @@
             "state" : "translated",
             "value" : "glab is not signed in yet."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Logowanie w glab jest jeszcze wymagane."}}
       }
     },
     "onboarding.auth.openTerminal" : {
@@ -64,7 +69,8 @@
             "state" : "translated",
             "value" : "Open Terminal"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz Terminal"}}
       }
     },
     "onboarding.auth.signedIn.%@" : {
@@ -75,7 +81,8 @@
             "state" : "translated",
             "value" : "Signed in as @%@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zalogowano jako @%@"}}
       }
     },
     "onboarding.auth.title" : {
@@ -86,7 +93,8 @@
             "state" : "translated",
             "value" : "GitLab sign-in"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Logowanie do GitLaba"}}
       }
     },
     "onboarding.auth.wrongHost.body.%@" : {
@@ -97,7 +105,8 @@
             "state" : "translated",
             "value" : "You're signed in to %@, but MergeTether reads from glab's default host."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zalogowano do %@. MergeTether korzysta z domyślnego hosta glab."}}
       }
     },
     "onboarding.auth.wrongHost.currentDefault.%@" : {
@@ -108,7 +117,8 @@
             "state" : "translated",
             "value" : "Current default: %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Domyślny host: %@"}}
       }
     },
     "onboarding.auth.wrongHost.instruction" : {
@@ -119,7 +129,8 @@
             "state" : "translated",
             "value" : "Switch glab's default host, then re-check:"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zmień domyślny host glab i sprawdź ponownie:"}}
       }
     },
     "onboarding.auth.wrongHost.title" : {
@@ -130,7 +141,8 @@
             "state" : "translated",
             "value" : "Signed in to a different host"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zalogowano do innego hosta"}}
       }
     },
     "onboarding.back" : {
@@ -141,7 +153,8 @@
             "state" : "translated",
             "value" : "Back"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wstecz"}}
       }
     },
     "onboarding.continue" : {
@@ -152,7 +165,8 @@
             "state" : "translated",
             "value" : "Continue"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dalej"}}
       }
     },
     "onboarding.copy" : {
@@ -163,7 +177,8 @@
             "state" : "translated",
             "value" : "Copy"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Kopiuj"}}
       }
     },
     "onboarding.done.body" : {
@@ -174,7 +189,8 @@
             "state" : "translated",
             "value" : "MergeTether will start watching your merge requests and inbox. Review automation results and pending decisions in the main window."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "MergeTether zacznie monitorować Twoje merge requesty i skrzynkę. Wyniki automatyzacji i oczekujące decyzje znajdziesz w głównym oknie."}}
       }
     },
     "onboarding.done.title" : {
@@ -185,7 +201,8 @@
             "state" : "translated",
             "value" : "You're all set."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wszystko gotowe."}}
       }
     },
     "onboarding.finish" : {
@@ -196,7 +213,8 @@
             "state" : "translated",
             "value" : "Finish"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zakończ"}}
       }
     },
     "onboarding.install.body" : {
@@ -207,7 +225,8 @@
             "state" : "translated",
             "value" : "MergeTether uses glab, the GitLab CLI, to manage merge requests and read your to-dos. Install it with Homebrew, then choose Re-check."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "MergeTether używa glab, narzędzia wiersza poleceń GitLaba, do zarządzania merge requestami i odczytywania zadań. Zainstaluj je przez Homebrew i wybierz „Sprawdź ponownie”."}}
       }
     },
     "onboarding.install.downloadManually" : {
@@ -218,7 +237,8 @@
             "state" : "translated",
             "value" : "Download manually"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pobierz ręcznie"}}
       }
     },
     "onboarding.install.foundAt.%@" : {
@@ -229,7 +249,8 @@
             "state" : "translated",
             "value" : "Found at %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Znaleziono: %@"}}
       }
     },
     "onboarding.install.notFound" : {
@@ -240,7 +261,8 @@
             "state" : "translated",
             "value" : "glab was not found on this Mac."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Na tym Macu nie znaleziono glab."}}
       }
     },
     "onboarding.install.title" : {
@@ -251,7 +273,8 @@
             "state" : "translated",
             "value" : "Install glab"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zainstaluj glab"}}
       }
     },
     "onboarding.launchAtLogin.body" : {
@@ -262,7 +285,8 @@
             "state" : "translated",
             "value" : "Open MergeTether automatically when you sign in."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwieraj MergeTether automatycznie po zalogowaniu."}}
       }
     },
     "onboarding.launchAtLogin.toggle" : {
@@ -273,7 +297,8 @@
             "state" : "translated",
             "value" : "Launch at login"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchamiaj przy logowaniu"}}
       }
     },
     "onboarding.launchAtLogin.title" : {
@@ -284,7 +309,8 @@
             "state" : "translated",
             "value" : "Launch at login"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchamianie przy logowaniu"}}
       }
     },
     "onboarding.notifications.body" : {
@@ -295,7 +321,8 @@
             "state" : "translated",
             "value" : "Get a system notification when work needs your decision. Updates handled automatically stay quiet."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otrzymuj powiadomienia systemowe, gdy potrzebna jest Twoja decyzja. Automatycznie obsłużone zdarzenia nie wywołują powiadomień."}}
       }
     },
     "onboarding.notifications.title" : {
@@ -306,7 +333,8 @@
             "state" : "translated",
             "value" : "Show notifications"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wyświetlaj powiadomienia"}}
       }
     },
     "onboarding.recheck" : {
@@ -317,7 +345,8 @@
             "state" : "translated",
             "value" : "Re-check"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdź ponownie"}}
       }
     },
     "onboarding.skip" : {
@@ -328,7 +357,8 @@
             "state" : "translated",
             "value" : "Skip"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Pomiń"}}
       }
     },
     "onboarding.step.%1$lld.of.%2$lld" : {
@@ -339,7 +369,8 @@
             "state" : "translated",
             "value" : "Step %1$lld of %2$lld"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Krok %1$lld z %2$lld"}}
       }
     },
     "onboarding.title" : {
@@ -350,7 +381,8 @@
             "state" : "translated",
             "value" : "Set up MergeTether"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Skonfiguruj MergeTether"}}
       }
     },
     "onboarding.windowTitle" : {
@@ -361,7 +393,8 @@
             "state" : "translated",
             "value" : "Setup"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Konfiguracja"}}
       }
     },
     "onboarding.auth.unverified" : {
@@ -372,7 +405,8 @@
             "state" : "translated",
             "value" : "Sign-in has not been verified. Choose Re-check to check the current account."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Logowanie wymaga weryfikacji. Wybierz „Sprawdź ponownie”, aby sprawdzić bieżące konto."}}
       }
     }
   },

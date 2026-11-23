@@ -281,6 +281,7 @@ struct DraftRegenerationTests {
         init() throws {
             defaults = try #require(UserDefaults(suiteName: suite))
             settings = SettingsManager(defaults: defaults)
+            settings.automation.selectedAssistant = .codex
             glab = gitlab.service(host: host, username: "me")
             requests = try [2, 3].map { iid in
                 try MRDependencyPresentationTests().request(iid, source: "topic-\(iid)", title: "Change \(iid)")

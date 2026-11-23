@@ -212,12 +212,8 @@
     "policy.assistant": {
       "extractionState": "manual",
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Automatic work needs a signed-in coding agent"
-          }
-        }
+        "en": {"stringUnit": {"state": "translated", "value": "Agent automation paused. Coding agent unavailable."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja asystenta wstrzymana. Asystent jest niedostępny."}}
       }
     },
     "policy.login": {

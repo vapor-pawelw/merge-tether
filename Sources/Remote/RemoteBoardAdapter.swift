@@ -195,7 +195,7 @@ import MergeTetherRemote
                             ?? row.attentionIntents.first { $0.state == .failed && !row.isReconciling($0) }
                             ?? row.attentionIntents.first { $0.state == .pending && !$0.isDeferredReview }
                         if let intent,
-                           intent.kind == .refresh || monitor.availableAssistants.contains(monitor.settings.automation.assistant),
+                           intent.kind == .refresh || monitor.selectedAssistantReady,
                            let configuration = try? RemoteDigest.token(monitor.settings.automation) {
                             let publication = monitor.manualReviewConsent(for: monitor.reviewRequest(for: intent)).publicationMode
                             if let token = try? RemoteDigest.token([account, try RemoteDigest.token(intent), configuration, publication.rawValue]) {

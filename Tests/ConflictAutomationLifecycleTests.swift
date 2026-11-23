@@ -186,6 +186,7 @@ struct ConflictAutomationLifecycleTests {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
             defaults = try #require(UserDefaults(suiteName: suite))
             settings = SettingsManager(defaults: defaults)
+            settings.automation.selectedAssistant = .codex
             settings.onboardingCompleted = true
             settings.automation.packageDecision = .enabled
             settings.automation.conflictTasksEnabled = true

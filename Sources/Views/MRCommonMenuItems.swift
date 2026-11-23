@@ -197,6 +197,7 @@ func confirmManualReview(for item: MergeRequestAttentionMonitor.Item,
 func confirmManualReview(for request: GitLabMergeRequest?, monitor: TodoMonitorService,
                          action: MRActionCTA = .runReview, title: LocalizedStringResource = .CommandCenter.commandCenterReviewRun,
                          variant: String? = nil) -> TodoMonitorService.ManualReviewConsent? {
+    guard requireCodingAssistant(monitor) else { return nil }
     let consent = monitor.manualReviewConsent(for: request)
     let variant = [variant, consent.publicationMode.rawValue].compactMap { $0 }.joined(separator: ".")
     return confirmMRAction(action, title: title, variant: variant,
@@ -206,6 +207,7 @@ func confirmManualReview(for request: GitLabMergeRequest?, monitor: TodoMonitorS
 @MainActor
 func confirmAssistantRetry(_ job: AssistantAutomationRunner.Handoff, for item: MergeRequestAttentionMonitor.Item,
                            monitor: TodoMonitorService, title: LocalizedStringResource) -> Bool {
+    guard requireCodingAssistant(monitor, for: job.key.assistant) else { return false }
     let variant = job.retryConfirmationVariant
     if job.workflow == .review {
         return confirmManualReview(for: item.mergeRequest, monitor: monitor, action: .retryRun,
@@ -225,7 +227,7 @@ func runConfirmedIntent(_ intent: MRTodoIntent, monitor: TodoMonitorService,
         await monitor.runMRTodoIntent(id: intent.id, confirmedReview: consent)
     } else {
         let action = MRActionCTA(intent: intent.kind) ?? .refreshFromGitLab
-        guard confirmMRAction(action, title: title, variant: variant) else { return }
+        guard confirmMRAction(action, title: title, variant: variant, monitor: monitor) else { return }
         await monitor.runMRTodoIntent(id: intent.id)
     }
 }

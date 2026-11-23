@@ -1,6 +1,41 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "settings.assistant.resumeAction": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Set up agent and resume…"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Skonfiguruj asystenta i wznów…"}}
+      }
+    },
+    "settings.assistant.requiredBody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Choose a signed-in coding agent in Settings, then try this action again."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Wybierz zalogowanego asystenta w ustawieniach i ponów tę czynność."}}
+      }
+    },
+    "settings.assistant.requiredTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Coding agent unavailable"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Asystent jest niedostępny"}}
+      }
+    },
+    "settings.assistant.useHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Codex CLI or Claude CLI runs agent actions on merge requests and agent automation."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Codex CLI lub Claude CLI obsługuje działania asystenta wywoływane na merge requestach i w automatyzacji."}}
+      }
+    },
+    "settings.assistant.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "No coding agent"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak asystenta"}}
+      }
+    },
     "settings.persistence.pausedTitle": {
       "extractionState": "manual",
       "localizations": {
@@ -284,7 +319,8 @@
             "state": "translated",
             "value": "Checked at %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzono o %@"}}
       }
     },
     "settings.automation.assistant.detected": {
@@ -295,7 +331,8 @@
             "state": "translated",
             "value": "CLI ready"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "CLI jest gotowe"}}
       }
     },
     "settings.automation.assistant.missing": {
@@ -306,7 +343,8 @@
             "state": "translated",
             "value": "CLI not ready"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "CLI wymaga konfiguracji"}}
       }
     },
     "settings.automation.package.recommended": {
@@ -405,7 +443,8 @@
             "state": "translated",
             "value": "Claude CLI"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Claude CLI"}}
       }
     },
     "settings.automation.assistant.codex": {
@@ -416,7 +455,8 @@
             "state": "translated",
             "value": "Codex CLI"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Codex CLI"}}
       }
     },
     "settings.automation.assistant.picker": {
@@ -427,7 +467,8 @@
             "state": "translated",
             "value": "Coding agent"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Asystent programistyczny"}}
       }
     },
     "settings.automation.assistant.tools": {
@@ -636,7 +677,8 @@
             "state": "translated",
             "value": "Choose a profile…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Wybierz profil…"}}
       }
     },
     "settings.automation.package.help": {
@@ -647,7 +689,8 @@
             "state": "translated",
             "value": "Profiles fill in automation defaults. You can adjust individual permissions afterwards. Applying a profile keeps your Scope."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Profil uzupełnia domyślne ustawienia automatyzacji. Poszczególne uprawnienia możesz później zmienić. Zastosowanie profilu zachowuje wybrany zakres."}}
       }
     },
     "settings.automation.package.off": {
@@ -669,7 +712,8 @@
             "state": "translated",
             "value": "Check for installed coding agents"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdź zainstalowanych asystentów"}}
       }
     },
     "settings.automation.package.title": {
@@ -680,7 +724,8 @@
             "state": "translated",
             "value": "Automation profile"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Profil automatyzacji"}}
       }
     },
     "settings.automation.package.useSelection": {
@@ -768,7 +813,8 @@
             "state": "translated",
             "value": "Automation"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja"}}
       }
     },
     "settings.automation.templateHelp": {
@@ -1032,7 +1078,8 @@
             "state": "translated",
             "value": "macOS notifications are turned off for MergeTether."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Powiadomienia są wyłączone w ustawieniach systemowych."}}
       }
     },
     "settings.general.notifications.openSystemSettings": {
@@ -1043,18 +1090,15 @@
             "state": "translated",
             "value": "Open System Settings…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz Ustawienia systemowe"}}
       }
     },
     "settings.general.notifications.section": {
       "extractionState": "manual",
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Notifications"
-          }
-        }
+        "en": {"stringUnit": {"state": "translated", "value": "Notifications"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Powiadomienia"}}
       }
     },
     "settings.general.notifications.toggle": {
@@ -1065,7 +1109,8 @@
             "state": "translated",
             "value": "Notify me when work needs my attention"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Powiadomienia MergeTether"}}
       }
     },
     "settings.general.refresh.picker": {
@@ -1120,7 +1165,8 @@
             "state": "translated",
             "value": "General"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ogólne"}}
       }
     },
     "settings.integration.auth.authenticated.%@": {
@@ -1263,7 +1309,8 @@
             "state": "translated",
             "value": "GitLab"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "GitLab"}}
       }
     },
     "settings.refreshInterval.15m": {
@@ -1379,12 +1426,8 @@
     "settings.automation.page.assistant": {
       "extractionState": "manual",
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Coding agent"
-          }
-        }
+        "en": {"stringUnit": {"state": "translated", "value": "Models & reasoning"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Modele i rozumowanie"}}
       }
     },
     "settings.automation.page.workflow": {
@@ -1571,7 +1614,8 @@
             "state": "translated",
             "value": "Set up %@"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Skonfiguruj %@"}}
       }
     },
     "settings.assistant.setup.body": {
@@ -1582,7 +1626,8 @@
             "state": "translated",
             "value": "Automation requires a working, signed-in CLI. Your current choice stays unchanged until verification succeeds."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja wymaga działającego CLI z aktywnym logowaniem. Zmiana wyboru nastąpi po pomyślnej weryfikacji."}}
       }
     },
     "settings.assistant.setup.checking": {
@@ -1593,7 +1638,8 @@
             "state": "translated",
             "value": "Checking requirements…"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzanie wymagań…"}}
       }
     },
     "settings.assistant.setup.install": {
@@ -1604,7 +1650,8 @@
             "state": "translated",
             "value": "Install or update CLI"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zainstaluj lub uaktualnij CLI"}}
       }
     },
     "settings.assistant.setup.installHelp": {
@@ -1615,7 +1662,8 @@
             "state": "translated",
             "value": "Use the button below to run the provider’s CLI installer, then sign in if needed."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Poniższy przycisk uruchomi instalator CLI dostawcy. Po instalacji zaloguj się, jeśli to konieczne."}}
       }
     },
     "settings.assistant.setup.signIn": {
@@ -1626,7 +1674,8 @@
             "state": "translated",
             "value": "Sign in using Terminal"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zaloguj się w Terminalu"}}
       }
     },
     "settings.assistant.setup.signInHelp": {
@@ -1637,7 +1686,8 @@
             "state": "translated",
             "value": "Complete sign-in in Terminal, then return here and check again."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Dokończ logowanie w Terminalu, wróć tutaj i sprawdź ponownie."}}
       }
     },
     "settings.assistant.setup.failed": {
@@ -1648,7 +1698,8 @@
             "state": "translated",
             "value": "Setup did not finish. Your previous choice is unchanged. Retry or cancel."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Konfiguracja nie została ukończona. Poprzedni wybór jest nadal aktywny. Spróbuj ponownie lub anuluj."}}
       }
     },
     "settings.assistant.setup.cancel": {
@@ -1659,7 +1710,8 @@
             "state": "translated",
             "value": "Cancel"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Anuluj"}}
       }
     },
     "settings.assistant.setup.recheck": {
@@ -1670,7 +1722,8 @@
             "state": "translated",
             "value": "Check again"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdź ponownie"}}
       }
     },
     "settings.assistant.setup.action": {
@@ -1681,7 +1734,8 @@
             "state": "translated",
             "value": "Set up coding agent"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Skonfiguruj asystenta"}}
       }
     },
     "settings.assistant.status.ready": {
@@ -1692,7 +1746,8 @@
             "state": "translated",
             "value": "%@ is ready."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "%@ jest gotowe."}}
       }
     },
     "settings.assistant.status.cli": {
@@ -1703,7 +1758,8 @@
             "state": "translated",
             "value": "%@ is missing. Coding agent automation is unavailable until the CLI is installed."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Brakuje %@. Zainstaluj CLI, aby korzystać z automatyzacji."}}
       }
     },
     "settings.assistant.status.invalid": {
@@ -1714,7 +1770,8 @@
             "state": "translated",
             "value": "%@ cannot run or needs an update. Coding agent automation is unavailable."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie można uruchomić %@. Sprawdź, czy CLI wymaga uaktualnienia."}}
       }
     },
     "settings.assistant.status.login": {
@@ -1725,7 +1782,8 @@
             "state": "translated",
             "value": "%@ needs sign-in. Coding agent automation is unavailable."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zaloguj się w %@, aby korzystać z automatyzacji."}}
       }
     },
     "settings.verification.title": {
@@ -1802,7 +1860,8 @@
             "state": "translated",
             "value": "Allow system notifications for work that needs your attention."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Zezwól MergeTether na wysyłanie powiadomień systemowych."}}
       }
     },
     "settings.general.notifications.permission.enable": {
@@ -1813,7 +1872,8 @@
             "state": "translated",
             "value": "Enable notifications"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Włącz powiadomienia"}}
       }
     },
     "settings.general.notifications.permission.enabled": {
@@ -1824,7 +1884,8 @@
             "state": "translated",
             "value": "System notifications are enabled."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Powiadomienia systemowe są włączone."}}
       }
     },
     "settings.integration.auth.unverified": {

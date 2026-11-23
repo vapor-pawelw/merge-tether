@@ -126,7 +126,10 @@ struct MergeTetherApp: App {
             let workflow = monitor.authoredMergeRequests.workflow
             VSplitView {
                 AssistantJobHistoryView(monitor: monitor).frame(minHeight: 250)
-                MergeWorkflowActivityView(entries: workflow.entries, onHandoff: workflow.confirmPipelineHandoff)
+                MergeWorkflowActivityView(entries: workflow.entries, onHandoff: { id in
+                    guard requireCodingAssistant(monitor) else { return }
+                    workflow.confirmPipelineHandoff(id)
+                })
                     .frame(minHeight: 180)
             }
             .frame(minWidth: 540)

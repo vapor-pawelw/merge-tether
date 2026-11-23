@@ -86,6 +86,28 @@ struct AssistantDependenciesTests {
         #expect(!setup.canCommit)
     }
 
+    @MainActor @Test func anInstalledCLIDoesNotMakeAgentActionsReadyUntilSelected() async throws {
+        let suite = "AssistantDependenciesTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        let dependencies = AssistantDependencyMonitor(probe: { assistant in
+            assistant == .claude ? .ready(URL(fileURLWithPath: "/example/claude")) : .missingCLI
+        })
+        let monitor = TodoMonitorService(settings: settings, glab: GlabService(), assistantDependencies: dependencies)
+        defer { monitor.stopTimer() }
+
+        dependencies.refresh()
+        for _ in 0..<1000 where dependencies.isChecking { await Task.yield() }
+        try #require(dependencies.statuses[.codex] == .missingCLI)
+        #expect(monitor.availableAssistants.contains(.claude))
+        #expect(!monitor.selectedAssistantReady)
+        settings.automation.selectedAssistant = .codex
+        #expect(!monitor.selectedAssistantReady)
+        settings.automation.selectedAssistant = .claude
+        #expect(monitor.selectedAssistantReady)
+    }
+
     @Test func verificationMigratesOnAndPreservesExplicitOptOut() throws {
         let decoder = JSONDecoder()
         let migrated = try decoder.decode(AutomationSettings.self, from: Data(#"{"packageDecision":"enabled"}"#.utf8))

@@ -29,7 +29,7 @@ struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, Additio
     private struct MergeConfirmation {
         let request: GitLabMergeRequest
         let action: MergeSubmissionAction
-        let verificationAssistant: AutomationAssistant
+        let verificationAssistant: AutomationAssistant?
         let accountRevision: UInt64
     }
     private enum PendingAction: Equatable { case merge(MergeSubmissionAction), threads }
@@ -139,11 +139,12 @@ struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, Additio
                 if owned {
                     if let action = directMergeAction, let request = item.mergeRequest {
                         Button {
-                            let assistant = monitor.settings.automation.assistant
+                            let assistant = monitor.settings.automation.selectedAssistant
                             let confirmation = MergeConfirmation(request: request, action: action,
                                 verificationAssistant: assistant, accountRevision: monitor.glab.accountRevision)
-                            let message = String(localized: .MergeActions.mergeActionsConfirmHelp) + "\n\n"
-                                + String(localized: assistant.manualMergeVerificationDisclosure)
+                            let message = ([String(localized: .MergeActions.mergeActionsConfirmHelp)]
+                                + (assistant.map { [String(localized: $0.manualMergeVerificationDisclosure)] } ?? []))
+                                .joined(separator: "\n\n")
                             guard confirmMRAction(id: MRActionCTA.merge.confirmationID(variant: action.rawValue),
                                 title: .MergeActions.mergeActionsConfirmMerge, button: action.title, message: message) else { return }
                             merge(confirmation)
@@ -244,7 +245,7 @@ struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, Additio
             case .verifyFeedback:
                 if showsFeedbackVerification {
                     Button {
-                        guard confirmMRAction(.verifyFeedback, title: .AuthorFeedback.authorFeedbackRecheck) else { return }
+                        guard confirmMRAction(.verifyFeedback, title: .AuthorFeedback.authorFeedbackRecheck, monitor: monitor) else { return }
                         feedbackRecheckRoute.perform(verify: { monitor.attention.retryAuthorFeedback(item.id) },
                             review: reviewFeedback)
                     } label: {
@@ -293,7 +294,8 @@ struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, Additio
         Task { @MainActor in
             defer { pendingAction = nil }
             result = await monitor.authoredMergeRequests.mergeManually(confirmation.request,
-                action: confirmation.action, verificationAssistant: confirmation.verificationAssistant)
+                action: confirmation.action, verificationAssistant: confirmation.verificationAssistant,
+                onAssistantRequired: presentCodingAssistantSetup)
             if result == .merged || result?.isDelegated == true { await monitor.refreshNow() }
         }
     }
@@ -312,6 +314,9 @@ struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, Additio
                     title: .MergeActions.mergeActionsResolveTitle, button: .MergeActions.mergeActionsResolveConfirm,
                     message: message) else { return }
                 resolve(prepared)
+            } catch ReReviewVerifier.VerificationError.unavailable {
+                pendingAction = nil
+                presentCodingAssistantSetup()
             } catch {
                 pendingAction = nil
                 resolutionMessage = String(localized: .MergeActions.mergeActionsFailed)

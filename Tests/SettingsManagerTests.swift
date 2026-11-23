@@ -5,6 +5,29 @@ import Testing
 @MainActor
 @Suite("SettingsManager")
 struct SettingsManagerTests {
+    @Test func codingAgentCanRemainUnselectedAcrossRestart() throws {
+        let suite = "CodingAgentSelection.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        #expect(settings.automation.selectedAssistant == nil)
+        settings.automation.applyPreset(.safe, for: .claude)
+        #expect(settings.save())
+        #expect(SettingsManager(defaults: defaults).automation.selectedAssistant == .claude)
+        settings.automation.selectedAssistant = nil
+        #expect(settings.save())
+        let restored = SettingsManager(defaults: defaults).automation
+        #expect(restored.selectedAssistant == nil)
+        #expect(restored.packageDecision == .enabled)
+        #expect(restored.reviewRequested.isEnabled)
+    }
+
+    @Test func decodingLegacyAutomationKeepsItsConfiguredProvider() throws {
+        let legacy = Data(#"{"assistant":"claude","packageDecision":"enabled"}"#.utf8)
+        let restored = try JSONDecoder().decode(AutomationSettings.self, from: legacy)
+        #expect(restored.selectedAssistant == .claude)
+    }
+
     @Test func existingInstallationsDefaultToManualBoardOrderWithAttentionPromotion() {
         let defaults = makeDefaults()
         let settings = SettingsManager(defaults: defaults)

@@ -51,7 +51,7 @@ private struct MergeWorkflowActivityRow: View {
             }
             .help(Text(.Menu.menuActionOpenInBrowser))
 
-            Text(entry.state.displayLabel)
+            Text(entry.waitingForCodingAssistant == true ? .EffectivePolicy.policyAssistant : entry.state.displayLabel)
                 .foregroundStyle(.secondary)
             Text(entry.event.context)
                 .font(.caption)

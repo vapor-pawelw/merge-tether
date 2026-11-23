@@ -448,7 +448,7 @@ final class MergeRequestAttentionMonitor {
             }, isCurrent: { target, assistant, model, thinking in
                 guard let settings, glab.resolvedHost == target.host, glab.currentUsername == target.username,
                       settings.automation.hasAutomaticActionConsent,
-                      settings.automation.assistant == assistant, settings.publicationPolicy(for: target).requiresAI,
+                      settings.automation.selectedAssistant == assistant, settings.publicationPolicy(for: target).requiresAI,
                       settings.automation.scope.resolve(target).active else { return false }
                 let configured = assistant == .codex ? settings.automation.codexVerificationModel.rawValue
                     : settings.automation.claudeVerificationModel.rawValue
@@ -567,8 +567,9 @@ final class MergeRequestAttentionMonitor {
     private func permitsAssistantAutomation(for account: Account) async -> Bool {
         guard let settings, isCurrent(account), !Task.isCancelled else { return false }
         let configuration = settings.automation
+        guard let assistant = configuration.selectedAssistant else { return false }
         let generation = accountGeneration
-        return await canAutomate(configuration.assistant) && !Task.isCancelled
+        return await canAutomate(assistant) && !Task.isCancelled
             && generation == accountGeneration && isCurrent(account) && settings.automation == configuration
     }
 

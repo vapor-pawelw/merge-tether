@@ -91,7 +91,7 @@ struct AuthorFeedbackView: View {
                     }
                     if !status.followUpNoteIDs.isEmpty, let request = item.authoredRequest {
                         Button {
-                            guard confirmMRAction(.handleFeedback, title: .AuthorFeedback.authorFeedbackHandle) else { return }
+                            guard confirmMRAction(.handleFeedback, title: .AuthorFeedback.authorFeedbackHandle, monitor: monitor) else { return }
                             starting = true
                             Task {
                                 defer { starting = false }

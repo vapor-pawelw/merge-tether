@@ -2,6 +2,7 @@ import SwiftUI
 
 struct InboxAttentionActions: View {
     let item: MergeRequestAttentionMonitor.Item
+    let monitor: TodoMonitorService
     let feedbackAction: TodoAutomationService.ActionState?
     var assistant: AutomationAssistant = .codex
     let onFeedback: () -> Void
@@ -34,7 +35,7 @@ struct InboxAttentionActions: View {
             } else if feedbackAction == .ready(.assistant) || feedbackAction == .failed {
                 if feedbackAction == .failed { Text(.Menu.menuTodoAutomationFailed).foregroundStyle(.orange) }
                 Button {
-                    guard confirmMRAction(.handleFeedback, title: .Menu.menuTodoAutomationPrepareFollowUp, variant: "prepare") else { return }
+                    guard confirmMRAction(.handleFeedback, title: .Menu.menuTodoAutomationPrepareFollowUp, variant: "prepare", monitor: monitor) else { return }
                     onFeedback()
                 } label: { MRActionLabel(title: .Menu.menuTodoAutomationPrepareFollowUp, cta: .handleFeedback) }
                     .buttonStyle(.bordered)
@@ -43,7 +44,7 @@ struct InboxAttentionActions: View {
             if item.needsPipelineHandoff {
                 Button {
                     guard confirmMRAction(.confirmPipelineHandoff, title: .Menu.menuWorkflowHandoffButton,
-                        detail: String(localized: .Menu.menuWorkflowHandoffExplanation)) else { return }
+                        detail: String(localized: .Menu.menuWorkflowHandoffExplanation), monitor: monitor) else { return }
                     onPipeline()
                 } label: {
                     MRActionLabel(title: .Menu.menuWorkflowHandoffButton, cta: .confirmPipelineHandoff)

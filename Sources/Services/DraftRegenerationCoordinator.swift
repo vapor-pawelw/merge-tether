@@ -124,7 +124,8 @@ final class DraftRegenerationCoordinator {
 
     @discardableResult
     func start(_ scope: DraftRegenerationScope, instructions: String?, expectedToken: String? = nil) -> Bool {
-        guard !terminating, let account, let settings, batch == nil else { return false }
+        guard !terminating, let account, let settings, batch == nil,
+              settings.automation.selectedAssistant != nil else { return false }
         let instructions = instructions?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let instructions, instructions.isEmpty || instructions.utf8.count > DraftRegenerationScope.maximumInstructionsBytes { return false }
         let selection = selection(for: scope)
@@ -234,6 +235,7 @@ final class DraftRegenerationCoordinator {
                          instructions: String?, configuration: AutomationSettings) async {
         let request = context.request
         do {
+            guard settings?.automation.selectedAssistant == configuration.selectedAssistant else { throw ContextError.changed }
             let output = try await generate(.init(drafts: drafts, instructions: instructions, request: request,
                                                   host: account.host, user: context.user, configuration: configuration))
             guard active(id, account) else { return }

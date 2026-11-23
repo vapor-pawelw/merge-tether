@@ -129,6 +129,7 @@ struct CommandCenterView: View {
         }
         .onAppear {
             MainWindowPresentation.openWindow = { openWindow(id: "main") }
+            SettingsNavigation.shared.openSettingsWindow = { openSettings() }
             monitor.authoredMergeRequests.setVisible(true)
             monitor.markMenuOpened()
         }
@@ -151,7 +152,10 @@ struct CommandCenterView: View {
             .help(Text(phase.regenerationTitle))
             .accessibilityIdentifier("draft-regeneration.resume")
         } else if regeneration.count(for: .all) > 0 {
-            Button { regenerationPresentation = .init(scope: .all) } label: {
+            Button {
+                guard requireCodingAssistant(monitor) else { return }
+                regenerationPresentation = .init(scope: .all)
+            } label: {
                 Label(.DraftRegeneration.draftRegenerationAllAction, systemImage: "wand.and.stars")
             }
             .disabled(!regeneration.isAvailable)
@@ -235,17 +239,8 @@ struct CommandCenterView: View {
             }
             .font(.caption).padding(10)
         }
-        AssistantCLIHealthBanner(monitor: monitor)
-        if let warning = monitor.assistantDependencyWarning,
-           monitor.assistantDependencies.statuses[monitor.settings.automation.assistant].map({
-               if case .loginRequired = $0 { return false }; return true
-           }) != false {
-            HStack {
-                Label { Text(warning) } icon: { Image(systemName: "exclamationmark.triangle") }
-                Spacer()
-                Button { openSettings() } label: { Text(.Settings.settingsAssistantSetupAction) }
-            }
-            .font(.caption).padding(10).background(.orange.opacity(0.1))
+        if monitor.settings.onboardingCompleted {
+            AssistantCLIHealthBanner(monitor: monitor)
         }
         if let error = monitor.assistantJobActionError {
             Text(verbatim: error).font(.caption).foregroundStyle(.orange).padding(8)
@@ -269,14 +264,19 @@ struct CommandCenterView: View {
             PersonLabel(person: accountPerson, fallback: Text(.CommandCenter.commandCenterAccountUnavailable))
             if let host = monitor.glab.resolvedHost { Text(verbatim: host).foregroundStyle(.secondary) }
             Spacer()
-            Button { openSettings() } label: {
-                HStack(spacing: 5) {
-                    Text(monitor.settings.automation.assistant.displayName)
-                    Image(systemName: monitor.availableAssistants.contains(monitor.settings.automation.assistant)
-                          ? "checkmark.circle" : "exclamationmark.circle")
+            if monitor.settings.onboardingCompleted {
+                Button { SettingsNavigation.shared.showCodingAgent(openSettings: { openSettings() }) } label: {
+                    HStack(spacing: 5) {
+                        if let assistant = monitor.settings.automation.selectedAssistant {
+                            Text(assistant.displayName)
+                            Image(systemName: monitor.selectedAssistantReady ? "checkmark.circle" : "exclamationmark.circle")
+                        } else {
+                            Text(.Settings.settingsAssistantNone)
+                        }
+                    }
                 }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .font(.caption).padding(.horizontal, 18).padding(.vertical, 10)
         .background(.bar)
@@ -313,7 +313,7 @@ extension TodoMonitorService {
         return DraftRegenerationSheet(presentation: presentation, isAvailable: { coordinator.isAvailable },
             batch: { coordinator.batch }, count: { coordinator.count(for: $0) },
             mergeRequestCount: { coordinator.mergeRequestCount },
-            start: { coordinator.start($0, instructions: $1) },
+            start: { requireCodingAssistant(self) && coordinator.start($0, instructions: $1) },
             apply: { await coordinator.apply($0, batchID: $1) },
             discard: { coordinator.discard($0) })
     }

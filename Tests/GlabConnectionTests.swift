@@ -73,6 +73,36 @@ struct GlabConnectionTests {
         #expect(actions == 0)
     }
 
+    @Test func theSetupWindowAndBoardResolveTheirTitlesInPolish() {
+        let strings: [(LocalizedStringResource, String)] = [
+            (.Onboarding.onboardingWindowTitle, "Konfiguracja"),
+            (.Board.boardTitle, "Merge requesty"),
+            (.Board.boardLaneOwn, "Moje merge requesty"),
+            (.Board.boardLaneReviewing, "Do przeglądu"),
+            (.Board.boardApprovalRatio(2, 5), "2/5"),
+            (.Board.boardEmptyReviewingTitle, "Brak merge requestów do przeglądu"),
+            (AutomationAssistant.codex.displayName, "Codex CLI"),
+            (AutomationAssistant.claude.displayName, "Claude CLI"),
+        ]
+        for (var resource, expected) in strings {
+            resource.locale = Locale(identifier: "pl")
+            #expect(String(localized: resource) == expected)
+        }
+    }
+
+    @Test func agentSetupRoutesToGeneralAndResumesItsRequestOnce() {
+        let navigation = SettingsNavigation()
+        navigation.selection = .automation
+        var opened: SettingsNavigation.Tab?
+        var resumes = 0
+        navigation.showCodingAgent(openSettings: { opened = navigation.selection }, onConfigured: { resumes += 1 })
+        #expect(opened == .general)
+        #expect(resumes == 0)
+        navigation.codingAgentConfigured()
+        navigation.codingAgentConfigured()
+        #expect(resumes == 1)
+    }
+
     @Test(arguments: [false, true])
     func obsoleteSignInChecksCannotRestoreAnAccountAfterASwitch(_ returnsToOriginal: Bool) async throws {
         let gitlab = InMemoryGitLab()

@@ -461,7 +461,7 @@ final class DraftProofRecoveryCoordinator {
             assessment = pending.assessment
         } else if let cached = semanticCache[snapshot.work], cached.0 == input.id { assessment = cached.1 }
         else {
-            let available = await canAutomate(input.configuration.assistant)
+            let available = if let assistant = input.configuration.selectedAssistant { await canAutomate(assistant) } else { false }
             guard current(input) else { throw CancellationError() }
             guard available else { throw VerifierUnavailable() }
             assessment = try await verify(.init(snapshot: live, origin: input.origin, draftIDs: input.draftIDs,

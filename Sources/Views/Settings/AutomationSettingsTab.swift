@@ -49,6 +49,10 @@ struct AutomationSettingsTab: View {
             draft.scope = configured
             saveState.updateSavedScope(settings.acceptedAutomation.scope)
         }
+        .onChange(of: settings.automation.selectedAssistant, initial: true) { _, assistant in
+            draft.selectedAssistant = assistant
+            saveState.updateSavedAssistant(settings.acceptedAutomation.selectedAssistant)
+        }
         .onChange(of: draft) { _, current in
             if let custom = AutomationProfileSnapshot.custom(from: current) { sessionCustom = custom }
         }
@@ -56,7 +60,9 @@ struct AutomationSettingsTab: View {
             if !enabled, page == .scope { page = .checkpoints }
         }
         .sheet(item: $setupAction) { action in
-            AssistantSetupView(assistant: draft.assistant) {
+            let assistant = draft.assistant
+            AssistantSetupView(assistant: assistant) {
+                guard settings.automation.selectedAssistant == assistant else { return }
                 if action == .enableVerification { draft.autoVerifyReReview = true }
                 else { applyDraft() }
             }
@@ -114,7 +120,8 @@ struct AutomationSettingsTab: View {
                     .disabled(draft == saveState.accepted && sessionCustom == settings.automationProfileHistory.available(for: saveState.accepted) && !saveState.failed)
 
                     Button {
-                        if draft.requiresAssistantSetup(comparedTo: settings.acceptedAutomation) { setupAction = .apply }
+                        if draft.selectedAssistant != nil,
+                           draft.requiresAssistantSetup(comparedTo: settings.acceptedAutomation) { setupAction = .apply }
                         else { applyDraft() }
                     } label: {
                         Text(.Settings.settingsAutomationApply)
@@ -138,6 +145,7 @@ struct AutomationSettingsTab: View {
     }
 
     private func applyDraft() {
+        draft.selectedAssistant = settings.automation.selectedAssistant
         let custom = AutomationProfileSnapshot.custom(from: draft) ?? sessionCustom
         saveState.begin()
         settings.automation = draft.preservingScope(from: settings.automation)
@@ -177,8 +185,8 @@ struct AutomationSettingsTab: View {
             Toggle(isOn: $draft.authorFeedback.isEnabled) { effectLabel(.Settings.settingsAutomationAuthorFeedback, .agent) }
                 .toggleStyle(.checkbox).disabled(draft.authorFeedback.runner == .shell)
             Toggle(isOn: Binding(get: { draft.autoVerifyReReview }, set: { enabled in
-                if enabled { setupAction = .enableVerification }
-                else { draft.autoVerifyReReview = false }
+                if enabled && draft.selectedAssistant != nil { setupAction = .enableVerification }
+                else { draft.autoVerifyReReview = enabled }
             })) { effectLabel(.Settings.settingsVerificationEnabled, .aiCheck) }
                 .toggleStyle(.checkbox)
             Text(.Settings.settingsVerificationHelp).font(.caption).foregroundStyle(.secondary)
@@ -358,7 +366,7 @@ struct AutomationSettingsTab: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text(.Settings.settingsAutomationPackageTitle).font(.headline)
                 AutomationSettingsProfilePicker(draft: $draft, lastCustom: $sessionCustom,
-                    canUseAutomatic: monitor.availableAssistants.contains(draft.assistant))
+                    canUseAutomatic: draft.selectedAssistant.map(monitor.availableAssistants.contains) ?? true)
                     .controlSize(.large)
                 if let preset = draft.matchingPreset {
                     AutomationPresetDescription(preset: preset)
@@ -395,25 +403,25 @@ struct AutomationSettingsTab: View {
 
     @ViewBuilder
     private var assistantFields: some View {
-        Section {
-            AutomationAssistantPicker(
-                assistant: $draft.assistant, available: monitor.availableAssistants,
-                onRefresh: monitor.refreshAvailableAssistants,
-                statuses: monitor.assistantDependencies.statuses
-            )
-        } header: {
-            Text(.Settings.settingsAutomationPageAssistant)
-        } footer: {
-            Text(draft.assistant == .codex
-                 ? .Settings.settingsAutomationCodexHelp
-                 : .Settings.settingsAutomationClaudeHelp)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        if let assistant = draft.selectedAssistant {
+            assistantModelFields(assistant)
+        } else {
+            Section {
+                Text(.Settings.settingsAssistantRequiredBody).foregroundStyle(.secondary)
+                Button {
+                    SettingsNavigation.shared.selection = .general
+                } label: {
+                    Text(.Settings.settingsAssistantSetupAction)
+                }
+            }
         }
+    }
 
+    @ViewBuilder
+    private func assistantModelFields(_ assistant: AutomationAssistant) -> some View {
         Section {
             Text(.Settings.settingsVerificationHelp).font(.caption).foregroundStyle(.secondary)
-            if draft.assistant == .codex {
+            if assistant == .codex {
                 Picker(selection: $draft.codexVerificationModel) {
                     ForEach(CodexReviewModel.allCases, id: \.self) { Text(verbatim: $0.name).tag($0) }
                 } label: { Text(.Settings.settingsVerificationModel) }
@@ -432,7 +440,7 @@ struct AutomationSettingsTab: View {
         } header: { Text(.Settings.settingsVerificationTitle) }
 
         Section {
-            if draft.assistant == .codex {
+            if assistant == .codex {
                 Picker(selection: $draft.codexReviewModel) {
                     ForEach(CodexReviewModel.allCases, id: \.self) { model in
                         Text(verbatim: model.name).tag(model)

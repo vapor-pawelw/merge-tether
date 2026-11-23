@@ -126,6 +126,7 @@ struct AssistantJobRow: View {
                         Text(.MRFreshness.mrFreshnessHistoricalRun).font(.caption).foregroundStyle(.secondary)
                     } else if !finished, execution.state != .succeeded && !handoff.isObsoleteReminder {
                         Button {
+                            guard requireCodingAssistant(monitor, for: handoff.key.assistant) else { return }
                             isRetrying = true
                             retryError = nil
                             Task {
@@ -134,7 +135,7 @@ struct AssistantJobRow: View {
                                 retryError = monitor.assistantJobActionError
                             }
                         } label: { Text(.AssistantJobs.assistantJobsRetry) }
-                        .disabled(isRetrying || !monitor.availableAssistants.contains(handoff.key.assistant)
+                        .disabled(isRetrying
                                   || AssistantAutomationRunner.isWorking(on: handoff.key.work))
                     }
                     if let path = execution.workingDirectory {

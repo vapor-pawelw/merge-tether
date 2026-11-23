@@ -27,8 +27,7 @@ struct FollowUpAutomationHoldView: View {
         if let issue = monitor.cliHealth.hold(for: provider)?.issue {
             return issue.kind == .loginRequired ? .loginRequired : .rateLimited
         }
-        if !monitor.availableAssistants.contains(provider),
-           !monitor.assistantDependencies.isChecking { return .assistantUnavailable }
+        if !monitor.selectedAssistantReady, !monitor.checkingSelectedAssistant { return .assistantUnavailable }
         if (row.stoppedJobNeedsAttention && row.latestJob?.workflow == .followUp)
             || row.attentionIntents.contains(where: { $0.kind == .followUp && $0.state == .failed }) {
             return .retryRequired
@@ -42,7 +41,15 @@ struct FollowUpAutomationHoldView: View {
                 Label { Text(.AutomationHold.automationHoldTitle) } icon: { Image(systemName: "pause.circle") }
                     .font(.subheadline.weight(.medium))
                 Text(reason.message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Button { openSettings() } label: { Text(.Menu.menuActionSettings) }
+                Button {
+                    if reason == .assistantUnavailable || reason == .loginRequired {
+                        SettingsNavigation.shared.showCodingAgent(openSettings: { openSettings() },
+                            onConfigured: { Task { await monitor.refreshFromGitLab(for: row.id) } })
+                    } else { openSettings() }
+                } label: {
+                    Text(reason == .assistantUnavailable || reason == .loginRequired
+                        ? .Settings.settingsAssistantResumeAction : .Menu.menuActionSettings)
+                }
                     .buttonStyle(.link).font(.caption)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

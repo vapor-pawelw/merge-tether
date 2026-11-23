@@ -44,7 +44,7 @@ extension TodoMonitorService {
         guard settings.automaticWritesAllowed, configuration.hasAutomaticActionConsent,
               glab.resolvedHost == target.host, glab.currentUsername == target.username,
               !settings.ignoredMergeRequests.contains(target), configuration.scope.resolve(target).active,
-              assistantReady ?? availableAssistants.contains(configuration.assistant),
+              configuration.selectedAssistant != nil, assistantReady ?? availableAssistants.contains(configuration.assistant),
               cliHealth.hold(for: configuration.assistant) == nil,
               let current = settings.assistantHandoffs.first(where: { $0.id == job.id }),
               !settings.mrActionIntents.contains(where: { $0.reviewRecoveryJobID == job.id }),

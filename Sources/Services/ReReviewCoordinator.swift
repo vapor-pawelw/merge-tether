@@ -161,7 +161,8 @@ final class ReReviewCoordinator {
     private func permitsAssistantAutomation(for context: Context) async -> Bool {
         guard isCurrent(context), !Task.isCancelled else { return false }
         let configuration = settings.automation
-        return await canAutomate(configuration.assistant) && !Task.isCancelled
+        guard let assistant = configuration.selectedAssistant else { return false }
+        return await canAutomate(assistant) && !Task.isCancelled
             && isCurrent(context) && settings.automation == configuration
     }
 

@@ -11,7 +11,8 @@ struct MREffectivePolicySummary: View {
     var body: some View {
         let (presentation, submissionTitle) = Self.presentation(row: row, monitor: monitor)
         MREffectivePolicyView(presentation: presentation, holdsOnly: holdsOnly,
-            excluding: excluding + (submissionTitle.map { [String(localized: $0)] } ?? []))
+            excluding: excluding + (submissionTitle.map { [String(localized: $0)] } ?? []),
+            onAgentConfigured: { Task { await monitor.refreshFromGitLab(for: row.id) } })
     }
 
     static func presentation(row: MergeRequestBoardSnapshot.Row, monitor: TodoMonitorService)
@@ -36,9 +37,9 @@ struct MREffectivePolicySummary: View {
         let readState = MREffectivePolicyPresentation.ReadState(catalogCurrent: catalogCurrent, row: row,
             input: monitor.boardRowInput(for: row))
         let input = MREffectivePolicyPresentation.Input(request: request, target: target, settings: monitor.settings,
-            assistantReady: monitor.assistantDependencies.available.contains(monitor.settings.automation.assistant),
+            assistantReady: monitor.selectedAssistantReady || monitor.checkingSelectedAssistant,
             readState: readState, submission: submission,
-            cliHold: monitor.cliHealth.hold(for: monitor.settings.automation.assistant)?.issue.kind)
+            cliHold: monitor.settings.automation.selectedAssistant.flatMap { monitor.cliHealth.hold(for: $0)?.issue.kind })
         return (.init(input: input), status?.displayedSubmissionState.title)
     }
 }
@@ -47,6 +48,7 @@ struct MREffectivePolicyView: View {
     let presentation: MREffectivePolicyPresentation
     var holdsOnly = false
     var excluding: [String] = []
+    var onAgentConfigured: (() -> Void)?
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
@@ -66,8 +68,15 @@ struct MREffectivePolicyView: View {
                 }
             }
             if let action = presentation.settingsAction {
-                Button { SettingsNavigation.shared.perform(action) { openSettings() } } label: {
-                    Text(.EffectivePolicy.policyChooseAutomationSettings)
+                Button {
+                    switch action {
+                    case .chooseAutomationSettings: SettingsNavigation.shared.perform(action) { openSettings() }
+                    case .chooseCodingAgent:
+                        SettingsNavigation.shared.showCodingAgent(openSettings: { openSettings() }, onConfigured: onAgentConfigured)
+                    }
+                } label: {
+                    Text(action == .chooseCodingAgent ? .Settings.settingsAssistantResumeAction
+                         : .EffectivePolicy.policyChooseAutomationSettings)
                 }
                 .font(.caption).buttonStyle(.link)
             }

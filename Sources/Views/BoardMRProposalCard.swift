@@ -82,6 +82,9 @@ struct BoardMRProposalCard: View {
                 runResult
                 HStack {
                     Button {
+                        let needsAgent = proposal.intents.contains { $0.state != .completed && $0.kind != .refresh }
+                            || proposal.todos.contains { MRTodoIntent.kind(for: $0, username: proposal.target.username) != nil }
+                        guard !needsAgent || requireCodingAssistant(monitor) else { return }
                         guard confirmMRAction(.addAndHandle, title: .Board.boardProposalAddAndHandle) else { return }
                         isWorking = true
                         Task {

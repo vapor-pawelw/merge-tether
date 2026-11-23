@@ -778,6 +778,7 @@ import MergeTetherRemote
         }
         if let storedAutomation { defaults.set(Data(storedAutomation.utf8), forKey: "automation") }
         let settings = SettingsManager(defaults: defaults)
+        if storedAutomation == nil { settings.automation.selectedAssistant = .codex }
         if let consent { settings.automation.packageDecision = consent }
         // These tests isolate publication/re-review from the independent acceptance workflow.
         settings.automation.autoResolveAcceptedFeedback = false

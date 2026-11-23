@@ -736,6 +736,7 @@ struct ReReviewCoordinatorTests {
             self.defaults = defaults
             let settings = SettingsManager(defaults: defaults)
             self.settings = settings
+            settings.automation.selectedAssistant = .codex
             settings.automation.packageDecision = .enabled
             settings.automation.autoReReviewEnabled = true
             settings.automation.autoVerifyReReview = false

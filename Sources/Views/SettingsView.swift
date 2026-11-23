@@ -6,6 +6,20 @@ final class SettingsNavigation {
     enum Tab: Hashable { case general, integration, automation, usage }
     static let shared = SettingsNavigation()
     var selection: Tab = .general
+    @ObservationIgnored var openSettingsWindow: (() -> Void)?
+    @ObservationIgnored private var onCodingAgentConfigured: (() -> Void)?
+
+    func showCodingAgent(openSettings: (() -> Void)? = nil, onConfigured: (() -> Void)? = nil) {
+        selection = .general
+        onCodingAgentConfigured = onConfigured
+        (openSettings ?? openSettingsWindow)?()
+    }
+
+    func codingAgentConfigured() {
+        let resume = onCodingAgentConfigured
+        onCodingAgentConfigured = nil
+        resume?()
+    }
 
     func showIntegration(openSettings: () -> Void) {
         selection = .integration
@@ -15,6 +29,7 @@ final class SettingsNavigation {
     func perform(_ action: MREffectivePolicyPresentation.SettingsAction, openSettings: () -> Void) {
         switch action {
         case .chooseAutomationSettings: selection = .automation
+        case .chooseCodingAgent: selection = .general
         }
         openSettings()
     }

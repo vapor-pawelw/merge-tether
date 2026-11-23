@@ -218,6 +218,7 @@ struct AuthoredMergeRequestStatusTests {
             """)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.selectedAssistant = .codex
         settings.automation.packageDecision = .enabled
         settings.automation.autoReReviewEnabled = true
         settings.automation.autoVerifyReReview = false
@@ -314,6 +315,7 @@ struct AuthoredMergeRequestStatusTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.selectedAssistant = .codex
         settings.automation.packageDecision = .enabled
         settings.onboardingCompleted = true
         settings.notificationsEnabled = false

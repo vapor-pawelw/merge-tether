@@ -34,7 +34,7 @@ import MergeTetherRemote
         if !reasons.isEmpty { details.reasons = [reasons] }
         let status = RemoteBoardAdapter.matchingMergeStatus(for: row, statuses: monitor.authoredMergeRequests.requests)
         let input = MREffectivePolicyPresentation.Input(request: request, target: target, settings: monitor.settings,
-            assistantReady: monitor.availableAssistants.contains(monitor.settings.automation.assistant),
+            assistantReady: monitor.selectedAssistantReady,
             readState: .init(catalogCurrent: monitor.attention.hasSyncedCurrentCatalog || monitor.authoredMergeRequests.hasSyncedCurrentCatalog,
                 sameContext: row.evidenceMatchesCatalogContext, readFailed: monitor.lastError != nil || monitor.attention.hasError,
                 rechecking: monitor.isLoading || monitor.attention.isLoading),

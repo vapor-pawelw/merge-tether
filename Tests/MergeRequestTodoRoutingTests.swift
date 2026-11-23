@@ -197,6 +197,7 @@ import Testing
         let suite = "MRTodoRoutingTests.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.selectedAssistant = .codex
         settings.automation.packageDecision = consent
         let root = FileManager.default.temporaryDirectory.appending(path: "MRTodoRoutingTests-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

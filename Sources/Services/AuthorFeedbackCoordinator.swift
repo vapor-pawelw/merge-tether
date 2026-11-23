@@ -653,7 +653,7 @@ final class AuthorFeedbackCoordinator {
         if let blocked = latestBlockedFollowUp(input) { stoppedFollowUps.append(blocked) }
         let activeDiscussions = GitLabMergeRequestDiscussion.activeForReview(input.discussions)
         let activeNoteIDs = Set(activeDiscussions.flatMap(\.notes).compactMap(\.id))
-        guard await canAutomate(input.configuration.assistant) else { throw ReReviewVerifier.VerificationError.unavailable }
+        guard input.configuration.selectedAssistant != nil, await canAutomate(input.configuration.assistant) else { throw ReReviewVerifier.VerificationError.unavailable }
         guard isCurrent(input) else { throw CancellationError() }
         let request = input.request
         let host = input.target.host
@@ -908,7 +908,7 @@ final class AuthorFeedbackCoordinator {
         for finding in initial where finding.canResolve && !informationalThreads.contains(finding.discussionID ?? "") {
             guard settings.automaticPublicWritesAllowed else { break }
             guard isCurrent(input) else { throw CancellationError() }
-            guard await canAutomate(input.configuration.assistant) else { throw ReReviewVerifier.VerificationError.unavailable }
+            guard input.configuration.selectedAssistant != nil, await canAutomate(input.configuration.assistant) else { throw ReReviewVerifier.VerificationError.unavailable }
             guard settings.automaticPublicWritesAllowed else { break }
             guard isCurrent(input), let discussionID = finding.discussionID else { throw CancellationError() }
             async let currentMR = glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
@@ -1116,7 +1116,7 @@ final class AuthorFeedbackCoordinator {
             freshCandidates += 1
             do {
                 guard isCurrent(input) else { throw CancellationError() }
-                guard await canAutomate(input.configuration.assistant) else { throw ReReviewVerifier.VerificationError.unavailable }
+                guard input.configuration.selectedAssistant != nil, await canAutomate(input.configuration.assistant) else { throw ReReviewVerifier.VerificationError.unavailable }
                 func currentCandidate(_ current: [GitLabMergeRequestDiscussion]) -> AuthorFeedbackPolicy.InformationalAcknowledgement? {
                     AuthorFeedbackPolicy.informationalAcknowledgements(discussions: current, assessment: assessment,
                         authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthors(input)).first { $0.discussionID == candidate.discussionID && $0.noteIDs == candidate.noteIDs }

@@ -55,6 +55,7 @@ struct MergeWorkflowActivityEntry: Codable, Identifiable {
     var readOnlyFailure: MergeWorkflowReadFailure? = nil
     var deferredForWorker: Bool? = nil
     var deferredForCapacity: Bool? = nil
+    var waitingForCodingAssistant: Bool? = nil
     var preparedReviewJobID: UUID? = nil
     var isReadOnlyFailure: Bool { readOnlyFailure != nil }
 }
@@ -107,6 +108,7 @@ final class MergeWorkflowAutomation {
     private var polling = false
     private var confirmedPipelineHandoffs: Set<String> = []
     @ObservationIgnored var onRemoteChange: (() -> Void)?
+    @ObservationIgnored var canStartAssistant: () -> Bool = { true }
 
     func hasReadOnlyFailure(for request: GitLabMergeRequest) -> Bool {
         let current = currentAdmissions.filter {
@@ -191,6 +193,7 @@ final class MergeWorkflowAutomation {
         var changed = false
         for index in settings.workflowActivity.indices where [.queued, .running].contains(settings.workflowActivity[index].state) {
             let entry = settings.workflowActivity[index]
+            if entry.state == .queued, entry.assistantJobID == nil, entry.waitingForCodingAssistant == true { continue }
             if entry.event.kind == .reviewUpdate, entry.assistantJobID == nil,
                let id = entry.preparedReviewJobID {
                 guard settings.automaticActionsAllowed else { continue }
@@ -435,6 +438,7 @@ final class MergeWorkflowAutomation {
                 entry.state = .skipped
             }
         }
+        if entry.state == .queued, !assistantCanStart { entry.waitingForCodingAssistant = true }
         settings.workflowActivity.insert(entry, at: 0)
         pruneHistory()
         settings.save()
@@ -457,7 +461,14 @@ final class MergeWorkflowAutomation {
                     $0.state = mode == .notify || mode == .preview ? .preview : .skipped
                     $0.deferredForWorker = nil
                     $0.deferredForCapacity = nil
+                    $0.waitingForCodingAssistant = nil
                     $0.preparedReviewJobID = nil
+                }
+                continue
+            }
+            guard assistantCanStart else {
+                if next.waitingForCodingAssistant != true {
+                    mutate(next.id, ifCurrent: next) { $0.waitingForCodingAssistant = true }
                 }
                 continue
             }
@@ -472,6 +483,7 @@ final class MergeWorkflowAutomation {
                 $0.state = .running
                 $0.deferredForWorker = nil
                 $0.deferredForCapacity = nil
+                $0.waitingForCodingAssistant = nil
                 $0.preparedReviewJobID = preparedReviewJobID
             }
             work = Task {
@@ -482,7 +494,11 @@ final class MergeWorkflowAutomation {
                 do {
                     try await execute(next, preparedReviewJobID: preparedReviewJobID)
                 } catch is CancellationError {
-                    update(next.id, .skipped, ifCurrent: next)
+                    let noAgent = settings.automation.selectedAssistant == nil && shouldProceed(next)
+                    mutate(next.id, ifCurrent: next) {
+                        $0.state = noAgent ? .queued : .skipped
+                        $0.waitingForCodingAssistant = noAgent ? true : nil
+                    }
                 } catch AssistantJobExecutor.ExecutionError.headChanged where next.event.kind == .reviewUpdate {
                     update(next.id, .skipped, ifCurrent: next)
                     onRemoteChange?()
@@ -510,6 +526,10 @@ final class MergeWorkflowAutomation {
             }
             return
         }
+    }
+
+    private var assistantCanStart: Bool {
+        settings.automation.selectedAssistant != nil && canStartAssistant()
     }
 
     private func deferForActiveWorker(_ entry: MergeWorkflowActivityEntry) {

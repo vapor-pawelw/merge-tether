@@ -210,6 +210,7 @@ import Testing
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.selectedAssistant = .codex
         let host = "gitlab-\(UUID().uuidString.lowercased()).example.test"
         let url = try #require(URL(string: "https://\(host)/team/repo/-/merge_requests/11"))
         let assessedHead = String(repeating: "b", count: 40)
@@ -253,6 +254,7 @@ import Testing
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.selectedAssistant = .codex
         let host = "gitlab-\(UUID().uuidString.lowercased()).example.test"
         let url = try #require(URL(string: "https://\(host)/team/repo/-/merge_requests/11"))
         let oldHead = String(repeating: "a", count: 40)
@@ -877,6 +879,34 @@ import Testing
                                        "source_branch": "feature", "target_branch": "main", "labels": []]]
         ]
         return try JSONDecoder().decode(MergeWorkflowActivityEntry.self, from: JSONSerialization.data(withJSONObject: object))
+    }
+
+    @Test func queuedAgentWorkIsRetainedWhileTheProviderIsUnselectedOrUnavailable() throws {
+        let suite = "WorkflowAwaitingAgent.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.safe, for: nil)
+        var queued = try entry(jobID: nil)
+        queued.state = .queued
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: queued.host, username: queued.user.username)
+        let workflow = MergeWorkflowAutomation(settings: settings, glab: glab)
+        settings.workflowActivity = [queued]
+
+        workflow.startNext()
+        #expect(workflow.entries.first?.state == .queued)
+        #expect(workflow.entries.first?.waitingForCodingAssistant == true)
+        #expect(gitlab.requests.isEmpty)
+
+        let restored = SettingsManager(defaults: defaults)
+        restored.automation.selectedAssistant = .claude
+        let restarted = MergeWorkflowAutomation(settings: restored, glab: glab)
+        restarted.canStartAssistant = { false }
+        restarted.startNext()
+        #expect(restarted.entries.first?.state == .queued)
+        #expect(gitlab.requests.isEmpty)
     }
 
     @Test func restoresLinkedWorkflowAndDropsEntriesWaitingWithoutAJob() throws {
@@ -1516,6 +1546,7 @@ import Testing
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.selectedAssistant = .codex
         let id = UUID()
         let url = try #require(URL(string: "https://gitlab.example.test/team/repo/-/merge_requests/11"))
         let feedback = [1, 2].map {

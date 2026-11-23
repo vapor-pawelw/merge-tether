@@ -450,6 +450,7 @@ enum AssistantJobExecutor {
 
     static func validateConfiguration(_ handoff: AssistantAutomationRunner.Handoff, automation: AutomationSettings) throws {
         guard !handoff.isObsoleteReminder else { throw ExecutionError.disabledPermission }
+        guard automation.selectedAssistant != nil else { throw ExecutionError.cliUnavailable }
         let project = handoff.mergeRequestURL?.gitLabProjectPath ?? ""
         let manual = handoff.manual == true
         guard handoff.followUpPushAllowed != true || automation.permitsFollowUpPush(manual: manual),

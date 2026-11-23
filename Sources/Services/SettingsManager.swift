@@ -137,7 +137,9 @@ final class SettingsManager {
         conversationDestination = defaults.string(forKey: Key.conversationDestination)
             .flatMap(AssistantContextLauncher.Destination.init(rawValue:)) ?? .codexApp
 
-        let loadedAutomation = store.load(Key.automation, fallback: AutomationSettings())
+        var initialAutomation = AutomationSettings()
+        initialAutomation.selectedAssistant = nil
+        let loadedAutomation = store.load(Key.automation, fallback: initialAutomation)
         let globallyEnabled = defaults.bool(forKey: Key.automationGloballyEnabled)
         automationGloballyEnabled = globallyEnabled
         confirmGlobalAutomationChanges = defaults.bool(forKey: Key.confirmGlobalAutomationChanges)

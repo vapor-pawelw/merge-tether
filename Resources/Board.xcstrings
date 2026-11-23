@@ -310,7 +310,8 @@
             "state": "translated",
             "value": "Merge requests"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Merge requesty"}}
       }
     },
     "board.inbox.button": {
@@ -412,7 +413,8 @@
             "state": "translated",
             "value": "My merge requests"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Moje merge requesty"}}
       }
     },
     "board.lane.reviewing": {
@@ -423,7 +425,8 @@
             "state": "translated",
             "value": "Reviewing"
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Do przeglądu"}}
       }
     },
     "board.lane.ownEmpty": {
@@ -434,7 +437,8 @@
             "state": "translated",
             "value": "Your open merge requests will appear here."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Tu pojawią się Twoje otwarte merge requesty."}}
       }
     },
     "board.lane.reviewingEmpty": {
@@ -445,7 +449,8 @@
             "state": "translated",
             "value": "Merge requests you manage as a reviewer will appear here."
           }
-        }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "Tu pojawią się merge requesty, które masz przejrzeć."}}
       }
     },
     "board.pin": {
@@ -700,23 +705,15 @@
     "board.intent.cliRequired": {
       "extractionState": "manual",
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Set up and sign in to the selected CLI to run this action."
-          }
-        }
+        "en": {"stringUnit": {"state": "translated", "value": "Choose a signed-in coding agent to run this action."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Wybierz zalogowanego asystenta, aby wykonać tę czynność."}}
       }
     },
     "board.compact.setupCli": {
       "extractionState": "manual",
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Set up CLI"
-          }
-        }
+        "en": {"stringUnit": {"state": "translated", "value": "Set up coding agent"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Skonfiguruj asystenta"}}
       }
     },
     "board.compact.blocked": {
@@ -811,12 +808,8 @@
     "board.compact.cliRequired": {
       "extractionState": "manual",
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "CLI required"
-          }
-        }
+        "en": {"stringUnit": {"state": "translated", "value": "Coding agent required"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Wymagany asystent"}}
       }
     },
     "board.initialSync": {
@@ -866,23 +859,15 @@
     "board.empty.own.title": {
       "extractionState": "manual",
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No open merge requests"
-          }
-        }
+        "en": {"stringUnit": {"state": "translated", "value": "No open merge requests"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak otwartych merge requestów"}}
       }
     },
     "board.empty.reviewing.title": {
       "extractionState": "manual",
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nothing to review"
-          }
-        }
+        "en": {"stringUnit": {"state": "translated", "value": "Nothing to review"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak merge requestów do przeglądu"}}
       }
     },
     "board.empty.loading.title": {
@@ -921,12 +906,8 @@
     "board.approvalRatio": {
       "extractionState": "manual",
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld/%lld"
-          }
-        }
+        "en": {"stringUnit": {"state": "translated", "value": "%lld/%lld"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "%lld/%lld"}}
       }
     },
     "board.approvalsHelp": {

@@ -531,6 +531,7 @@ struct MRCatalogStalenessTests {
     @Test func automationHidesReviewerThreadButPreservesIndependentAuthorThread() async throws {
         let h = try harness()
         defer { h.cleanUp() }
+        h.settings.automation.selectedAssistant = .codex
         h.settings.automation.packageDecision = .enabled
         h.settings.automation.workflowRules[.newDiscussion].mode = .assistant
         try h.write("reviewing.json", "[]")

@@ -63,6 +63,7 @@ final class AssistantJobCoordinator {
         while !terminating, tasks.count < maximumConcurrentJobs, !pending.isEmpty {
             guard let index = pending.firstIndex(where: {
                 $0.settings.automaticActionsAllowed && ($0.handoff.manual == true || $0.settings.automaticWritesAllowed)
+                    && $0.settings.automation.selectedAssistant != nil
                     && healthStore.hold(for: $0.handoff.key.assistant) == nil
             }) else { break }
             let next = pending.remove(at: index)

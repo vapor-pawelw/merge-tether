@@ -833,6 +833,7 @@ struct AutomationPackageTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.selectedAssistant = .codex
         settings.automation.packageDecision = .enabled
         let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.org", projectID: 1, iid: 2)
         let url = try #require(URL(string: "https://gitlab.example.org/group/repo/-/merge_requests/2"))

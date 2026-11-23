@@ -128,7 +128,6 @@ struct BoardJobStatusActions: View {
     let monitor: TodoMonitorService
     var muted = false
     @State private var retrying = false
-    @Environment(\.openSettings) private var openSettings
 
     private var active: Bool { handoff.operationalExecution?.state.isActive == true }
     private var isFinished: Bool {
@@ -163,12 +162,10 @@ struct BoardJobStatusActions: View {
                         Text(.AssistantJobs.assistantJobsStop)
                     }
                     .buttonStyle(.plain)
-                } else if !monitor.availableAssistants.contains(handoff.key.assistant) {
-                    Button { openSettings() } label: { Text(.Board.boardCompactSetupCli) }
-                        .buttonStyle(.bordered)
                 } else {
                     Button {
                         guard !retrying, !AssistantAutomationRunner.isWorking(on: handoff.key.work) else { return }
+                        guard requireCodingAssistant(monitor, for: handoff.key.assistant) else { return }
                         retrying = true
                         Task {
                             defer { retrying = false }

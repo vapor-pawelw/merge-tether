@@ -95,6 +95,8 @@ enum MRActionCTA: String, CaseIterable, Sendable {
         }
     }
 
+    var requiresCodingAssistant: Bool { effect == .agent || effect == .aiCheck }
+
     var followUps: [MRActionFollowUp] {
         switch self {
         case .verifyFeedback: [.mayStartAgent]

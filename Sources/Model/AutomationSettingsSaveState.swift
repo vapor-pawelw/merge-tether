@@ -23,6 +23,7 @@ struct AutomationSettingsSaveState {
     mutating func historySaved(succeeded: Bool) { failed = !succeeded }
 
     mutating func updateSavedScope(_ scope: MRAutomationScope) { accepted.scope = scope }
+    mutating func updateSavedAssistant(_ assistant: AutomationAssistant?) { accepted.selectedAssistant = assistant }
 
     mutating func revert() -> AutomationSettings {
         failed = runtimeSavePending

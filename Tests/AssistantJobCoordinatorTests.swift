@@ -499,6 +499,7 @@ import Testing
         let name = "AssistantJobCoordinatorTests.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: name))
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.selectedAssistant = .codex
         settings.automation.packageDecision = .enabled
         return (settings, name, defaults)
     }

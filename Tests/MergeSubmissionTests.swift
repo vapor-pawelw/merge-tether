@@ -259,6 +259,7 @@ import Testing
             defer { defaults.removePersistentDomain(forName: suite) }
             let settings = SettingsManager(defaults: defaults)
             settings.onboardingCompleted = true; settings.notificationsEnabled = false
+            settings.automation.selectedAssistant = .codex
             settings.automation.packageDecision = .enabled
             settings.automation.conflictTasksEnabled = true
             gitlab.write("train-conflict")
@@ -301,6 +302,7 @@ import Testing
             defer { defaults.removePersistentDomain(forName: suite) }
             let settings = SettingsManager(defaults: defaults)
             settings.onboardingCompleted = true; settings.notificationsEnabled = false
+            settings.automation.selectedAssistant = .codex
             settings.automation.packageDecision = .enabled
             settings.automation.conflictTasksEnabled = true
             var receipt = MergeSubmissionReceipt(target: .init(host: host, username: user.username, projectID: 1, iid: 2),
@@ -592,6 +594,7 @@ import Testing
             let settings = SettingsManager(defaults: defaults)
             settings.onboardingCompleted = true
             settings.notificationsEnabled = false
+            settings.automation.selectedAssistant = .codex
             settings.automation.packageDecision = .enabled
             settings.automation.autoMergeEnabled = true
             gitlab.write("ordinary-project")
@@ -736,6 +739,7 @@ import Testing
             defer { defaults.removePersistentDomain(forName: suite) }
             let settings = SettingsManager(defaults: defaults)
             settings.onboardingCompleted = true; settings.notificationsEnabled = false
+            settings.automation.selectedAssistant = .codex
             settings.automation.packageDecision = .enabled
             settings.automation.conflictTasksEnabled = true
             settings.automation.autoMergeEnabled = true
@@ -806,6 +810,7 @@ import Testing
             defer { defaults.removePersistentDomain(forName: suite) }
             let settings = SettingsManager(defaults: defaults)
             settings.onboardingCompleted = true; settings.notificationsEnabled = false
+            settings.automation.selectedAssistant = .codex
             settings.automation.packageDecision = .enabled
             settings.automation.autoMergeEnabled = true
             settings.save()
@@ -848,6 +853,7 @@ import Testing
             defer { defaults.removePersistentDomain(forName: suite) }
             let settings = SettingsManager(defaults: defaults)
             settings.onboardingCompleted = true; settings.notificationsEnabled = false
+            settings.automation.selectedAssistant = .codex
             settings.automation.packageDecision = .enabled
             settings.automation.autoMergeEnabled = true
             let rejectedHead = try #require(request.sha)
@@ -890,6 +896,7 @@ import Testing
             let defaults = try #require(UserDefaults(suiteName: suite))
             defer { defaults.removePersistentDomain(forName: suite) }
             let settings = SettingsManager(defaults: defaults)
+            settings.automation.selectedAssistant = .codex
             settings.automation.packageDecision = .enabled
             settings.onboardingCompleted = true
             settings.notificationsEnabled = false
@@ -939,6 +946,7 @@ import Testing
             let defaults = try #require(UserDefaults(suiteName: suite))
             defer { defaults.removePersistentDomain(forName: suite) }
             let settings = SettingsManager(defaults: defaults)
+            settings.automation.selectedAssistant = .codex
             settings.automation.packageDecision = .enabled
             settings.onboardingCompleted = true; settings.notificationsEnabled = false
             settings.automation.autoMergeEnabled = true
@@ -991,6 +999,7 @@ import Testing
             defer { defaults.removePersistentDomain(forName: suite) }
             let settings = SettingsManager(defaults: defaults)
             settings.onboardingCompleted = true
+            settings.automation.selectedAssistant = .codex
             settings.automation.packageDecision = .enabled
             settings.automation.conflictTasksEnabled = true
             settings.automation.allowAssistantTools = true

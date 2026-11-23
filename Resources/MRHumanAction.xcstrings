@@ -478,12 +478,8 @@
     "mrHumanAction.feedbackUnverified": {
       "extractionState": "manual",
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Open reviewer comments need review; remaining work has not been verified."
-          }
-        }
+        "en": {"stringUnit": {"state": "translated", "value": "Open reviewer comments need review; remaining work has not been verified."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwarte uwagi wymagają przeglądu. Pozostałe zmiany czekają na weryfikację."}}
       }
     },
     "mrHumanAction.changesRequested": {

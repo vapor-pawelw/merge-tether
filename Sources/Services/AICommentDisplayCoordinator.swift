@@ -124,7 +124,7 @@ import Observation
               glab.accountRevision == accountRevision, glab.resolvedHost == host,
               glab.currentUsername == username, settings.automaticWritesAllowed else { return }
         guard !missing.isEmpty else { queued.removeValue(forKey: target); return }
-        guard await canAutomate(configuration.assistant), latest[target] == invocation, !Task.isCancelled,
+        guard configuration.selectedAssistant != nil, await canAutomate(configuration.assistant), latest[target] == invocation, !Task.isCancelled,
               settings.automation == configuration, glab.accountRevision == accountRevision,
               glab.resolvedHost == host, glab.currentUsername == username, settings.automaticWritesAllowed else { return }
         contexts[target] = .init(request: request, revision: accountRevision)
@@ -153,7 +153,7 @@ import Observation
                            model: String, thinking: VerificationThinking) -> Bool {
         guard let context = contexts[target], context.revision == glab.accountRevision,
               glab.resolvedHost == target.host, glab.currentUsername == target.username,
-              settings.automaticWritesAllowed, settings.automation.assistant == assistant,
+              settings.automaticWritesAllowed, settings.automation.selectedAssistant == assistant,
               settings.automation.verificationThinking == thinking,
               settings.automation.scope.permits(context.request, host: target.host, username: target.username) else { return false }
         return model == (assistant == .codex ? settings.automation.codexVerificationModel.rawValue

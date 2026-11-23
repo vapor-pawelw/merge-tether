@@ -501,7 +501,7 @@ private struct CommandCenterMRDetailContent: View {
                     MarkMergeRequestReadyButton(item: item, monitor: monitor).buttonStyle(.bordered)
                     if let feedback = presentationItem.authorFeedbackStatus {
                         Button {
-                            guard confirmMRAction(.verifyFeedback, title: .AuthorFeedback.authorFeedbackRecheck) else { return }
+                            guard confirmMRAction(.verifyFeedback, title: .AuthorFeedback.authorFeedbackRecheck, monitor: monitor) else { return }
                             monitor.attention.retryAuthorFeedback(item.id)
                         } label: {
                             MRActionLabel(title: .AuthorFeedback.authorFeedbackRecheck, cta: .verifyFeedback)
@@ -570,7 +570,6 @@ private struct CommandCenterMRDetailContent: View {
                             .buttonStyle(.borderedProminent)
                             .mrActionHelp(.retryRun)
                             .disabled(isRetrying || job.execution?.state.isActive != false
-                                      || !monitor.availableAssistants.contains(job.key.assistant)
                                       || AssistantAutomationRunner.isWorking(on: job.key.work))
                             Button { openHistory(proxy: proxy) } label: {
                                 Text(.MRHumanAction.mrHumanActionActionReviewRun)
@@ -588,7 +587,7 @@ private struct CommandCenterMRDetailContent: View {
                             .buttonStyle(.borderedProminent)
                     } else if action.action == .retryDraftVerification {
                         Button {
-                            guard confirmMRAction(.retryDraftVerification, title: action.actionLabel) else { return }
+                            guard confirmMRAction(.retryDraftVerification, title: action.actionLabel, monitor: monitor) else { return }
                             monitor.attention.retryDraftProofRecovery(item.id)
                         } label: {
                             MRActionLabel(title: action.actionLabel, cta: .retryDraftVerification)
@@ -596,7 +595,9 @@ private struct CommandCenterMRDetailContent: View {
                             .buttonStyle(.borderedProminent)
                             .mrActionHelp(.retryDraftVerification)
                     } else if action.action == .setupAssistant {
-                        Button { openSettings() } label: { Text(action.actionLabel) }
+                        Button {
+                            SettingsNavigation.shared.showCodingAgent(openSettings: { openSettings() })
+                        } label: { Text(action.actionLabel) }
                     } else if action.action == .reviewIssue {
                         Button { detailsExpanded = true; Task { await scroll(to: .details, proxy: proxy) } } label: {
                             Text(action.actionLabel)
@@ -655,7 +656,10 @@ private struct CommandCenterMRDetailContent: View {
             }
             .buttonStyle(.bordered)
         } else if coordinator.count(for: scope) > 0 {
-            Button { regenerationPresentation = .init(scope: scope) } label: {
+            Button {
+                guard requireCodingAssistant(monitor) else { return }
+                regenerationPresentation = .init(scope: scope)
+            } label: {
                 Label(.DraftRegeneration.draftRegenerationMrAction, systemImage: "wand.and.stars")
             }
             .buttonStyle(.bordered)
@@ -670,7 +674,7 @@ private struct CommandCenterMRDetailContent: View {
         return { draft in
             guard let id = draft.id else { return }
             let scope = DraftRegenerationScope.draft(projectID: item.id.projectID, iid: item.id.iid, draftID: id)
-            guard monitor.draftRegeneration.count(for: scope) > 0 else { return }
+            guard monitor.draftRegeneration.count(for: scope) > 0, requireCodingAssistant(monitor) else { return }
             regenerationPresentation = .init(scope: scope)
         }
     }
@@ -742,9 +746,9 @@ private struct CommandCenterMRDetailContent: View {
     private var decisionActions: some View {
             CommentReviewImpactView(item: item, reReviewEnabled: monitor.settings.automation.autoReReviewEnabled)
             BoardMRIntentActions(row: presentationRow, monitor: monitor)
-            ReReviewControls(item: presentationItem, monitor: monitor.attention, assistant: monitor.settings.automation.assistant,
+            ReReviewControls(item: presentationItem, monitor: monitor.attention, requireAssistant: { requireCodingAssistant(monitor) }, assistant: monitor.settings.automation.assistant,
                 hidesStaleResult: MRCardPresentation(row: presentationRow, monitor: monitor, allowsRemoval: isReviewed).working)
-            InboxAttentionActions(item: presentationItem, feedbackAction: monitor.attentionFeedbackAction(for: item),
+            InboxAttentionActions(item: presentationItem, monitor: monitor, feedbackAction: monitor.attentionFeedbackAction(for: item),
                 assistant: presentationRow.latestJob?.key.assistant ?? monitor.settings.automation.assistant,
                 onFeedback: { Task { await monitor.runAttentionFeedback(for: item) } },
                 onPipeline: { monitor.confirmPipelineHandoff(for: item.id) },
@@ -832,6 +836,7 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     private func resetReviewState() {
+        guard requireCodingAssistant(monitor) else { return }
         isResettingReview = true
         reviewStartError = nil
         let expectedTarget = discussionTarget

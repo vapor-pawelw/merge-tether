@@ -282,7 +282,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The selected agent CLI is unavailable. Check the agent in Settings → Automation, then try again."
+            "value": "The coding agent is unavailable. Check Settings → General → Coding agent, then try again."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Asystent jest niedostępny. Sprawdź Ustawienia → Ogólne → Asystent programistyczny i spróbuj ponownie."
           }
         }
       }

@@ -43,7 +43,7 @@ extension TodoMonitorService {
 
     func canRunReview(for item: MergeRequestAttentionMonitor.Item) -> Bool {
         guard let target = manualReviewTarget(for: item), let request = item.mergeRequest,
-              target.accepts(request), availableAssistants.contains(settings.automation.assistant) else { return false }
+              target.accepts(request) else { return false }
         return !AssistantAutomationRunner.isWorking(on: .init(host: target.host, projectID: target.projectID, iid: target.iid))
     }
 
@@ -52,7 +52,7 @@ extension TodoMonitorService {
                    confirmed: ManualReviewConsent? = nil, readOnly: Bool = false) async {
         assistantJobActionError = nil
         let consent = confirmed ?? manualReviewConsent(for: item)
-        guard consent == manualReviewConsent(for: item), canRunReview(for: item),
+        guard consent == manualReviewConsent(for: item), canRunReview(for: item), selectedAssistantReady,
               let target = manualReviewTarget(for: item) else {
             assistantJobActionError = String(localized: .AssistantJobs.assistantJobsActionFailed)
             return
@@ -64,11 +64,11 @@ extension TodoMonitorService {
             let request = try await glab.fetchMergeRequest(projectID: target.projectID, iid: target.iid, host: target.host)
             guard target.matchesAccount(host: glab.resolvedHost, username: glab.currentUsername),
                   glab.accountRevision == accountRevision, target.accepts(request),
-                  settings.automation.assistant == assistant else { throw CancellationError() }
+                  settings.automation.selectedAssistant == assistant else { throw CancellationError() }
             let dependency = await assistantDependencies.check(assistant)
             guard dependency.isReady, target.matchesAccount(host: glab.resolvedHost, username: glab.currentUsername),
                   glab.accountRevision == accountRevision,
-                  settings.automation.assistant == assistant else { throw CancellationError() }
+                  settings.automation.selectedAssistant == assistant else { throw CancellationError() }
             var current = item
             current.mergeRequest = request
             guard consent == manualReviewConsent(for: current),

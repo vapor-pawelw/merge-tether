@@ -354,6 +354,7 @@ enum AssistantAutomationRunner {
         let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
         func validateLaunchPolicy() throws {
             try AssistantJobExecutor.validatePersistence(settings)
+            guard settings.automation.selectedAssistant != nil else { throw AssistantJobExecutor.ExecutionError.cliUnavailable }
             if !manual, draftRepair?.workRevisionMatches(settings) == false {
                 throw AssistantJobExecutor.ExecutionError.disabledPermission
             }

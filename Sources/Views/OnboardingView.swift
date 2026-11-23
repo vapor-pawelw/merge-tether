@@ -6,14 +6,14 @@ struct OnboardingView: View {
     @Environment(\.dismissWindow) private var dismissWindow
     @State private var step: Step = .glabInstall
     @State private var automationChoice: AutomationPackageChoice?
-    @State private var assistant: AutomationAssistant
-    @State private var pendingAutomation: AutomationSettings?
-    @State private var showingAssistantSetup = false
+    @State private var assistant: AutomationAssistant?
+    @State private var assistantSetup: AutomationAssistant?
 
     init(monitor: TodoMonitorService) {
         self.monitor = monitor
-        _assistant = State(initialValue: monitor.settings.automation.assistant)
-        _automationChoice = State(initialValue: AutomationPreset.onboardingDefault(for: monitor.settings.automation.packageDecision))
+        let automation = monitor.settings.automation
+        _assistant = State(initialValue: automation.selectedAssistant)
+        _automationChoice = State(initialValue: AutomationPreset.onboardingDefault(for: automation.packageDecision))
         _step = State(initialValue: Self.startingStep(hasCompletedSetup: monitor.settings.onboardingCompleted,
             cliAvailable: monitor.glab.glabPath != nil))
     }
@@ -66,11 +66,9 @@ struct OnboardingView: View {
             }
         }
         .frame(minWidth: 560, minHeight: 440)
-        .sheet(isPresented: $showingAssistantSetup) {
-            if let pendingAutomation {
-                AssistantSetupView(assistant: pendingAutomation.assistant) {
-                    complete(automation: pendingAutomation)
-                }
+        .sheet(item: $assistantSetup) { candidate in
+            AssistantSetupView(assistant: candidate) {
+                step = .done
             }
         }
     }
@@ -80,10 +78,14 @@ struct OnboardingView: View {
         case .glabInstall: monitor.glab.glabPath != nil
         case .glabAuth: monitor.glab.currentUsername != nil
         case .automation:
-            monitor.settings.automation.packageDecision != .undecided || automationChoice == .manual
-                || (automationChoice?.requiresCLI == true && monitor.availableAssistants.contains(assistant))
+            monitor.settings.automation.packageDecision != .undecided || effectiveAutomationChoice == .manual
+                || (effectiveAutomationChoice?.requiresCLI == true && assistant.map(monitor.availableAssistants.contains) == true)
         case .notifications, .launchAtLogin, .done: true
         }
+    }
+
+    private var effectiveAutomationChoice: AutomationPackageChoice? {
+        assistant == nil && automationChoice != nil ? .manual : automationChoice
     }
 
     private func goBack() {
@@ -92,30 +94,24 @@ struct OnboardingView: View {
     }
 
     private func goNext() {
-        if step == .done {
+        guard canContinue else { return }
+        switch step {
+        case .done:
             finish()
-            return
+        case .automation where monitor.settings.automation.packageDecision == .undecided
+            && effectiveAutomationChoice?.requiresCLI == true:
+            assistantSetup = assistant
+        default:
+            if let next = Step(rawValue: step.rawValue + 1) { step = next }
         }
-        guard let next = Step(rawValue: step.rawValue + 1) else { return }
-        step = next
     }
 
     private func finish() {
         var updated = monitor.settings.automation
-        if monitor.settings.automation.packageDecision == .undecided, let automationChoice {
+        if updated.packageDecision == .undecided, let automationChoice = effectiveAutomationChoice {
             automationChoice.apply(to: &updated, assistant: assistant)
-
-            if automationChoice.requiresCLI {
-                pendingAutomation = updated
-                showingAssistantSetup = true
-                return
-            }
         }
-        complete(automation: updated)
-    }
-
-    private func complete(automation: AutomationSettings) {
-        monitor.settings.automation = automation
+        monitor.settings.automation = updated
         monitor.settings.onboardingCompleted = true
         monitor.applySettings()
         monitor.start()

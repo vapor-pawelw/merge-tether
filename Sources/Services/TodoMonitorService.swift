@@ -93,8 +93,8 @@ final class TodoMonitorService {
             attention.aiOriginCoordinator.failure(work: .init(host: $0.host, projectID: row.id.projectID, iid: row.id.iid)) != nil
         } == true
         return .init(account: account, automation: settings.configuredAutomation, workflowEntries: workflowEntries,
-            assistantReady: assistantDependencies.available.contains(settings.automation.assistant),
-            assistantChecking: assistantDependencies.isChecking,
+            assistantReady: settings.automation.selectedAssistant.map(assistantDependencies.available.contains) == true,
+            assistantChecking: checkingSelectedAssistant,
             confirmationBusy: attention.confirmationStates[row.id]?.isBusy == true,
             conflictProcessing: request.map { automaticConflictIsProcessing(for: $0) } == true,
             pipelineProcessing: request.map { authoredMergeRequests.workflow.isAutomaticallyProcessingPipeline($0, entries: workflowEntries) } == true,
@@ -128,6 +128,12 @@ final class TodoMonitorService {
     let reviewJobCoordinator: AssistantJobCoordinator?
     var availableAssistants: Set<AutomationAssistant> {
         assistantDependencies.available.filter { cliHealth.hold(for: $0) == nil }
+    }
+    var selectedAssistantReady: Bool {
+        settings.automation.selectedAssistant.map(availableAssistants.contains) == true
+    }
+    var checkingSelectedAssistant: Bool {
+        settings.automation.selectedAssistant != nil && assistantDependencies.isChecking
     }
 
     private var optimisticallyDone: Set<Int> { todoStore.optimisticallyDone }
@@ -196,8 +202,9 @@ final class TodoMonitorService {
         let router = MergeRequestTodoRouter(settings: settings, glab: glab, canAutomate: { [weak self] in
             guard let self else { return false }
             let configuration = self.settings.automation
+            guard let assistant = configuration.selectedAssistant else { return false }
             let revision = self.glab.accountRevision
-            let ready = await AssistantCLI.detect(configuration.assistant).isReady
+            let ready = await AssistantCLI.detect(assistant).isReady
             // This probe also serves manual work; persistence is checked at each action boundary.
             return ready && !Task.isCancelled && self.settings.automation == configuration
                 && self.glab.accountRevision == revision
@@ -319,6 +326,9 @@ final class TodoMonitorService {
         authoredMergeRequests.workflow.onRemoteChange = { [weak self] in
             Task { await self?.refreshNow() }
         }
+        authoredMergeRequests.workflow.canStartAssistant = { [weak self] in
+            self?.selectedAssistantReady == true
+        }
         authoredMergeRequests.authorFeedbackAllowsMerge = { [weak self] request, discussions, authorID in
             guard let self, let host = self.glab.resolvedHost, let username = self.glab.currentUsername,
                   let fingerprint = ReviewVerdict.fingerprint(discussions),
@@ -343,11 +353,12 @@ final class TodoMonitorService {
             Task { await self?.mrTodoRouter.refreshCompletionEvidence(for: target, accountRevision: revision) }
         }
         assistantDependencies.onReady = { [weak self] assistant in
-            guard let self, self.settings.automation.assistant == assistant else { return }
+            guard let self, self.settings.automation.selectedAssistant == assistant else { return }
+            self.authoredMergeRequests.workflow.startNext()
             self.wakeAutomaticRetries()
         }
         assistantDependencies.onRecovered = { [weak self] assistant in
-            guard let self, self.settings.automation.assistant == assistant else { return }
+            guard let self, self.settings.automation.selectedAssistant == assistant else { return }
             self.attention.authorFeedbackCoordinator?.retryReadOnlyFailures()
             self.attention.aiOriginCoordinator.retryReadOnlyFailures()
             self.authoredMergeRequests.workflow.retryReadOnlyFailures()
@@ -582,9 +593,9 @@ final class TodoMonitorService {
         input.handoffs = assistantHandoffs
         input.confirmationStates = attention.confirmationStates
         input.automation = settings.configuredAutomation
-        input.assistantReady = availableAssistants.contains(settings.automation.assistant)
-        input.reviewAssistantReady = assistantDependencies.available.contains(settings.automation.assistant)
-        input.assistantChecking = assistantDependencies.isChecking
+        input.assistantReady = selectedAssistantReady
+        input.reviewAssistantReady = settings.automation.selectedAssistant.map(assistantDependencies.available.contains) == true
+        input.assistantChecking = checkingSelectedAssistant
         input.ignoredTargets = settings.ignoredMergeRequests
         input.hiddenTargets = hiddenBoardTargets
         input.mrCatalogReadFailed = attention.hasError || authoredMergeRequests.hasError
@@ -891,27 +902,8 @@ final class TodoMonitorService {
         return settings.assistantHandoffs.filter { $0.key.work.host == host && $0.key.username == username }
     }
 
-    var unavailableAssistant: AutomationAssistant? {
-        let assistant = settings.automation.assistant
-        let hasActionOptIn = settings.automation.hasAutomaticPublicActionConsent
-            && glab.resolvedHost != nil && glab.currentUsername != nil
-            && settings.hasAutomaticActionOptIn(host: glab.resolvedHost, username: glab.currentUsername)
-        if (settings.automation.usesAssistant || settings.automation.autoReReviewEnabled
-            || settings.automation.autoMergeEnabled || hasActionOptIn || settings.automation.autoApproveEnabled
-            || settings.automation.publishDraftsWithoutConfirmation || settings.automation.publishAIRepliesWithoutConfirmation),
-           let status = assistantDependencies.statuses[assistant], !status.isReady { return assistant }
-        return assistantHandoffs.first { handoff in
-            handoff.execution?.state.isActive == true && assistantDependencies.statuses[handoff.key.assistant].map { !$0.isReady } == true
-        }?.key.assistant
-    }
-
-    var assistantDependencyWarning: LocalizedStringResource? {
-        guard let assistant = unavailableAssistant else { return nil }
-        return assistantDependencies.statuses[assistant]?.message(for: assistant)
-    }
-
     func automaticConflictIsProcessing(for request: GitLabMergeRequest) -> Bool {
-        guard availableAssistants.contains(settings.automation.assistant) || assistantDependencies.isChecking,
+        guard selectedAssistantReady || checkingSelectedAssistant,
               let state = authoredMergeRequests.conflictAutomationState(for: request) else { return false }
         return state == .available || state == .processing
     }

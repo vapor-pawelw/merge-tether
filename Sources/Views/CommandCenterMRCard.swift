@@ -44,7 +44,6 @@ private struct CommandCenterMRCardContent: View {
     }
     let presentation: MRCardPresentation
     private var busy: Bool { presentation.busy }
-    private var needsCLI: Bool { !monitor.assistantDependencies.available.contains(monitor.settings.automation.assistant) }
     private var humanAction: MRHumanAction? { presentation.humanAction }
 
     private var contentOpacity: Double { isDraft ? 0.5 : 1 }
@@ -352,15 +351,11 @@ private struct CommandCenterMRCardContent: View {
         if let label = reviewingContext.actionLabel {
             switch reviewingContext.nextStep {
             case .runReview:
-                if needsCLI {
-                    primary(.Board.boardCompactSetupCli) { openSettings() }
-                } else {
-                    primary(label, cta: .runReview, enabled: monitor.canRunReview(for: item)) {
-                        guard let consent = confirmManualReview(for: item, monitor: monitor) else { return }
-                        start { await monitor.runReview(for: item, confirmed: consent) }
-                    }
+                primary(label, cta: .runReview, enabled: monitor.canRunReview(for: item)) {
+                    guard let consent = confirmManualReview(for: item, monitor: monitor) else { return }
+                    start { await monitor.runReview(for: item, confirmed: consent) }
                 }
-            case .setupAgent: primary(label) { openSettings() }
+            case .setupAgent: primary(label) { SettingsNavigation.shared.showCodingAgent(openSettings: { openSettings() }) }
             case .monitoring, .viewDiscussions: primary(label) { openAttention(.feedback) }
             case .reviewComments: primary(label) { openAttention(.drafts) }
             case .viewRun: primary(label) { openAttention(.assistantRuns) }
@@ -378,7 +373,6 @@ private struct CommandCenterMRCardContent: View {
             if let job = action.retryJob {
                 primary(action.actionLabel, cta: .retryRun,
                         enabled: job.execution?.state.isActive == false
-                            && monitor.availableAssistants.contains(job.key.assistant)
                             && !AssistantAutomationRunner.isWorking(on: job.key.work)) {
                     guard !isStarting else { return }
                     guard confirmAssistantRetry(job, for: item, monitor: monitor, title: action.actionLabel) else { return }
@@ -415,28 +409,28 @@ private struct CommandCenterMRCardContent: View {
             primary(action.actionLabel) { openAttention(.drafts) }
         case .verifyFeedback:
             primary(action.actionLabel, cta: .verifyFeedback) {
-                guard confirmMRAction(.verifyFeedback, title: action.actionLabel) else { return }
+                guard confirmMRAction(.verifyFeedback, title: action.actionLabel, monitor: monitor) else { return }
                 monitor.attention.retryAuthorFeedback(item.id)
             }
         case .retryDraftVerification:
             primary(action.actionLabel, cta: .retryDraftVerification) {
-                guard confirmMRAction(.retryDraftVerification, title: action.actionLabel) else { return }
+                guard confirmMRAction(.retryDraftVerification, title: action.actionLabel, monitor: monitor) else { return }
                 monitor.attention.retryDraftProofRecovery(item.id)
             }
         case .retryReReview:
             primary(action.actionLabel, cta: .verifyReReview) {
-                guard confirmMRAction(.verifyReReview, title: action.actionLabel) else { return }
+                guard confirmMRAction(.verifyReReview, title: action.actionLabel, monitor: monitor) else { return }
                 start { await monitor.attention.retryReReview(item.id) }
             }
         case .setupAssistant:
-            primary(action.actionLabel) { openSettings() }
+            primary(action.actionLabel) { SettingsNavigation.shared.showCodingAgent(openSettings: { openSettings() }) }
         case .reviewDecision, .reviewFeedback:
             primary(action.actionLabel) { openAttention(.feedback) }
         case .reviewHandoff, .reviewMerge, .reviewIssue:
             primary(action.actionLabel) { openAttention(.overview) }
         case .handleFeedback:
             primary(action.actionLabel, cta: .handleFeedback) {
-                guard confirmMRAction(.handleFeedback, title: action.actionLabel) else { return }
+                guard confirmMRAction(.handleFeedback, title: action.actionLabel, monitor: monitor) else { return }
                 start { await monitor.handleFeedbackManually(for: item) }
             }
         case .retryIntent:

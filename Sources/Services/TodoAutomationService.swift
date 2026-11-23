@@ -87,7 +87,7 @@ final class TodoAutomationService {
         if settings.automationReceipts.contains(key) { return rule.runner == .assistant ? .queuedForAssistant : .finished }
         if settings.automationAttemptReceipts.contains(key) { return .failed }
         guard rule.isConfigured, rule.includes(project: todo.project.pathWithNamespace),
-              rule.runner == .shell || available.contains(settings.automation.assistant)
+              rule.runner == .shell || settings.automation.selectedAssistant.map(available.contains) == true
         else { return nil }
         return .ready(rule.runner)
     }
@@ -126,7 +126,8 @@ final class TodoAutomationService {
         }
         guard !settings.automationAttemptReceipts.contains(key), !ineligible.contains(key) else { return false }
 
-        let assistant = rule.runner == .assistant ? settings.automation.assistant : nil
+        let assistant = rule.runner == .assistant ? settings.automation.selectedAssistant : nil
+        guard rule.runner != .assistant || assistant != nil else { return false }
         guard running.insert(key).inserted else { return false }
         defer { running.remove(key) }
         let workspace = assistant == nil ? "" : settings.automation.assistantWorkspace
@@ -148,7 +149,7 @@ final class TodoAutomationService {
         }
         guard isPending(),
               settings.automation[event] == rule,
-              assistant == nil || (settings.automation.assistant == assistant
+              assistant == nil || (settings.automation.selectedAssistant == assistant
                   && settings.automation.assistantWorkspace == workspace
                   && settings.automation.permitsAssistantTools(project: project) == invocation.allowTools)
         else { return false }
@@ -177,14 +178,14 @@ final class TodoAutomationService {
         let stackPosition = assistant == nil ? nil : await glab.stackPosition(for: work)
         guard isPending(), glab.accountRevision == accountRevision, settings.automation[event] == rule,
               manual || settings.automation.scope.resolve(target).active,
-              assistant == nil || (settings.automation.assistant == assistant
+              assistant == nil || (settings.automation.selectedAssistant == assistant
                   && settings.automation.assistantWorkspace == workspace
                   && settings.automation.permitsAssistantTools(project: project) == invocation.allowTools),
               assistant == nil || !AssistantAutomationRunner.isWorking(on: work)
         else { return false }
         if assistant == nil, !manual {
             let configuration = settings.automation
-            guard await canAutomate(configuration.assistant), !Task.isCancelled,
+            guard configuration.selectedAssistant != nil, await canAutomate(configuration.assistant), !Task.isCancelled,
                   settings.automation == configuration, isPending(),
                   settings.automation.scope.resolve(target).active else { return false }
         }

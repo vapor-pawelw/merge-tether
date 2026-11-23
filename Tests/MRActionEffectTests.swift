@@ -9,6 +9,7 @@ struct MRActionEffectTests {
     func aiIconsAreReservedForAIWork(_ cta: MRActionCTA) {
         let usesAI = cta.effect == .agent || cta.effect == .aiCheck
         #expect(Self.aiSymbols.contains(cta.symbol ?? "") == usesAI)
+        #expect(cta.requiresCodingAssistant == usesAI)
     }
 
     @Test(arguments: MRActionCTA.allCases)
