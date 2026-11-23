@@ -82,17 +82,61 @@ enum AssistantWorkerAudit {
         }
     }
 
-    static func recordChanges(since baseline: Snapshot, handoff: AssistantAutomationRunner.Handoff,
+    enum Verdict: Equatable {
+        case clean
+        case unexpected([AssistantJobExecution.RemoteEffect])
+        /// Comparable live evidence could not be read, so unattended writes cannot be shown to stay in bounds.
+        case unavailable
+    }
+
+    /// Compares the live MR with the pre-launch baseline and records any effects outside the run's allowances.
+    /// A missing baseline or an unreadable post-run state yields `.unavailable`.
+    @discardableResult
+    static func recordChanges(since baseline: Snapshot?, handoff: AssistantAutomationRunner.Handoff,
                               request: GitLabMergeRequest, user: GitLabAuthenticatedUser, accountRevision: UInt64,
-                              glab: GlabService, settings: SettingsManager) async {
-        guard let live = await capture(for: request, host: handoff.key.work.host, user: user,
-                                      accountRevision: accountRevision, glab: glab),
-              let index = activeRunIndex(handoff, in: settings) else { return }
-        let effects = live.effects(since: baseline, allowsPush: handoff.allowsPush || handoff.followUpPushAllowed == true,
+                              glab: GlabService, settings: SettingsManager,
+                              retryDelay: Duration = .seconds(2)) async -> Verdict {
+        guard let baseline else { return .unavailable }
+        var live = await capture(for: request, host: handoff.key.work.host, user: user,
+                                 accountRevision: accountRevision, glab: glab)
+        if live == nil, !Task.isCancelled {
+            try? await Task.sleep(for: retryDelay)
+            live = await capture(for: request, host: handoff.key.work.host, user: user,
+                                 accountRevision: accountRevision, glab: glab)
+        }
+        guard let live else { return .unavailable }
+        let effects = live.effects(since: baseline, allowsPush: AgentProcessEnvironment.pushPermitted(handoff),
                                    allowsOwnResolution: handoff.resolvesOwnThreads == true)
-        guard !effects.isEmpty else { return }
-        settings.assistantHandoffs[index].execution?.remoteEffects = effects
-        settings.save()
+        guard !effects.isEmpty else { return .clean }
+        if let index = activeRunIndex(handoff, in: settings) {
+            settings.assistantHandoffs[index].execution?.remoteEffects = effects
+            settings.save()
+        }
         Log.monitor.warning("Observed GitLab changes outside the allowances of worker run \(handoff.id.uuidString, privacy: .private)")
+        return .unexpected(effects)
+    }
+
+    /// Fails closed for unattended writes. Unexpected effects suspend all automation through the global
+    /// killswitch, which the user resumes explicitly; manual actions and user-started runs stay available.
+    /// Unavailable evidence does the same for unattended runs, while user-started runs keep their outcome.
+    /// Returns the error that should replace a successful outcome, or nil when the run stays within bounds.
+    static func enforce(_ verdict: Verdict, handoff: AssistantAutomationRunner.Handoff,
+                        settings: SettingsManager) -> AssistantJobExecutor.ExecutionError? {
+        let error: AssistantJobExecutor.ExecutionError
+        switch verdict {
+        case .clean: return nil
+        case .unexpected: error = .unexpectedRemoteEffects
+        case .unavailable:
+            guard handoff.manual != true else { return nil }
+            error = .auditUnavailable
+        }
+        suspendAutomaticWrites(settings)
+        return error
+    }
+
+    static func suspendAutomaticWrites(_ settings: SettingsManager) {
+        guard settings.automationGloballyEnabled, settings.configuredAutomationAvailable else { return }
+        settings.setAutomationGloballyEnabled(false)
+        Log.monitor.warning("Suspended automation after an unverifiable or out-of-bounds worker run")
     }
 }

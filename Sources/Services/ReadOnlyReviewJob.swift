@@ -135,7 +135,7 @@ struct ReadOnlyReviewJob {
         env["MERGETETHER_REVIEW_PORT"] = String(endpoint.port)
         env["MERGETETHER_REVIEW_SESSION"] = endpoint.token
         for key in ["TMPDIR", "TMP", "TEMP"] { env[key] = temporaryDirectory.path }
-        return env
+        return AgentProcessEnvironment.readOnly(env)
     }
 
     static func arguments(for assistant: AutomationAssistant, model: String?, helper: URL, schema: URL, result: URL,

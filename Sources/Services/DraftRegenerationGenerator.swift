@@ -72,7 +72,8 @@ enum DraftRegenerationGenerator {
                 "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#, "--setting-sources", "",
                 "--no-session-persistence", "--output-format", "json", "--json-schema", String(decoding: schema, as: UTF8.self)]
         }
-        let environment = GlabService.shellEnvironment.merging(AssistantCLI.environment) { _, assistantValue in assistantValue }
+        let environment = AgentProcessEnvironment.readOnly(
+            GlabService.shellEnvironment.merging(AssistantCLI.environment) { _, assistantValue in assistantValue })
         let output = try await AssistantUsageRunner.run(executable, arguments: arguments, environment: environment,
             currentDirectory: folder, timeout: 180, input: Data((prompt + "\n\n" + String(decoding: data, as: UTF8.self)).utf8),
             usage: .init(role: .codingAgent, assistant: assistant, model: model, mergeRequest: .init(host: input.host,

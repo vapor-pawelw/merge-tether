@@ -2,9 +2,11 @@ import Foundation
 
 /// Executable MR tasks have full CLI tool access. GitLab action authorization
 /// remains in their task instructions and the app's live policy/evidence checks.
+/// `pushPermitted` only selects the defense-in-depth Git push guard; it is not OS isolation.
 struct AssistantJobInvocation {
     let workspace: URL
     let evidenceRoot: URL
+    var pushPermitted = false
 
     var helperEvidenceDirectories: [URL] {
         ["verdicts", "ai-assessments", "follow-up-preflight", "follow-up-verifications", "follow-up-locks"]
@@ -24,7 +26,7 @@ struct AssistantJobInvocation {
             .replacingOccurrences(of: "\"", with: "\\\"")
         environment["JAVA_TOOL_OPTIONS"] = [base["JAVA_TOOL_OPTIONS"], "-Djava.io.tmpdir=\"\(javaTemporaryDirectory)\""]
             .compactMap { $0 }.joined(separator: " ")
-        return environment
+        return AgentProcessEnvironment.worker(environment, pushPermitted: pushPermitted)
     }
     var claudeTools: String { "default" }
     var claudeSettings: String { #"{"sandbox":{"enabled":false}}"# }

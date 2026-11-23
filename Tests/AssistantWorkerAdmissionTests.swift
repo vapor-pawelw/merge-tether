@@ -5,16 +5,30 @@ import Testing
 @MainActor
 struct AssistantWorkerAdmissionTests {
     @Test(arguments: AutomationAssistant.allCases, ["observed", "failed", "other-account", "changed-account", "allowed-resolution", "allowed-push", "missing-approvals"])
-    func recordsGitLabChangesAroundTheWorkerWithoutChangingItsOutcome(_ assistant: AutomationAssistant, _ scenario: String) async throws {
+    func unattendedWorkerAuditFailsClosedAndSuspendsAutomaticWrites(_ assistant: AutomationAssistant, _ scenario: String) async throws {
         let f = try Fixture(assistant: assistant, scenario: "audit-\(scenario)")
         defer { f.clean() }
+        #expect(f.settings.automationGloballyEnabled && f.settings.automaticPublicWritesAllowed)
+        let suspends = ["observed", "failed", "changed-account", "missing-approvals"].contains(scenario)
         do {
             let outcome = try await AssistantJobExecutor.execute(f.handoff, settings: f.settings,
                 glab: f.glab, pipelineWorkDetector: f.claims, detectCLI: { _ in .ready(f.cli) })
-            #expect(scenario != "failed" && outcome.result.status == .blocked)
-        } catch {
-            #expect(scenario == "failed" && error is AssistantJobFailure)
+            #expect(!suspends && outcome.result.status == .blocked)
+        } catch let failure as AssistantJobFailure {
+            #expect(suspends)
+            let expected: AssistantJobExecutor.ExecutionError? = switch scenario {
+            case "observed", "missing-approvals": .unexpectedRemoteEffects
+            case "changed-account": .auditUnavailable
+            default: nil
+            }
+            // A failed worker keeps its own error; only the out-of-bounds or unverifiable successes are replaced.
+            if let expected { #expect(failure.description == expected.description) }
+            else { #expect(failure.description.contains("CLI exit 12")) }
         }
+        #expect(f.settings.automationGloballyEnabled == !suspends)
+        #expect(f.settings.automaticPublicWritesAllowed == !suspends)
+        #expect(SettingsManager(defaults: f.defaults).automationGloballyEnabled == !suspends)
+        #expect(FileManager.default.fileExists(atPath: f.cli.path + ".started"))
 
         let saved = try #require(SettingsManager(defaults: f.defaults).assistantHandoffs.first?.execution)
         let effects = Set(saved.remoteEffects ?? [])
@@ -52,6 +66,24 @@ struct AssistantWorkerAdmissionTests {
         }
         #expect(FileManager.default.fileExists(atPath: f.cli.path + ".started") == allowed)
         if scenario.hasPrefix("late-") { #expect(f.baselineReads > 0) }
+    }
+
+    @Test(arguments: AutomationAssistant.allCases, [false, true])
+    func unreadableAuditBaselineBlocksOnlyUnattendedLaunches(_ assistant: AutomationAssistant, _ manual: Bool) async throws {
+        let f = try Fixture(assistant: assistant, scenario: manual ? "manual-baseline-unavailable" : "baseline-unavailable")
+        defer { f.clean() }
+        do {
+            let outcome = try await AssistantJobExecutor.execute(f.handoff, settings: f.settings,
+                glab: f.glab, pipelineWorkDetector: f.claims, detectCLI: { _ in .ready(f.cli) })
+            #expect(manual && outcome.result.status == .blocked)
+        } catch {
+            #expect(!manual)
+            #expect(error as? AssistantJobExecutor.ExecutionError == .auditUnavailable)
+        }
+        #expect(FileManager.default.fileExists(atPath: f.cli.path + ".started") == manual)
+        // Refusing to start needs no suspension: nothing ran without comparable evidence.
+        #expect(f.settings.automationGloballyEnabled)
+        #expect(f.gitlab.requests.allSatisfy { $0.method == "GET" })
     }
 
     @MainActor private final class Fixture {
@@ -159,6 +191,7 @@ struct AssistantWorkerAdmissionTests {
                     return try InMemoryGitLab.json(["id": workerRan && scenario == "audit-changed-account" ? 9 : 1, "username": "me"])
                 }
                 if call.endpoint == "/projects/7/merge_requests/11" {
+                    if scenario.hasSuffix("baseline-unavailable"), baselineReads > 0, !workerRan { throw GlabError.timedOut }
                     var payload: [String: Any] = ["project_id":7,"iid":11,"source_project_id":7,"target_project_id":7,
                         "author":["id":authored ? 1 : 2,"username":authored ? "me" : "other","name":"Author"],
                         "title":"Fixture","web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened",

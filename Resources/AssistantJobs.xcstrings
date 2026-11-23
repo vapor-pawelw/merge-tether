@@ -389,6 +389,30 @@
         },
         "pl": {"stringUnit": {"state": "translated", "value": "Bieżący stan merge requestu lub commit źródłowy są niedostępne. Automatyczna praca poczeka na kompletne dane z GitLaba."}}
       }
+    },
+    "assistant.jobs.error.auditUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MergeTether could not read comparable GitLab evidence around this automatic run, so automation is paused. Check the merge request, then resume automation."
+          }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "MergeTether nie mógł odczytać porównywalnych danych z GitLaba wokół tego automatycznego przebiegu, więc automatyzacja jest wstrzymana. Sprawdź merge request, a następnie wznów automatyzację."}}
+      }
+    },
+    "assistant.jobs.error.unexpectedRemoteEffects": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitLab changed outside this run’s permissions while the agent was working, so automation is paused. Review the listed changes, then resume automation."
+          }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "W trakcie pracy agenta GitLab zmienił się poza uprawnieniami tego przebiegu, więc automatyzacja jest wstrzymana. Przejrzyj wymienione zmiany, a następnie wznów automatyzację."}}
+      }
     }
   },
   "version": "1.0"

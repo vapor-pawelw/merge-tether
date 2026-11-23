@@ -209,9 +209,6 @@ enum AICommentOriginAssessor {
     }
 
     @MainActor private static var environment: [String: String] {
-        var result = AssistantCLI.environment
-        for (key, value) in GlabService.shellEnvironment { result[key] = value }
-        result["PATH"] = AssistantCLI.environment["PATH"]
-        return result
+        AgentProcessEnvironment.verifier
     }
 }
