@@ -6,7 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
-- Use roughly 12 pt above the title and 8 pt between the title and author on Mac and iPhone merge request cards.
+- Keep merge request messages beside the approvals and tags when they overlap vertically, and let messages below them use the full card width. Place bottom actions below both areas on Mac and iPhone.
+
+- Give the Mac card's More menu the same 24 pt square as the other action buttons and position the action row 12 pt from the top.
+
+- Keep approvals and tags in a right-aligned column with 4 pt between rows on Mac and iPhone merge request cards. Draft and Blocked share a row, and long titles wrap to the left. Match the visible top inset to the other card insets and keep about 8 pt between the repository reference and the title.
 
 - Add or remove reviewers from the approvals popover on Mac and iPhone. Search by name or GitLab username. Make the iPhone approvals badge more compact and keep its tap area within the badge.
 

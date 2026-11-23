@@ -29,6 +29,7 @@ private struct CommandCenterMRCardContent: View {
     @State private var confirmRemoval = false
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openSettings) private var openSettings
+    private let contentTopInset: CGFloat = 14
 
     private var item: MergeRequestAttentionMonitor.Item { row.item }
     private var isDraft: Bool { row.isDraft }
@@ -49,8 +50,7 @@ private struct CommandCenterMRCardContent: View {
     private var contentOpacity: Double { isDraft ? 0.5 : 1 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            cardContent
+        Group {
             if finishedState == nil {
                 MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext,
                     actionsBlocked: presentation.actionsBlocked || isStarting || finishingCommentReview,
@@ -59,6 +59,7 @@ private struct CommandCenterMRCardContent: View {
                     coveredBlockers: shownRequirements?.coveredBlockers ?? [],
                     hidesBlockedActions: presentation.working, highlightedSubmission: presentation.mergeStage?.submission,
                     statusTopPadding: humanAction == nil ? 0 : 8, statusOpacity: contentOpacity,
+                    statusLayout: MRCardStatusLayout(cardContent: cardContent, controls: metadataControls),
                     statusTrailer: { mergeActionStatus }) { hasDirectMergeAction in
                     if humanAction?.action == .retryRun {
                         Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
@@ -85,13 +86,18 @@ private struct CommandCenterMRCardContent: View {
                         .disabled(isStarting || finishingCommentReview || presentation.actionsBlocked || !item.canFinishCommentReview)
                     }
                 }
+            } else {
+                MRCardMetadataLayout {
+                    cardContent
+                    metadataControls.zIndex(1)
+                }
             }
         }
         .onChange(of: row.latestJob?.id) { _, _ in retryError = nil }
         .controlSize(.small)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding([.leading, .bottom, .trailing], 16)
-        .padding(.top, 12)
+        .padding(.top, contentTopInset)
         .overlay {
             RoundedRectangle(cornerRadius: 8).strokeBorder(.primary.opacity(0.14), lineWidth: 1)
                 .opacity(contentOpacity)
@@ -107,33 +113,27 @@ private struct CommandCenterMRCardContent: View {
         .environment(\.gitLabPersonSourceURL, row.displayURL)
     }
 
-    private var cardContent: some View {
+    @ViewBuilder private var cardContent: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // The title's line box adds space above the glyphs after the reference baseline.
-            VStack(alignment: .leading, spacing: 10) {
-                metadataHeader.zIndex(1)
-                VStack(alignment: .leading, spacing: 8) {
-                    Button(action: onDetails) {
-                        BoardCardTitle(title: row.displayTitle, repositoryPath: row.displayURL.gitLabProjectPath,
-                            titleColor: !isDraft && isMuted ? .secondary : .primary)
-                            .opacity(contentOpacity)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(Text(verbatim: "\(row.displayTitle)\n\(row.displayURL.gitLabProjectPath)\n") + Text(.Board.boardDetails))
-                    if let author = ReviewingContext(row: row).author {
-                        BoardCardAuthor(author: author, contentOpacity: contentOpacity)
-                    } else if allowsRemoval {
-                        PersonAvatar(url: nil, size: 16)
-                            .opacity(contentOpacity)
-                            .help(Text(.ReviewingContext.reviewingAuthorUnknown))
-                            .accessibilityLabel(Text(.ReviewingContext.reviewingAuthorUnknown))
-                    }
+            // The title's line box contributes about 2 pt above the glyphs.
+            VStack(alignment: .leading, spacing: 6) {
+                MRCardReferenceLayout {
+                    BoardMRReferenceLine(iid: item.id.iid, projectID: item.id.projectID,
+                        repositoryPath: row.displayURL.gitLabProjectPath, contentOpacity: contentOpacity)
                 }
+                Button(action: onDetails) {
+                    BoardCardTitle(title: row.displayTitle, repositoryPath: row.displayURL.gitLabProjectPath,
+                        titleColor: !isDraft && isMuted ? .secondary : .primary)
+                        .opacity(contentOpacity)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(Text(verbatim: "\(row.displayTitle)\n\(row.displayURL.gitLabProjectPath)\n") + Text(.Board.boardDetails))
             }
-            .padding(.bottom, 8)
-            cardStatus.opacity(contentOpacity)
+            author
         }
+        .padding(.bottom, 8)
+        cardStatus.opacity(contentOpacity)
     }
 
     private var cardStatus: some View {
@@ -205,28 +205,25 @@ private struct CommandCenterMRCardContent: View {
 
     @ViewBuilder private var attentionAndDrafts: some View {
         let drafts = presentation.working ? nil : MRPendingDraftsSummary(item: item)
-        if humanAction != nil || drafts != nil {
-            VStack(alignment: .leading, spacing: 16) {
-                if humanAction != nil {
-                    MergeRequestAttentionCallout(message: presentation.message)
-                        .font(.callout.weight(.medium))
-                        .lineLimit(3)
-                        .help(Text(verbatim: presentation.message))
-                }
-                if let drafts {
-                    Label {
-                        Group {
-                            if let message = drafts.peopleMessage { PeopleMessageLabel(message: message) }
-                            else { Text(drafts.message) }
-                        }.foregroundStyle(isMuted ? Color.secondary : Color.primary)
-                    } icon: {
-                        Image(systemName: "text.bubble").foregroundStyle(.secondary)
-                    }
-                    .font(.callout)
-                    .fixedSize(horizontal: false, vertical: true)
-                }
+        if humanAction != nil {
+            MergeRequestAttentionCallout(message: presentation.message)
+                .font(.callout.weight(.medium))
+                .lineLimit(3)
+                .help(Text(verbatim: presentation.message))
+        }
+        if let drafts {
+            Label {
+                Group {
+                    if let message = drafts.peopleMessage { PeopleMessageLabel(message: message) }
+                    else { Text(drafts.message) }
+                }.foregroundStyle(isMuted ? Color.secondary : Color.primary)
+            } icon: {
+                Image(systemName: "text.bubble").foregroundStyle(.secondary)
             }
+            .font(.callout)
+            .fixedSize(horizontal: false, vertical: true)
             .labelStyle(BoardCardStatusLabelStyle())
+            .layoutValue(key: MRCardContentSpacing.self, value: humanAction != nil ? 16 : 8)
         }
     }
 
@@ -235,7 +232,7 @@ private struct CommandCenterMRCardContent: View {
             automationHolds
         } else {
             VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 5) {
+                StatusFlowLayout(spacing: 5) {
                     ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
                         BoardStatusChip(title: chip.title, symbol: chip.symbol)
                     }
@@ -257,38 +254,49 @@ private struct CommandCenterMRCardContent: View {
             : Color(red: 0.38, green: 0.27, blue: 0.52)
     }
 
-    private var metadataHeader: some View {
-        MRCardMetadataLayout {
-            BoardMRReferenceLine(iid: item.id.iid, projectID: item.id.projectID,
-                repositoryPath: row.displayURL.gitLabProjectPath, contentOpacity: contentOpacity)
-                .padding(.top, 4)
-            metadataControls.fixedSize(horizontal: true, vertical: false)
+    @ViewBuilder
+    private var author: some View {
+        if let author = ReviewingContext(row: row).author {
+            BoardCardAuthor(author: author, contentOpacity: contentOpacity)
+        } else if allowsRemoval {
+            PersonAvatar(url: nil, size: 16)
+                .opacity(contentOpacity)
+                .help(Text(.ReviewingContext.reviewingAuthorUnknown))
+                .accessibilityLabel(Text(.ReviewingContext.reviewingAuthorUnknown))
         }
     }
 
     private var metadataControls: some View {
-        HStack(spacing: 6) {
-            if let dependencies = RemoteMRDependencies(summary: row.displayItem.dependencies, projectID: item.id.projectID) {
-                MRDependencyBadge(dependencies: dependencies)
-            }
-            if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
-            else if isDraft { BoardDraftBadge(tint: draftBadgeTint) }
+        VStack(alignment: .trailing, spacing: 4) {
+            cardActions
             if finishedState == nil {
                 BoardMRApprovalBadge(row: row, monitor: monitor)
             }
-            HStack(spacing: 0) {
-                if finishedState == nil, let scopeTarget {
-                    BoardAutomationToggle(monitor: monitor, target: scopeTarget,
-                        projectPath: item.url.gitLabProjectPath, isDraft: isDraft,
-                        policy: MREffectivePolicySummary.presentation(row: row, monitor: monitor).0)
+            HStack(spacing: 8) {
+                if let dependencies = RemoteMRDependencies(summary: row.displayItem.dependencies, projectID: item.id.projectID) {
+                    MRDependencyBadge(dependencies: dependencies)
                 }
-                BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
-                    username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
-                    settings: monitor.settings)
-                CopyMergeRequestLinkButton(url: item.url, placement: .header)
-                moreMenu
+                if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
+                else if isDraft { BoardDraftBadge(tint: draftBadgeTint) }
             }
         }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var cardActions: some View {
+        HStack(spacing: 0) {
+            if finishedState == nil, let scopeTarget {
+                BoardAutomationToggle(monitor: monitor, target: scopeTarget,
+                    projectPath: item.url.gitLabProjectPath, isDraft: isDraft,
+                    policy: MREffectivePolicySummary.presentation(row: row, monitor: monitor).0)
+            }
+            BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
+                username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
+                settings: monitor.settings)
+            CopyMergeRequestLinkButton(url: item.url, placement: .header)
+            moreMenu
+        }
+        .offset(y: 12 - contentTopInset)
     }
 
     private var reviewingContext: ReviewingContext { presentation.reviewingContext }

@@ -328,25 +328,22 @@ struct RemoteCardView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 16) {
-                header
-                if let date = inboxUpdateDate {
-                    HStack(alignment: .bottom) {
-                        VStack(alignment: .leading, spacing: 16) {
-                            cardInformation
-                            InboxUpdateTimestamp(date: date)
-                        }
-                        if showsActions { cardActions }
+            if expanded {
+                VStack(alignment: .leading, spacing: 16) {
+                    expandedHeader.frame(maxWidth: .infinity, alignment: .leading)
+                    if !card.detail.isEmpty || hasSupportingInformation {
+                        VStack(alignment: .leading, spacing: 8) { informationRows }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                } else {
-                    cardInformation
                 }
-            }
-            if inboxUpdateDate == nil, showsActions {
-                HStack { cardActions }
+            } else {
+                compactContent
+                if showsActions { HStack { cardActions } }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading).padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding([.horizontal, .bottom], 16)
+        .padding(.top, expanded ? 16 : 14)
         .background(Color(uiColor: .secondarySystemGroupedBackground).opacity(contentOpacity),
                     in: RoundedRectangle(cornerRadius: 16))
         .modifier(RemoteCardInteraction(onOpen: onOpen))
@@ -358,10 +355,6 @@ struct RemoteCardView: View {
                 .allowsHitTesting(false)
         }
         .environment(\.gitLabPersonSourceURL, card.url)
-    }
-    @ViewBuilder
-    private var cardInformation: some View {
-        if !card.detail.isEmpty || hasSupportingInformation { content.opacity(contentOpacity) }
     }
     @ViewBuilder
     private var cardActions: some View {
@@ -401,14 +394,41 @@ struct RemoteCardView: View {
                 .accessibilityIdentifier("remote.cta.\(card.id)")
         }
     }
-    private var header: some View {
+    private var compactContent: some View {
+        MRCardMetadataLayout {
+            VStack(alignment: .leading, spacing: 8) {
+                MRCardReferenceLayout { repositoryReference }
+                title.opacity(contentOpacity)
+                author
+            }
+            .padding(.bottom, !card.detail.isEmpty || hasSupportingInformation ? 8 : 0)
+            informationRows.opacity(contentOpacity)
+            if let date = inboxUpdateDate {
+                InboxUpdateTimestamp(date: date)
+                    .layoutValue(key: MRCardContentSpacing.self, value: 16)
+            }
+            VStack(alignment: .trailing, spacing: 4) {
+                approvalBadge
+                HStack(spacing: 8) {
+                    if let dependencies = card.dependencies {
+                        MRDependencyBadge(dependencies: dependencies)
+                    }
+                    draftBadge
+                }
+            }
+            .font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: true, vertical: false)
+            .zIndex(1)
+        }
+    }
+
+    private var expandedHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: expanded ? 6 : 12) {
-                if expanded { repositoryReference }
-                else { compactMetadata.zIndex(1) }
+            VStack(alignment: .leading, spacing: 6) {
+                repositoryReference
                 VStack(alignment: .leading, spacing: 4) {
                     title
-                    if expanded, let branches {
+                    if let branches {
                         Label { Text(verbatim: branches.source + " → " + branches.target) } icon: {
                             Image(systemName: "arrow.triangle.branch")
                         }
@@ -418,31 +438,21 @@ struct RemoteCardView: View {
                     }
                 }.opacity(contentOpacity)
             }
-            if expanded {
-                MergeRequestDescription(source: mergeRequestDescription, title: .RemoteDetail.remoteDetailDescription,
-                    expandHint: .RemoteDetail.remoteDetailExpandDescription, collapseHint: .RemoteDetail.remoteDetailCollapseDescription)
-                if card.presentation?.author != nil || card.presentation?.draftBadge != nil || card.id.hasPrefix("mr:") {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 8) {
-                            author
-                            Spacer(minLength: 0)
-                            badges
-                        }
-                        VStack(alignment: .leading, spacing: 8) {
-                            author
-                            badges
-                        }
+            MergeRequestDescription(source: mergeRequestDescription, title: .RemoteDetail.remoteDetailDescription,
+                expandHint: .RemoteDetail.remoteDetailExpandDescription, collapseHint: .RemoteDetail.remoteDetailCollapseDescription)
+            if card.presentation?.author != nil || card.presentation?.draftBadge != nil || card.id.hasPrefix("mr:") {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        author
+                        Spacer(minLength: 0)
+                        detailBadges
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        author
+                        detailBadges
                     }
                 }
-            } else {
-                author
             }
-        }.frame(maxWidth: .infinity, alignment: .leading)
-    }
-    private var compactMetadata: some View {
-        MRCardMetadataLayout {
-            repositoryReference.padding(.top, 3)
-            badges.fixedSize(horizontal: true, vertical: false)
         }
     }
     private var repositoryReference: some View {
@@ -470,28 +480,33 @@ struct RemoteCardView: View {
                 .opacity(contentOpacity)
         }
     }
-    private var badges: some View {
+    private var detailBadges: some View {
         HStack(spacing: 6) {
-            if !expanded, let dependencies = card.dependencies {
-                MRDependencyBadge(dependencies: dependencies)
-            }
-            if let badge = card.presentation?.draftBadge {
-                let tint = showsDraftStyle ? draftBadgeTint : Color.secondary
-                Text(verbatim: badge).fontWeight(.medium)
-                    .foregroundStyle(tint)
-                    .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(tint.opacity(showsDraftStyle ? 0.1 : 0.08), in: Capsule())
-            }
-            if card.id.hasPrefix("mr:") {
-                RemoteApprovalProgressBadge(progress: card.approvals, people: card.presentation?.approvalPeople,
-                    viewerApprovalID: card.presentation?.viewerApprovalID,
-                    assignedReviewerCount: card.presentation?.assignedReviewerCount,
-                    approvedWithOpenFindings: card.presentation?.approvedWithOpenFindings == true,
-                    personalApproval: card.personalApprovalControl(model: actionsModel),
-                    reviewerEditing: card.reviewerEditing(model: actionsModel),
-                    automaticApprovalOff: card.presentation?.automaticApprovalOff == true)
-            }
+            draftBadge
+            approvalBadge
         }.font(.caption).foregroundStyle(.secondary)
+    }
+    @ViewBuilder
+    private var draftBadge: some View {
+        if let badge = card.presentation?.draftBadge {
+            let tint = showsDraftStyle ? draftBadgeTint : Color.secondary
+            Text(verbatim: badge).fontWeight(.medium)
+                .foregroundStyle(tint)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(tint.opacity(showsDraftStyle ? 0.1 : 0.08), in: Capsule())
+        }
+    }
+    @ViewBuilder
+    private var approvalBadge: some View {
+        if card.id.hasPrefix("mr:") {
+            RemoteApprovalProgressBadge(progress: card.approvals, people: card.presentation?.approvalPeople,
+                viewerApprovalID: card.presentation?.viewerApprovalID,
+                assignedReviewerCount: card.presentation?.assignedReviewerCount,
+                approvedWithOpenFindings: card.presentation?.approvedWithOpenFindings == true,
+                personalApproval: card.personalApprovalControl(model: actionsModel),
+                reviewerEditing: card.reviewerEditing(model: actionsModel),
+                automaticApprovalOff: card.presentation?.automaticApprovalOff == true)
+        }
     }
     private var hasSupportingInformation: Bool {
         card.presentation?.requirements?.isEmpty == false || card.visibleStatus != nil
@@ -499,8 +514,8 @@ struct RemoteCardView: View {
             || card.presentation?.steps?.isEmpty == false || card.visibleNextStep != nil
             || !(card.presentation?.chips.isEmpty ?? card.drafts.isEmpty)
     }
-    private var content: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private var informationRows: some View {
+        Group {
             if !card.detail.isEmpty {
                 if card.needsAttention == true {
                     MergeRequestAttentionCallout(message: card.detail)
@@ -574,7 +589,7 @@ struct RemoteCardView: View {
             } else if !card.drafts.isEmpty, card.presentation?.pendingDrafts == nil {
                 Label(.Remote.remoteComments, systemImage: "text.bubble").font(.caption).foregroundStyle(.tint)
             }
-        }.frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
     private var requirementPeopleMessage: RemotePeopleMessage? {
         if let message = card.presentation?.requirementPeopleMessage { return message }

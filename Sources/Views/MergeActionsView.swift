@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Status and results precede the shared action row on both cards and Details.
-struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
+struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, AdditionalActions: View>: View {
     let item: MergeRequestAttentionMonitor.Item
     let monitor: TodoMonitorService
     var evidenceMatchesCatalogContext = true
@@ -22,6 +22,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
     var highlightedSubmission: MergeSubmissionState? = nil
     var statusTopPadding: CGFloat
     var statusOpacity: Double
+    var statusLayout: StatusLayout
     var statusTrailer: () -> StatusTrailer
     var additionalActions: (Bool) -> AdditionalActions
     @Environment(\.openURL) private var openURL
@@ -45,6 +46,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
          textFont: Font = .subheadline, coveredBlockers: Set<MergeRequestBlocker> = [],
          hidesBlockedActions: Bool = false, highlightedSubmission: MergeSubmissionState? = nil,
          statusTopPadding: CGFloat = 0, statusOpacity: Double = 1,
+         statusLayout: StatusLayout = EmptyModifier(),
          @ViewBuilder statusTrailer: @escaping () -> StatusTrailer,
          @ViewBuilder additionalActions: @escaping (Bool) -> AdditionalActions) {
         self.item = item; self.monitor = monitor
@@ -59,6 +61,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
         self.highlightedSubmission = highlightedSubmission
         self.statusTopPadding = statusTopPadding
         self.statusOpacity = statusOpacity
+        self.statusLayout = statusLayout
         self.statusTrailer = statusTrailer; self.additionalActions = additionalActions
     }
 
@@ -119,15 +122,19 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if owned, hasStatusText {
-                VStack(alignment: .leading, spacing: 5) { statusText }
-                    .font(textFont)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .modifier(MRDetailStatusCard(isPresented: showsStatusCard))
-                    .padding(.top, statusTopPadding)
-                    .opacity(statusOpacity)
+            Group {
+                if owned, hasStatusText {
+                    VStack(alignment: .leading, spacing: 5) { statusText }
+                        .font(textFont)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .modifier(MRDetailStatusCard(isPresented: showsStatusCard))
+                        .padding(.top, statusTopPadding)
+                        .opacity(statusOpacity)
+                }
+                statusTrailer().opacity(statusOpacity)
             }
-            statusTrailer().opacity(statusOpacity)
+            .font(.caption)
+            .modifier(statusLayout)
             HStack(spacing: 8) {
                 if owned {
                     if let action = directMergeAction, let request = item.mergeRequest {
@@ -159,8 +166,8 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
                 }
                 additionalActions(directMergeAction != nil && !actionsBlocked && !working)
             }
+            .font(.caption)
         }
-        .font(.caption)
         .onChange(of: item.mergeRequest?.sha) { _, _ in
             result = nil
         }
@@ -323,7 +330,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
     }
 }
 
-extension MergeActionsView where StatusTrailer == EmptyView {
+extension MergeActionsView where StatusLayout == EmptyModifier, StatusTrailer == EmptyView {
     init(item: MergeRequestAttentionMonitor.Item, monitor: TodoMonitorService, evidenceMatchesCatalogContext: Bool = true,
          actionsBlocked: Bool = false, onReviewFeedback: (() -> Void)? = nil, showsExplanations: Bool = true,
          textFont: Font = .subheadline, @ViewBuilder additionalActions: @escaping () -> AdditionalActions) {
@@ -333,7 +340,7 @@ extension MergeActionsView where StatusTrailer == EmptyView {
     }
 }
 
-extension MergeActionsView where StatusTrailer == EmptyView, AdditionalActions == EmptyView {
+extension MergeActionsView where StatusLayout == EmptyModifier, StatusTrailer == EmptyView, AdditionalActions == EmptyView {
     init(item: MergeRequestAttentionMonitor.Item, monitor: TodoMonitorService, evidenceMatchesCatalogContext: Bool = true,
          actionsBlocked: Bool = false, onReviewFeedback: (() -> Void)? = nil, showsExplanations: Bool = true,
          textFont: Font = .subheadline) {

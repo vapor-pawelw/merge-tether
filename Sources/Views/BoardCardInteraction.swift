@@ -28,7 +28,7 @@ struct BoardActionsMenu<Content: View>: View {
         Menu(content: content) {
             BoardCardActionIcon(systemName: "ellipsis")
         }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
         .boardHeaderControlHover()
         .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
         .help(Text(.CommandCenter.commandCenterActions))
