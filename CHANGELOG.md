@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Stop asking for a review on merge requests you already approved: your current approval, given anywhere, accepts the code and discussions seen so far until the head or MR text changes.
+
 - Move **Run setup again** to General settings, below the coding agent picker.
 
 - Edit or restore the AI comment assessment prompt in Advanced automation settings.

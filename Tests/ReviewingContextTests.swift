@@ -26,6 +26,27 @@ struct ReviewingContextTests {
               execution: .init(state: state), workflow: .review, expectedHeadSHA: "abc")
     }
 
+    @Test func ownCurrentApprovalAcceptsObservedHeadButNotLaterChanges() throws {
+        typealias Baseline = MergeRequestAttentionMonitor.ApprovalBaseline
+        var progress = try #require(MergeRequestApprovalProgress(completed: 1, required: 2))
+        progress.currentApproverIDs = [5]
+        let first = Date(timeIntervalSince1970: 100)
+        progress.approvalDates[5] = first
+        let baseline = Baseline(head: "abc", semanticContext: "ctx", approvedAt: first)
+        // First sighting and unchanged head, even with open remarks, need no re-review.
+        #expect(Baseline.accepts(baseline: nil, progress: progress, userID: 5, head: "abc", semanticContext: "ctx"))
+        #expect(Baseline.accepts(baseline: baseline, progress: progress, userID: 5, head: "abc", semanticContext: "ctx"))
+        // A new head or edited MR text brings the review back until the reviewer approves again.
+        #expect(!Baseline.accepts(baseline: baseline, progress: progress, userID: 5, head: "def", semanticContext: "ctx"))
+        #expect(!Baseline.accepts(baseline: baseline, progress: progress, userID: 5, head: "abc", semanticContext: "new"))
+        progress.approvalDates[5] = Date(timeIntervalSince1970: 200)
+        #expect(Baseline.accepts(baseline: baseline, progress: progress, userID: 5, head: "def", semanticContext: "ctx"))
+        // Someone else's approval, or a withdrawn one, never accepts.
+        #expect(!Baseline.accepts(baseline: nil, progress: progress, userID: 6, head: "abc", semanticContext: "ctx"))
+        progress.currentApproverIDs = []
+        #expect(!Baseline.accepts(baseline: nil, progress: progress, userID: 5, head: "abc", semanticContext: "ctx"))
+    }
+
     @Test func detailsShowOneTaskRowPerKindPreferringRunningThenFailedWork() throws {
         let request = try request()
         func intent(_ kind: MRTodoIntent.Kind, _ state: MRTodoIntent.State) -> MRTodoIntent {
