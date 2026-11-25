@@ -6,7 +6,7 @@ struct CommandCenterAddMergeRequestView: View {
     @State private var address = ""
     @State private var selectedProjectID: Int?
     @State private var isAdding = false
-    @State private var addFailed = false
+    @State private var addError: LocalizedStringResource?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -23,12 +23,13 @@ struct CommandCenterAddMergeRequestView: View {
                 } label: { Text(.Menu.menuMrRepository) }
                 .disabled(isAdding)
             }
-            if addFailed { Text(.Menu.menuMrAddFailed).font(.caption).foregroundStyle(.orange) }
+            if let addError { Text(addError).font(.caption).foregroundStyle(.orange) }
             HStack {
                 Spacer()
                 Button(role: .cancel) { dismiss() } label: { Text(.Menu.menuScopeCancel) }
                     .keyboardShortcut(.cancelAction).disabled(isAdding)
                 Button {
+                    addError = nil
                     isAdding = true
                     Task {
                         defer { isAdding = false }
@@ -36,7 +37,11 @@ struct CommandCenterAddMergeRequestView: View {
                             _ = try await monitor.addManagedMergeRequest(from: address,
                                 projectID: usesNumericAddress ? selectedProjectID : nil)
                             dismiss()
-                        } catch { addFailed = true }
+                        } catch let finished as MergeRequestFinishedState {
+                            addError = finished == .merged ? .Menu.menuMrAddMerged : .Menu.menuMrAddClosed
+                        } catch {
+                            addError = .Menu.menuMrAddFailed
+                        }
                     }
                 } label: {
                     if isAdding { ProgressView().controlSize(.small) }
@@ -49,6 +54,8 @@ struct CommandCenterAddMergeRequestView: View {
         }
         .padding(24).frame(width: 480)
         .onAppear { if repositories.count == 1 { selectedProjectID = repositories.first?.id } }
+        .onChange(of: address) { _, _ in addError = nil }
+        .onChange(of: selectedProjectID) { _, _ in addError = nil }
     }
 
     private var usesNumericAddress: Bool {

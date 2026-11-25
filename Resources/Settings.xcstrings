@@ -42,19 +42,26 @@
         }
       }
     },
+    "settings.hiddenReviews.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Restore open merge requests within 3 days of hiding them. After that, use + on the board to add them again."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwarte MR-y możesz przywrócić w ciągu 3 dni od ukrycia. Później możesz je dodać ponownie przyciskiem + na tablicy."}}
+      }
+    },
     "settings.hiddenReviews.empty": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No hidden merge requests."
+            "value": "No merge requests to restore."
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Brak ukrytych MR-ów."
+            "value": "Brak MR-ów do przywrócenia."
           }
         }
       }

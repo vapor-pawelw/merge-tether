@@ -706,10 +706,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Hide this merge request from Reviewing. To restore it on the Mac, open Settings → Merge requests → Hidden merge requests."
+            "value": "Hide this merge request from Reviewing. You can restore it for 3 days in Settings → Merge requests → Hidden merge requests on the Mac while it’s open. After that, use + on the Mac to add an open merge request again."
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Ukryj ten MR w kolumnie Do przeglądu. Aby go przywrócić na Macu, otwórz Ustawienia → Merge requesty → Ukryte MR-y."}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Ukryj ten MR w kolumnie „Do przeglądu”. Jeśli nadal jest otwarty, przez 3 dni możesz go przywrócić na Macu w Ustawieniach → Merge requesty → Ukryte MR-y. Po tym czasie otwarty MR możesz dodać ponownie przyciskiem + na Macu."}}
       }
     },
     "board.intent.review": {

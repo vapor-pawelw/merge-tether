@@ -257,6 +257,8 @@ struct ReviewAssignmentLedger: Codable, Sendable {
 }
 
 struct HiddenReview: Codable, Identifiable, Sendable {
+    static let restorationInterval: TimeInterval = 3 * 24 * 60 * 60
+
     struct InboxNotification: Codable, Equatable, Sendable {
         let id: UUID
         let observedAt: Date
@@ -269,6 +271,7 @@ struct HiddenReview: Codable, Identifiable, Sendable {
     var inboxNotification: InboxNotification? = nil
     var hideID: UUID? = nil
     var manuallyHidden: Bool? = nil
+    var restoreUntil: Date? = nil
     var id: MRAutomationScope.Target { target }
 }
 
@@ -278,8 +281,9 @@ struct HiddenMergeRequests: Codable {
         didSet { details = details.filter { targets.contains($0.key) } }
     }
     var details: [Target: HiddenReview] = [:]
+    var legacyRestoreUntil: Date?
 
-    private enum CodingKeys: String, CodingKey { case targets, details }
+    private enum CodingKeys: String, CodingKey { case targets, details, legacyRestoreUntil }
 
     init() {}
 
@@ -291,6 +295,7 @@ struct HiddenMergeRequests: Codable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         targets = try values.decode(Set<Target>.self, forKey: .targets)
         details = try values.decode([Target: HiddenReview].self, forKey: .details)
+        legacyRestoreUntil = try values.decodeIfPresent(Date.self, forKey: .legacyRestoreUntil)
         guard details.allSatisfy({ target, review in
             targets.contains(target) && target == review.target && target.projectID > 0
                 && target.iid.map { review.url.isGitLabMergeRequest(host: target.host, iid: $0) } == true
@@ -300,7 +305,7 @@ struct HiddenMergeRequests: Codable {
     }
 
     func encode(to encoder: Encoder) throws {
-        if details.isEmpty {
+        if details.isEmpty, legacyRestoreUntil == nil {
             var values = encoder.singleValueContainer()
             try values.encode(targets)
             return
@@ -308,5 +313,21 @@ struct HiddenMergeRequests: Codable {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(targets, forKey: .targets)
         try values.encode(details, forKey: .details)
+        try values.encodeIfPresent(legacyRestoreUntil, forKey: .legacyRestoreUntil)
+    }
+
+    mutating func migrateRestorationDeadlines(now: Date) -> Bool {
+        let deadline = now.addingTimeInterval(HiddenReview.restorationInterval)
+        var changed = false
+        for (target, review) in details where review.restoreUntil == nil {
+            details[target]?.restoreUntil = review.inboxNotification?.observedAt
+                .addingTimeInterval(HiddenReview.restorationInterval) ?? deadline
+            changed = true
+        }
+        if legacyRestoreUntil == nil, targets.count > details.count {
+            legacyRestoreUntil = deadline
+            changed = true
+        }
+        return changed
     }
 }

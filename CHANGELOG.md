@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Restore hidden reviews for three days while they are open. Add an expired open review again with **+**, which now explains when an MR is already merged or closed.
+
+- Remember **Don't ask again** when hiding a merge request from the Reviewing menu on Mac.
+
 - Show smaller ChatGPT and Claude glyphs on AI actions and activity on Mac and iOS. The ChatGPT provider uses Codex CLI.
 
 - Match the ChatGPT and Claude icons in the Agent settings tab to the size of neighboring icons.

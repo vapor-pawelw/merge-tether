@@ -20,7 +20,7 @@ RELAY_PREFIXES = ("Services/RemoteRelay/", "prototypes/remote-relay/")
 GROUPS = {
     "usage": ["AssistantUsageTests", "AssistantUsageStoreTests", "AssistantUsageRunnerTests",
               "AssistantJobSnapshotTests", "AssistantJobInvocationTests"],
-    "presentation": ["MRBoardGroupingTests", "MRHumanActionTests", "MRProgressPresentationTests",
+    "presentation": ["MRBoardGroupingTests", "MRHumanActionTests", "MRProgressPresentationTests", "NewReviewIntakeTests",
                      "MergeRequestBoardSnapshotTests", "InboxSnapshotTests", "RemoteBoardAdapterTests",
                      "ConfirmedAttentionSnapshotTests", "UserAttentionTests", "ReviewingContextTests",
                      "BoardRefreshStateTests", "BoardCardPinTests", "InboxTodoStoreTests",

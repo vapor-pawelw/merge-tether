@@ -1,7 +1,7 @@
 import Foundation
 import MergeTetherRemote
 
-enum MergeRequestFinishedState: String {
+enum MergeRequestFinishedState: String, Error {
     case merged, closed
 
     init?(_ request: GitLabMergeRequest?) {

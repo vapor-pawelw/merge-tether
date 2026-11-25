@@ -57,7 +57,6 @@ private struct CommandCenterMRDetailContent: View {
     @State private var reviewStartError: String?
     @State private var isRetrying = false
     @State private var retryError: String?
-    @State private var confirmRemoval = false
     @State private var isResettingReview = false
     @State private var discussionStore = MRDiscussionStore()
     @State private var publicationSession = DraftPublicationSession()
@@ -363,9 +362,6 @@ private struct CommandCenterMRDetailContent: View {
             .alert(Text(.MRDiscussions.mrDiscussionsOriginChangeFailed), isPresented: $originChangeFailed) {
                 Button(role: .cancel) {} label: { Text(.MRDiscussions.mrDiscussionsOriginCancel) }
             } message: { Text(.MRDiscussions.mrDiscussionsOriginChangeFailedMessage) }
-            .confirmationDialog(Text(.Board.boardReviewAssignmentHide), isPresented: $confirmRemoval, titleVisibility: .visible) {
-                Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardReviewAssignmentHide) }
-            } message: { Text(.Board.boardReviewAssignmentHideExplanation) }
             .sheet(item: $regenerationPresentation) { monitor.draftRegenerationSheet($0) }
             .environment(\.gitLabPersonSourceURL, item.url)
         }
@@ -564,7 +560,7 @@ private struct CommandCenterMRDetailContent: View {
     private var headerMenu: some View {
         BoardActionsMenu {
             MRCommonMenuItems(item: item, monitor: monitor,
-                onRemove: isReviewed ? { confirmRemoval = true } : nil)
+                onRemove: isReviewed ? { monitor.removeReviewedMergeRequest(item) } : nil)
         }
     }
 

@@ -11,15 +11,15 @@
     "remoteCardActions.hiddenReviewsEmpty": {
       "extractionState": "manual",
       "localizations": {
-        "en": {"stringUnit": {"state": "translated", "value": "No hidden merge requests."}},
-        "pl": {"stringUnit": {"state": "translated", "value": "Brak ukrytych MR-ów."}}
+        "en": {"stringUnit": {"state": "translated", "value": "No merge requests to restore."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak MR-ów do przywrócenia."}}
       }
     },
     "remoteCardActions.hideReviewExplanation": {
       "extractionState": "manual",
       "localizations": {
-        "en": {"stringUnit": {"state": "translated", "value": "Hide this merge request from Reviewing. You can restore it from Hidden merge requests in Reviewing."}},
-        "pl": {"stringUnit": {"state": "translated", "value": "Ukryj ten MR w kolumnie „Do przeglądu”. Możesz go przywrócić z listy ukrytych MR-ów w tej kolumnie."}}
+        "en": {"stringUnit": {"state": "translated", "value": "Hide this merge request from Reviewing. You can restore it from Hidden merge requests in Reviewing for 3 days while it’s open. After that, use + on the Mac to add an open merge request again."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Ukryj ten MR w kolumnie „Do przeglądu”. Jeśli nadal jest otwarty, przez 3 dni możesz go przywrócić z listy ukrytych MR-ów w tej kolumnie. Po tym czasie otwarty MR możesz dodać ponownie przyciskiem + na Macu."}}
       }
     },
     "remoteCardActions.approval": {

@@ -991,7 +991,7 @@ final class TodoMonitorService {
 
     struct ReviewRemoval: Identifiable {
         let id = UUID()
-        let reviews: [HiddenReview]
+        var reviews: [HiddenReview]
         let automatic: Bool
         let accountRevision: UInt64
     }
@@ -999,7 +999,12 @@ final class TodoMonitorService {
     private var reviewRemoval: ReviewRemoval?
     private var automaticReviewRemoval: ReviewRemoval?
     var undoableReviewRemovals: [ReviewRemoval] {
-        [reviewRemoval, automaticReviewRemoval].compactMap { $0 }.filter { $0.accountRevision == glab.accountRevision }
+        let now = hiddenReviewDisplayTime
+        return [reviewRemoval, automaticReviewRemoval].compactMap { removal in
+            guard var removal, removal.accountRevision == glab.accountRevision else { return nil }
+            removal.reviews = removal.reviews.filter { isCurrentRestorableHide($0, now: now) }
+            return removal.reviews.isEmpty ? nil : removal
+        }
     }
 
     func dismissReviewRemoval(_ id: UUID) {
@@ -1009,19 +1014,21 @@ final class TodoMonitorService {
 
     private func announceHiddenReviews(_ reviews: [HiddenReview], automatic: Bool) {
         let revision = glab.accountRevision
+        let currentHides = reviews.compactMap { settings.hiddenReviewDetails[$0.target] }
+        guard !currentHides.isEmpty else { return }
         if automatic {
             let previous = automaticReviewRemoval.flatMap { $0.accountRevision == revision ? $0.reviews : nil } ?? []
-            let newTargets = Set(reviews.map(\.target))
-            automaticReviewRemoval = .init(reviews: previous.filter { !newTargets.contains($0.target) } + reviews,
+            let newTargets = Set(currentHides.map(\.target))
+            automaticReviewRemoval = .init(reviews: previous.filter { !newTargets.contains($0.target) } + currentHides,
                 automatic: true, accountRevision: revision)
         } else {
-            reviewRemoval = .init(reviews: reviews, automatic: false, accountRevision: revision)
+            reviewRemoval = .init(reviews: currentHides, automatic: false, accountRevision: revision)
         }
     }
 
     func undoReviewRemoval(_ removal: ReviewRemoval) {
-        guard undoableReviewRemovals.contains(where: { $0.id == removal.id }) else { return }
-        if restoreReviewedMergeRequests(removal.reviews) { dismissReviewRemoval(removal.id) }
+        guard let current = undoableReviewRemovals.first(where: { $0.id == removal.id }) else { return }
+        if restoreReviewedMergeRequests(current.reviews) { dismissReviewRemoval(removal.id) }
     }
 
     @discardableResult
@@ -1037,10 +1044,23 @@ final class TodoMonitorService {
         return assignmentSeen || candidateSeen
     }
 
+    private var hiddenReviewDisplayTime: Date {
+        // A refresh invalidates time-based projections even if GitLab has no new data.
+        _ = isLoading
+        return .now
+    }
+
+    private func isCurrentRestorableHide(_ review: HiddenReview, now: Date) -> Bool {
+        settings.canRestoreHiddenReview(review.target, now: now)
+            && settings.hiddenReviewDetails[review.target]?.hideID == review.hideID
+    }
+
     var hiddenReviewNotifications: [HiddenReview] {
         guard let account = boardDisplayAccount else { return [] }
+        let now = hiddenReviewDisplayTime
         return settings.filteredHiddenReviewDetails.values.filter {
             $0.target.host == account.host && $0.target.username == account.username && $0.inboxNotification != nil
+                && settings.canRestoreHiddenReview($0.target, now: now)
         }.sorted { ($0.target.projectID, $0.target.iid ?? 0) < ($1.target.projectID, $1.target.iid ?? 0) }
     }
 
@@ -1058,9 +1078,10 @@ final class TodoMonitorService {
 
     var hiddenReviewAssignments: [HiddenReview] {
         guard let account = boardDisplayAccount else { return [] }
+        let now = hiddenReviewDisplayTime
         var hidden = settings.hiddenReviewDetails.filter {
             $0.key.host == account.host && $0.key.username == account.username
-                && MergeRequestFinishedState(settings.mrLifecycleLedger.request(for: $0.key)) == nil
+                && settings.canRestoreHiddenReview($0.key, now: now)
         }
         let assigned = settings.reviewAssignments.entries(host: account.host, username: account.username)?.map(\.request) ?? []
         let retained = settings.ignoredMergeRequests.compactMap { target -> GitLabMergeRequest? in
@@ -1069,8 +1090,7 @@ final class TodoMonitorService {
         }
         for request in assigned + retained where request.state == "opened" && request.author.username != account.username {
             guard let target = scopeTarget(projectID: request.projectID, iid: request.iid, url: request.webURL),
-                  settings.ignoredMergeRequests.contains(target), hidden[target] == nil,
-                  MergeRequestFinishedState(settings.mrLifecycleLedger.request(for: target)) == nil else { continue }
+                  hidden[target] == nil, settings.canRestoreHiddenReview(target, now: now) else { continue }
             hidden[target] = .init(target: target, title: request.title, url: request.webURL)
         }
         return hidden.values.sorted {
@@ -1080,12 +1100,14 @@ final class TodoMonitorService {
 
     @discardableResult
     func restoreReviewedMergeRequests(_ reviews: [HiddenReview]) -> Bool {
+        let now = Date()
         let targets = Set(reviews.compactMap { review -> MRAutomationScope.Target? in
             guard let iid = review.target.iid,
-                  scopeTarget(projectID: review.target.projectID, iid: iid, url: review.url) == review.target else { return nil }
+                  scopeTarget(projectID: review.target.projectID, iid: iid, url: review.url) == review.target,
+                  isCurrentRestorableHide(review, now: now) else { return nil }
             return review.target
         })
-        guard settings.restoreHiddenReviews(targets) else { return false }
+        guard settings.restoreHiddenReviews(targets, now: now) else { return false }
         for target in targets { clearNewReviewAssignment(target) }
         settings.save()
         resumeIncomingReviews()
@@ -1146,10 +1168,13 @@ final class TodoMonitorService {
         let request: GitLabMergeRequest
         if let iid = Int(number), iid > 0, let projectID,
            let host = glab.resolvedHost, let username = glab.currentUsername {
+            let revision = glab.accountRevision
             request = try await glab.fetchMergeRequest(projectID: projectID, iid: iid, host: host)
-            guard request.projectID == projectID, request.iid == iid, request.state == "opened",
+            guard request.projectID == projectID, request.iid == iid,
                   request.webURL.isGitLabMergeRequest(host: host, iid: iid),
-                  glab.resolvedHost == host, glab.currentUsername == username else { throw CancellationError() }
+                  glab.resolvedHost == host, glab.currentUsername == username,
+                  glab.accountRevision == revision else { throw CancellationError() }
+            try Self.requireOpenMergeRequest(request)
             target = .init(host: host, username: username, projectID: projectID, iid: iid)
         } else {
             let result = try await resolveAutomationTarget(from: raw)
@@ -1191,6 +1216,7 @@ final class TodoMonitorService {
               !projectPath.contains("/-/"), !projectPath.hasSuffix(".git") else {
             throw GlabError.decoding("Enter a GitLab repository or merge request URL")
         }
+        let revision = glab.accountRevision
         let projectID = try await glab.resolveAutomationProject(path: projectPath, host: host)
         var iid: Int? = nil
         var verified: GitLabMergeRequest?
@@ -1199,15 +1225,23 @@ final class TodoMonitorService {
                 throw GlabError.decoding("Invalid merge request URL")
             }
             let request = try await glab.fetchMergeRequest(projectID: projectID, iid: number, host: host)
-            guard request.projectID == projectID, request.iid == number, request.state == "opened", request.webURL.isGitLabMergeRequest(host: host, iid: number) else {
-                throw GlabError.decoding("The merge request is no longer open")
+            guard request.projectID == projectID, request.iid == number,
+                  request.webURL.isGitLabMergeRequest(host: host, iid: number) else {
+                throw GlabError.decoding("GitLab returned a different merge request")
             }
             iid = number
             verified = request
         }
-        guard glab.resolvedHost == host, glab.currentUsername == username else { throw CancellationError() }
+        guard glab.resolvedHost == host, glab.currentUsername == username,
+              glab.accountRevision == revision else { throw CancellationError() }
+        if let verified { try Self.requireOpenMergeRequest(verified) }
         let target = MRAutomationScope.Target(host: host, username: username, projectID: projectID, iid: iid)
         return (target, projectPath, verified)
+    }
+
+    private static func requireOpenMergeRequest(_ request: GitLabMergeRequest) throws {
+        if let finished = MergeRequestFinishedState(request) { throw finished }
+        guard request.state == "opened" else { throw GlabError.decoding("The merge request is no longer open") }
     }
 
     var attentionItems: [MergeRequestAttentionMonitor.Item] { boardProjector?.attentionItems ?? [] }

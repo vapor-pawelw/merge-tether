@@ -62,6 +62,7 @@ struct MergeRequestSettingsTab: View {
     private var hiddenReviews: some View {
         let requests = monitor.hiddenReviewAssignments
         return DisclosureGroup {
+            Text(.Settings.settingsHiddenReviewsHelp).font(.caption).foregroundStyle(.secondary)
             if requests.isEmpty {
                 Text(.Settings.settingsHiddenReviewsEmpty).foregroundStyle(.secondary)
             }

@@ -167,7 +167,11 @@ struct MRCommonMenuItems: View {
         }
         if !isFinished, let onRemove {
             Divider()
-            Button(role: .destructive, action: onRemove) {
+            Button(role: .destructive) {
+                guard confirmMRAction(id: "hideReviewAssignment", title: .Board.boardReviewAssignmentHide,
+                    message: String(localized: .Board.boardReviewAssignmentHideExplanation)) else { return }
+                onRemove()
+            } label: {
                 Label { Text(.Board.boardReviewAssignmentHide) } icon: { Image(systemName: "eye.slash") }
             }
         }

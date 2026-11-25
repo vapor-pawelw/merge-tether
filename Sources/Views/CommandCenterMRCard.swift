@@ -38,7 +38,6 @@ private struct CommandCenterMRCardContent: View {
     @State private var pendingPrimary: (title: LocalizedStringResource, cta: MRActionCTA?)?
     @State private var finishingCommentReview = false
     @State private var retryError: String?
-    @State private var confirmRemoval = false
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openSettings) private var openSettings
     private let contentTopInset: CGFloat = 14
@@ -143,9 +142,6 @@ private struct CommandCenterMRCardContent: View {
             iid: item.id.iid, background: colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(white: 0.95),
             backgroundOpacity: contentOpacity, actionLabel: newReviewActionLabel, onActivate: onActivate)
         .contextMenu { menuItems }
-        .confirmationDialog(Text(.Board.boardReviewAssignmentHide), isPresented: $confirmRemoval, titleVisibility: .visible) {
-            Button(role: .destructive) { monitor.removeReviewedMergeRequest(row.displayItem) } label: { Text(.Board.boardReviewAssignmentHide) }
-        } message: { Text(.Board.boardReviewAssignmentHideExplanation) }
         .environment(\.gitLabPersonSourceURL, row.displayURL)
     }
 
@@ -568,7 +564,7 @@ private struct CommandCenterMRCardContent: View {
             }
         }
         MRCommonMenuItems(item: item, monitor: monitor, boardPin: cardPin,
-            onRemove: allowsRemoval ? { confirmRemoval = true } : nil)
+            onRemove: allowsRemoval ? { monitor.removeReviewedMergeRequest(row.displayItem) } : nil)
     }
 
     private var chips: [MRCardPresentation.Chip] { presentation.chips }

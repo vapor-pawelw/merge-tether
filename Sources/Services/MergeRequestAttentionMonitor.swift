@@ -1002,21 +1002,27 @@ final class MergeRequestAttentionMonitor {
             $0.target.host == host && $0.target.username == user.username && $0.grantsManagement
         }.map(\.target))
         let trackedTargets = settings?.mrLifecycleLedger.targets(host: host, username: user.username) ?? []
+        let hiddenTargets = settings?.ignoredMergeRequests.filter {
+            $0.host == host && $0.username == user.username && settings?.canRestoreHiddenReview($0) == true
+        } ?? []
         let lookupTargets = feedbackDecision == nil
-            ? scopeTargets.union(recordedTargets).union(intentTargets).union(trackedTargets) : []
+            ? scopeTargets.union(recordedTargets).union(intentTargets).union(trackedTargets).union(hiddenTargets) : []
         var explicit: [GitLabMergeRequest] = []
         var recordedReviews: [GitLabMergeRequest] = []
         var explicitFetchFailed = false
         for target in lookupTargets.sorted(by: { ($0.projectID, $0.iid ?? 0) < ($1.projectID, $1.iid ?? 0) }) {
-            guard let iid = target.iid, !isIgnored(target) else { continue }
+            let hidden = isIgnored(target)
+            guard let iid = target.iid, !hidden || settings?.canRestoreHiddenReview(target) == true else { continue }
+            let hideID = settings?.hiddenReviewDetails[target]?.hideID
             let id = Item.ID(projectID: target.projectID, iid: iid)
             guard !listedIDs.contains(id) else { continue }
             // Merged MRs cannot reopen. Closed rows, including Seen tombstones,
             // continue exact checks because they may reopen without assignment.
-            if settings?.mrLifecycleLedger.request(for: target)?.state == "merged"
+            if !hidden, settings?.mrLifecycleLedger.request(for: target)?.state == "merged"
                 || terminalCatalogRequests.contains(id) { continue }
             let requestReadStartedAt = Date()
             guard let request = try? await glab.fetchMergeRequest(projectID: target.projectID, iid: iid, host: host) else {
+                if hidden { continue }
                 explicitFetchFailed = true
                 if var previous = previousCatalog[id] {
                     previous.approvalProgress = nil
@@ -1028,7 +1034,11 @@ final class MergeRequestAttentionMonitor {
             guard request.projectID == target.projectID, request.iid == iid,
                   request.webURL.isGitLabMergeRequest(host: host, iid: iid),
                   ["opened", "closed", "merged"].contains(request.state) else {
-                explicitFetchFailed = true
+                if !hidden { explicitFetchFailed = true }
+                continue
+            }
+            if hidden {
+                settings?.retireFinishedHiddenReview(target, request: request, hideID: hideID)
                 continue
             }
             if request.state == "merged" || request.state == "closed" {

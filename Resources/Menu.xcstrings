@@ -1082,6 +1082,20 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się dodać otwartego merge requesta. Sprawdź adres lub repozytorium i numer."}}
       }
     },
+    "menu.mr.addMerged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "This merge request has already been merged."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Ten merge request został już scalony."}}
+      }
+    },
+    "menu.mr.addClosed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "This merge request is closed."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Ten merge request jest zamknięty."}}
+      }
+    },
     "menu.mr.address": {
       "extractionState": "manual",
       "localizations": {

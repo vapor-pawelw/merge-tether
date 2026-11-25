@@ -10,7 +10,7 @@ struct NewReviewIntakeTests {
     private let mergeRequestJSON = #"{"id":4200,"project_id":1,"iid":42,"title":"Add feature","state":"opened","draft":false,"sha":"0123456789abcdef0123456789abcdef01234567","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/42","source_branch":"feature","target_branch":"main","labels":[],"author":{"id":9,"username":"bob","name":"Bob"}}"#
     private var target: MRAutomationScope.Target { .init(host: host, username: "alice", projectID: 1, iid: 42) }
 
-    private func fixture(preset: AutomationPreset, addDirectly: Bool = true,
+    private func fixture(preset: AutomationPreset, addDirectly: Bool = true, state: String = "opened",
                          body: (TodoMonitorService, SettingsManager) async throws -> Void) async throws {
         let name = "NewReviewIntakeTests-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: name))
@@ -22,6 +22,7 @@ struct NewReviewIntakeTests {
         let gitlab = InMemoryGitLab()
         defer { gitlab.close() }
         gitlab.write("todos", todoJSON)
+        gitlab.write("merge-request", mergeRequestJSON.replacingOccurrences(of: #""state":"opened""#, with: #""state":"\#(state)""#))
         gitlab.handler = { [mergeRequestJSON] request in
             if request.arguments.first == "config" { return InMemoryGitLab.output(host) }
             if request.arguments.first == "auth" { return InMemoryGitLab.output(error: "Logged in to \(host) as alice") }
@@ -30,7 +31,10 @@ struct NewReviewIntakeTests {
                 return InMemoryGitLab.output("[\(mergeRequestJSON)]")
             }
             if request.endpoint == "/user" { return InMemoryGitLab.output(#"{"id":7,"username":"alice"}"#) }
-            if request.endpoint == "/projects/1/merge_requests/42" { return InMemoryGitLab.output(mergeRequestJSON) }
+            if request.endpoint == "/projects/1/merge_requests/42" { return try gitlab.response("merge-request") }
+            if request.endpoint == "/projects/group%2Frepo" {
+                return InMemoryGitLab.output(#"{"id":1,"path_with_namespace":"group/repo"}"#)
+            }
             if request.method == "POST" { return InMemoryGitLab.output("{}") }
             return InMemoryGitLab.output("[]")
         }
@@ -166,6 +170,50 @@ struct NewReviewIntakeTests {
             let closed = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(closedJSON.utf8))
             settings.mrLifecycleLedger.record(closed, for: target)
             #expect(monitor.hiddenReviewAssignments.isEmpty)
+        }
+    }
+
+    @Test(arguments: ["merged", "closed"])
+    func refreshingRetiresFinishedHiddenRequestsAndManualAddReportsTheirState(_ state: String) async throws {
+        try await fixture(preset: .manual, state: state) { monitor, settings in
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(mergeRequestJSON.utf8))
+            let hidden = HiddenReview(target: target, title: request.title, url: request.webURL)
+            try #require(settings.hideFilteredReviews([hidden]))
+            let savedHide = try #require(settings.hiddenReviewDetails[target])
+            #expect(monitor.hiddenReviewAssignments.map(\.target) == [target])
+            #expect(monitor.hiddenReviewNotifications.map(\.target) == [target])
+
+            monitor.attention.refresh(host: host, username: target.username, todos: [])
+            await monitor.refreshManually()
+            #expect(monitor.hiddenReviewAssignments.isEmpty)
+            #expect(monitor.hiddenReviewNotifications.isEmpty)
+            #expect(!monitor.restoreReviewedMergeRequests([savedHide]))
+            #expect(settings.ignoredMergeRequests.contains(target))
+
+            for (address, projectID) in [(request.webURL.absoluteString, Int?.none), ("!42", 1)] {
+                do {
+                    _ = try await monitor.addManagedMergeRequest(from: address, projectID: projectID)
+                    Issue.record("A finished merge request must not be added")
+                } catch {
+                    #expect((error as? MergeRequestFinishedState)?.rawValue == state)
+                }
+            }
+            #expect(settings.ignoredMergeRequests.contains(target))
+        }
+    }
+
+    @Test func manualAddBringsBackAnOpenRequestAfterItsRestoreWindowExpires() async throws {
+        try await fixture(preset: .manual) { monitor, settings in
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(mergeRequestJSON.utf8))
+            let hidden = HiddenReview(target: target, title: request.title, url: request.webURL)
+            let fourDaysAgo = Date().addingTimeInterval(-4 * 24 * 60 * 60)
+            try #require(settings.hideReviewedMergeRequest(hidden, now: fourDaysAgo))
+            #expect(monitor.hiddenReviewAssignments.isEmpty)
+
+            let added = try await monitor.addManagedMergeRequest(from: request.webURL.absoluteString)
+            #expect(added.iid == request.iid)
+            #expect(!settings.ignoredMergeRequests.contains(target))
+            #expect(settings.automation.scope.isManaged(target))
         }
     }
 
