@@ -126,7 +126,7 @@ final class MRFeedbackLaunchCoordinator {
         guard settings.automaticWritesAllowed, let account, let request = item.authoredRequest,
               request.state == "opened", request.author.username == account.username,
               item.url.isGitLabMergeRequest(host: account.host, iid: item.id.iid),
-              settings.automation.scope.permits(request, host: account.host, username: account.username) else { return false }
+              settings.effectiveAutomationScope.permits(request, host: account.host, username: account.username) else { return false }
         let rule = settings.automation.workflowRules[.newDiscussion], feedback = settings.automation.authorFeedback
         return feedback.runner == .assistant && feedback.isConfigured && feedback.includes(project: item.url.gitLabProjectPath)
             && (feedback.isEnabled || (rule.mode == .assistant && rule.includes(request)))

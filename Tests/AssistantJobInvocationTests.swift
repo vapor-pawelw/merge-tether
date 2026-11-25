@@ -188,6 +188,7 @@ struct AssistantJobInvocationTests {
           'api /user '*) printf '%s' '{"id":1,"username":"me"}' ;;
           'api /projects/7/merge_requests/11 '*)
             printf '%s' '{"project_id":7,"iid":11,"author":{"id":1,"username":"me","name":"Me"},"title":"Fixture","web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened","draft":false,"sha":"\(head)","source_branch":"feature","target_branch":"main","labels":[]}' ;;
+          'api /projects/7/merge_requests/11/approvals'*) printf '%s' '{"approved_by":[]}' ;;
           'api /projects/7/merge_requests/11/discussions'*)
             printf x >> "$0-discussions-read"
             if test '\(scenario)' = read-failure; then printf '%s' 'Discussion read failed' >&2; exit 31; fi

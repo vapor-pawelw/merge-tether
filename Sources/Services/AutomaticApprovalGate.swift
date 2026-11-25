@@ -22,30 +22,19 @@ struct ReviewTargetBinding: Codable, Equatable, Sendable {
     }
 }
 
-/// Deterministic preconditions for automatic approval that a model-produced verdict cannot satisfy.
-/// They are checked by the app against its own fresh GitLab reads, independently of the verdict.
+/// Automatic approval requires a verdict for the diff target the app reads from GitLab.
 enum AutomaticApprovalGate {
-    /// Larger changes always wait for a person, whatever the review verdict says.
-    static let maximumChangedFiles = 50
-
     enum Refusal: Equatable, Sendable {
         /// The sealed review predates target binding or was captured without diff refs.
         case reviewTargetUnbound
         case targetChanged
-        case pipelineNotPassed
-        case changeSizeUnknown
-        case changeTooLarge
     }
 
     static func refusal(for request: GitLabMergeRequest, head: String,
                         reviewed: ReviewTargetBinding?) -> Refusal? {
         guard let reviewed else { return .reviewTargetUnbound }
         guard reviewed.headSHA == head, ReviewTargetBinding(request) == reviewed else { return .targetChanged }
-        guard let pipeline = request.headPipeline, pipeline.status == "success", pipeline.sha == head
-        else { return .pipelineNotPassed }
-        guard let count = request.changesCount.flatMap({ Int($0.trimmingCharacters(in: .whitespaces)) }), count >= 0
-        else { return .changeSizeUnknown }
-        return count > maximumChangedFiles ? .changeTooLarge : nil
+        return nil
     }
 
     static func permits(_ request: GitLabMergeRequest, head: String, reviewed: ReviewTargetBinding?) -> Bool {

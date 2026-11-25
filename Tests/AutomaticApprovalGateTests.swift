@@ -17,7 +17,7 @@ import Testing
         return try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: json))
     }
 
-    @Test func aBoundPassingSmallChangeIsPermitted() throws {
+    @Test func aVerdictForTheCurrentDiffTargetIsPermitted() throws {
         let current = try request()
         let reviewed = try #require(ReviewTargetBinding(current))
         #expect(reviewed.targetBranch == "main" && reviewed.baseSHA == base && reviewed.targetProjectID == 1)
@@ -33,18 +33,12 @@ import Testing
 
     @Test(arguments: [
         ("retargeted", AutomaticApprovalGate.Refusal.targetChanged), ("otherProject", .targetChanged),
-        ("failedPipeline", .pipelineNotPassed), ("otherPipelineHead", .pipelineNotPassed),
-        ("tooLarge", .changeTooLarge), ("capped", .changeSizeUnknown),
     ])
     func changedOrUnprovenContextIsRefused(_ change: String, _ refusal: AutomaticApprovalGate.Refusal) throws {
         let reviewed = try #require(ReviewTargetBinding(try request()))
         let changed: [String: Any?] = switch change {
         case "retargeted": ["target_branch": "feature-base"]
-        case "otherProject": ["target_project_id": 7]
-        case "failedPipeline": ["head_pipeline": ["id": 5, "status": "failed", "sha": head]]
-        case "otherPipelineHead": ["head_pipeline": ["id": 5, "status": "success", "sha": String(repeating: "f", count: 40)]]
-        case "tooLarge": ["changes_count": String(AutomaticApprovalGate.maximumChangedFiles + 1)]
-        default: ["changes_count": "1000+"]
+        default: ["target_project_id": 7]
         }
         #expect(AutomaticApprovalGate.refusal(for: try request(changed), head: head, reviewed: reviewed) == refusal)
     }
@@ -53,8 +47,6 @@ import Testing
         let current = try request()
         let reviewed = try #require(ReviewTargetBinding(current))
         #expect(AutomaticApprovalGate.refusal(for: current, head: head, reviewed: nil) == .reviewTargetUnbound)
-        #expect(AutomaticApprovalGate.refusal(for: try request(["head_pipeline": nil]), head: head, reviewed: reviewed) == .pipelineNotPassed)
-        #expect(AutomaticApprovalGate.refusal(for: try request(["changes_count": nil]), head: head, reviewed: reviewed) == .changeSizeUnknown)
         #expect(AutomaticApprovalGate.refusal(for: try request(["diff_refs": ["base_sha": String(repeating: "c", count: 40), "head_sha": head]]),
             head: head, reviewed: reviewed) == .targetChanged)
         #expect(AutomaticApprovalGate.refusal(for: current, head: String(repeating: "f", count: 40), reviewed: reviewed) == .targetChanged)

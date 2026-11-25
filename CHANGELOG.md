@@ -6,9 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
-- Turn off automatic approval by default. When enabled, require a passing pipeline at the reviewed commit and verify the target branch and base before applying the verdict.
+- Use the selected preset and approval threshold for automatic approval. Refresh the review when the MR target or diff base changes.
 
-- Authenticate locally stored AI comment assessments, overrides and review evidence before they can authorize automatic GitLab actions.
+- Authenticate locally stored AI comment assessments, overrides and review evidence. Reuse a reply worker’s verified source assessment for automatic publication.
 
 - Cancel queued agent jobs that lose permission to run so they release the merge request.
 
@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Require full verification before release, including an iOS simulator build and production relay tests.
 
-- Pause automatic GitLab actions when an agent run changes GitLab outside its allowed actions or its audit cannot be completed.
+- Hold automatic actions for the affected MR while retrying an unavailable agent audit. Pause that MR when the audit detects unexpected changes.
 
 - Offer fixed reply styles for remote draft regeneration. Keep temporary iPhone interruptions connected and show the paired phone's connection status on the Mac.
 

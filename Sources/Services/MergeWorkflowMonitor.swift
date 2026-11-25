@@ -476,7 +476,10 @@ final class MergeWorkflowMonitor {
             let changedVerdict = verdictDigest.map {
                 previous.lastObservedVerdictDigest != nil && previous.lastObservedVerdictDigest != $0
             } ?? false
-            let covered = reviewCoverage(request, discussions: discussions, account: account, verdict: verdict)
+            let changedTarget = await changedReviewTarget(request, run: verdictRun, verdict: verdict, host: account.host, glab: glab)
+            let covered = changedTarget == nil
+                ? reviewCoverage(request, discussions: discussions, account: account, verdict: verdict)
+                : false
             if changedVerdict || (covered == true && previous.reviewWasCovered != true) {
                 previous.reviewCoverageEpoch = (previous.reviewCoverageEpoch ?? 0) + 1
             }
@@ -512,9 +515,14 @@ final class MergeWorkflowMonitor {
                     to: MergeRequestDiffDigest.noteRevisions(GitLabMergeRequestDiscussion.activeForReview(discussions),
                         excludingAuthor: account.userID))
             } else { [Int]() }
-            let staleContext = await staleReviewContext(request, discussions: discussions, glab: glab,
-                account: account, verdict: verdict, changedActiveNotes: changedActiveNotes)
-                .map { epoch == 0 ? $0 : $0 + "-coverage-\(epoch)" }
+            let staleEvidence = if let changedTarget {
+                "target-" + UserAttentionSnapshot.digest("\(changedTarget.targetProjectID)|\(changedTarget.targetBranch)|\(changedTarget.baseSHA)")
+            } else {
+                await staleReviewContext(request, discussions: discussions, glab: glab,
+                    account: account, verdict: verdict, changedActiveNotes: changedActiveNotes)
+            }
+            let staleContext = staleEvidence.map { epoch == 0 ? $0 : $0 + "-coverage-\(epoch)" }
+            let targetReviewInstructions = "The MR target or diff base changed. Review the entire current diff and discussions, including files previously reviewed, and record a fresh verdict."
             let metadataNeedsReview = staleContext != nil
                 && verdict?.requiresFreshReview(forSemanticContext: request.semanticContextFingerprint) == true
             let hasReviewed = previous.hasReviewed || hasReviewEvidence || previous.reviewedHead != nil || staleContext != nil
@@ -525,7 +533,8 @@ final class MergeWorkflowMonitor {
                 if let staleContext {
                     let observation = Observation(glab: glab, account: account, request: request)
                     events.append(observation.event(.reviewUpdate, token: head + "-context-" + staleContext,
-                        context: metadataNeedsReview ? IncrementalReviewScope.metadataReviewInstructions
+                        context: changedTarget != nil ? targetReviewInstructions
+                            : metadataNeedsReview ? IncrementalReviewScope.metadataReviewInstructions
                             : "Your recorded review does not cover the current discussion content at this head. Recheck current discussions and record a fresh review verdict."))
                 }
                 continue
@@ -581,14 +590,16 @@ final class MergeWorkflowMonitor {
                     parts.append("The author replied after your review comments. Recheck reply note IDs: "
                         + ids.map(String.init).joined(separator: ", ") + ".")
                 }
-                if metadataNeedsReview {
+                if changedTarget != nil {
+                    parts.append(targetReviewInstructions)
+                } else if metadataNeedsReview {
                     parts.append(IncrementalReviewScope.metadataReviewInstructions)
                 } else if staleUnreported {
                     parts.append("Your recorded review does not cover the current discussion content. Record a fresh verdict after checking what changed.")
                 }
-                let scoped = metadataNeedsReview ? "" : scope.instructions
+                let scoped = metadataNeedsReview || changedTarget != nil ? "" : scope.instructions
                 if !scoped.isEmpty { parts.append(scoped) }
-                let onlyOwnOrRemoved = staleUnreported && !metadataNeedsReview && !changedHead && ids.isEmpty && scope.changedNoteIDs.isEmpty
+                let onlyOwnOrRemoved = staleUnreported && changedTarget == nil && !metadataNeedsReview && !changedHead && ids.isEmpty && scope.changedNoteIDs.isEmpty
                     && previous.reviewedNoteRevisions != nil
                 if onlyOwnOrRemoved {
                     parts.append("No other participant's note was added or edited since your review. Do not review again; confirm your verdict for the current discussions.")
@@ -604,6 +615,19 @@ final class MergeWorkflowMonitor {
             baselines.reviews[key] = previous
         }
         return events
+    }
+
+    private func changedReviewTarget(_ request: GitLabMergeRequest, run: AssistantAutomationRunner.Handoff?,
+                                     verdict: ReviewVerdict?, host: String, glab: GlabService) async -> ReviewTargetBinding? {
+        guard let run, let head = request.sha, verdict?.headSHA == head,
+              AssistantJobJournal.reviewVerdict(for: run) == verdict,
+              let reviewed = AssistantJobJournal.targetForReviewUpdates(for: run) else { return nil }
+        let live: GitLabMergeRequest?
+        if ReviewTargetBinding(request) != nil { live = request }
+        else { live = try? await glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host) }
+        guard let live, live.state == "opened", live.webURL == request.webURL,
+              let current = ReviewTargetBinding(live), current.headSHA == head, current != reviewed else { return nil }
+        return current
     }
 
     private func reviewCoverage(_ request: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion]?,

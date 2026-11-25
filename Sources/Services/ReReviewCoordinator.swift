@@ -282,7 +282,7 @@ final class ReReviewCoordinator {
         guard runtimePermitsReReview(context) else { return }
         guard settings.automation.hasAutomaticActionConsent, settings.automation.autoReReviewEnabled,
               isCurrent(context), request.state == "opened", request.author.id == user.id,
-              settings.automation.scope.permits(request, host: context.host, username: context.username) else {
+              settings.effectiveAutomationScope.permits(request, host: context.host, username: context.username) else {
             reReviewTasks.removeValue(forKey: context)?.task.cancel()
             reReviewChecks.removeValue(forKey: context)
             notify(context)
@@ -322,7 +322,7 @@ final class ReReviewCoordinator {
             discussions = fresh
         }
         guard !Task.isCancelled, isCurrent(context), runtimePermitsReReview(context),
-              settings.automation.scope.permits(request, host: host, username: context.username) else { return }
+              settings.effectiveAutomationScope.permits(request, host: host, username: context.username) else { return }
         let activeDiscussions = GitLabMergeRequestDiscussion.activeForReview(discussions)
         guard let fingerprint = ReviewVerdict.fingerprint(discussions),
               let activeFingerprint = ReviewVerdict.fingerprint(activeDiscussions) else { return }
@@ -341,7 +341,7 @@ final class ReReviewCoordinator {
         func markReviewerReadFailed() {
             guard !Task.isCancelled, isCurrent(context), runtimePermitsReReview(context),
                   reReviewKey(request, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == key,
-                  settings.automation.scope.permits(request, host: host, username: context.username) else { return }
+                  settings.effectiveAutomationScope.permits(request, host: host, username: context.username) else { return }
             let check = reReviewChecks[context]
             if check?.key != key {
                 // The next poll re-fetches reviewer evidence before it can start verification.
@@ -368,7 +368,7 @@ final class ReReviewCoordinator {
             return
         }
         let stillInScope = !Task.isCancelled && isCurrent(context) && runtimePermitsReReview(context)
-            && settings.automation.scope.permits(request, host: host, username: context.username)
+            && settings.effectiveAutomationScope.permits(request, host: host, username: context.username)
         let history = MergeRequestReviewHistory(reviewers: reviewers, discussions: discussions, authorID: user.id)
         var reconciledReceipt = false
         if stillInScope, settings.automation.hasAutomaticActionConsent, settings.automation.autoReReviewEnabled {
@@ -434,7 +434,7 @@ final class ReReviewCoordinator {
                 }
                 guard !Task.isCancelled, isCurrent(context), runtimePermitsReReview(context),
                       reReviewKey(request, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == key,
-                      settings.automation.scope.permits(request, host: host, username: context.username) else { return }
+                      settings.effectiveAutomationScope.permits(request, host: host, username: context.username) else { return }
             } catch {
                 markReviewerReadFailed()
                 return
@@ -500,7 +500,7 @@ final class ReReviewCoordinator {
                             && reReviewKey(request, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == key
                             && settings.automation.hasAutomaticActionConsent && settings.automation.autoReReviewEnabled
                             && runtimePermitsReReview(context)
-                            && settings.automation.scope.permits(request, host: host, username: context.username)
+                            && settings.effectiveAutomationScope.permits(request, host: host, username: context.username)
                     }
                     let diff: Data
                     do {
@@ -608,12 +608,12 @@ final class ReReviewCoordinator {
                       try await glab.fetchAuthenticatedUser(host: host, expectedUsername: context.username) == user,
                       isCurrent(context), settings.automation.autoReReviewEnabled,
                       runtimePermitsReReview(context),
-                      settings.automation.scope.permits(current, host: host, username: context.username) else { return }
+                      settings.effectiveAutomationScope.permits(current, host: host, username: context.username) else { return }
                 let liveReviewers = try await glab.fetchMergeRequestReviewers(projectID: request.projectID, iid: request.iid, host: host)
                 observeCurrentReviewers(liveReviewers, context: context)
                 guard settings.automaticPublicWritesAllowed, !Task.isCancelled, isCurrent(context),
                       settings.automation.autoReReviewEnabled, !settings.pendingCommentReviews.contains(target),
-                      settings.automation.scope.permits(current, host: host, username: context.username),
+                      settings.effectiveAutomationScope.permits(current, host: host, username: context.username),
                       runtimePermitsReReview(context), reReviewChecks[context]?.key == key,
                       reReviewKey(current, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == key,
                       !excludedReviewers(context, key: key, discussions: liveDiscussions, authorID: user.id).contains(reviewerID),
@@ -628,7 +628,7 @@ final class ReReviewCoordinator {
                     guard await permitsAssistantAutomation(for: context),
                           reReviewKey(current, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == key,
                           settings.automation.autoReReviewEnabled,
-                          settings.automation.scope.permits(current, host: host, username: context.username) else {
+                          settings.effectiveAutomationScope.permits(current, host: host, username: context.username) else {
                         if isCurrent(context) { reReviewChecks[context]?.state = .unavailable }
                         notify(context, unanswered: feedback.hasUnansweredFeedback)
                         return
@@ -655,7 +655,7 @@ final class ReReviewCoordinator {
                       ReviewVerdict.fingerprint(GitLabMergeRequestDiscussion.activeForReview(checkedThreads)) == activeFingerprint,
                       reReviewKey(checkedMR, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == key,
                       reReviewChecks[context]?.key == key,
-                      settings.automation.scope.permits(checkedMR, host: host, username: context.username) else { return }
+                      settings.effectiveAutomationScope.permits(checkedMR, host: host, username: context.username) else { return }
                 guard settings.reReviewReceipts[receiptKey]?.covers(noteID: noteID, headSHA: head) != true else { continue }
                 let checkedReviewers = try await glab.fetchMergeRequestReviewers(projectID: request.projectID, iid: request.iid, host: host)
                 observeCurrentReviewers(checkedReviewers, context: context)
@@ -683,7 +683,7 @@ final class ReReviewCoordinator {
                         && self.reReviewChecks[context]?.key == key
                         && self.reReviewKey(checkedMR, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == key
                         && !self.settings.pendingCommentReviews.contains(target)
-                        && self.settings.automation.scope.permits(checkedMR, host: host, username: context.username)
+                        && self.settings.effectiveAutomationScope.permits(checkedMR, host: host, username: context.username)
                         && self.currentReviewerIDs[context]?.contains(reviewerID) == true
                         && !self.excludedReviewers(context, key: key, discussions: checkedThreads, authorID: user.id).contains(reviewerID)
                 }

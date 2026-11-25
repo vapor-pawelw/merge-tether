@@ -95,7 +95,7 @@ enum AssistantJobExecutor {
         try validateIgnoredTarget(handoff, ignored: settings.ignoredMergeRequests)
         let project = request.webURL.gitLabProjectPath
         guard handoff.manual == true || settings.automation.assistant == handoff.key.assistant,
-              handoff.manual == true || settings.automation.scope.permits(request, host: handoff.key.work.host, username: handoff.key.username),
+              handoff.manual == true || settings.effectiveAutomationScope.permits(request, host: handoff.key.work.host, username: handoff.key.username),
               handoff.resolvesOwnThreads != true || settings.automation.permitsOwnThreadResolution(manual: handoff.manual == true),
               !handoff.allowsPush || settings.automation.permitsConflictPush(project: project, manual: handoff.manual == true),
               handoff.key.access != .configuredTools || settings.automation.permitsAssistantTools(project: project)
@@ -158,6 +158,30 @@ enum AssistantJobExecutor {
             Confirmations of fixes, acknowledgements, minor corrections and uncertain disagreements belong in the review
             verdict or run result. This limit applies to human and bot threads and overrides broader reply guidance.
             """
+        let assessmentTarget = handoff.key.automationTarget
+        let assessmentPolicy = settings.publicationPolicy(for: assessmentTarget)
+        let assessmentDirectory = AICommentAssessmentStore.scopedDirectory(AICommentAssessmentStore.directory,
+            criteriaOverride: assessmentPolicy.aiCommentCriteriaOverride)
+        let mayAssess = settings.automaticPublicWritesAllowed && assessmentPolicy.requiresAI
+            && assessmentPolicy.covers(request, host: assessmentTarget.host)
+            && (handoff.workflow != .followUp || handoff.followUpPushAllowed == true)
+            && !AICommentOriginCoordinator.isEvaluating(assessmentTarget)
+        let assessmentInstructions: String
+        if mayAssess {
+            let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid,
+                host: assessmentTarget.host)
+            let cached = (discussions ?? []).flatMap(\.notes).compactMap { note -> String? in
+                guard let id = note.id, let body = note.body,
+                      AICommentAssessmentStore.reusable(note, target: assessmentTarget, in: assessmentDirectory) != nil
+                        || AICommentOriginOverrideStore.override(for: note, host: assessmentTarget.host, projectID: request.projectID,
+                            iid: request.iid, in: AICommentAssessmentStore.directory) != nil else { return nil }
+                return "\(id):\(AICommentAssessmentStore.digest(body))"
+            }
+            assessmentInstructions = AICommentAssessmentStore.workerInstructions(
+                criteriaOverride: assessmentPolicy.aiCommentCriteriaOverride, existing: Array(Set(cached).sorted().prefix(100)))
+        } else {
+            assessmentInstructions = "Return an empty sourceAssessments list. MergeTether handles any needed assessment for this run."
+        }
         let instructions = handoff.prompt + """
 
             This is a headless MergeTether run. Do not open coding-agent desktop apps, create GUI chats, or request interactive input.
@@ -218,6 +242,7 @@ enum AssistantJobExecutor {
             Return [] when you saved no generated drafts. This declaration records authorship for display only:
             it grants no publication, approval or verification permission and never replaces a follow-up seal.
             \(AssistantJobResult.extraContextInstructions)
+            \(assessmentInstructions)
             Include the MR link, actions, verification and remaining blockers in summary. Do not claim private drafts were saved unless re-fetched.
             \(AgentExplanation.instructions(for: "blocker"))
             Keep the detailed run evidence and completed actions in summary and the transcript.
@@ -245,7 +270,7 @@ enum AssistantJobExecutor {
                     user: user, accountRevision: accountRevision, glab: glab)
             }
             // Unattended runs need comparable evidence afterwards; without a baseline they do not start.
-            if handoff.manual != true, authorization.auditBaseline == nil { throw ExecutionError.auditUnavailable }
+            if handoff.manual != true, authorization.auditBaseline?.isComplete != true { throw ExecutionError.auditUnavailable }
             if requiresLiveWorkflowRule(handoff) || handoff.draftRepair != nil || handoff.pipelineReservation != nil {
                 let latest = try await glab.fetchMergeRequest(projectID: handoff.key.work.projectID,
                     iid: handoff.key.work.iid, host: handoff.key.work.host)
@@ -318,7 +343,7 @@ enum AssistantJobExecutor {
         }
         } catch {
             if let denial = authorization.denial { throw denial }
-            // The failure stays the reported error; enforcement still suspends unattended writes.
+            // The failure stays the reported error; the audit still records remote effects.
             if capturedOutput != nil { _ = await auditRemoteEffects() }
             else if case ProcessRunner.RunError.timedOut = error { _ = await auditRemoteEffects() }
             if let capturedOutput, !(error is CancellationError) {
@@ -326,18 +351,34 @@ enum AssistantJobExecutor {
             }
             throw error
         }
-        if let violation = await auditRemoteEffects() {
-            // Do not record verdicts, drafts or a completion checkpoint from an out-of-bounds or unverifiable run.
-            throw AssistantJobFailure(error: violation, output: output)
-        }
         let transcript = GlabService.redactWorkflowEvidence(String(decoding: output.stdout, as: UTF8.self) + "\n" + output.stderr)
         let outcome = AssistantJobCoordinator.Outcome(result: result, output: transcript)
+        if let violation = await auditRemoteEffects() {
+            // Keep the actual worker report visible while the audit holds action-authorizing evidence.
+            if let index = AssistantWorkerAudit.activeRunIndex(handoff, in: settings) {
+                settings.assistantHandoffs[index].execution?.summary =
+                    String(GlabService.redactWorkflowEvidence(result.summary).prefix(32_000))
+                settings.save()
+            }
+            if violation == .auditUnavailable, !Task.isCancelled {
+                let review = await reviewVerdictForCompletion(result, user: user, handoff: handoff,
+                    settings: settings, glab: glab, reviewedRequest: authorization.request)
+                do {
+                    try await AssistantJobJournal.save(outcome, for: handoff, reviewVerdict: review?.verdict,
+                        reviewDrafts: review?.drafts, reviewTarget: review?.target, reviewLaunchTarget: review?.launchTarget,
+                        awaitingWorkerAudit: true)
+                } catch {
+                    Log.monitor.error("Could not preserve the worker outcome while awaiting its audit: \(String(describing: error), privacy: .private)")
+                }
+            }
+            throw AssistantJobFailure(error: violation, output: output)
+        }
         await recordGeneratedDrafts(result, baseline: generationBaseline, user: user, request: request,
-            handoff: handoff, settings: settings, glab: glab)
+            handoff: handoff, settings: settings, glab: glab, assessmentPolicy: mayAssess ? assessmentPolicy : nil)
         let review = await reviewVerdictForCompletion(result, user: user, handoff: handoff, settings: settings, glab: glab,
-            reviewedRequest: request)
+            reviewedRequest: authorization.request)
         do { try await AssistantJobJournal.save(outcome, for: handoff, reviewVerdict: review?.verdict, reviewDrafts: review?.drafts,
-            reviewTarget: review?.target) }
+            reviewTarget: review?.target, reviewLaunchTarget: review?.launchTarget) }
         catch { Log.monitor.error("Could not checkpoint worker completion: \(String(describing: error), privacy: .private)") }
         try Task.checkCancellation()
         return outcome
@@ -349,6 +390,8 @@ enum AssistantJobExecutor {
         let drafts: [GitLabDraftNote]
         /// From the app's own read after the worker finished; never from the worker or its helper.
         var target: ReviewTargetBinding? = nil
+        /// Kept for re-review when the target moved during the original run.
+        var launchTarget: ReviewTargetBinding? = nil
     }
 
     @MainActor
@@ -392,7 +435,8 @@ enum AssistantJobExecutor {
             let target = ReviewTargetBinding(request)
             let launchTarget = reviewedRequest.flatMap(ReviewTargetBinding.init)
             return .init(verdict: verdict, drafts: drafts,
-                target: reviewedRequest == nil || launchTarget == target ? target : nil)
+                target: reviewedRequest == nil || launchTarget == target ? target : nil,
+                launchTarget: launchTarget != target ? launchTarget : nil)
         } catch {
             Log.monitor.error("Could not authenticate review verdict: \(String(describing: error), privacy: .private)")
             return nil
@@ -402,7 +446,8 @@ enum AssistantJobExecutor {
     @MainActor
     static func recordGeneratedDrafts(_ result: AssistantJobResult, baseline: [GitLabDraftNote]?,
         user: GitLabAuthenticatedUser, request: GitLabMergeRequest, handoff: AssistantAutomationRunner.Handoff,
-        settings: SettingsManager, glab: GlabService, directory: URL = AICommentProvenanceStore.directory) async {
+        settings: SettingsManager, glab: GlabService, directory: URL = AICommentProvenanceStore.directory,
+        assessmentPolicy: AutomaticPublicationPolicy? = nil) async {
         let work = handoff.key.work
         let revision = glab.accountRevision
         func current() -> Bool {
@@ -423,6 +468,26 @@ enum AssistantJobExecutor {
                   live.sha == request.sha || handoff.followUpPushAllowed == true || handoff.allowsPush else { return }
             let drafts = try await glab.fetchOwnDraftNotes(projectID: work.projectID, iid: work.iid, host: work.host, userID: user.id)
             guard current() else { return }
+            if let assessmentPolicy, let classifications = result.sourceAssessments, !classifications.isEmpty,
+               settings.automaticPublicWritesAllowed, settings.publicationPolicy(for: handoff.key.automationTarget) == assessmentPolicy,
+               let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: work.projectID, iid: work.iid, host: work.host),
+               await AssistantJobJournal.loadKey(), current(),
+               settings.permitsAutomaticAction(.commentPublication, for: live, target: handoff.key.automationTarget),
+               settings.publicationPolicy(for: handoff.key.automationTarget) == assessmentPolicy {
+                let assessmentDirectory = AICommentAssessmentStore.scopedDirectory(AICommentAssessmentStore.directory,
+                    criteriaOverride: assessmentPolicy.aiCommentCriteriaOverride)
+                let model = switch handoff.key.assistant {
+                case .codex: (handoff.codingModel ?? handoff.reviewModel)?.rawValue ?? "default"
+                case .claude: handoff.claudeCodingModel?.rawValue ?? "default"
+                }
+                do {
+                    try AICommentAssessmentStore.persistWorkerAssessments(classifications, draftClaims: claims,
+                        baseline: baseline, current: drafts, discussions: discussions, userID: user.id,
+                        target: handoff.key.automationTarget, assistant: handoff.key.assistant, model: model, in: assessmentDirectory)
+                } catch {
+                    Log.monitor.error("Could not save the worker's comment assessments: \(String(describing: error), privacy: .private)")
+                }
+            }
             let context = AICommentProvenanceStore.Context(host: work.host, username: user.username, userID: user.id,
                 projectID: work.projectID, iid: work.iid)
             let runID = handoff.id
@@ -516,7 +581,7 @@ enum AssistantJobExecutor {
         guard request.projectID == work.projectID, request.iid == work.iid,
               request.webURL.isGitLabMergeRequest(host: work.host, iid: work.iid),
               handoff.manual == true || settings.automation.assistant == handoff.key.assistant,
-              handoff.manual == true || settings.automation.scope.permits(request, host: work.host, username: handoff.key.username),
+              handoff.manual == true || settings.effectiveAutomationScope.permits(request, host: work.host, username: handoff.key.username),
               handoff.key.access != .configuredTools || settings.automation.permitsAssistantTools(project: project)
         else { throw ExecutionError.disabledPermission }
         if requiresLiveWorkflowRule(handoff) {

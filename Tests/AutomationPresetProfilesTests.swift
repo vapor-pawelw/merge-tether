@@ -227,7 +227,7 @@ struct AutomationPresetProfilesTests {
         let suite = "ApprovalThreshold.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        #expect(try JSONDecoder().decode(AutomationSettings.self, from: Data("{}".utf8)).autoApprovalThreshold == .noIssues)
+        #expect(try JSONDecoder().decode(AutomationSettings.self, from: Data("{}".utf8)).autoApprovalThreshold == .noMajorIssues)
         let settings = SettingsManager(defaults: defaults)
         settings.automation.autoApprovalThreshold = .noCodeIssues
         settings.automation.applyPreset(.full, for: .codex)
@@ -243,7 +243,7 @@ struct AutomationPresetProfilesTests {
 
     @Test func automaticApprovalDefaultsAreSafeAndUpgradesPreserveExplicitValues() throws {
         // Fresh settings and legacy blobs without the key never approve on their own.
-        #expect(!AutomationSettings().autoApproveEnabled && AutomationSettings().autoApprovalThreshold == .noIssues)
+        #expect(!AutomationSettings().autoApproveEnabled && AutomationSettings().autoApprovalThreshold == .noMajorIssues)
         var recommended = AutomationSettings()
         recommended.applyRecommended(for: .codex)
         #expect(!recommended.autoApproveEnabled)

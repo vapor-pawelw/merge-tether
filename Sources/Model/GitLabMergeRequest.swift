@@ -179,8 +179,6 @@ struct GitLabMergeRequest: Codable, Sendable {
     private let user: UserPermissions?
     /// Present on single-MR reads only. Approval proof binds the reviewed diff to its base.
     var diffRefs: DiffRefs? = nil
-    /// GitLab reports a decimal count, or a capped value such as `1000+`. Present on single-MR reads only.
-    var changesCount: String? = nil
     // Derived live evidence is deliberately excluded from the persisted REST payload.
     var mergeTrainConflict: MergeTrainPreparationConflict? = nil
     var mergeTrainEvidenceUnavailable = false
@@ -243,7 +241,6 @@ struct GitLabMergeRequest: Codable, Sendable {
         case headPipeline = "head_pipeline"
         case user, reviewers
         case diffRefs = "diff_refs"
-        case changesCount = "changes_count"
     }
 }
 

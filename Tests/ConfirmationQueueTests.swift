@@ -2567,6 +2567,31 @@ import MergeTetherRemote
         #expect(harness.log("approve.log").split(separator: "\n").count == 1)
     }
 
+    @Test func aRetargetSchedulesOneFreshReviewForTheSameHead() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.recordVerdict("no_objections", head: head, bindSemanticContext: true)
+        let user = try await harness.glab.fetchAuthenticatedUser(host: host, expectedUsername: "me")
+        let workflow = MergeWorkflowMonitor(defaults: harness.defaults, verdictDirectory: harness.folder.appending(path: "verdicts"))
+        var updates: [MergeWorkflowEvent] = []
+        func poll() async {
+            await workflow.poll(glab: harness.glab, host: host, user: user, authored: [],
+                enabled: [.reviewUpdate], reviewSLA: 3600, reviewHistory: harness.settings.assistantHandoffs) { updates.append($0) }
+        }
+        await poll()
+        #expect(updates.isEmpty)
+
+        let changed = harness.log("request.json").replacingOccurrences(of: #""target_branch":"main""#, with: #""target_branch":"release""#)
+        try #require(changed != harness.log("request.json"))
+        try harness.write("request.json", changed)
+        try harness.write("reviewing.json", "[\(changed)]")
+        await poll()
+        await poll()
+
+        #expect(updates.count == 1)
+        #expect(updates.first?.context.contains("current diff") == true)
+    }
+
     @Test func persistenceHoldStopsAutomaticApprovalButKeepsExplicitFreshApproval() async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
@@ -2610,10 +2635,11 @@ import MergeTetherRemote
 
     @Test(arguments: ["unchanged", "retargeted", "retargetedProject", "newBase", "legacyUnbound", "noDiffRefs",
                       "pipelineRunning", "pipelineOtherHead", "noPipeline", "tooManyFiles", "cappedSize", "unknownSize"])
-    func automaticApprovalRequiresTheReviewedTargetAndDeterministicGate(_ change: String) async throws {
+    func automaticApprovalUsesTheReviewedTargetRegardlessOfPipelineOrDiffSize(_ change: String) async throws {
         // given
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
+        harness.settings.automation.applyPreset(.full, for: .codex)
         try harness.recordVerdict("no_objections", head: head, bindTarget: change != "legacyUnbound")
         var request = try #require(JSONSerialization.jsonObject(with: harness.gitlab.data("request.json")) as? [String: Any])
         switch change {
@@ -2624,7 +2650,7 @@ import MergeTetherRemote
         case "pipelineRunning": request["head_pipeline"] = ["id": 5, "status": "running", "sha": head]
         case "pipelineOtherHead": request["head_pipeline"] = ["id": 5, "status": "success", "sha": String(repeating: "e", count: 40)]
         case "noPipeline": request.removeValue(forKey: "head_pipeline")
-        case "tooManyFiles": request["changes_count"] = String(AutomaticApprovalGate.maximumChangedFiles + 1)
+        case "tooManyFiles": request["changes_count"] = "500"
         case "cappedSize": request["changes_count"] = "1000+"
         case "unknownSize": request.removeValue(forKey: "changes_count")
         default: break
@@ -2636,8 +2662,9 @@ import MergeTetherRemote
 
         // then
         let approved = harness.log("approve.log").contains("sha=\(head)")
-        #expect(approved == (change == "unchanged"))
-        if change != "unchanged" {
+        let needsFreshEvidence = ["retargeted", "retargetedProject", "newBase", "legacyUnbound", "noDiffRefs"].contains(change)
+        #expect(approved == !needsFreshEvidence)
+        if needsFreshEvidence {
             // The verdict still offers a manual approval; only the automatic write is withheld.
             let item = try #require(harness.monitor.currentItems.first)
             #expect(!item.autoApproveReady)
@@ -2699,6 +2726,7 @@ import MergeTetherRemote
             handoff: run, settings: harness.settings, glab: harness.glab, reviewedRequest: launched, directory: verdicts)
         // The review itself is still recorded, but it cannot authorize automatic approval.
         #expect(retargeted != nil && retargeted?.target == nil)
+        #expect(retargeted?.launchTarget == ReviewTargetBinding(launched))
     }
 
     @Test func validatedReviewCompletionCapturesExactPendingDraftsAndFailsClosedWhenTheyCannotBeRead() async throws {
@@ -2871,7 +2899,7 @@ import MergeTetherRemote
     }
 
     @Test func explicitAutoApprovalWaitsForEveryDiscussion() async throws {
-        #expect(!AutomationSettings().autoApproveEnabled && AutomationSettings().autoApprovalThreshold == .noIssues)
+        #expect(!AutomationSettings().autoApproveEnabled && AutomationSettings().autoApprovalThreshold == .noMajorIssues)
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
         try harness.write("discussions.json", othersThread)

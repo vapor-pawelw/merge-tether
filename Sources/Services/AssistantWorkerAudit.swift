@@ -2,7 +2,7 @@ import Foundation
 
 @MainActor
 enum AssistantWorkerAudit {
-    struct Snapshot {
+    struct Snapshot: Codable, Equatable, Sendable {
         private let head: String?
         private let approved: Bool?
         private let discussions: Discussions?
@@ -26,8 +26,10 @@ enum AssistantWorkerAudit {
             return effects
         }
 
-        private struct Discussions {
-            struct Resolution {
+        var isComplete: Bool { head != nil && approved != nil && discussions != nil }
+
+        private struct Discussions: Codable, Equatable, Sendable {
+            struct Resolution: Codable, Equatable, Sendable {
                 let threadID: String
                 let startedByUser: Bool
             }
@@ -55,6 +57,13 @@ enum AssistantWorkerAudit {
         }
     }
 
+    struct Pending: Codable, Equatable, Sendable {
+        let baseline: Snapshot
+        let userID: Int
+        let sourceProjectID: Int?
+        let sourceBranch: String
+    }
+
     static func capture(for request: GitLabMergeRequest, host: String, user: GitLabAuthenticatedUser,
                         accountRevision: UInt64, glab: GlabService) async -> Snapshot? {
         func sameAccount() -> Bool {
@@ -68,7 +77,7 @@ enum AssistantWorkerAudit {
         async let discussions = try? glab.fetchMergeRequestDiscussions(projectID: project, iid: iid, host: host, timeout: 8)
         async let approvals = try? glab.fetchMergeRequestApprovalCounts(projectID: project, iid: iid, host: host, timeout: 8)
         let (verifiedUser, live, threads, approvalCounts) = await (authenticated, currentRequest, discussions, approvals)
-        guard sameAccount(), verifiedUser == user, let live,
+        guard sameAccount(), verifiedUser == user, let live, live.projectID == project, live.iid == iid,
               live.webURL == request.webURL, live.webURL.isGitLabMergeRequest(host: host, iid: iid),
               live.sourceProjectID == request.sourceProjectID, live.sourceBranch == request.sourceBranch else { return nil }
         return .init(head: live.sha, approved: approvalCounts?.approverIDs?.contains(user.id),
@@ -99,44 +108,89 @@ enum AssistantWorkerAudit {
         guard let baseline else { return .unavailable }
         var live = await capture(for: request, host: handoff.key.work.host, user: user,
                                  accountRevision: accountRevision, glab: glab)
-        if live == nil, !Task.isCancelled {
+        let first = compare(live, baseline: baseline, handoff: handoff)
+        if first == .unavailable, !Task.isCancelled, glab.accountRevision == accountRevision {
             try? await Task.sleep(for: retryDelay)
             live = await capture(for: request, host: handoff.key.work.host, user: user,
                                  accountRevision: accountRevision, glab: glab)
         }
+        guard !Task.isCancelled else { return .unavailable }
+        let verdict = compare(live, baseline: baseline, handoff: handoff)
+        if let index = activeRunIndex(handoff, in: settings) {
+            switch verdict {
+            case .clean: break
+            case .unavailable where handoff.manual != true:
+                settings.assistantHandoffs[index].execution?.pendingWorkerAudit = Pending(
+                    baseline: baseline, userID: user.id, sourceProjectID: request.sourceProjectID, sourceBranch: request.sourceBranch)
+                settings.save()
+            case .unavailable: break
+            case .unexpected(let effects):
+                settings.assistantHandoffs[index].execution?.remoteEffects = effects
+            }
+        }
+        return verdict
+    }
+
+    private static func compare(_ live: Snapshot?, baseline: Snapshot, handoff: AssistantAutomationRunner.Handoff) -> Verdict {
         guard let live else { return .unavailable }
         let effects = live.effects(since: baseline, allowsPush: AgentProcessEnvironment.pushPermitted(handoff),
                                    allowsOwnResolution: handoff.resolvesOwnThreads == true)
-        guard !effects.isEmpty else { return .clean }
-        if let index = activeRunIndex(handoff, in: settings) {
-            settings.assistantHandoffs[index].execution?.remoteEffects = effects
-            settings.save()
-        }
-        Log.monitor.warning("Observed GitLab changes outside the allowances of worker run \(handoff.id.uuidString, privacy: .private)")
-        return .unexpected(effects)
+        if !effects.isEmpty { return .unexpected(effects) }
+        return live.isComplete && baseline.isComplete ? .clean : .unavailable
     }
 
-    /// Fails closed for unattended writes. Unexpected effects suspend all automation through the global
-    /// killswitch, which the user resumes explicitly; manual actions and user-started runs stay available.
-    /// Unavailable evidence does the same for unattended runs, while user-started runs keep their outcome.
-    /// Returns the error that should replace a successful outcome, or nil when the run stays within bounds.
     static func enforce(_ verdict: Verdict, handoff: AssistantAutomationRunner.Handoff,
                         settings: SettingsManager) -> AssistantJobExecutor.ExecutionError? {
-        let error: AssistantJobExecutor.ExecutionError
         switch verdict {
         case .clean: return nil
-        case .unexpected: error = .unexpectedRemoteEffects
-        case .unavailable:
-            guard handoff.manual != true else { return nil }
-            error = .auditUnavailable
+        case .unavailable: return handoff.manual == true ? nil : .auditUnavailable
+        case .unexpected:
+            settings.automation.scope[handoff.key.automationTarget] = .paused
+            settings.save()
+            Log.monitor.warning("Paused automation on a merge request with out-of-bounds worker effects")
+            return .unexpectedRemoteEffects
         }
-        suspendAutomaticWrites(settings)
-        return error
     }
 
-    static func suspendAutomaticWrites(_ settings: SettingsManager) {
-        guard settings.automationGloballyEnabled, settings.configuredAutomationAvailable else { return }
-        settings.setAutomationGloballyEnabled(false)
-        Log.monitor.warning("Suspended automation after an unverifiable or out-of-bounds worker run")
+    /// Resume comparing saved evidence on later polls, without launching a worker again.
+    static func retryPending(host: String, user: GitLabAuthenticatedUser, glab: GlabService, settings: SettingsManager) async {
+        let revision = glab.accountRevision
+        let pending = settings.assistantHandoffs.filter {
+            $0.key.work.host == host && $0.key.username == user.username
+                && $0.execution?.state.isActive == false && $0.execution?.pendingWorkerAudit?.userID == user.id
+        }
+        guard !pending.isEmpty else { return }
+        _ = await AssistantJobJournal.loadKey()
+        for handoff in pending {
+            let work = handoff.key.work
+            guard !Task.isCancelled, glab.accountRevision == revision else { return }
+            guard let audit = handoff.execution?.pendingWorkerAudit,
+                  let request = try? await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: host),
+                  request.projectID == work.projectID, request.iid == work.iid, request.webURL == handoff.mergeRequestURL,
+                  request.sourceProjectID == audit.sourceProjectID, request.sourceBranch == audit.sourceBranch else { continue }
+            let live = await capture(for: request, host: host, user: user, accountRevision: revision, glab: glab)
+            let verdict = compare(live, baseline: audit.baseline, handoff: handoff)
+            guard verdict != .unavailable, !Task.isCancelled, glab.accountRevision == revision,
+                  let index = settings.assistantHandoffs.firstIndex(where: {
+                      $0.id == handoff.id && $0.key == handoff.key && $0.execution?.pendingWorkerAudit == audit
+                  }) else { continue }
+            if case .unexpected(let effects) = verdict {
+                settings.assistantHandoffs[index].execution?.pendingWorkerAudit = nil
+                settings.assistantHandoffs[index].execution?.remoteEffects = effects
+                settings.assistantHandoffs[index].execution?.error = AssistantJobExecutor.ExecutionError.unexpectedRemoteEffects.rawValue
+                _ = enforce(verdict, handoff: handoff, settings: settings)
+            } else {
+                guard AssistantJobJournal.isKeyReady || !AssistantJobJournal.hasCheckpoint(handoff.id) else { continue }
+                do {
+                    if let execution = try AssistantJobJournal.completeAuditedRun(handoff) {
+                        settings.assistantHandoffs[index].execution = execution
+                    }
+                    settings.assistantHandoffs[index].execution?.pendingWorkerAudit = nil
+                    settings.save()
+                } catch {
+                    Log.monitor.error("Could not restore the audited worker outcome: \(String(describing: error), privacy: .private)")
+                }
+            }
+        }
     }
 }

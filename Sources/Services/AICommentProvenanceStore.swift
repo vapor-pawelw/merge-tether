@@ -117,19 +117,26 @@ enum AICommentProvenanceStore {
     nonisolated static let directory = ReviewVerdictStore.directory.deletingLastPathComponent()
         .appending(path: "display-comment-origins")
 
+    nonisolated static func validatedGeneratedDrafts(_ claims: [DraftClaim], baseline: [GitLabDraftNote],
+        current: [GitLabDraftNote], userID: Int) -> [(DraftClaim, GitLabDraftNote)] {
+        guard claims.count <= 100, Set(claims.map(\.id)).count == claims.count,
+              baseline.allSatisfy({ ($0.id ?? 0) > 0 && $0.authorID == userID && $0.note != nil }),
+              Set(baseline.compactMap(\.id)).count == baseline.count else { return [] }
+        return claims.compactMap { claim in
+            let matches = current.filter { $0.id == claim.id }
+            let previous = baseline.first { $0.id == claim.id }
+            guard claim.id > 0, matches.count == 1, let draft = matches.first,
+                  draft.authorID == userID, let body = draft.note, !body.isEmpty,
+                  AICommentAssessmentStore.digest(body) == claim.bodySHA256,
+                  previous?.note.map(AICommentAssessmentStore.digest) != claim.bodySHA256 else { return nil }
+            return (claim, draft)
+        }
+    }
+
     nonisolated static func recordGenerated(_ claims: [DraftClaim], baseline: [GitLabDraftNote], current: [GitLabDraftNote],
         context: Context, runID: UUID, headSHA: String, in directory: URL = directory) throws {
-        guard context.isValid, validHead(headSHA), claims.count <= 100,
-              Set(claims.map(\.id)).count == claims.count,
-              baseline.allSatisfy({ ($0.id ?? 0) > 0 && $0.authorID == context.userID && $0.note != nil }),
-              Set(baseline.compactMap(\.id)).count == baseline.count else { return }
-        for claim in claims where claim.id > 0 {
-            let matches = current.filter { $0.id == claim.id }
-            let previous = baseline.filter { $0.id == claim.id }
-            guard matches.count == 1, previous.count <= 1, let draft = matches.first,
-                  draft.authorID == context.userID, let body = draft.note, !body.isEmpty,
-                  AICommentAssessmentStore.digest(body) == claim.bodySHA256,
-                  previous.first?.note.map(AICommentAssessmentStore.digest) != claim.bodySHA256 else { continue }
+        guard context.isValid, validHead(headSHA) else { return }
+        for (claim, draft) in validatedGeneratedDrafts(claims, baseline: baseline, current: current, userID: context.userID) {
             try remember(draft, context: context, runID: runID, headSHA: headSHA, in: directory)
             let contextFile = file(kind: "context", id: claim.id, context: context, in: directory)
             if let markdown = normalizedExtraContext(claim.extraContext) {

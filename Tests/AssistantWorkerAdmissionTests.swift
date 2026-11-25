@@ -5,7 +5,7 @@ import Testing
 @MainActor
 struct AssistantWorkerAdmissionTests {
     @Test(arguments: AutomationAssistant.allCases, ["observed", "failed", "other-account", "changed-account", "allowed-resolution", "allowed-push", "missing-approvals"])
-    func unattendedWorkerAuditFailsClosedAndSuspendsAutomaticWrites(_ assistant: AutomationAssistant, _ scenario: String) async throws {
+    func workerAuditHoldsOnlyTheAffectedMergeRequest(_ assistant: AutomationAssistant, _ scenario: String) async throws {
         let f = try Fixture(assistant: assistant, scenario: "audit-\(scenario)")
         defer { f.clean() }
         #expect(f.settings.automationGloballyEnabled && f.settings.automaticPublicWritesAllowed)
@@ -25,9 +25,12 @@ struct AssistantWorkerAdmissionTests {
             if let expected { #expect(failure.description == expected.description) }
             else { #expect(failure.description.contains("CLI exit 12")) }
         }
-        #expect(f.settings.automationGloballyEnabled == !suspends)
-        #expect(f.settings.automaticPublicWritesAllowed == !suspends)
-        #expect(SettingsManager(defaults: f.defaults).automationGloballyEnabled == !suspends)
+        let target = MRAutomationScope.Target(host: f.host, username: "me", projectID: 7, iid: 11)
+        let unrelated = MRAutomationScope.Target(host: f.host, username: "me", projectID: 7, iid: 12)
+        let reopened = SettingsManager(defaults: f.defaults)
+        #expect(reopened.automationGloballyEnabled && reopened.automaticPublicWritesAllowed)
+        #expect((reopened.automation.scope[target] == .paused) == ["observed", "failed", "missing-approvals"].contains(scenario))
+        #expect(reopened.automation.scope[unrelated] != .paused)
         #expect(FileManager.default.fileExists(atPath: f.cli.path + ".started"))
 
         let saved = try #require(SettingsManager(defaults: f.defaults).assistantHandoffs.first?.execution)
@@ -41,6 +44,60 @@ struct AssistantWorkerAdmissionTests {
             #expect(effects.isEmpty)
         }
         #expect(f.gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
+    @Test(arguments: AutomationAssistant.allCases)
+    func aReplyWorkerSuppliesPublicationEvidenceThroughItsStructuredResult(_ assistant: AutomationAssistant) async throws {
+        let f = try Fixture(assistant: assistant, scenario: "reply-assessment")
+        defer { f.clean() }
+        let target = f.handoff.key.automationTarget
+        let directory = AICommentAssessmentStore.directory
+        let record = AICommentAssessmentStore.fileURL(host: f.host, projectID: 7, iid: 11, noteID: 40, in: directory)
+        defer { try? FileManager.default.removeItem(at: record.deletingLastPathComponent()) }
+        let outcome = try await AssistantJobExecutor.execute(f.handoff, settings: f.settings, glab: f.glab,
+            pipelineWorkDetector: f.claims, detectCLI: { _ in .ready(f.cli) })
+        #expect(outcome.result.sourceAssessments?.map(\.noteID) == [40])
+        let discussions = try await f.glab.fetchMergeRequestDiscussions(projectID: 7, iid: 11, host: f.host)
+        let note = try #require(discussions.first?.notes.first)
+        #expect(AICommentAssessmentStore.isAI(note, host: f.host, projectID: 7, iid: 11, username: target.username, in: directory))
+        #expect(!AICommentAssessmentStore.isAI(note, host: f.host, projectID: 7, iid: 11, username: "another-account", in: directory))
+    }
+
+    @Test func delayedAuditResumesThePendingRunAndLeavesOtherMergeRequestsEligible() async throws {
+        let f = try Fixture(assistant: .codex, scenario: "audit-read-outage")
+        defer { f.clean() }
+        let target = f.handoff.key.automationTarget
+        let other = MRAutomationScope.Target(host: f.host, username: "me", projectID: 7, iid: 12)
+        do {
+            _ = try await AssistantJobExecutor.execute(f.handoff, settings: f.settings, glab: f.glab,
+                pipelineWorkDetector: f.claims, detectCLI: { _ in .ready(f.cli) })
+            Issue.record("Expected the unavailable post-run audit to hold the outcome")
+        } catch let failure as AssistantJobFailure {
+            #expect(failure.description == AssistantJobExecutor.ExecutionError.auditUnavailable.description)
+        }
+        f.settings.assistantHandoffs[0].execution?.state = .failed
+        f.settings.save()
+        let restarted = SettingsManager(defaults: f.defaults)
+        #expect(restarted.effectiveAutomationScope[target] == .paused)
+        #expect(restarted.effectiveAutomationScope[other] != .paused)
+        #expect(restarted.automationGloballyEnabled)
+        #expect(restarted.assistantHandoffs.first?.execution?.pendingWorkerAudit != nil)
+        #expect(AssistantJobJournal.recover(restarted.assistantHandoffs[0])?.state == .failed)
+        let request = try await f.glab.fetchMergeRequest(projectID: 7, iid: 11, host: f.host)
+        var otherPayload = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+        otherPayload["iid"] = 12
+        otherPayload["web_url"] = "https://\(f.host)/team/repo/-/merge_requests/12"
+        let otherRequest = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: otherPayload))
+        #expect(!restarted.permitsAutomaticAction(.approval, for: request, target: target))
+        #expect(restarted.permitsAutomaticAction(.approval, for: otherRequest, target: other))
+
+        f.auditReadRecovered = true
+        await AssistantWorkerAudit.retryPending(host: f.host, user: .init(id: 1, username: "me"), glab: f.glab, settings: restarted)
+
+        #expect(restarted.effectiveAutomationScope[target] != .paused)
+        #expect(restarted.assistantHandoffs.first?.execution?.state == .blocked)
+        #expect(restarted.assistantHandoffs.first?.execution?.pendingWorkerAudit == nil)
+        #expect(try String(contentsOfFile: f.cli.path + ".started", encoding: .utf8) == "started")
     }
 
     @Test(arguments: AutomationAssistant.allCases,
@@ -100,6 +157,7 @@ struct AssistantWorkerAdmissionTests {
         let head = String(repeating: "a", count: 40)
         let scenario: String
         var baselineReads = 0
+        var auditReadRecovered = false
         var labels = ["eligible"]
         var targetBranch = "main"
         var pipelineStatus = "failed"
@@ -110,6 +168,7 @@ struct AssistantWorkerAdmissionTests {
             defaults = try #require(UserDefaults(suiteName: suite))
             settings = SettingsManager(defaults: defaults)
             settings.automation.applyPreset(.full, for: assistant)
+            if scenario == "reply-assessment" { settings.automation.publicationMode = .aiReplies }
             settings.automation.workflowRules[.reviewUpdate].mode = scenario.hasSuffix("no-rule") ? .off : .assistant
             settings.automation.workflowRules[.reviewUpdate].requiredLabel = "eligible"
             settings.automation.workflowRules[.reviewUpdate].targetBranches = "main"
@@ -126,13 +185,18 @@ struct AssistantWorkerAdmissionTests {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             try Data("""
             #!/usr/bin/python3
-            import json,pathlib,sys
+            import hashlib,json,pathlib,sys
             args=sys.argv[1:]
-            pathlib.Path(__file__+'.started').write_text('started')
+            with pathlib.Path(__file__+'.started').open('a') as started:
+                started.write('started')
             sys.stdin.read()
             if \(scenario == "audit-failed" ? "True" : "False"):
                 sys.exit(12)
             result={'status':'blocked','summary':'Synthetic task; no external effects.','blocker':'Fixture finished.','generatedDrafts':[]}
+            if \(scenario == "reply-assessment" ? "True" : "False"):
+                result['generatedDrafts']=[{'id':72,'bodySHA256':hashlib.sha256(b'Fixed').hexdigest()}]
+                result['sourceAssessments']=[{'noteID':40,'bodySHA256':hashlib.sha256(b'AI finding').hexdigest(),
+                    'classification':'ai_assisted','confidence':'high','evidence':'Specific cross-file reasoning.'}]
             if args[0]=='exec':
                 json.dump(result,open(args[args.index('--output-last-message')+1],'w'))
                 print(json.dumps({'type':'turn.completed'}))
@@ -210,6 +274,9 @@ struct AssistantWorkerAdmissionTests {
                         if pipelineStatus == "passed" { pipelineStatus = "success" }
                         if pipelineStatus == "replaced" { pipelineStatus = "failed"; pipelineID = 11 }
                     }
+                    if scenario == "reply-assessment" && workerRan {
+                        return InMemoryGitLab.output(#"[{"id":72,"author_id":1,"note":"Fixed","discussion_id":"incoming"}]"#)
+                    }
                     return InMemoryGitLab.output("[]")
                 }
                 if call.endpoint == "/projects/7/pipelines/10" {
@@ -217,13 +284,18 @@ struct AssistantWorkerAdmissionTests {
                 }
                 if call.endpoint == "/projects/7/repository/branches/feature" { return try InMemoryGitLab.json(["commit":["id":head]]) }
                 if call.endpoint.hasSuffix("/approvals") {
-                    if scenario == "audit-missing-approvals" && !workerRan { throw GlabError.timedOut }
+                    if workerRan && (scenario == "audit-missing-approvals" || (scenario == "audit-read-outage" && !auditReadRecovered)) {
+                        throw GlabError.timedOut
+                    }
                     let approvers = workerRan && (fullEffectChange || scenario == "audit-other-account")
                         ? [["user": ["id": actorID]]] : []
                     return try InMemoryGitLab.json(["approved_by": approvers])
                 }
                 if call.endpoint.contains("/discussions") {
-                    guard scenario.hasPrefix("audit-") else { return InMemoryGitLab.output("[]") }
+                    if scenario == "reply-assessment" {
+                        return InMemoryGitLab.output(#"[{"id":"incoming","notes":[{"id":40,"author":{"id":2},"system":false,"body":"AI finding"}]}]"#)
+                    }
+                    guard scenario.hasPrefix("audit-"), scenario != "audit-read-outage" else { return InMemoryGitLab.output("[]") }
                     let otherAccount = scenario == "audit-other-account"
                     let ownResolution = scenario == "audit-allowed-resolution"
                     let resolved = workerRan && (fullEffectChange || otherAccount || ownResolution)

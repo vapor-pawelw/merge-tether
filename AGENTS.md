@@ -23,6 +23,10 @@ macOS GitLab inbox and MR automation. Read [README.md](README.md) for behavior,
 
 ## Expensive mistakes to avoid
 
+- Preserve the [automation product rules](docs/automation.md#product-rules) during
+  security and reliability fixes. Treat changes to these rules as product
+  changes and cover the expected behavior in tests.
+
 - Run executable MR workers with full tool access in both Codex CLI and Claude CLI.
   Diagnostic, planning and semantic-verifier tasks need live tools too. The verifier
   only reads evidence; keep GitLab action permissions independent of tool access.

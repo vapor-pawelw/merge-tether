@@ -396,10 +396,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "MergeTether could not read comparable GitLab evidence around this automatic run, so automation is paused. Check the merge request, then resume automation."
+            "value": "MergeTether could not verify this automatic run against GitLab. If the agent ran, automatic actions for this merge request wait for the next successful check."
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "MergeTether nie mógł odczytać porównywalnych danych z GitLaba wokół tego automatycznego przebiegu, więc automatyzacja jest wstrzymana. Sprawdź merge request, a następnie wznów automatyzację."}}
+        "pl": {"stringUnit": {"state": "translated", "value": "MergeTether nie mógł zweryfikować tego automatycznego przebiegu w GitLabie. Jeśli agent się uruchomił, automatyczne działania dla tego merge requesta czekają na udaną weryfikację."}}
       }
     },
     "assistant.jobs.error.unexpectedRemoteEffects": {
@@ -408,10 +408,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "GitLab changed outside this run’s permissions while the agent was working, so automation is paused. Review the listed changes, then resume automation."
+            "value": "GitLab changed outside this run’s permissions while the agent was working. Review the listed changes before resuming automation on this merge request."
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "W trakcie pracy agenta GitLab zmienił się poza uprawnieniami tego przebiegu, więc automatyzacja jest wstrzymana. Przejrzyj wymienione zmiany, a następnie wznów automatyzację."}}
+        "pl": {"stringUnit": {"state": "translated", "value": "W trakcie pracy agenta GitLab zmienił się poza uprawnieniami tego przebiegu. Przejrzyj wymienione zmiany przed wznowieniem automatyzacji tego merge requesta."}}
       }
     }
   },

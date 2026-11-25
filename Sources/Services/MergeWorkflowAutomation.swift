@@ -273,7 +273,7 @@ final class MergeWorkflowAutomation {
         guard !polling, isCurrent(host: host, user: user) else { return }
         synchronizeAssistantJobs()
         let rules = settings.automation.workflowRules
-        let observationScope = settings.automation.scope
+        let observationScope = settings.effectiveAutomationScope
         for entry in currentAdmissions where entry.state == .awaitingPipelineHandoff || entry.state == .alreadyRegistered {
             let original = entry.event.mergeRequest
             let current = authored.first { $0.projectID == original.projectID && $0.iid == original.iid }
@@ -297,7 +297,7 @@ final class MergeWorkflowAutomation {
                 glab: glab, host: host, user: user, authored: authored,
                 enabled: rules.enabled, reviewSLA: Double(max(1, rules[.reviewWaiting].waitHours)) * 3600, trackedReviews: trackedReviews,
                 automationScope: observationScope, reviewHistory: settings.assistantHandoffs,
-                isCurrent: { self.isCurrent(host: host, user: user) && self.settings.automation.scope == observationScope }
+                isCurrent: { self.isCurrent(host: host, user: user) && self.settings.effectiveAutomationScope == observationScope }
             ) { event in
                 guard self.isCurrent(host: host, user: user) else { return }
                 self.receive(event, host: host, user: user)
@@ -349,7 +349,7 @@ final class MergeWorkflowAutomation {
                   let key = pipelineKey(entry), key.projectID > 0, key.mergeRequestIID > 0, key.pipelineID > 0,
                   let current = authored.first(where: { $0.projectID == key.projectID && $0.iid == key.mergeRequestIID }),
                   current.state == "opened", current.author.id == user.id,
-                  settings.automation.scope.permits(current, host: entry.host, username: entry.user.username),
+                  settings.effectiveAutomationScope.permits(current, host: entry.host, username: entry.user.username),
                   let source = current.sha, GlabService.isFullGitSHA(source), source == entry.event.mergeRequest.sha,
                   current.headPipeline?.id == key.pipelineID, current.headPipeline?.status == "failed",
                   current.webURL.isGitLabMergeRequest(host: entry.host, iid: current.iid)
@@ -568,7 +568,7 @@ final class MergeWorkflowAutomation {
                 let current = try await self.glab.fetchMergeRequest(projectID: original.projectID, iid: original.iid, host: entry.host)
                 guard current.state == "opened", current.sha == original.sha, current.sha != nil,
                       current.webURL.isGitLabMergeRequest(host: entry.host, iid: current.iid),
-                      self.settings.automation.scope.permits(current, host: entry.host, username: entry.user.username),
+                      self.settings.effectiveAutomationScope.permits(current, host: entry.host, username: entry.user.username),
                       self.configuredRule(for: event)?.includes(current) == true, self.shouldProceed(entry)
                 else { throw CancellationError() }
                 return current
@@ -658,7 +658,7 @@ final class MergeWorkflowAutomation {
                           current.headPipeline?.projectID == latest.headPipeline?.projectID,
                           current.headPipeline?.sha == latest.headPipeline?.sha, current.headPipeline?.status == "failed",
                           self.glab.accountRevision == assessmentAccountRevision,
-                          self.settings.automation.scope.permits(current, host: entry.host, username: entry.user.username),
+                          self.settings.effectiveAutomationScope.permits(current, host: entry.host, username: entry.user.username),
                           self.configuredRule(for: event)?.includes(current) == true else { throw CancellationError() }
                     if let expectedJobs = event.failedPipelineJobIDs {
                         guard try await self.matchesFailedJobs(expectedJobs, pipelineID: handoff.pipelineID,
@@ -711,7 +711,7 @@ final class MergeWorkflowAutomation {
             current = try await glab.fetchMergeRequest(projectID: latest.projectID, iid: latest.iid, host: entry.host)
         }
         guard current.state == "opened", current.sha == latest.sha,
-              settings.automation.scope.permits(current, host: entry.host, username: entry.user.username),
+              settings.effectiveAutomationScope.permits(current, host: entry.host, username: entry.user.username),
               configuredRule(for: event)?.includes(current) == true,
               shouldProceed(entry), settingsBeforeLaunch.preservingScope(from: settings.automation) == settings.automation
         else { throw CancellationError() }
@@ -840,7 +840,7 @@ final class MergeWorkflowAutomation {
 
     private func configuredRule(for event: MergeWorkflowEvent) -> MergeWorkflowRule? {
         guard settings.automation.hasAutomaticActionConsent, let host = glab.resolvedHost, let username = glab.currentUsername,
-              settings.automation.scope.permits(event.mergeRequest, host: host, username: username) else { return nil }
+              settings.effectiveAutomationScope.permits(event.mergeRequest, host: host, username: username) else { return nil }
         var rule = settings.automation.workflowRules[event.kind]
         rule.mode = rule.effectiveMode(for: event.kind)
         return rule.mode != .off && rule.includes(event.mergeRequest) ? rule : nil
@@ -858,7 +858,7 @@ final class MergeWorkflowAutomation {
               skipped.event.pipelineID == key.pipelineID, skipped.event.mergeRequest.projectID == current.projectID,
               skipped.event.mergeRequest.iid == current.iid, skipped.event.mergeRequest.sha == current.sha,
               current.state == "opened", current.author.id == entry.user.id,
-              settings.automation.scope.permits(current, host: entry.host, username: entry.user.username),
+              settings.effectiveAutomationScope.permits(current, host: entry.host, username: entry.user.username),
               current.headPipeline?.id == key.pipelineID, current.headPipeline?.status == "failed",
               configuration.preservingScope(from: settings.automation) == settings.automation,
               settings.automation.autoClaimPipelineFailures, settings.automation.hasAutomaticActionConsent,

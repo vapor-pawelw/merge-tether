@@ -95,6 +95,10 @@ enum AssistantAutomationRunner {
         let username: String
         let workspace: String
         let access: Access
+
+        var automationTarget: MRAutomationScope.Target {
+            .init(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
+        }
     }
 
     struct ForeignPipelineDiagnosis: Codable, Equatable, Sendable {
@@ -427,7 +431,7 @@ enum AssistantAutomationRunner {
             } catch let error as GlabError where !manual && recordsReviewVerdict && retryOf == nil && error.isTransientReadFailure {
                 throw ReviewAdmissionReadFailure(cause: error)
             }
-            guard manual || settings.automation.scope.permits(snapshot.request, host: work.host, username: username) else {
+            guard manual || settings.effectiveAutomationScope.permits(snapshot.request, host: work.host, username: username) else {
                 throw AssistantJobExecutor.ExecutionError.disabledPermission
             }
             if let preparedWorkflowReview, snapshot.user != preparedWorkflowReview.user {
@@ -538,11 +542,6 @@ enum AssistantAutomationRunner {
                 username: username, runID: id)
             : ""
         let publication = settings.publicationPolicy(for: target)
-        let aiAssessment = publication.requiresAI
-            && (mrWorkflow != .followUp || followUpPush)
-            ? "\n\n" + AICommentAssessmentStore.recordingInstructions(host: work.host, projectID: work.projectID, iid: work.iid,
-                criteriaOverride: publication.aiCommentCriteriaOverride)
-            : ""
         let publicationPolicy: String
         if mrWorkflow == .followUp && !followUpPush {
             publicationPolicy = "This unfinished author-follow-up run saves no response drafts and publishes nothing, regardless of publication settings."
@@ -577,7 +576,7 @@ enum AssistantAutomationRunner {
 
                 Start your final update with a clickable Markdown link to this MR: [Open MR in GitLab](<\(mergeRequestURL.absoluteString)>). Summarize what you did or found, what you verified, and any blockers, missing evidence or next steps. Include the summary even when no changes were needed.
 
-                \(publicationPolicy)\(verdict)\(aiAssessment)\(followUpProof)
+                \(publicationPolicy)\(verdict)\(followUpProof)
 
                 \(boundedPrompt)
                 """,
@@ -670,6 +669,7 @@ enum AssistantAutomationRunner {
         guard let execution = handoff.execution, !execution.state.isActive,
               let taskPrompt = handoff.taskPrompt, let url = handoff.mergeRequestURL else { throw HandoffError.jobUnavailable }
         guard manual || (settings.automaticWritesAllowed && automaticRetryIdentity != nil && glab != nil
+            && handoff.execution?.pendingWorkerAudit == nil && handoff.execution?.remoteEffects?.isEmpty != false
             && execution.cancellationOrigin != .user
             && (execution.state == .failed || execution.state == .interrupted
                 || execution.state == .cancelled && execution.cancellationOrigin == .policy)) else {

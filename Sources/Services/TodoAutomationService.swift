@@ -381,7 +381,7 @@ final class TodoAutomationService {
         let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
         let decisionContext = AssistantAutomationRunner.feedbackDecisionRevision(work: work, username: username, settings: settings)
         guard let residual, settings.automation.allowFollowUpPush, settings.automation.hasAutomaticActionConsent,
-              settings.automation.scope.permits(request, host: work.host, username: username),
+              settings.effectiveAutomationScope.permits(request, host: work.host, username: username),
               !settings.ignoredMergeRequests.contains(target), request.author.username == username else { return nil }
         let allAttempts = settings.assistantHandoffs.filter { $0.key.work == work && $0.key.username == username && !$0.isObsoleteReminder }
         let attempts = allAttempts.filter { $0.feedbackDecisionRevision == decisionContext }

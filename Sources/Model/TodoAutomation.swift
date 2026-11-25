@@ -255,7 +255,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     /// Off unless a delivering profile or the user turns it on; a review verdict alone never approves.
     var autoApproveEnabled = false
     /// The strictest threshold unless the user chose another one. Stored choices are preserved.
-    var autoApprovalThreshold: AutoApprovalThreshold = .noIssues
+    var autoApprovalThreshold: AutoApprovalThreshold = .noMajorIssues
     var autoResolveOwnReviewThreads = true
     var autoResolveAcceptedFeedback = true
     var autoMergeProjects = ""
