@@ -162,15 +162,24 @@ import MergeTetherRemote
             != updated.actions.first(where: \.isAuthorFeedbackVerification)?.token)
     }
 
-    @Test func verificationInProgressWithholdsOnlyAuthorFeedbackVerification() throws {
+    @Test func failedFollowUpUsesTheSelectedIntentDuringReadOnlyReconciliation() throws {
         let request = try MRDependencyPresentationTests().request(2, project: 1)
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: request.author.username, projectID: 1, iid: 2)
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
             url: request.webURL, mergeRequest: request, isAuthored: true)
-        item.authorFeedbackStatus = .init(head: request.sha!, fingerprint: "feedback", phase: .failed)
-        item.draftProofRecoveryFailure = "Draft verification failed"
-        let account = "\(request.author.username)@\(request.webURL.host!)"
-        let card = RemoteBoardAdapter.card(item, account: account, followUpInProgress: true)
-        #expect(card.actions.filter { $0.kind == .verify }.map(\.id) == ["verifyDrafts"])
+        item.observedDiscussionFingerprint = "current-discussion"
+        item.authorFeedbackStatus = .init(head: request.sha!, fingerprint: "current-discussion",
+            semanticContextFingerprint: request.semanticContextFingerprint, readOnlyReconciliation: true, phase: .checking)
+        let reconciled = MRTodoIntent(id: UUID(), target: target, kind: .followUp, state: .failed,
+            todoIDs: [], noteIDs: [42], sourceEvents: [], request: request, headSHA: request.sha!, jobID: nil, updatedAt: .now)
+        let selected = MRTodoIntent(id: UUID(), target: target, kind: .followUp, state: .failed,
+            todoIDs: [], noteIDs: [43], sourceEvents: [], request: request, headSHA: request.sha!, jobID: UUID(), updatedAt: .now)
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [reconciled, selected])
+        let action = try #require(MRHumanAction(row: row, assistantReady: true))
+
+        #expect(row.isReconciling(reconciled))
+        #expect(action.retryIntent?.id == selected.id)
+        #expect(action.failedFollowUp(in: row, jobs: [])?.intent.id == selected.id)
     }
 
     @Test func manualReReviewConfirmationIsLimitedToTheCurrentNonConcreteFailure() throws {

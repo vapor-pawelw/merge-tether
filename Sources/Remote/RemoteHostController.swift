@@ -957,8 +957,7 @@ extension RemoteConnection: RemoteHostTransport {}
                 RemoteBoardAdapter.failedFollowUp(in: row, monitor: monitor,
                     presentation: .init(row: row, monitor: monitor, allowsRemoval: !item.isAuthored))
             } else { nil }
-            guard retry != .authorFeedback || !row.hasFollowUpInProgress,
-                  retry.isAvailable(for: item, failedFollowUp: followUp) else { return .changed }
+            guard retry.isAvailable(for: item, failedFollowUp: followUp) else { return .changed }
             switch retry {
             case .authorFeedback: monitor.attention.retryAuthorFeedback(item.id)
             case .drafts: monitor.attention.retryDraftProofRecovery(item.id)

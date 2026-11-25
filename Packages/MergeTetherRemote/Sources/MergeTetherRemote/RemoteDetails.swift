@@ -291,7 +291,7 @@ public struct RemoteFollowUpRecovery: Codable, Equatable, Sendable {
     public var reason: String?
     public var diagnostics: String?
     public var comments: [Comment]
-    public let commentCount: Int?
+    public var commentCount: Int?
     public let retryActionID: String
 
     public init(stage: Stage, reason: String?, diagnostics: String?, comments: [Comment],
@@ -401,6 +401,7 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
             if var recovery = details.followUpRecovery {
                 recovery.reason = recovery.reason.map { text($0, 2_000) }
                 recovery.diagnostics = recovery.diagnostics.map { text($0, 4_000) }
+                if recovery.comments.count > 30 { recovery.commentCount = nil }
                 recovery.comments = list(recovery.comments, 30).map { original in
                     var comment = original
                     comment.author = comment.author.map { text($0, 512) }
@@ -489,6 +490,9 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
                     return thread
                 }
             }
+            else if let recovery = details.followUpRecovery, recovery.comments.contains(where: { $0.body != nil }) {
+                details.followUpRecovery?.comments = recovery.comments.map { .init(id: $0.id, author: $0.author, url: $0.url) }
+            }
             else if var threads = details.threads, !threads.isEmpty {
                 if threads.count > 1 { threads = Array(threads.prefix(threads.count / 2)) }
                 else if threads[0].notes.count > 1 {
@@ -520,6 +524,7 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
             else if let recovery = details.followUpRecovery {
                 if !recovery.comments.isEmpty {
                     details.followUpRecovery?.comments = Array(recovery.comments.prefix(recovery.comments.count / 2))
+                    details.followUpRecovery?.commentCount = nil
                 } else if recovery.diagnostics != nil {
                     details.followUpRecovery?.diagnostics = nil
                 } else { details.followUpRecovery = nil }

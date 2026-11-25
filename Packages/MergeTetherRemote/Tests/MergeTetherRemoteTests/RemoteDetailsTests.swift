@@ -379,6 +379,40 @@ import Testing
         #expect(fitted.details?.draftContexts == nil && fitted.details?.proposedSolutionDraftIDs == nil)
     }
 
+    @Test func boundedDetailsPreserveDiscussionNotesAheadOfDuplicateRecoveryBodies() throws {
+        let board = board(), card = board.cards[0]
+        let request = try RemoteDetailRequest(card: card, board: board)
+        let body = String(repeating: "a", count: 4_000)
+        let notes = (1...24).map { RemoteDetailNote(id: String($0), body: body) }
+        var details = RemoteMRDetails(checkedAt: date, threads: [.init(id: "t", state: .open, notes: notes)])
+        let comments = (1...24).map { RemoteFollowUpRecovery.Comment(id: $0, body: body) }
+        details.followUpRecovery = .init(stage: .stopped, reason: nil, diagnostics: nil,
+            comments: comments, commentCount: comments.count, retryActionID: "intent:retry")
+
+        let fitted = RemoteDetailResponse(request: request, status: .current, details: details).bounded()
+
+        #expect(fitted.details?.truncated == true)
+        #expect(fitted.details?.threads?.first?.notes.map(\.id) == notes.map(\.id))
+        #expect(fitted.details?.threads?.first?.notes.map { $0.body.count } == notes.map { $0.body.count })
+        #expect(fitted.details?.followUpRecovery?.comments.map(\.id) == comments.map(\.id))
+        #expect(fitted.details?.followUpRecovery?.commentCount == comments.count)
+    }
+
+    @Test func boundedDetailsOmitTheCountWhenRecoveryReferencesAreTrimmed() throws {
+        let board = board(), card = board.cards[0]
+        let request = try RemoteDetailRequest(card: card, board: board)
+        let comments = (1...31).map { RemoteFollowUpRecovery.Comment(id: $0) }
+        var details = RemoteMRDetails(checkedAt: date)
+        details.followUpRecovery = .init(stage: .stopped, reason: nil, diagnostics: nil,
+            comments: comments, commentCount: comments.count, retryActionID: "intent:retry")
+
+        let fitted = RemoteDetailResponse(request: request, status: .current, details: details).bounded()
+
+        #expect(fitted.details?.truncated == true)
+        #expect(fitted.details?.followUpRecovery?.comments.count == 30)
+        #expect(fitted.details?.followUpRecovery?.commentCount == nil)
+    }
+
     @Test func dependencySourcesSurviveSnapshotsAndOlderPhonesCanStillOpenDetails() throws {
         let predecessor = #"{"reference":"!1","title":"Base","url":"https://gitlab.example.test/g/p/-/merge_requests/1","isCurrent":true"#
         let decoder = JSONDecoder()

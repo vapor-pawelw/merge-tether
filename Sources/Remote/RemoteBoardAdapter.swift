@@ -67,8 +67,7 @@ import MergeTetherRemote
 
     static func card(_ item: MergeRequestAttentionMonitor.Item, account: String,
                      extraActions: [RemoteActionKind] = [], context: [String] = [],
-                     failedFollowUp: MRHumanAction.FailedFollowUp? = nil,
-                     followUpInProgress: Bool = false) -> RemoteCard {
+                     failedFollowUp: MRHumanAction.FailedFollowUp? = nil) -> RemoteCard {
         let drafts = item.drafts.enumerated().map { index, draft in
             let context: String?
             if case let .line(location) = draft.kind { context = location }
@@ -123,7 +122,6 @@ import MergeTetherRemote
                 return RemoteAction(id: raw, kind: kind, token: token)
             }
             for retry in MRVerificationRetry.allCases where retry.isAvailable(for: item, failedFollowUp: failedFollowUp) {
-                guard retry != .authorFeedback || !followUpInProgress else { continue }
                 let recovery = retry == .authorFeedback ? failedFollowUp : nil
                 var identity = [token, retry.rawValue]
                 if let recovery {
@@ -205,7 +203,7 @@ import MergeTetherRemote
                     let context = handoffs.map(\.id).sorted() + [(try? RemoteDigest.token(monitor.settings.automation)) ?? "",
                         item.authorFeedbackStatus?.fingerprint ?? ""] + feedbackIDs
                     card = self.card(item, account: account, extraActions: extras, context: context,
-                        failedFollowUp: followUp, followUpInProgress: row.hasFollowUpInProgress)
+                        failedFollowUp: followUp)
                     card = self.presentation(card, model: presentation)
                     let issues = monitor.issueTags(for: row.displayRequest)
                     if !issues.isEmpty { card.issues = issues }

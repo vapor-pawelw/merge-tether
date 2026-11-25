@@ -102,10 +102,11 @@ struct MRHumanAction {
     func failedFollowUp(in row: MergeRequestBoardSnapshot.Row,
                         jobs: [AssistantAutomationRunner.Handoff]) -> FailedFollowUp? {
         guard row.evidenceMatchesCatalogContext, !row.hasFollowUpInProgress,
-              let intent = row.attentionIntents.first(where: {
-                  $0.kind == .followUp && $0.state == .failed && (action != .retryRun || $0.jobID == retryJob?.id)
+              let intent = row.attentionIntents.first(where: { candidate in
+                  guard candidate.kind == .followUp, candidate.state == .failed, !row.isReconciling(candidate) else { return false }
+                  if action == .retryRun { return retryJob.map { $0.id == candidate.jobID } == true }
+                  return retryIntent?.id == candidate.id
               }),
-              !row.isReconciling(intent),
               let request = row.displayRequest, request.state == "opened",
               intent.target.username == request.author.username,
               intent.target.projectID == request.projectID, intent.target.iid == request.iid,
