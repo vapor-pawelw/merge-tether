@@ -90,19 +90,8 @@ struct RemoteCardDetail: View {
                             Button(.Remote.remoteClose) { model.state.acknowledgeResult() }
                         }
                         actionSection(followUpRecovery).id(RemoteCardCTA.Destination.actions)
-                        if current.id.hasPrefix("mr:") {
-                            if let details = shown {
-                                RemoteMRDetailContent(details: details, card: current, account: model.state.board?.account ?? "",
-                                    personalApproval: current.personalApprovalControl(model: model),
-                                    reviewerEditing: current.reviewerEditing(model: model),
-                                    onRefreshActivity: boardCard == nil || !model.supportsDetails ? nil : refreshActivity,
-                                    activityReadInProgress: activityReadInProgress,
-                                    canRefreshActivity: !activityReadInProgress && model.state.pending == nil
-                                        && model.connectionStatus() == .connected,
-                                    onCommentOrigin: hasConfirmedDiscussions && current.actions.contains { $0.kind == .setCommentOrigin } ? { request in
-                                        Task { await model.setCommentOrigin(request, card: current) }
-                                    } : nil)
-                            }
+                        if current.id.hasPrefix("mr:"), let details = shown {
+                            detailContent(details, hasConfirmedDiscussions: hasConfirmedDiscussions)
                         }
                     }
                     .scrollTargetLayout()
@@ -136,16 +125,7 @@ struct RemoteCardDetail: View {
                     openedReview = true
                     await model.requestDetails(card: current, acknowledgingReview: seen)
                 }
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button { dismiss() } label: { Image(systemName: "xmark") }
-                            .accessibilityLabel(Text(.Remote.remoteClose))
-                    }
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        if current.id.hasPrefix("mr:") { RemoteDetailRefreshButton(model: model, card: boardCard) }
-                        sectionMenu(proxy)
-                    }
-                }
+                .toolbar { detailToolbar(proxy) }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 if current.id.hasPrefix("mr:"), shown == nil { detailLoadingBanner }
@@ -204,6 +184,36 @@ struct RemoteCardDetail: View {
             }
             .onDisappear { model.cancelApproval(); model.cancelDetails() }
             .environment(\.gitLabPersonSourceURL, current.url)
+        }
+    }
+
+    private func detailContent(_ details: RemoteMRDetails, hasConfirmedDiscussions: Bool) -> some View {
+        let canEditOrigin = hasConfirmedDiscussions && current.actions.contains { $0.kind == .setCommentOrigin }
+        let onCommentOrigin: ((RemoteCommentOriginRequest) -> Void)?
+        if canEditOrigin {
+            onCommentOrigin = { request in Task { await model.setCommentOrigin(request, card: current) } }
+        } else { onCommentOrigin = nil }
+        let onRefreshActivity: (() -> Void)?
+        if boardCard != nil, model.supportsDetails {
+            onRefreshActivity = { refreshActivity() }
+        } else { onRefreshActivity = nil }
+        return RemoteMRDetailContent(details: details, card: current, account: model.state.board?.account ?? "",
+            personalApproval: current.personalApprovalControl(model: model),
+            reviewerEditing: current.reviewerEditing(model: model),
+            onRefreshActivity: onRefreshActivity, activityReadInProgress: activityReadInProgress,
+            canRefreshActivity: !activityReadInProgress && model.state.pending == nil && model.connectionStatus() == .connected,
+            onCommentOrigin: onCommentOrigin)
+    }
+
+    @ToolbarContentBuilder
+    private func detailToolbar(_ proxy: ScrollViewProxy) -> some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button { dismiss() } label: { Image(systemName: "xmark") }
+                .accessibilityLabel(Text(.Remote.remoteClose))
+        }
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            if current.id.hasPrefix("mr:") { RemoteDetailRefreshButton(model: model, card: boardCard) }
+            sectionMenu(proxy)
         }
     }
 
