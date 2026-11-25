@@ -6,6 +6,11 @@ struct AssistantCLIHealthIssue: Codable, Equatable, Sendable {
     var resetsAt: Date? = nil
     var resetHint: String? = nil
 
+    var reportedReset: Date? {
+        guard kind == .rateLimited else { return nil }
+        return resetsAt ?? resetHint.flatMap(Self.parseResetHint)
+    }
+
     static func parse(_ output: ProcessRunner.Output, assistant: AutomationAssistant, now: Date = Date()) -> Self? {
         // Only provider error records are evidence. Tool output and normal assistant text are untrusted content.
         let lines = String(decoding: output.stdout.suffix(131_072), as: UTF8.self).split(separator: "\n")
@@ -34,20 +39,20 @@ struct AssistantCLIHealthIssue: Codable, Equatable, Sendable {
             default: nil
             }
             if let kind = classify(code: code, message: message) ?? structured {
-                return .init(kind: kind, resetsAt: resetDate(error, now: now) ?? resetDate(object, now: now),
-                    resetHint: resetHint(message))
+                return issue(kind, message: message,
+                    structuredReset: resetDate(error, now: now) ?? resetDate(object, now: now))
             }
         }
         guard output.exitCode != 0 else { return nil }
         if let kind = classify(code: "", message: output.stderr) {
-            return .init(kind: kind, resetHint: resetHint(output.stderr))
+            return issue(kind, message: output.stderr)
         }
         // Claude can refuse startup before its JSON formatter is initialized.
         // Do not inspect text nested inside otherwise structured tool/assistant output.
         if assistant == .claude, output.stdout.count <= 16_384,
            !lines.contains(where: { (try? JSONSerialization.jsonObject(with: Data($0.utf8))) != nil }) {
             let message = String(decoding: output.stdout, as: UTF8.self)
-            if let kind = classify(code: "", message: message) { return .init(kind: kind, resetHint: resetHint(message)) }
+            if let kind = classify(code: "", message: message) { return issue(kind, message: message) }
         }
         return nil
     }
@@ -82,13 +87,31 @@ struct AssistantCLIHealthIssue: Codable, Equatable, Sendable {
 
     private static func resetDate(_ fields: [String: Any], now: Date) -> Date? {
         for key in ["resets_at", "reset_at", "resetsAt"] {
-            if let seconds = fields[key] as? Double, seconds > 0 { return Date(timeIntervalSince1970: seconds) }
+            if let seconds = fields[key] as? Double, seconds.isFinite, seconds > 0 {
+                return Date(timeIntervalSince1970: seconds)
+            }
             if let value = fields[key] as? String, let date = ISO8601DateFormatter().date(from: value) { return date }
         }
         if let seconds = fields["retry_after"] as? Double, seconds > 0, seconds < 31_536_000 {
             return now.addingTimeInterval(seconds)
         }
         return nil
+    }
+
+    private static func issue(_ kind: Kind, message: String, structuredReset: Date? = nil) -> Self {
+        var issue = Self(kind: kind, resetsAt: structuredReset, resetHint: resetHint(message))
+        issue.resetsAt = issue.reportedReset
+        return issue
+    }
+
+    private static func parseResetHint(_ hint: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .current
+        formatter.dateFormat = "MMM d, yyyy h:mm a"
+        let dateText = hint.replacingOccurrences(of: #"(?<=\d)(st|nd|rd|th)\b"#, with: "", options: .regularExpression)
+        return formatter.date(from: dateText)
     }
 
     private static func resetHint(_ message: String) -> String? {
@@ -100,5 +123,16 @@ struct AssistantCLIHealthIssue: Codable, Equatable, Sendable {
         guard !value.isEmpty, value.count <= 120, value.rangeOfCharacter(from: .decimalDigits) != nil,
               value.unicodeScalars.allSatisfy(permitted.contains) else { return nil }
         return value
+    }
+}
+
+enum AssistantCLIHealthCheck: Equatable, Sendable {
+    case available
+    case held(AssistantCLIHealthIssue)
+    case unavailable
+
+    var issue: AssistantCLIHealthIssue? {
+        if case .held(let issue) = self { return issue }
+        return nil
     }
 }

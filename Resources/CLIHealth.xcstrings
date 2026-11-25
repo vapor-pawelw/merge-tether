@@ -61,6 +61,27 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Czas resetu podany przez CLI: %@"}}
       }
     },
+    "cli.health.limitCheckScheduled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Work is paused. MergeTether will check access again at %@ and resume eligible work when access returns."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Praca jest wstrzymana. MergeTether sprawdzi dostęp ponownie o %@ i po jego przywróceniu wznowi zadania spełniające warunki."}}
+      }
+    },
+    "cli.health.limitChecksStopped": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Three hourly checks could not confirm that access was restored. Automatic checks have stopped. Retry queued work manually when you have access."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Trzy sprawdzenia w odstępach godzinnych nie potwierdziły przywrócenia dostępu. Automatyczne sprawdzanie zostało zakończone. Po odzyskaniu dostępu ponów oczekujące zadania ręcznie."}}
+      }
+    },
+    "cli.health.limitStillUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "The CLI check could not confirm access. Try again once access is restored."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzenie CLI nie potwierdziło dostępu. Spróbuj ponownie po odzyskaniu dostępu."}}
+      }
+    },
     "cli.health.signIn": {
       "extractionState": "manual",
       "localizations": {

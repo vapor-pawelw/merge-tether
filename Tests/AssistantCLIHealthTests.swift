@@ -24,6 +24,7 @@ struct AssistantCLIHealthTests {
         let limit = ProcessRunner.Output(stdout: Data(#"{"type":"result","is_error":true,"result":"You’ve hit your limit · resets 5pm (Europe/Warsaw)"}"#.utf8), stderr: "", exitCode: 1)
         let issue = AssistantCLIHealthIssue.parse(limit, assistant: .claude)
         #expect(issue?.kind == .rateLimited && issue?.resetHint == "5pm (Europe/Warsaw)")
+        #expect(issue?.reportedReset == nil)
         let sessionLimit = ProcessRunner.Output(stdout: Data(),
             stderr: "You've hit your session limit · resets 2:40pm (Europe/Warsaw)", exitCode: 1)
         #expect(AssistantCLIHealthIssue.parse(sessionLimit, assistant: .claude)?.kind == .rateLimited)
@@ -73,6 +74,8 @@ struct AssistantCLIHealthTests {
         let issue = AssistantCLIHealthIssue.parse(output, assistant: .codex)
         #expect(issue?.kind == .rateLimited)
         #expect(issue?.resetHint == "Nov 13th, 2030 1:41 PM")
+        let reset = Calendar(identifier: .gregorian).date(from: DateComponents(year: 2030, month: 11, day: 13, hour: 13, minute: 41))
+        #expect(issue?.resetsAt == reset)
         #expect(AssistantCLIHealthIssue.parse(.init(stdout: Data(), stderr: "HTTP 429 from GitLab", exitCode: 1), assistant: .codex) == nil)
     }
 
@@ -134,17 +137,85 @@ struct AssistantCLIHealthTests {
         ])
         #expect(limited?.kind == .rateLimited)
         #expect(limited?.resetsAt == Date(timeIntervalSince1970: 1795613340))
-        let allowed = CodexAccountProbe.issue(fromResponses: [
+        let allowed = CodexAccountProbe.check(fromResponses: [
             #"{"id":2,"result":{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}}"#,
             #"{"id":3,"result":{"ordinaryUsageAllowed":true,"rateLimits":{"primary":{"usedPercent":40,"resetsAt":1795613340},"rateLimitReachedType":null}}}"#,
         ])
-        #expect(allowed == nil)
+        #expect(allowed == .available)
+        #expect(CodexAccountProbe.check(fromResponses: [#"{"id":3,"result":{"ordinaryUsageAllowed":true}}"#]) == .unavailable)
         let loggedOut = CodexAccountProbe.issue(fromResponses: [#"{"id":2,"result":{"account":null,"requiresOpenaiAuth":true}}"#])
         #expect(loggedOut?.kind == .loginRequired)
         // No answer, an error response, or an account that needs no OpenAI auth proves nothing.
         #expect(CodexAccountProbe.issue(fromResponses: []) == nil)
         #expect(CodexAccountProbe.issue(fromResponses: [#"{"id":3,"error":{"message":"nope"}}"#]) == nil)
         #expect(CodexAccountProbe.issue(fromResponses: [#"{"id":2,"result":{"account":null,"requiresOpenaiAuth":false}}"#]) == nil)
+    }
+
+    @MainActor @Test func limitChecksBackOffAndStayStoppedAcrossRestarts() async throws {
+        let suite = "AssistantCLIHealthTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let health = AssistantCLIHealthStore(defaults: defaults)
+        let reset = Date(timeIntervalSince1970: 1_900_000_000)
+        let cli = URL(fileURLWithPath: "/example/codex")
+        let issue = AssistantCLIHealthIssue(kind: .rateLimited, resetsAt: reset)
+        health.record(issue, assistant: .codex, executable: cli, startedAt: reset.addingTimeInterval(-300))
+        var due = reset.addingTimeInterval(60)
+        let hold = try #require(health.hold(for: .codex))
+        #expect(hold.limitCheckAt == due)
+
+        for delay in [60.0, 120, 240, 480, 960, 1920, 3600, 3600, 3600] {
+            health.recordFailedLimitCheck(.codex, expectedID: hold.id, checkedAt: due)
+            due = due.addingTimeInterval(delay)
+            #expect(health.hold(for: .codex)?.limitCheckAt == due)
+        }
+        let restarted = AssistantCLIHealthStore(defaults: defaults)
+        #expect(restarted.hold(for: .codex)?.limitCheckAt == due)
+        restarted.recordFailedLimitCheck(.codex, expectedID: hold.id, checkedAt: due)
+        let exhausted = AssistantCLIHealthStore(defaults: defaults)
+        #expect(exhausted.hold(for: .codex)?.limitRecheck?.exhausted == true)
+        #expect(exhausted.hold(for: .codex)?.limitCheckAt == nil)
+
+        exhausted.record(.init(kind: .rateLimited), assistant: .codex, executable: cli, startedAt: due.addingTimeInterval(1))
+        let current = try #require(exhausted.hold(for: .codex))
+        #expect(current.limitCheckAt == nil)
+        #expect(current.issue.reportedReset == reset)
+        let limited = AssistantCLILimitRecovery(health: exhausted, check: { _, _ in .held(issue) }, onRecovered: { _ in })
+        #expect(await limited.recheckExhaustedHold(.codex, executable: cli, expectedID: current.id) == false)
+        #expect(exhausted.hold(for: .codex) == current)
+        let recovered = AssistantCLILimitRecovery(health: exhausted, check: { _, _ in .available }, onRecovered: { _ in })
+        #expect(await recovered.recheckExhaustedHold(.codex, executable: cli, expectedID: current.id))
+        #expect(AssistantCLIHealthStore(defaults: defaults).hold(for: .codex) == nil)
+    }
+
+    @MainActor @Test func anotherResetPostponesTheNextCheckWithoutClearingTheHold() throws {
+        let health = AssistantCLIHealthStore(persists: false)
+        let reset = Date(timeIntervalSince1970: 1_900_000_000)
+        health.record(.init(kind: .rateLimited, resetsAt: reset), assistant: .claude,
+            executable: URL(fileURLWithPath: "/example/claude"), startedAt: reset.addingTimeInterval(-600))
+        let hold = try #require(health.hold(for: .claude))
+        let nextReset = reset.addingTimeInterval(3_600)
+        health.recordFailedLimitCheck(.claude, expectedID: hold.id, checkedAt: reset.addingTimeInterval(60),
+            reportedIssue: .init(kind: .rateLimited, resetsAt: nextReset))
+        #expect(health.hold(for: .claude)?.issue.resetsAt == nextReset)
+        #expect(health.hold(for: .claude)?.limitCheckAt == nextReset.addingTimeInterval(60))
+    }
+
+    @MainActor @Test func anInconclusiveProbeKeepsTheHoldAndSchedulesAnotherCheck() async throws {
+        let health = AssistantCLIHealthStore(persists: false)
+        let reset = Date().addingTimeInterval(-120)
+        health.record(.init(kind: .rateLimited, resetsAt: reset), assistant: .codex,
+            executable: URL(fileURLWithPath: "/example/codex"), startedAt: reset.addingTimeInterval(-60))
+        let recovery = AssistantCLILimitRecovery(health: health, check: { _, _ in .unavailable }, onRecovered: { _ in
+            Issue.record("An inconclusive check must not release the queue")
+        })
+        defer { recovery.stop() }
+        recovery.start()
+        for _ in 0..<100 where health.hold(for: .codex)?.limitRecheck == nil {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let next = try #require(health.hold(for: .codex)?.limitCheckAt)
+        #expect(next > Date())
     }
 
     @MainActor @Test func unrecognizedCodexFailureIsConfirmedByTheAccountProbeButSuccessIsNot() async throws {

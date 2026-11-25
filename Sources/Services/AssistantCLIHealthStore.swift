@@ -5,11 +5,34 @@ import Observation
 final class AssistantCLIHealthStore {
     struct Hold: Codable, Equatable, Identifiable, Sendable {
         let id: UUID
-        let issue: AssistantCLIHealthIssue
+        var issue: AssistantCLIHealthIssue
         let executable: URL
         let startedAt: Date
         var observedAt: Date? = nil
+        var limitRecheck: LimitRecheck? = nil
         var detectedAt: Date { observedAt ?? startedAt }
+        var limitCheckAt: Date? {
+            guard issue.kind == .rateLimited, limitRecheck?.exhausted != true else { return nil }
+            let resetCheckAt = issue.reportedReset?.addingTimeInterval(LimitRecheck.initialDelay)
+            guard let nextAt = limitRecheck?.nextAt else { return resetCheckAt }
+            return max(nextAt, resetCheckAt ?? nextAt)
+        }
+    }
+
+    struct LimitRecheck: Codable, Equatable, Sendable {
+        static let initialDelay: TimeInterval = 60
+        private static let maximumDelay: TimeInterval = 3_600
+        private var delay: TimeInterval = 0
+        private var hourlyFailures = 0
+        private(set) var nextAt: Date?
+        var exhausted: Bool { hourlyFailures >= 3 }
+
+        mutating func recordFailure(at now: Date, reset: Date?) {
+            if delay == Self.maximumDelay { hourlyFailures += 1 }
+            delay = min(Self.maximumDelay, max(Self.initialDelay, delay * 2))
+            let backoff = now.addingTimeInterval(delay)
+            nextAt = exhausted ? nil : max(backoff, reset?.addingTimeInterval(Self.initialDelay) ?? backoff)
+        }
     }
     static let shared: AssistantCLIHealthStore = {
         let testing = Bundle.allBundles.contains { $0.bundleURL.pathExtension == "xctest" }
@@ -33,14 +56,34 @@ final class AssistantCLIHealthStore {
 
     func record(_ issue: AssistantCLIHealthIssue, assistant: AutomationAssistant, executable: URL, startedAt: Date,
                 observedAt: Date? = nil) {
+        var issue = issue
         let detectedAt = observedAt ?? startedAt
         guard successfulStarts[assistant].map({ $0 < detectedAt }) ?? true else { return }
-        if let previous = holds[assistant.rawValue] {
+        let previous = hold(for: assistant)
+        if let previous {
             guard previous.detectedAt <= detectedAt else { return }
             if previous.detectedAt == detectedAt && previous.issue == issue { return }
         }
+        if issue.kind == .rateLimited, issue.reportedReset == nil {
+            issue.resetsAt = previous?.issue.reportedReset
+        }
+        let recheck = issue.kind == .rateLimited ? previous?.limitRecheck : nil
         holds[assistant.rawValue] = .init(id: UUID(), issue: issue, executable: executable, startedAt: startedAt,
-            observedAt: detectedAt)
+            observedAt: detectedAt, limitRecheck: recheck)
+        save()
+    }
+
+    func recordFailedLimitCheck(_ assistant: AutomationAssistant, expectedID: UUID, checkedAt: Date,
+                                reportedIssue: AssistantCLIHealthIssue? = nil) {
+        guard var hold = hold(for: assistant), hold.id == expectedID,
+              let dueAt = hold.limitCheckAt, checkedAt >= dueAt else { return }
+        if let reportedIssue, let reset = reportedIssue.reportedReset, reset > checkedAt {
+            hold.issue = reportedIssue
+        }
+        var recheck = hold.limitRecheck ?? LimitRecheck()
+        recheck.recordFailure(at: checkedAt, reset: hold.issue.reportedReset)
+        hold.limitRecheck = recheck
+        holds[assistant.rawValue] = hold
         save()
     }
 
