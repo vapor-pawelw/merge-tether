@@ -41,15 +41,43 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Review criteria"
+            "value": "Filter instructions"
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Kryteria przeglądu"
+            "value": "Instrukcje filtrowania"
           }
         }
+      }
+    },
+    "reviewIntakeExampleDraft": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Hide drafts from @release-bot when the title contains “dependency update”." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Ukryj szkice od @release-bot, jeśli tytuł zawiera „dependency update”." } }
+      }
+    },
+    "reviewIntakeExampleProject": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Keep only MRs from platform/api that target main or have the “security” label." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Zachowaj tylko MR-y z platform/api, które mają gałąź docelową main lub etykietę „security”." } }
+      }
+    },
+    "reviewIntakeExampleBranch": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Hide MRs targeting branches that start with release/, unless they have the “hotfix” label." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Ukryj MR-y kierowane do gałęzi zaczynających się od release/, chyba że mają etykietę „hotfix”." } }
+      }
+    },
+    "reviewIntakeExampleDisplayName": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Hide MRs labeled “maintenance” if the author’s GitLab display name contains “Bot”." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Ukryj MR-y z etykietą „maintenance”, jeśli nazwa wyświetlana autora w GitLabie zawiera „Bot”." } }
       }
     },
     "reviewIntakeSave": {

@@ -4,6 +4,7 @@ struct IncomingReviewFilterSettingsSection: View {
     let monitor: TodoMonitorService
     @Environment(\.openSettings) private var openSettings
     @State private var draft: IncomingReviewFilterSettings
+    @State private var example: LocalizedStringResource = .ReviewIntake.reviewIntakeExampleDraft
     @State private var saveFailed = false
 
     init(monitor: TodoMonitorService) {
@@ -15,11 +16,31 @@ struct IncomingReviewFilterSettingsSection: View {
         Section {
             Toggle(isOn: $draft.enabled) { Text(.ReviewIntake.reviewIntakeToggle) }
             if draft.enabled {
-                Text(.ReviewIntake.reviewIntakeCriteria)
-                TextEditor(text: $draft.criteria)
-                    .font(.body)
-                    .frame(minHeight: 85)
-                    .accessibilityLabel(Text(.ReviewIntake.reviewIntakeCriteria))
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(.ReviewIntake.reviewIntakeCriteria)
+                    TextEditor(text: $draft.criteria)
+                        .font(.body)
+                        .frame(minHeight: 85)
+                        .overlay(alignment: .topLeading) {
+                            if draft.criteria.isEmpty {
+                                Text(example)
+                                    .foregroundStyle(Color(nsColor: .placeholderTextColor))
+                                    .padding(.horizontal, 5)
+                                    .allowsHitTesting(false)
+                                    .accessibilityHidden(true)
+                            }
+                        }
+                        .accessibilityLabel(Text(.ReviewIntake.reviewIntakeCriteria))
+                        .accessibilityHint(Text(example))
+                        .onAppear {
+                            example = [
+                                .ReviewIntake.reviewIntakeExampleDraft,
+                                .ReviewIntake.reviewIntakeExampleProject,
+                                .ReviewIntake.reviewIntakeExampleBranch,
+                                .ReviewIntake.reviewIntakeExampleDisplayName
+                            ].randomElement() ?? example
+                        }
+                }
                 Toggle(isOn: $draft.showHiddenReviewsInInbox) {
                     Text(.ReviewIntake.reviewIntakeShowHiddenInInbox)
                 }

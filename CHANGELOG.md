@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Keep automatic review hides in Inbox until you mark them as seen or restore the merge request. Turn off future Inbox updates for autohides in filter settings.
 
-- Filter incoming review requests with custom criteria and the configured lightweight verifier. Unavailable or uncertain assessments let the merge request through with a note. A banner shows which merge requests were hidden and offers to restore them. They also appear under **Hidden merge requests**.
+- Filter incoming review requests with plain-language instructions and the configured lightweight verifier. The empty filter field shows examples for keeping and hiding requests. Unavailable or uncertain assessments let the merge request through with a note. A banner shows which merge requests were hidden and offers to restore them. They also appear under **Hidden merge requests**.
 
 - Recheck agent access one minute after a reported usage-limit reset and resume eligible work when access returns. Back off to hourly checks and offer manual retry after three unsuccessful hourly checks.
 
