@@ -61,8 +61,27 @@ struct MainWindowFrameTests {
         #expect(secondWindow.frame == movedAndResized)
     }
 
-    private func makeWindow(frame: CGRect) -> NSWindow {
-        let window = NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: true)
+    @Test func mainWindowToolbarUsesIconsAndDisablesDisplayModeCustomization() async throws {
+        let suite = "MainWindowFrameTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let window = makeWindow(frame: .init(x: 100, y: 100, width: 700, height: 700), style: [.titled])
+        defer { window.close() }
+        let toolbar = NSToolbar(identifier: .init(UUID().uuidString))
+        toolbar.displayMode = .labelOnly
+        if #available(macOS 15, *) { toolbar.allowsDisplayModeCustomization = true }
+        window.toolbar = toolbar
+        try #require(window.toolbar === toolbar)
+        window.contentView = MainWindowFrameView(defaults: defaults) { [] }
+
+        await finishAttachingWindow()
+
+        #expect(toolbar.displayMode == .iconOnly)
+        if #available(macOS 15, *) { #expect(!toolbar.allowsDisplayModeCustomization) }
+    }
+
+    private func makeWindow(frame: CGRect, style: NSWindow.StyleMask = [.borderless]) -> NSWindow {
+        let window = NSWindow(contentRect: frame, styleMask: style, backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false
         return window
     }

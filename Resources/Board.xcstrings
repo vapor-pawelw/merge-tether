@@ -454,6 +454,13 @@
         "pl": { "stringUnit": { "state": "translated", "value": "Zamknij skrzynkę" } }
       }
     },
+    "board.inbox.markAllRead": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Mark all as read" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Oznacz wszystkie jako przeczytane" } }
+      }
+    },
     "board.inbox.accessibilityCount": {
       "extractionState": "manual",
       "localizations": {

@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Keep the Mac toolbar icon-only and add **Mark all as read** to the Inbox for standalone GitLab to-dos and finished merge request updates.
+
 - Use **Hide** and **Restore** consistently for hidden review assignments. Explain which actions start an AI agent or run a read-only AI check when hovering over their controls.
 
 - Combine agent configuration and usage in the **Agent** tab, reorder the settings tabs, and group startup and setup in **General**.

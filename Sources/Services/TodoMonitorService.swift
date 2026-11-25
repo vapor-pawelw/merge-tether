@@ -1495,6 +1495,21 @@ final class TodoMonitorService {
 
     func markDone(_ todo: Todo) async { await todoStore.markDone(todo, automatically: false) }
 
+    func markInboxNotificationsRead(_ notifications: [BoardCardPin], accountRevision: UInt64) async {
+        for notification in notifications {
+            guard !Task.isCancelled, glab.accountRevision == accountRevision else { return }
+            guard notification.host == glab.resolvedHost, notification.username == glab.currentUsername else { continue }
+            switch notification.item {
+            case .todo(let id):
+                if let todo = currentAccountTodos.first(where: { $0.id == id }) { await markDone(todo) }
+            case .completion(let id):
+                acknowledgeLifecycleCompletion(id: id)
+            case .mergeRequest:
+                continue
+            }
+        }
+    }
+
     /// Hides the to-do immediately but waits `undoWindow` before calling GitLab.
     func markDoneWithUndo(_ todo: Todo) { todoStore.markDoneWithUndo(todo) }
 
