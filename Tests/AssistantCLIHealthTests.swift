@@ -97,4 +97,76 @@ struct AssistantCLIHealthTests {
         store.record(issue, assistant: .codex, executable: executable, startedAt: Date(timeIntervalSince1970: 15))
         #expect(store.hold(for: .codex) == nil)
     }
+
+    @Test func claudeStructuredStatusIdentifiesLoginAndLimitWithoutRelyingOnWording() {
+        // Observed from `claude -p --output-format stream-json` with no stored login.
+        let login = ProcessRunner.Output(stdout: Data("""
+            {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Something else entirely"}]},"error":"authentication_failed"}
+            {"type":"result","subtype":"success","is_error":true,"terminal_reason":"api_error","result":"Something else entirely"}
+            """.utf8), stderr: "", exitCode: 1)
+        #expect(AssistantCLIHealthIssue.parse(login, assistant: .claude)?.kind == .loginRequired)
+        let status401 = ProcessRunner.Output(stdout: Data(#"{"type":"result","is_error":true,"api_error_status":401,"result":"Request failed"}"#.utf8),
+            stderr: "", exitCode: 1)
+        #expect(AssistantCLIHealthIssue.parse(status401, assistant: .claude)?.kind == .loginRequired)
+        let status429 = ProcessRunner.Output(stdout: Data(#"{"type":"result","is_error":true,"api_error_status":429,"result":"Request failed"}"#.utf8),
+            stderr: "", exitCode: 1)
+        #expect(AssistantCLIHealthIssue.parse(status429, assistant: .claude)?.kind == .rateLimited)
+        let rejected = ProcessRunner.Output(stdout: Data(#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1795615200,"rateLimitType":"seven_day"}}"#.utf8),
+            stderr: "", exitCode: 1)
+        #expect(AssistantCLIHealthIssue.parse(rejected, assistant: .claude)?.resetsAt == Date(timeIntervalSince1970: 1795615200))
+        // A warning is not a refusal, and a 500 is neither a limit nor a login problem.
+        let warning = ProcessRunner.Output(stdout: Data("""
+            {"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","resetsAt":1795615200}}
+            {"type":"result","is_error":false,"result":"ok"}
+            """.utf8), stderr: "", exitCode: 0)
+        #expect(AssistantCLIHealthIssue.parse(warning, assistant: .claude) == nil)
+        let server = ProcessRunner.Output(stdout: Data(#"{"type":"result","is_error":true,"api_error_status":500,"result":"Request failed"}"#.utf8),
+            stderr: "", exitCode: 1)
+        #expect(AssistantCLIHealthIssue.parse(server, assistant: .claude) == nil)
+    }
+
+    @Test func codexAccountResponsesConfirmLimitAndLoginStructurally() {
+        // Observed from `codex app-server` while the weekly limit was exhausted.
+        let limited = CodexAccountProbe.issue(fromResponses: [
+            #"{"id":1,"result":{"userAgent":"x"}}"#,
+            #"{"id":2,"result":{"account":{"type":"chatgpt","planType":"prolite"},"requiresOpenaiAuth":true}}"#,
+            #"{"id":3,"result":{"ordinaryUsageAllowed":false,"rateLimits":{"primary":{"usedPercent":100,"windowDurationMins":10080,"resetsAt":1795613340},"secondary":null,"rateLimitReachedType":"rate_limit_reached"}}}"#,
+        ])
+        #expect(limited?.kind == .rateLimited)
+        #expect(limited?.resetsAt == Date(timeIntervalSince1970: 1795613340))
+        let allowed = CodexAccountProbe.issue(fromResponses: [
+            #"{"id":2,"result":{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}}"#,
+            #"{"id":3,"result":{"ordinaryUsageAllowed":true,"rateLimits":{"primary":{"usedPercent":40,"resetsAt":1795613340},"rateLimitReachedType":null}}}"#,
+        ])
+        #expect(allowed == nil)
+        let loggedOut = CodexAccountProbe.issue(fromResponses: [#"{"id":2,"result":{"account":null,"requiresOpenaiAuth":true}}"#])
+        #expect(loggedOut?.kind == .loginRequired)
+        // No answer, an error response, or an account that needs no OpenAI auth proves nothing.
+        #expect(CodexAccountProbe.issue(fromResponses: []) == nil)
+        #expect(CodexAccountProbe.issue(fromResponses: [#"{"id":3,"error":{"message":"nope"}}"#]) == nil)
+        #expect(CodexAccountProbe.issue(fromResponses: [#"{"id":2,"result":{"account":null,"requiresOpenaiAuth":false}}"#]) == nil)
+    }
+
+    @MainActor @Test func unrecognizedCodexFailureIsConfirmedByTheAccountProbeButSuccessIsNot() async throws {
+        let suite = "AssistantCLIHealthTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let health = AssistantCLIHealthStore(defaults: defaults)
+        let usage = AssistantUsageStore(file: folder.appendingPathComponent("usage.json"))
+        let reset = Date(timeIntervalSince1970: 1795613340)
+        _ = try await AssistantUsageRunner.run(URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "printf '%s\\n' '{\"type\":\"turn.failed\",\"error\":{\"message\":\"Unexpected wording\"}}'; exit 1"],
+            environment: [:], usage: .init(role: .codingAgent, assistant: .codex), store: usage, healthStore: health,
+            codexProbe: { _, _ in .init(kind: .rateLimited, resetsAt: reset) })
+        #expect(health.hold(for: .codex)?.issue == .init(kind: .rateLimited, resetsAt: reset))
+        health.clear(.codex, expectedID: try #require(health.hold(for: .codex)).id)
+        // A successful run never consults the probe.
+        _ = try await AssistantUsageRunner.run(URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "printf '%s\\n' '{\"type\":\"turn.completed\"}'"],
+            environment: [:], usage: .init(role: .codingAgent, assistant: .codex), store: usage, healthStore: health,
+            codexProbe: { _, _ in Issue.record("probe must not run after success"); return nil })
+        #expect(health.hold(for: .codex) == nil)
+    }
 }

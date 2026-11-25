@@ -16,7 +16,10 @@ enum AssistantUsageRunner {
                     usage: Context, store: AssistantUsageStore = .shared,
                     healthStore: AssistantCLIHealthStore? = nil,
                     beforeLaunch: (@Sendable () async throws -> Void)? = nil,
-                    authorizeLaunch: (@MainActor @Sendable () -> Bool)? = nil) async throws -> ProcessRunner.Output {
+                    authorizeLaunch: (@MainActor @Sendable () -> Bool)? = nil,
+                    codexProbe: @Sendable (URL, [String: String]) async -> AssistantCLIHealthIssue? = {
+                        await CodexAccountProbe.probe(executable: $0, environment: $1)
+                    }) async throws -> ProcessRunner.Output {
         let health = await MainActor.run { healthStore ?? AssistantCLIHealthStore.shared }
         if let hold = await health.hold(for: usage.assistant) { throw AccessError.temporarilyUnavailable(hold.issue.kind) }
         let startedAt = Date()
@@ -48,7 +51,12 @@ enum AssistantUsageRunner {
                         }
                     }, authorizeLaunch: authorizeLaunch, onStarted: { launchCapture.markStarted() })
             }
-            if let issue = AssistantCLIHealthIssue.parse(output, assistant: usage.assistant) {
+            var issue = AssistantCLIHealthIssue.parse(output, assistant: usage.assistant)
+            // `codex exec` reports failures as prose only; confirm an unrecognized one through Codex's account endpoints.
+            if issue == nil, usage.assistant == .codex, output.exitCode != 0 {
+                issue = await codexProbe(executable, environment)
+            }
+            if let issue {
                 await health.record(issue, assistant: usage.assistant, executable: executable, startedAt: startedAt,
                     observedAt: Date())
             } else if AssistantCLIHealthIssue.confirmsSuccess(output, assistant: usage.assistant) {

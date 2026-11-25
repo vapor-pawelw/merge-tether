@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Recognize agent usage limits and sign-in problems from the CLIs' structured status instead of wording alone: Claude's API status, and Codex's account and rate-limit endpoints when a Codex run fails with an unrecognized message.
+
 - Keep the Mac toolbar icon-only and add **Mark all as read** to the Inbox for standalone GitLab to-dos and finished merge request updates.
 
 - Use **Hide** and **Restore** consistently for hidden review assignments. Explain which actions start an AI agent or run a read-only AI check when hovering over their controls.

@@ -27,7 +27,13 @@ struct AssistantCLIHealthIssue: Codable, Equatable, Sendable {
             let code = (error["code"] as? String ?? object["error"] as? String ?? error["type"] as? String ?? "").lowercased()
             let message = error["message"] as? String ?? object["result"] as? String
                 ?? (object["errors"] as? [String])?.joined(separator: "\n") ?? ""
-            if let kind = classify(code: code, message: message) {
+            // Documented structured status first; wording is only a fallback.
+            let structured: Kind? = switch object["api_error_status"] as? Int {
+            case 401?: .loginRequired
+            case 429?: .rateLimited
+            default: nil
+            }
+            if let kind = classify(code: code, message: message) ?? structured {
                 return .init(kind: kind, resetsAt: resetDate(error, now: now) ?? resetDate(object, now: now),
                     resetHint: resetHint(message))
             }
@@ -60,7 +66,8 @@ struct AssistantCLIHealthIssue: Codable, Equatable, Sendable {
 
     private static func classify(code: String, message: String) -> Kind? {
         let message = message.lowercased().replacingOccurrences(of: "’", with: "'")
-        if ["authentication_error", "authentication_failed", "invalid_api_key", "token_expired", "refresh_token_reused"].contains(code)
+        if ["authentication_error", "authentication_failed", "invalid_api_key", "token_expired", "refresh_token_reused",
+                "oauth_org_not_allowed", "cloud_credential_error"].contains(code)
             || ["please log in again", "please login again", "not logged in", "please run /login", "please run 'codex login'",
                 "failed to refresh token", "your access token has expired", "your authentication token has expired"].contains(where: message.contains) {
             return .loginRequired
