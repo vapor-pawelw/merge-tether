@@ -8,22 +8,30 @@ struct CommandCenterDisplayFrame {
         let triage: [MergeRequestBoardSnapshot.OtherCard]
         let jobs: [MergeRequestBoardSnapshot.OtherCard]
         let updates: [MergeRequestBoardSnapshot.OtherCard]
+        let notificationIDs: [BoardCardPin]
 
         init(items: [MergeRequestBoardSnapshot.OtherCard]) {
             self.items = items
             var triage: [MergeRequestBoardSnapshot.OtherCard] = []
             var jobs: [MergeRequestBoardSnapshot.OtherCard] = []
             var updates: [MergeRequestBoardSnapshot.OtherCard] = []
+            var notificationIDs: [BoardCardPin] = []
             for item in items {
                 switch item.content {
-                case .proposal, .todo: triage.append(item)
+                case .proposal: triage.append(item)
+                case .todo:
+                    triage.append(item)
+                    notificationIDs.append(item.id)
                 case .job: jobs.append(item)
-                case .completion: updates.append(item)
+                case .completion:
+                    updates.append(item)
+                    notificationIDs.append(item.id)
                 }
             }
             self.triage = triage
             self.jobs = jobs
             self.updates = updates
+            self.notificationIDs = notificationIDs
         }
     }
 

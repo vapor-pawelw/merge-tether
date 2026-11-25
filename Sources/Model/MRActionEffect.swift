@@ -35,6 +35,14 @@ enum MRActionEffect: Equatable, Sendable {
         case .local: .ActionEffects.kindLocal
         }
     }
+
+    var actionDescription: LocalizedStringResource {
+        switch self {
+        case .agent: .ActionEffects.startsAgent
+        case .aiCheck: .ActionEffects.runsAICheck
+        case .gitLab, .gitLabWithAICheck, .local: kindDescription
+        }
+    }
 }
 
 extension AssistantAutomationRunner.Handoff {
@@ -140,7 +148,7 @@ enum MRActionCTA: String, CaseIterable, Sendable {
 
     /// Hover text: the effect kind, what this action does, then what may follow.
     var help: String {
-        ([effect.kindDescription, summary] + followUps.map(Self.followUpLine))
+        ([effect.actionDescription, summary] + followUps.map(Self.followUpLine))
             .map { String(localized: $0) }
             .joined(separator: "\n")
     }

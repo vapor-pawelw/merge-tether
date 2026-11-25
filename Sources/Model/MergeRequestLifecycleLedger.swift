@@ -168,3 +168,71 @@ struct MergeRequestLifecycleLedger: Codable, Sendable {
         request.state == "merged" || request.state == "closed"
     }
 }
+
+/// The last successful reviewer listing, including unread assignments for each account.
+struct ReviewAssignmentLedger: Codable, Sendable {
+    private struct Account: Codable, Hashable, Sendable {
+        let host: String
+        let username: String
+    }
+
+    private struct ID: Codable, Hashable, Sendable {
+        let projectID: Int
+        let iid: Int
+    }
+
+    struct Entry: Codable, Sendable {
+        let request: GitLabMergeRequest
+        var newSince: Date?
+    }
+
+    private var listings: [Account: [ID: Entry]] = [:]
+    private var baselinesEstablished: Set<Account>?
+
+    func entries(host: String, username: String) -> [Entry]? {
+        listings[Account(host: host, username: username)].map { Array($0.values) }
+    }
+
+    func needsBaseline(host: String, username: String) -> Bool {
+        baselinesEstablished?.contains(Account(host: host, username: username)) != true
+    }
+
+    mutating func observe(_ requests: [GitLabMergeRequest], host: String, username: String, at date: Date,
+                          previouslyVisible: Set<MRAutomationScope.Target> = []) {
+        let account = Account(host: host, username: username)
+        let previous = listings[account]
+        let establishingBaseline = needsBaseline(host: host, username: username)
+        var next: [ID: Entry] = [:]
+        for request in requests where request.state == "opened" && request.projectID > 0 && request.iid > 0
+            && request.author.username != username && request.webURL.isGitLabMergeRequest(host: host, iid: request.iid) {
+            let id = ID(projectID: request.projectID, iid: request.iid)
+            guard next[id] == nil else { continue }
+            let newSince: Date?
+            if establishingBaseline {
+                let target = MRAutomationScope.Target(host: host, username: username, projectID: id.projectID, iid: id.iid)
+                let newlyVisible = !previouslyVisible.isEmpty && !previouslyVisible.contains(target)
+                newSince = previous?[id]?.newSince ?? (newlyVisible ? date : nil)
+            } else if let old = previous?[id] {
+                newSince = old.newSince
+            } else {
+                newSince = date
+            }
+            next[id] = .init(request: request, newSince: newSince)
+        }
+        listings[account] = next
+        if establishingBaseline {
+            if baselinesEstablished == nil { baselinesEstablished = [] }
+            baselinesEstablished?.insert(account)
+        }
+    }
+
+    @discardableResult
+    mutating func markSeen(_ target: MRAutomationScope.Target) -> Bool {
+        guard let iid = target.iid else { return false }
+        let account = Account(host: target.host, username: target.username)
+        let id = ID(projectID: target.projectID, iid: iid)
+        guard listings[account]?[id]?.newSince != nil else { return false }
+        listings[account]?[id]?.newSince = nil
+        return true
+    }
+}

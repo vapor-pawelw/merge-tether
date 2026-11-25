@@ -839,6 +839,25 @@ final class MergeRequestAttentionMonitor {
         let agentWorks = assistantWorks(username: user.username)
         let verdictDirectory = verdictDirectory
         let observedAt = Date()
+        // Capture legacy visibility before the network read so this refresh can route new review requests independently.
+        let legacyLedger: MergeRequestLifecycleLedger?
+        var legacyTracked: Set<MRAutomationScope.Target> = []
+        var legacyOpenRequests: [GitLabMergeRequest] = []
+        if feedbackDecision == nil, let settings,
+           settings.reviewAssignments.needsBaseline(host: host, username: user.username) {
+            let ledger = settings.mrLifecycleLedger
+            let scope = settings.automation.scope
+            legacyLedger = ledger
+            legacyOpenRequests = ledger.retainedRequests(host: host, username: user.username) + openItems.compactMap(\.mergeRequest)
+            legacyTracked = ledger.targets(host: host, username: user.username)
+            legacyTracked.formUnion(scope.individualTargets(host: host, username: user.username).filter(scope.isManaged))
+            legacyTracked.formUnion(settings.mrActionIntents.lazy.filter(\.grantsManagement).map(\.target))
+            legacyTracked.formUnion(agentWorks.filter { $0.host == host }.map {
+                .init(host: host, username: user.username, projectID: $0.projectID, iid: $0.iid)
+            })
+        } else {
+            legacyLedger = nil
+        }
         let owned: [GitLabMergeRequest]?
         let assigned: [GitLabMergeRequest]?
         let listed: [GitLabMergeRequest]
@@ -871,6 +890,25 @@ final class MergeRequestAttentionMonitor {
             return request.author.id == user.id || settings?.automation.scope.isManaged(target) == true
                 || hasManagedIntent(target) || settings?.mrLifecycleLedger.request(for: target) != nil
                 || agentWorks.contains(.init(host: host, projectID: request.projectID, iid: request.iid))
+        }
+        if let assigned, let settings {
+            let requests = assigned.filter { request in
+                request.author.id != user.id && request.reviewers?.contains { $0.id == user.id } != false
+            }
+            var previouslyVisible: Set<MRAutomationScope.Target> = []
+            if let legacyLedger {
+                previouslyVisible = Set((requests + legacyOpenRequests).compactMap { request in
+                    let key = target(for: request)
+                    guard request.state == "opened", request.author.id != user.id, !isIgnored(key),
+                          request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
+                          legacyLedger.request(for: key).map({ $0.state == "opened" }) != false,
+                          legacyTracked.contains(key) else { return nil }
+                    return key
+                })
+            }
+            settings.reviewAssignments.observe(requests, host: host, username: user.username, at: observedAt,
+                previouslyVisible: previouslyVisible)
+            settings.save()
         }
         func remember(_ request: GitLabMergeRequest, readStartedAt: Date) {
             let target = target(for: request)

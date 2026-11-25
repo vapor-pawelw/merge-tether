@@ -1,6 +1,57 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "settings.requireReviewStartConfirmation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Require confirmation to start a review"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wymagaj potwierdzenia startu recenzji"
+          }
+        }
+      }
+    },
+    "settings.hiddenReviews.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hidden merge requests"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ukryte MR-y"
+          }
+        }
+      }
+    },
+    "settings.hiddenReviews.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No hidden merge requests."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Brak ukrytych MR-ów."
+          }
+        }
+      }
+    },
     "settings.assistant.resumeAction": {
       "extractionState": "manual",
       "localizations": {
@@ -1241,6 +1292,27 @@
           }
         },
         "pl": {"stringUnit": {"state": "translated", "value": "Uruchamianie"}}
+      }
+    },
+    "settings.codingAgent.tab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Agent"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Agent"}}
+      }
+    },
+    "settings.mergeRequests.tab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Merge requests"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Merge requesty"}}
+      }
+    },
+    "settings.notifications.tab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Notifications"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Powiadomienia"}}
       }
     },
     "settings.general.tab": {

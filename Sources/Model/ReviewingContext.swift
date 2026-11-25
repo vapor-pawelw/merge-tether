@@ -192,6 +192,9 @@ struct ReviewingContext {
         }
         if review?.execution?.state.isActive == true {
             nextStep = .automaticReview
+        } else if row.waitsForReviewStart {
+            status = .reviewNeeded
+            nextStep = readyAction(.runReview)
         } else if deferredReview, drafts == 0, !MergeRequestBoardSnapshot.Row.jobNeedsAttention(currentReview?.execution?.state) {
             status = .waitingForReady
             nextStep = readyAction(.runReview)

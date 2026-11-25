@@ -19,7 +19,7 @@ See which reviews need you, what’s blocking your merges, and what Codex or Cla
 - **See what’s blocking a merge.** Check pipelines, approvals, open discussions, and merge dependencies, including stacked MRs, from the card. Open the MR for the discussion, private drafts, and activity history.
 - **Catch the decisions that need you.** The menu bar flags work that needs your input, from a reply draft ready to publish to an automation run that needs a retry. Optional macOS notifications surface the same decisions.
 
-The board defaults to manual ordering. Drag an MR above, between, or below cards in the same column, automation section, and pin group. On a paired iPhone, touch and hold a card to reorder it on both devices. Choose automatic ordering or turn off attention-based promotion in **Settings → General → Merge requests**.
+The board defaults to manual ordering. Drag an MR above, between, or below cards in the same column, automation section, and pin group. On a paired iPhone, touch and hold a card to reorder it on both devices. Choose automatic ordering or turn off attention-based promotion in **Settings → Merge requests**.
 
 ## Get started
 
@@ -40,7 +40,7 @@ open MergeTether.xcworkspace
 
 Run the `MergeTether` scheme in Xcode. For downloadable builds, check the features listed in their release notes. [Build guide](docs/building.md) · [GitHub Releases](https://github.com/vapor-pawelw/merge-tether/releases)
 
-The board works with `glab` alone. To run agent actions or automation, select a signed-in **Codex CLI** or **Claude CLI** during onboarding or in **Settings → General → Coding agent**.
+The board works with `glab` alone. To run agent actions or automation, select a signed-in **Codex CLI** or **Claude CLI** during onboarding or in **Settings → Agent**.
 
 ## Delegate a review or a follow-up
 

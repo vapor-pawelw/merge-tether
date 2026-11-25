@@ -81,6 +81,9 @@ struct GlabConnectionTests {
             (.Board.boardLaneReviewing, "Do przeglądu"),
             (.Board.boardApprovalRatio(2, 5), "2/5"),
             (.Board.boardEmptyReviewingTitle, "Brak merge requestów do przeglądu"),
+            (.Settings.settingsMergeRequestsTab, "Merge requesty"),
+            (.Settings.settingsNotificationsTab, "Powiadomienia"),
+            (.Settings.settingsCodingAgentTab, "Agent"),
             (AutomationAssistant.codex.displayName, "Codex CLI"),
             (AutomationAssistant.claude.displayName, "Claude CLI"),
         ]
@@ -90,17 +93,23 @@ struct GlabConnectionTests {
         }
     }
 
-    @Test func agentSetupRoutesToGeneralAndResumesItsRequestOnce() {
+    @Test func agentSetupRoutesToTheAgentTabAndResumesItsRequestOnce() {
         let navigation = SettingsNavigation()
         navigation.selection = .automation
         var opened: SettingsNavigation.Tab?
         var resumes = 0
         navigation.showCodingAgent(openSettings: { opened = navigation.selection }, onConfigured: { resumes += 1 })
-        #expect(opened == .general)
+        #expect(opened == .codingAgent)
         #expect(resumes == 0)
         navigation.codingAgentConfigured()
         navigation.codingAgentConfigured()
         #expect(resumes == 1)
+    }
+
+    @Test func settingsKeepAgentAndUsageTogetherInTheRequestedTabOrder() {
+        #expect(SettingsNavigation.Tab.allCases == [
+            .general, .codingAgent, .automation, .integration, .mergeRequests, .notifications
+        ])
     }
 
     @Test(arguments: [false, true])

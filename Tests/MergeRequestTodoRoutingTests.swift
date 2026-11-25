@@ -4,6 +4,29 @@ import Testing
 
 @MainActor
 @Suite struct MergeRequestTodoRoutingTests {
+    @Test func reviewStartConfirmationHoldsAutomaticDeliveryUntilManualStart() async throws {
+        let f = try fixture(); defer { f.cleanup() }
+        f.settings.automation.applyPreset(.trusted, for: .codex)
+        #expect(!f.settings.automation.requireReviewStartConfirmation)
+        f.settings.automation.requireReviewStartConfirmation = true
+        #expect(f.settings.save())
+        #expect(SettingsManager(defaults: f.defaults).automation.requireReviewStartConfirmation)
+
+        var launches: [Bool] = []
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { _, manual in
+            launches.append(manual)
+            return UUID()
+        })
+        _ = await router.process([todo()], host: target.host, username: target.username, managed: [])
+        let intent = try #require(f.settings.mrActionIntents.first)
+        #expect(intent.state == .pending && launches.isEmpty)
+
+        await router.run(intent.id, manual: true) { $0.sha == intent.headSHA }
+
+        #expect(launches == [true])
+        #expect(f.settings.mrActionIntents.first?.state == .running)
+    }
+
     @Test func manualReviewIntentWaitsForConfirmationOfTheLiveRequest() async throws {
         let f = try fixture(); defer { f.cleanup() }
         var launched: UUID?

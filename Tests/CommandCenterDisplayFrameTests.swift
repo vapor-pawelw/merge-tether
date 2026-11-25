@@ -30,6 +30,7 @@ struct CommandCenterDisplayFrameTests {
         #expect(frame.inbox.jobs.count == 1 && frame.inbox.updates.count == 1)
         #expect(frame.inbox.triage.count + frame.inbox.jobs.count + frame.inbox.updates.count == frame.inbox.items.count)
         #expect(frame.inbox.items.first?.id == pins.first)
+        #expect(Set(frame.inbox.notificationIDs) == [pin, .init(host: host, username: "me", item: .completion(completion.id))])
     }
 
     @Test func eachDisplayFrameUsesCurrentRowsWithoutMutatingTheEarlierFrame() throws {

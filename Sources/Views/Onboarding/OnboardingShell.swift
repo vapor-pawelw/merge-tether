@@ -6,7 +6,6 @@ struct OnboardingShell<Content: View>: View {
     let onSkip: () -> Void
     let onContinue: () -> Void
     let continueEnabled: Bool
-    let isBusy: Bool
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -70,7 +69,6 @@ struct OnboardingShell<Content: View>: View {
             .keyboardShortcut(.defaultAction)
             .disabled(!continueEnabled)
         }
-        .disabled(isBusy)
         .padding(.horizontal, 24)
         .padding(.vertical, 14)
     }

@@ -44,6 +44,7 @@ struct CommandCenterBoardView: View {
     }
     @State private var selected: Selection?
     @State private var compactLane: Lane = .own
+    @State private var showingOnlyNewReviews = false
     @State private var detailPopoverPresented = false
     @State private var dragSession = BoardDragSession<BoardCardDrag>()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -255,7 +256,8 @@ struct CommandCenterBoardView: View {
 
     private func lane(_ lane: Lane, compact: Bool = false) -> some View {
         let reviewing = lane == .reviewing
-        let rows = reviewing ? board.reviewed : board.own
+        let newReviews = board.reviewed.filter { $0.newReviewAssignedAt != nil }
+        let rows = reviewing ? (showingOnlyNewReviews ? newReviews : board.reviewed) : board.own
         let cardIDs = rows.map(\.id)
         let settings = monitor.settings
         let expansionKey = reviewing ? \SettingsManager.reviewingAutomationOffExpanded : \SettingsManager.ownAutomationOffExpanded
@@ -283,6 +285,13 @@ struct CommandCenterBoardView: View {
                         .font(.subheadline.weight(.semibold))
                 }
                 Spacer()
+                if reviewing, !newReviews.isEmpty || showingOnlyNewReviews {
+                    Picker(selection: $showingOnlyNewReviews) {
+                        Text(.Board.boardReviewAssignmentsAll).tag(false)
+                        Text(.Board.boardReviewAssignmentsNewCount(newReviews.count)).tag(true)
+                    } label: { Text(.Board.boardLaneReviewing) }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize()
+                }
                 Text(cardIDs.count, format: .number).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 6).padding(.vertical, 10)
@@ -290,9 +299,13 @@ struct CommandCenterBoardView: View {
             GeometryReader { viewport in
                 ScrollView {
                     if rows.isEmpty {
-                        empty(reviewing ? .Board.boardEmptyReviewingTitle : .Board.boardEmptyOwnTitle,
-                              message: reviewing ? .Board.boardLaneReviewingEmpty : .Board.boardLaneOwnEmpty,
-                              symbol: lane.symbol)
+                        if reviewing, showingOnlyNewReviews {
+                            Text(.Board.boardReviewAssignmentsNoNew).foregroundStyle(.secondary).padding()
+                        } else {
+                            empty(reviewing ? .Board.boardEmptyReviewingTitle : .Board.boardEmptyOwnTitle,
+                                  message: reviewing ? .Board.boardLaneReviewingEmpty : .Board.boardLaneOwnEmpty,
+                                  symbol: lane.symbol)
+                        }
                     } else {
                         laneCards(rows, removable: reviewing, automationOffExpanded: automationOffExpanded,
                             viewportHeight: max(0, viewport.size.height - 10))

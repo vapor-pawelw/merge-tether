@@ -302,4 +302,49 @@ struct InboxTodoStoreTests {
         }
     }
 
+    @Test func bulkReadOnlyAcknowledgesSelectedNotificationsAndCanRetryFailures() async throws {
+        try await fixture { store, gitlab, settings in
+            settings.glabPath = store.glab.glabPath
+            settings.resolvedHost = host
+            let otherTodo = todoJSON.replacingOccurrences(of: #""id":401"#, with: #""id":402"#)
+            let laterTodo = todoJSON.replacingOccurrences(of: #""id":401"#, with: #""id":403"#)
+            gitlab.handler = { request in
+                if request.arguments.first == "config" { return InMemoryGitLab.output(host) }
+                if request.arguments.first == "auth" {
+                    return InMemoryGitLab.output(error: "Logged in to \(host) as alice")
+                }
+                if request.arguments.contains(where: { $0.hasPrefix("/todos?") }) {
+                    return InMemoryGitLab.output(todoJSON.dropLast() + "," + otherTodo.dropFirst().dropLast()
+                        + "," + laterTodo.dropFirst())
+                }
+                if request.endpoint == "/todos/401/mark_as_done", !gitlab.has("acknowledgement-available") {
+                    return InMemoryGitLab.output(error: "network unavailable", code: 1)
+                }
+                return InMemoryGitLab.output("[]")
+            }
+            let monitor = TodoMonitorService(settings: settings, glab: store.glab)
+            defer { monitor.stopTimer() }
+            await monitor.refreshManually()
+            let revision = store.glab.accountRevision
+            let selected = try #require(BoardCardPin.todo(host: host, username: "alice", id: 401))
+            let second = try #require(BoardCardPin.todo(host: host, username: "alice", id: 402))
+
+            await monitor.markInboxNotificationsRead([selected, second], accountRevision: revision)
+            #expect(Set(monitor.currentAccountTodos.map(\.id)) == [401, 403])
+            #expect(monitor.lastError != nil)
+
+            gitlab.write("acknowledgement-available")
+            store.glab.currentUsername = "bob"
+            store.glab.currentUsername = "alice"
+            await monitor.refreshManually()
+            await monitor.markInboxNotificationsRead([selected], accountRevision: revision)
+            #expect(Set(monitor.currentAccountTodos.map(\.id)) == [401, 402, 403])
+
+            await monitor.markInboxNotificationsRead([selected], accountRevision: store.glab.accountRevision)
+            #expect(Set(monitor.currentAccountTodos.map(\.id)) == [402, 403])
+            #expect(gitlab.requests.filter { $0.method == "POST" }.map(\.endpoint) ==
+                ["/todos/401/mark_as_done", "/todos/402/mark_as_done", "/todos/401/mark_as_done"])
+        }
+    }
+
 }

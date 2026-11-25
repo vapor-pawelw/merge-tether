@@ -181,27 +181,25 @@ struct AutomationSettingsTab: View {
 
     private var preparationFields: some View {
         Section {
-            Toggle(isOn: $draft.reviewRequested.isEnabled) { effectLabel(.Settings.settingsAutomationReviewRequested, .agent) }
-                .toggleStyle(.checkbox).disabled(draft.reviewRequested.runner == .shell)
+            effectToggle($draft.reviewRequested.isEnabled, .Settings.settingsAutomationReviewRequested,
+                         effect: draft.reviewRequested.runner == .assistant ? .agent : nil)
+                .disabled(draft.reviewRequested.runner == .shell)
             checkpointToggle($draft.startNewReviewsAutomatically, .Settings.settingsAutomationStartNewReviews,
                              help: .Settings.settingsAutomationStartNewReviewsHelp, reset: .startNewReviews, effect: .agent)
-                .disabled(!draft.reviewRequested.isEnabled)
+                .disabled(!draft.reviewRequested.isEnabled || draft.reviewRequested.runner != .assistant)
             Text(.Settings.settingsAutomationStartNewReviewsHelp).font(.caption).foregroundStyle(.secondary)
-            Toggle(isOn: $draft.authorFeedback.isEnabled) { effectLabel(.Settings.settingsAutomationAuthorFeedback, .agent) }
-                .toggleStyle(.checkbox).disabled(draft.authorFeedback.runner == .shell)
-            Toggle(isOn: Binding(get: { draft.autoVerifyReReview }, set: { enabled in
+            effectToggle($draft.authorFeedback.isEnabled, .Settings.settingsAutomationAuthorFeedback,
+                         effect: draft.authorFeedback.runner == .assistant ? .agent : nil)
+                .disabled(draft.authorFeedback.runner == .shell)
+            effectToggle(Binding(get: { draft.autoVerifyReReview }, set: { enabled in
                 if enabled && draft.selectedAssistant != nil { setupAction = .enableVerification }
                 else { draft.autoVerifyReReview = enabled }
-            })) { effectLabel(.Settings.settingsVerificationEnabled, .aiCheck) }
-                .toggleStyle(.checkbox)
+            }), .Settings.settingsVerificationEnabled, effect: .aiCheck)
             Text(.Settings.settingsVerificationHelp).font(.caption).foregroundStyle(.secondary)
             checkpointToggle($draft.autoClaimPipelineFailures, .Settings.settingsAutomationPipelineOwnership,
                              help: .Settings.settingsAutomationPipelineOwnershipHelp, reset: .pipelineOwnership, effect: .agent)
             VStack(alignment: .leading, spacing: 4) {
-                Toggle(isOn: $draft.conflictTasksEnabled) {
-                    effectLabel(.Settings.settingsAutomationConflictsToggle, .agent)
-                }
-                .toggleStyle(.checkbox)
+                effectToggle($draft.conflictTasksEnabled, .Settings.settingsAutomationConflictsToggle, effect: .agent)
 
                 Text(.EffectivePolicy.settingsConflictsHelp)
                     .font(.caption)
@@ -338,31 +336,36 @@ struct AutomationSettingsTab: View {
         }
     }
 
-    /// Settings that start AI work carry the same icon as their call to action.
-    @ViewBuilder
-    private func effectLabel(_ title: LocalizedStringResource, _ effect: MRActionEffect?) -> some View {
-        HStack(spacing: 4) {
-            Text(title)
-            if let effect { MRActionEffectIcon(effect: effect) }
+    private func effectToggle(_ isOn: Binding<Bool>, _ title: LocalizedStringResource,
+                              effect: MRActionEffect?, detail: LocalizedStringResource? = nil) -> some View {
+        let help = [effect?.actionDescription, detail].compactMap { $0 }
+            .map { String(localized: $0) }.joined(separator: "\n")
+        return Toggle(isOn: isOn) {
+            HStack(spacing: 4) {
+                Text(title)
+                if let symbol = effect?.symbol {
+                    Image(systemName: symbol).foregroundStyle(.secondary).accessibilityHidden(true)
+                }
+            }
         }
+        .toggleStyle(.checkbox)
+        .help(help)
+        .accessibilityHint(help)
     }
 
     private func checkpointToggle(
         _ isOn: Binding<Bool>, _ title: LocalizedStringResource, help: LocalizedStringResource,
         reset: AutomationCheckpoint? = nil, effect: MRActionEffect? = nil
     ) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Toggle(isOn: isOn) { effectLabel(title, effect) }.toggleStyle(.checkbox)
-                if let reset {
-                    Spacer()
-                    AutomationDefaultsResetButton(preset: draft.baselinePreset) {
-                        draft.resetCheckpoint(reset, to: $0)
-                    }
+        HStack {
+            effectToggle(isOn, title, effect: effect, detail: help)
+            if let reset {
+                Spacer()
+                AutomationDefaultsResetButton(preset: draft.baselinePreset) {
+                    draft.resetCheckpoint(reset, to: $0)
                 }
             }
         }
-        .help(Text(help))
     }
 
     @ViewBuilder
@@ -414,7 +417,7 @@ struct AutomationSettingsTab: View {
             Section {
                 Text(.Settings.settingsAssistantRequiredBody).foregroundStyle(.secondary)
                 Button {
-                    SettingsNavigation.shared.selection = .general
+                    SettingsNavigation.shared.selection = .codingAgent
                 } label: {
                     Text(.Settings.settingsAssistantSetupAction)
                 }
@@ -487,6 +490,19 @@ struct AutomationSettingsTab: View {
 
     @ViewBuilder
     private var advancedFields: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { settings.confirmGlobalAutomationChanges },
+                set: { enabled in
+                    settings.confirmGlobalAutomationChanges = enabled
+                    settings.save()
+                }
+            )) {
+                Text(.CommandCenter.commandCenterAutomationConfirmPreference)
+            }
+        } header: {
+            Text(.CommandCenter.commandCenterAutomationToggle)
+        }
         ReviewParticipationSettingsSection(monitor: monitor)
         WorkerExecutionTimeoutSettingsView(policy: $draft.workerExecutionTimeout, repositories: timeoutRepositories)
         Section {

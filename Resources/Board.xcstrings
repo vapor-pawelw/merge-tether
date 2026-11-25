@@ -2,6 +2,132 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "board.reviewAssignment.new": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nowe"
+          }
+        }
+      }
+    },
+    "board.reviewAssignment.hide": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ukryj"
+          }
+        }
+      }
+    },
+    "board.reviewAssignment.restore": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Restore"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Przywróć"}}
+      }
+    },
+    "board.reviewAssignment.seen": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mark as seen"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oznacz jako widziane"
+          }
+        }
+      }
+    },
+    "board.reviewAssignment.hidden.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@” is now hidden."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ukryto „%@”."
+          }
+        }
+      }
+    },
+    "board.reviewAssignments.all": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wszystkie"
+          }
+        }
+      }
+    },
+    "board.reviewAssignments.newCount.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New %lld"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nowe %lld"
+          }
+        }
+      }
+    },
+    "board.reviewAssignments.noNew": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No new review assignments."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Brak nowych przypisań do recenzji."
+          }
+        }
+      }
+    },
     "board.reviewers.done": {
       "extractionState": "manual",
       "localizations": {
@@ -328,6 +454,13 @@
         "pl": { "stringUnit": { "state": "translated", "value": "Zamknij skrzynkę" } }
       }
     },
+    "board.inbox.markAllRead": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Mark all as read" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Oznacz wszystkie jako przeczytane" } }
+      }
+    },
     "board.inbox.accessibilityCount": {
       "extractionState": "manual",
       "localizations": {
@@ -520,28 +653,16 @@
         "pl": { "stringUnit": { "state": "translated", "value": "Spróbuj ponownie" } }
       }
     },
-    "board.remove": {
+    "board.reviewAssignment.hideExplanation": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Remove from my list"
+            "value": "Hide this merge request from Reviewing. To restore it on the Mac, open Settings → Merge requests → Hidden merge requests."
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Usuń z mojej listy"}}
-      }
-    },
-    "board.remove.explanation": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Remove this MR from Reviewing, stop its active agent runs and pause its automation. Its GitLab assignments and drafts are kept. You can add it again manually."
-          }
-        },
-        "pl": {"stringUnit": {"state": "translated", "value": "Usuń ten MR z listy Przeglądam, zatrzymaj jego aktywne uruchomienia agentów i wstrzymaj automatyzację. Przypisania w GitLabie i wersje robocze zostaną zachowane. Możesz dodać go ponownie ręcznie."}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Ukryj ten MR w kolumnie Do przeglądu. Aby go przywrócić na Macu, otwórz Ustawienia → Merge requesty → Ukryte MR-y."}}
       }
     },
     "board.intent.review": {

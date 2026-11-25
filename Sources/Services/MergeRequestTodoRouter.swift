@@ -578,6 +578,7 @@ final class MergeRequestTodoRouter {
                                         target: MRAutomationScope.Target, workflowEventKind: MergeWorkflowTrigger? = nil) -> Bool {
         guard settings.automation.scope.permits(request, host: target.host, username: target.username),
               shouldAdoptAutomatically(kind, request: request, target: target) else { return false }
+        if kind == .review, workflowEventKind == nil, settings.automation.requireReviewStartConfirmation { return false }
         guard let workflowEventKind else { return true }
         let rule = settings.automation.workflowRules[workflowEventKind]
         return rule.mode == .assistant && rule.includes(request)

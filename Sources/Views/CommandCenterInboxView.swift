@@ -3,11 +3,12 @@ import SwiftUI
 struct CommandCenterInboxView: View {
     let monitor: TodoMonitorService
     @Environment(\.dismiss) private var dismiss
+    @State private var isMarkingRead = false
 
     var body: some View {
         let inbox = monitor.commandCenterDisplayFrame.inbox
         VStack(spacing: 0) {
-            header(count: inbox.items.count)
+            header(inbox, accountRevision: monitor.glab.accountRevision)
             Divider()
             content(inbox)
         }
@@ -19,8 +20,9 @@ struct CommandCenterInboxView: View {
 
     }
 
-    private func header(count: Int) -> some View {
-        HStack(alignment: .center, spacing: 12) {
+    private func header(_ inbox: CommandCenterDisplayFrame.Inbox, accountRevision: UInt64) -> some View {
+        let count = inbox.items.count
+        return HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(.Board.boardInboxButton).font(.title2.weight(.semibold))
                 if count > 0 || monitor.inboxRefreshState == .current {
@@ -30,6 +32,15 @@ struct CommandCenterInboxView: View {
                 }
             }
             Spacer()
+            if isMarkingRead { ProgressView().controlSize(.small) }
+            Button(.Board.boardInboxMarkAllRead) {
+                isMarkingRead = true
+                Task {
+                    defer { isMarkingRead = false }
+                    await monitor.markInboxNotificationsRead(inbox.notificationIDs, accountRevision: accountRevision)
+                }
+            }
+            .disabled(inbox.notificationIDs.isEmpty || isMarkingRead)
             Button { dismiss() } label: { Image(systemName: "xmark") }
                 .buttonStyle(.plain)
                 .help(Text(.Board.boardInboxClose))

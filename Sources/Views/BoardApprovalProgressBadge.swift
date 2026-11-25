@@ -17,6 +17,7 @@ struct BoardApprovalProgressBadge: View {
     var personalAction: Action? = nil
     var reviewerEditing: ReviewerEditing? = nil
     var automaticApprovalOff = false
+    var onClick: () -> Void = {}
     @State private var showingPeople = false
     @State private var pinned = false
     @State private var badgeHovered = false
@@ -75,7 +76,7 @@ struct BoardApprovalProgressBadge: View {
             ? .Board.boardApprovalsRemoveWarningTitle : .Board.boardApprovalsApprove
         if personalAction != nil || reviewerEditing != nil || automaticApprovalOff
             || (progress.map { $0.required > 0 || $0.completed > 0 } ?? true) || viewerApproval != nil || assigned != nil {
-            Button { hoverTask?.cancel(); pinned = true; showingPeople = true } label: {
+            Button { onClick(); hoverTask?.cancel(); pinned = true; showingPeople = true } label: {
                 HStack(spacing: 4) {
                     HStack(spacing: 3) {
                         Image(systemName: satisfied ? "checkmark.seal.fill" : "checkmark.seal").accessibilityHidden(true)
@@ -290,6 +291,7 @@ private struct BoardApprovalPersonRow<Name: View, Status: View>: View {
 struct BoardMRApprovalBadge: View {
     let row: MergeRequestBoardSnapshot.Row
     let monitor: TodoMonitorService
+    var onClick: () -> Void = {}
 
     var body: some View {
         let target = monitor.scopeTarget(projectID: row.id.projectID, iid: row.id.iid, url: row.displayURL)
@@ -300,7 +302,8 @@ struct BoardMRApprovalBadge: View {
                 guard let target, let head = row.displayRequest?.sha else { return false }
                 return monitor.settings.hasAutomaticApprovalWithOpenFindings(for: target, head: head)
             }, personalAction: action, reviewerEditing: reviewerEditing,
-            automaticApprovalOff: target.flatMap { monitor.settings.independentApprovalPreferences[$0] } == .off)
+            automaticApprovalOff: target.flatMap { monitor.settings.independentApprovalPreferences[$0] } == .off,
+            onClick: onClick)
     }
 
     private var reviewerEditing: ReviewerEditing? {

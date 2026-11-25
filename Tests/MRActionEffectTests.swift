@@ -15,10 +15,24 @@ struct MRActionEffectTests {
     @Test(arguments: MRActionCTA.allCases)
     func hoverStatesTheEffectKindFirstAndEveryFollowUp(_ cta: MRActionCTA) {
         let lines = cta.help.components(separatedBy: "\n")
-        #expect(lines.first == String(localized: cta.effect.kindDescription))
+        #expect(lines.first == String(localized: cta.effect.actionDescription))
         #expect(lines.count == 2 + cta.followUps.count)
         // A missing catalog entry would surface its raw key instead of a sentence.
         #expect(lines.allSatisfy { $0.contains(" ") })
+    }
+
+    @Test func agentAndCheckTooltipsDescribeDifferentActionsInBothLanguages() {
+        for (language, expectedAgent, expectedCheck) in [
+            ("en", "Starts an AI agent.", "Runs a read-only AI check."),
+            ("pl", "Uruchamia agenta AI.", "Uruchamia kontrolę AI tylko do odczytu.")
+        ] {
+            var agent = MRActionEffect.agent.actionDescription
+            var check = MRActionEffect.aiCheck.actionDescription
+            agent.locale = Locale(identifier: language)
+            check.locale = Locale(identifier: language)
+            #expect(String(localized: agent) == expectedAgent)
+            #expect(String(localized: check) == expectedCheck)
+        }
     }
 
     @Test func deterministicActionsSaySoAndResumedAutomationShowsTheBolt() {

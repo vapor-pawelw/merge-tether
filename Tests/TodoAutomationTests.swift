@@ -446,8 +446,8 @@ struct TodoAutomationTests {
     }
 
     @MainActor
-    @Test("legacy shell rules do not automatically run or consume MR proposals")
-    func legacyShellRulePreservesMRProposalWithoutRunning() async throws {
+    @Test("legacy shell rules leave review assignments and their to-dos available")
+    func legacyShellRuleLeavesReviewAssignmentAndTodoAvailable() async throws {
         let todo = try makeTodo(action: "review_requested", author: "anna")
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
@@ -514,10 +514,13 @@ struct TodoAutomationTests {
         #expect(settings.assistantHandoffs.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: actionLog.path))
         #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "acknowledged").path))
-        let board = MergeRequestBoardSnapshot(own: monitor.ownMergeRequestItems, reviewed: monitor.reviewedMergeRequestItems,
-            todos: monitor.visibleTodos, attention: monitor.attentionItems, handoffs: [],
-            host: "gitlab.example.org", username: "me")
-        #expect(board.proposals.contains { $0.todos.map(\.id) == [42] })
+        let assignmentDeadline = ContinuousClock.now + .seconds(5)
+        while monitor.reviewedMergeRequestItems.isEmpty, ContinuousClock.now < assignmentDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let board = monitor.boardSnapshot
+        #expect(board.reviewed.map(\.id.iid) == [1220])
+        #expect(board.otherTodos.map(\.id) == [42])
     }
 
     @MainActor

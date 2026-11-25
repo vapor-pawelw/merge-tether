@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// A containing sheet must release Escape while a child popover owns dismissal.
@@ -22,6 +23,7 @@ private struct BoardHeaderControlHover: ViewModifier {
 }
 
 struct BoardActionsMenu<Content: View>: View {
+    var onClick: (() -> Void)?
     @ViewBuilder var content: () -> Content
 
     var body: some View {
@@ -29,10 +31,60 @@ struct BoardActionsMenu<Content: View>: View {
             BoardCardActionIcon(systemName: "ellipsis")
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .background {
+            if let onClick {
+                BoardMenuTracking(action: onClick).allowsHitTesting(false)
+            }
+        }
         .boardHeaderControlHover()
         .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
         .help(Text(.CommandCenter.commandCenterActions))
         .controlSize(.small)
+    }
+}
+
+/// Wait for the native menu to close so marking a card seen cannot remove the menu's anchor in the New filter.
+private struct BoardMenuTracking: NSViewRepresentable {
+    let action: () -> Void
+
+    func makeNSView(context: Context) -> Anchor {
+        let view = Anchor()
+        view.observeMenus()
+        return view
+    }
+
+    func updateNSView(_ view: Anchor, context: Context) {
+        view.action = action
+    }
+
+    static func dismantleNSView(_ view: Anchor, coordinator: ()) {
+        NotificationCenter.default.removeObserver(view)
+    }
+
+    final class Anchor: NSView {
+        var action: (() -> Void)?
+        private weak var openedMenu: NSMenu?
+
+        func observeMenus() {
+            NotificationCenter.default.addObserver(self, selector: #selector(menuOpened(_:)),
+                name: NSMenu.didBeginTrackingNotification, object: nil)
+            NotificationCenter.default.addObserver(self, selector: #selector(menuClosed(_:)),
+                name: NSMenu.didEndTrackingNotification, object: nil)
+        }
+
+        @objc private func menuOpened(_ notification: Notification) {
+            guard let window, let event = NSApp.currentEvent,
+                  event.type == .leftMouseDown || event.type == .leftMouseUp,
+                  event.window === window, !isHiddenOrHasHiddenAncestor,
+                  bounds.intersection(visibleRect).contains(convert(event.locationInWindow, from: nil)) else { return }
+            openedMenu = notification.object as? NSMenu
+        }
+
+        @objc private func menuClosed(_ notification: Notification) {
+            guard let openedMenu, notification.object as? NSMenu === openedMenu else { return }
+            self.openedMenu = nil
+            action?()
+        }
     }
 }
 

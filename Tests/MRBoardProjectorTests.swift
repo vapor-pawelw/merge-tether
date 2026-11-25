@@ -29,6 +29,90 @@ struct MRBoardProjectorTests {
         return input
     }
 
+    @Test func assignedReviewsAppearWithoutTrackingAndLeaveAfterUnassignment() throws {
+        let foreign = item(try request(["author": ["id": 8, "username": "author", "name": "Author"]]))
+        var input = input(evidence: foreign, catalog: foreign)
+        input.trackedReviewedTargets = []
+        let initial = Date(timeIntervalSince1970: 100)
+        var assignments = ReviewAssignmentLedger()
+        assignments.observe([], host: account.host, username: account.username, at: initial)
+        assignments.observe([try #require(foreign.mergeRequest)], host: account.host, username: account.username,
+            at: initial.addingTimeInterval(20))
+        input.reviewAssignments = assignments.entries(host: account.host, username: account.username)
+
+        let row = try #require(MRBoardProjector(input: input).board().reviewed.first)
+        #expect(row.newReviewAssignedAt == initial.addingTimeInterval(20))
+
+        assignments.observe([], host: account.host, username: account.username, at: initial.addingTimeInterval(30))
+        input.reviewAssignments = assignments.entries(host: account.host, username: account.username)
+        #expect(MRBoardProjector(input: input).board().reviewed.isEmpty)
+    }
+
+    @Test func hiddenAndFinishedAssignmentsStayOutOfReviewing() throws {
+        let foreign = item(try request(["author": ["id": 8, "username": "author", "name": "Author"]]))
+        var input = input(evidence: foreign, catalog: foreign)
+        let target = MRAutomationScope.Target(host: account.host, username: account.username, projectID: 1, iid: 42)
+        let active = try #require(foreign.mergeRequest)
+        input.reviewAssignments = [.init(request: active, newSince: Date())]
+        input.ignoredTargets = [target]
+        #expect(MRBoardProjector(input: input).board().reviewed.isEmpty)
+        input.ignoredTargets = []
+        #expect(MRBoardProjector(input: input).board().reviewed.count == 1)
+        input.retainedRequests = [try request(["state": "merged", "author": ["id": 8, "username": "author", "name": "Author"]])]
+        #expect(MRBoardProjector(input: input).board().reviewed.isEmpty)
+    }
+
+    @Test(arguments: [false, true])
+    func existingBoardMarksOnlyAdditionalAssignmentsNew(_ alreadyReadByOlderApp: Bool) throws {
+        let known = try request(["author": ["id": 8, "username": "author", "name": "Author"]])
+        let additional = try request(["iid": 43, "web_url": "https://gitlab.test/g/p/-/merge_requests/43",
+            "author": ["id": 8, "username": "author", "name": "Author"]])
+        let firstRead = Date(timeIntervalSince1970: 100)
+        let upgradeRead = Date(timeIntervalSince1970: 200)
+        let knownTarget = MRAutomationScope.Target(host: account.host, username: account.username, projectID: 1, iid: 42)
+        let additionalTarget = MRAutomationScope.Target(host: account.host, username: account.username, projectID: 1, iid: 43)
+        var assignments = ReviewAssignmentLedger()
+        if alreadyReadByOlderApp {
+            assignments.observe([known, additional], host: account.host, username: account.username, at: firstRead)
+            var legacy = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(assignments)) as? [String: Any])
+            legacy.removeValue(forKey: "baselinesEstablished")
+            assignments = try JSONDecoder().decode(ReviewAssignmentLedger.self, from: JSONSerialization.data(withJSONObject: legacy))
+        }
+
+        assignments.observe([known, additional], host: account.host, username: account.username, at: upgradeRead,
+            previouslyVisible: [knownTarget])
+
+        let entries = try #require(assignments.entries(host: account.host, username: account.username))
+        #expect(entries.first(where: { $0.request.iid == 42 })?.newSince == nil)
+        #expect(entries.first(where: { $0.request.iid == 43 })?.newSince == upgradeRead)
+        let markedSeen = assignments.markSeen(additionalTarget)
+        #expect(markedSeen)
+        assignments = try JSONDecoder().decode(ReviewAssignmentLedger.self, from: JSONEncoder().encode(assignments))
+        assignments.observe([known, additional], host: account.host, username: account.username, at: upgradeRead.addingTimeInterval(10),
+            previouslyVisible: [knownTarget])
+        #expect(assignments.entries(host: account.host, username: account.username)?.allSatisfy { $0.newSince == nil } == true)
+    }
+
+    @Test func firstPollIsBaselineAndSeenSurvivesRefreshAndRestart() throws {
+        let previouslyAssigned = try request(["author": ["id": 8, "username": "author", "name": "Author"]])
+        let newRequest = try request(["iid": 43, "web_url": "https://gitlab.test/g/p/-/merge_requests/43",
+            "author": ["id": 8, "username": "author", "name": "Author"]])
+        let initial = Date(timeIntervalSince1970: 100)
+        var assignments = ReviewAssignmentLedger()
+        assignments.observe([previouslyAssigned], host: account.host, username: account.username, at: initial)
+        #expect(assignments.entries(host: account.host, username: account.username)?.first?.newSince == nil)
+        assignments.observe([previouslyAssigned, newRequest], host: account.host, username: account.username,
+            at: initial.addingTimeInterval(20))
+        let target = MRAutomationScope.Target(host: account.host, username: account.username, projectID: 1, iid: 43)
+        let markedSeen = assignments.markSeen(target)
+        #expect(markedSeen)
+        assignments = try JSONDecoder().decode(ReviewAssignmentLedger.self, from: JSONEncoder().encode(assignments))
+        assignments.observe([previouslyAssigned, newRequest], host: account.host, username: account.username,
+            at: initial.addingTimeInterval(30))
+        #expect(assignments.entries(host: account.host, username: account.username)?.allSatisfy { $0.newSince == nil } == true)
+        #expect(assignments.entries(host: account.host, username: "another-account") == nil)
+    }
+
     @Test func mergeableCardsAppearBelowPinsAndAboveCardsNeedingAttention() throws {
         func mr(_ iid: Int, _ status: String, pipeline: String = "success") throws -> MergeRequestAttentionMonitor.Item {
             item(try request(["iid": iid, "web_url": "https://gitlab.test/g/p/-/merge_requests/\(iid)",

@@ -6,10 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
-- Recognize agent usage limits and sign-in problems from the CLIs' structured status instead of wording alone: Claude's API status, and Codex's account and rate-limit endpoints when a Codex run fails with an unrecognized message.
-
-- Recheck agent access one minute after a reported usage-limit reset and resume eligible work when access returns. Back off to hourly checks and offer manual retry after three unsuccessful hourly checks.
-
 - Skip author feedback follow-ups when GitLab confirms every selected thread is resolved, including when the queue resumes after a CLI limit or a run is retried. The MR action can also complete without a configured coding agent.
 
 - Add new review requests straight to Reviewing, marked **New**, instead of the inbox (Settings → General, on by default). Turn it off to keep them in the inbox, where **Add** tracks one and **Ignore this MR** discards it; automation does not pick up inbox candidates.
@@ -18,17 +14,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Fix a Reviewing card stuck on "Preparing review" with a running timer after its worker was cancelled or had already finished.
 
-- Stop asking for a review on merge requests you already approved: your current approval, given anywhere, accepts the code and discussions seen so far until the head or MR text changes.
+- Recheck agent access one minute after a reported usage-limit reset and resume eligible work when access returns. Back off to hourly checks and offer manual retry after three unsuccessful hourly checks.
 
-- Move **Run setup again** to General settings, below the coding agent picker.
+- Recognize agent usage limits and sign-in problems from the CLIs' structured status instead of wording alone: Claude's API status, and Codex's account and rate-limit endpoints when a Codex run fails with an unrecognized message.
+
+- Keep the Mac toolbar icon-only and add **Mark all as read** to the Inbox for standalone GitLab to-dos and finished merge request updates.
+
+- Use **Hide** and **Restore** consistently for hidden review assignments. Explain which actions start an AI agent or run a read-only AI check when hovering over their controls.
+
+- Combine agent configuration and usage in the **Agent** tab, reorder the settings tabs, and group startup and setup in **General**.
+
+- Highlight new review assignments with a teal badge and card outline. Clear the highlight on opening details or using the card menu. Click the badge or **Mark as seen** at the lower left to clear it directly.
+
+- Give merge request settings, notifications, and coding agent setup their own Mac settings tabs. Find hidden assignments in a collapsed section under Merge requests. Mark newly visible assignments on upgrade when Reviewing already contained cards.
+
+- Keep the **Restore** button fully visible in expanded hidden merge request rows.
+
+- Move **Run setup again** from GitLab to General settings.
+
+- Stop asking for a review on merge requests you already approved: your current approval, given anywhere, accepts the code and discussions seen so far until the head or MR text changes.
 
 - Edit or restore the AI comment assessment prompt in Advanced automation settings.
 
 - Complete the Polish localization of the Mac and iPhone interfaces, including plural forms, setup, automation, and the iPhone camera permission prompt.
 
-- Import open GitLab merge requests assigned to you as a reviewer from Mac setup, including drafts and reviews with no pending GitLab to-do. Imported requests appear in Reviewing with your existing automation settings.
+- Show all open GitLab reviewer assignments in Reviewing, including drafts. Mark new assignments as seen when you interact with the card, hide and restore individual assignments, and optionally require confirmation before starting a review automatically.
 
-- Let Mac users finish setup without selecting a coding agent. Save the verified agent selection and close setup when users finish. Add the agent picker to General settings, offer setup from actions that require a CLI, and show how to resume agent work on the affected merge request. Restore Polish labels in setup and on the board.
+- Let Mac users finish setup without selecting a coding agent. Save the verified agent selection and close setup when users finish. Add the agent picker to Settings, offer setup from actions that require a CLI, and show how to resume agent work on the affected merge request. Restore Polish labels in setup and on the board.
 
 - Simplify Swift expressions that can hit compiler type-checking limits when building the Mac or iPhone app from source.
 

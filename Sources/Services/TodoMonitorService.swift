@@ -564,6 +564,10 @@ final class TodoMonitorService {
         let snapshot = attention.presentationSnapshot
         var input = MRBoardProjector.Input(account: .init(host: host, username: username, revision: glab.accountRevision))
         input.attention = snapshot
+        input.reviewAssignments = settings.reviewAssignments.entries(host: host, username: username)?.filter { entry in
+            settings.addNewReviewsToReviewed
+                || trackedReviewTarget(.init(host: host, username: username, projectID: entry.request.projectID, iid: entry.request.iid))
+        }
         input.authored = authoredMergeRequests.requests
         input.retainedRequests = settings.mrLifecycleLedger.retainedRequests(host: host, username: username)
         input.ownCatalogIsAuthoritative = attention.hasCurrentOwnListing
@@ -809,8 +813,11 @@ final class TodoMonitorService {
         } else {
             todos = allTodos
         }
-        let managed = Set(reviewedMergeRequestItems.compactMap {
-            scopeTarget(projectID: $0.id.projectID, iid: $0.id.iid, url: $0.url)
+        let catalog = boardProjector?.browser.reviewed ?? []
+        let managed = Set(catalog.compactMap { item -> MRAutomationScope.Target? in
+            guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
+                  trackedReviewTarget(target), !settings.ignoredMergeRequests.contains(target) else { return nil }
+            return target
         })
         let acknowledged = await mrTodoRouter.process(todos, host: host, username: username, managed: managed, automatically: automatically)
         guard glab.resolvedHost == host, glab.currentUsername == username,
@@ -890,53 +897,65 @@ final class TodoMonitorService {
         await refreshNow()
     }
 
-    func importAssignedReviews() async throws -> Int {
-        guard let account = boardDisplayAccount else { throw GlabError.notAuthenticated }
-        let executable = glab.glabPath
-        func checkAccount() throws {
-            try Task.checkCancellation()
-            guard boardDisplayAccount == account, glab.glabPath == executable else { throw CancellationError() }
-        }
-
-        let user = try await glab.fetchAuthenticatedUser(host: account.host, expectedUsername: account.username)
-        try checkAccount()
-        let readStartedAt = Date()
-        let assigned = try await glab.fetchReviewAssignedMergeRequests(userID: user.id, host: account.host)
-        try checkAccount()
-        let currentUser = try await glab.fetchAuthenticatedUser(host: account.host, expectedUsername: account.username)
-        guard currentUser == user else { throw GlabError.notAuthenticated }
-        try checkAccount()
-
-        var ledger = settings.mrLifecycleLedger
-        var imported = 0
-        for request in assigned {
-            guard request.state == "opened", request.author.id != user.id,
-                  request.reviewers?.contains(where: { $0.id == user.id }) != false,
-                  let target = scopeTarget(projectID: request.projectID, iid: request.iid, url: request.webURL),
-                  !settings.ignoredMergeRequests.contains(target), ledger.request(for: target) == nil else { continue }
-            ledger.record(request, for: target, now: readStartedAt)
-            imported += 1
-        }
-        if imported > 0, !settings.saveMergeRequestLifecycleLedger(ledger) { throw CocoaError(.fileWriteUnknown) }
-        return imported
+    struct ReviewRemoval: Identifiable {
+        let id = UUID()
+        let request: GitLabMergeRequest
+        let target: MRAutomationScope.Target
+        let accountRevision: UInt64
     }
 
-    /// Removes a foreign MR locally, retaining GitLab assignments, drafts and history.
-    /// A persisted pause prevents global discovery from adding it back on the next poll.
+    private(set) var reviewRemoval: ReviewRemoval?
+    var undoableReviewRemoval: ReviewRemoval? {
+        guard let reviewRemoval, reviewRemoval.accountRevision == glab.accountRevision else { return nil }
+        return reviewRemoval
+    }
+
+    func dismissReviewRemoval(_ id: UUID) {
+        if reviewRemoval?.id == id { reviewRemoval = nil }
+    }
+
+    func undoReviewRemoval(_ removal: ReviewRemoval) {
+        guard undoableReviewRemoval?.id == removal.id,
+              scopeTarget(projectID: removal.request.projectID, iid: removal.request.iid,
+                  url: removal.request.webURL) == removal.target else { return }
+        restoreReviewedMergeRequest(removal.request)
+        dismissReviewRemoval(removal.id)
+    }
+
+    func markReviewAssignmentSeen(_ item: MergeRequestAttentionMonitor.Item) {
+        guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) else { return }
+        let assignmentSeen = settings.reviewAssignments.markSeen(target)
+        let candidateSeen = settings.newReviewTargets.remove(target) != nil
+        if assignmentSeen || candidateSeen { settings.save() }
+    }
+
+    var hiddenReviewAssignments: [GitLabMergeRequest] {
+        guard let account = boardDisplayAccount else { return [] }
+        let assignments = settings.reviewAssignments.entries(host: account.host, username: account.username) ?? []
+        return assignments.map(\.request).filter {
+            guard let target = scopeTarget(projectID: $0.projectID, iid: $0.iid, url: $0.webURL) else { return false }
+            return settings.ignoredMergeRequests.contains(target)
+        }.sorted { ($0.webURL.gitLabProjectPath, $0.iid) < ($1.webURL.gitLabProjectPath, $1.iid) }
+    }
+
+    func restoreReviewedMergeRequest(_ request: GitLabMergeRequest) {
+        guard let target = scopeTarget(projectID: request.projectID, iid: request.iid, url: request.webURL),
+              settings.ignoredMergeRequests.remove(target) != nil else { return }
+        settings.reviewAssignments.markSeen(target)
+        settings.save()
+    }
+
+    /// Both board removal and the inline Hide action use the same account-specific exclusion.
     @discardableResult
     func removeReviewedMergeRequest(_ item: MergeRequestAttentionMonitor.Item) -> Bool {
         guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
               let request = item.mergeRequest, request.author.username != target.username,
-              request.projectID == target.projectID, request.iid == target.iid,
-              request.webURL == item.url else { return false }
-        settings.ignoredMergeRequests.insert(target)
-        settings.automation.scope[target] = .paused
-        let saved = settings.save()
-        let work = AssistantAutomationRunner.MergeRequestWork(host: target.host, projectID: target.projectID, iid: item.id.iid)
-        for job in assistantHandoffs where job.key.work == work && job.execution?.state.isActive == true {
-            AssistantAutomationRunner.cancel(job.id, settings: settings)
-        }
-        return saved
+              request.projectID == target.projectID, request.iid == target.iid, request.webURL == item.url else { return false }
+        guard settings.ignoredMergeRequests.insert(target).inserted else { return true }
+        settings.reviewAssignments.markSeen(target)
+        guard settings.save() else { return false }
+        reviewRemoval = .init(request: request, target: target, accountRevision: glab.accountRevision)
+        return true
     }
 
     func ignoreMergeRequestProposal(projectID: Int, iid: Int, url: URL) async {
@@ -1209,6 +1228,9 @@ final class TodoMonitorService {
         case .failure(let err):
             Log.monitor.error("Refresh failed: \(String(describing: err), privacy: .public)")
             lastError = err
+            if settings.onboardingCompleted, let host, let username {
+                attention.refresh(host: host, username: username, todos: currentAccountTodos)
+            }
             // A transient read failure retains the last account-bound inbox.
         }
     }
@@ -1366,6 +1388,16 @@ final class TodoMonitorService {
                 grouping: settings.boardGrouping)
         }
         boardSnapshotCache.invalidate()
+        var previousWithCurrentReviewStart = previous
+        previousWithCurrentReviewStart.requireReviewStartConfirmation = current.requireReviewStartConfirmation
+        if previousWithCurrentReviewStart == current {
+            // This setting controls admission of new work, so an already launched job keeps its policy.
+            if !current.requireReviewStartConfirmation, current.hasEnabledAutomation,
+               let host = glab.resolvedHost, let username = glab.currentUsername {
+                Task { await self.routeMRTodos(host: host, username: username) }
+            }
+            return
+        }
         let scopeOnly = previous.preservingScope(from: current) == current
         let host = glab.resolvedHost ?? "", username = glab.currentUsername ?? ""
         let targets = Set(previous.scope.individualTargets(host: host, username: username)
@@ -1579,6 +1611,21 @@ final class TodoMonitorService {
     }
 
     func markDone(_ todo: Todo) async { await todoStore.markDone(todo, automatically: false) }
+
+    func markInboxNotificationsRead(_ notifications: [BoardCardPin], accountRevision: UInt64) async {
+        for notification in notifications {
+            guard !Task.isCancelled, glab.accountRevision == accountRevision else { return }
+            guard notification.host == glab.resolvedHost, notification.username == glab.currentUsername else { continue }
+            switch notification.item {
+            case .todo(let id):
+                if let todo = currentAccountTodos.first(where: { $0.id == id }) { await markDone(todo) }
+            case .completion(let id):
+                acknowledgeLifecycleCompletion(id: id)
+            case .mergeRequest:
+                continue
+            }
+        }
+    }
 
     /// Hides the to-do immediately but waits `undoWindow` before calling GitLab.
     func markDoneWithUndo(_ todo: Todo) { todoStore.markDoneWithUndo(todo) }

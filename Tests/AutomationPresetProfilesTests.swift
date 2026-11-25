@@ -309,6 +309,9 @@ struct AutomationPresetProfilesTests {
         settings.save()
         FollowUpVerificationStore.synchronizeRuns(settings: settings)
         #expect(cancelled.isEmpty)
+        settings.automation.requireReviewStartConfirmation = true
+        settings.save()
+        #expect(cancelled.isEmpty)
         settings.automation.allowAutomaticPublicActions = false
         settings.save()
         #expect(cancelled == Set(settings.assistantHandoffs.map(\.id)))

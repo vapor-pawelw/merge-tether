@@ -79,6 +79,10 @@ final class MainWindowFrameView: NSView {
         // Let SwiftUI apply its initial frame before restoring and observing changes.
         DispatchQueue.main.async { [weak self, weak window] in
             guard let self, let window, self.window === window else { return }
+            if let toolbar = window.toolbar {
+                if #available(macOS 15, *) { toolbar.allowsDisplayModeCustomization = false }
+                toolbar.displayMode = .iconOnly
+            }
             restoreFrame(of: window)
             observeFrame(of: window)
         }

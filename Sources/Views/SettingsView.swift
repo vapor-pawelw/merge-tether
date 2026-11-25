@@ -3,14 +3,38 @@ import Observation
 
 @MainActor @Observable
 final class SettingsNavigation {
-    enum Tab: Hashable { case general, integration, automation, usage }
+    enum Tab: CaseIterable, Hashable {
+        case general, codingAgent, automation, integration, mergeRequests, notifications
+
+        var title: LocalizedStringResource {
+            switch self {
+            case .general: .Settings.settingsGeneralTab
+            case .integration: .Settings.settingsIntegrationTab
+            case .mergeRequests: .Settings.settingsMergeRequestsTab
+            case .notifications: .Settings.settingsNotificationsTab
+            case .codingAgent: .Settings.settingsCodingAgentTab
+            case .automation: .Settings.settingsAutomationTab
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .general: "gearshape"
+            case .integration: "terminal"
+            case .mergeRequests: "arrow.triangle.pull"
+            case .notifications: "bell"
+            case .codingAgent: "sparkles"
+            case .automation: "bolt.circle"
+            }
+        }
+    }
     static let shared = SettingsNavigation()
     var selection: Tab = .general
     @ObservationIgnored var openSettingsWindow: (() -> Void)?
     @ObservationIgnored private var onCodingAgentConfigured: (() -> Void)?
 
     func showCodingAgent(openSettings: (() -> Void)? = nil, onConfigured: (() -> Void)? = nil) {
-        selection = .general
+        selection = .codingAgent
         onCodingAgentConfigured = onConfigured
         (openSettings ?? openSettingsWindow)?()
     }
@@ -29,7 +53,7 @@ final class SettingsNavigation {
     func perform(_ action: MREffectivePolicyPresentation.SettingsAction, openSettings: () -> Void) {
         switch action {
         case .chooseAutomationSettings: selection = .automation
-        case .chooseCodingAgent: selection = .general
+        case .chooseCodingAgent: selection = .codingAgent
         }
         openSettings()
     }
@@ -45,46 +69,24 @@ struct SettingsView: View {
 
     var body: some View {
         TabView(selection: $navigation.selection) {
-            GeneralSettingsTab(monitor: monitor)
-                .tabItem {
-                    Label {
-                        Text(.Settings.settingsGeneralTab)
-                    } icon: {
-                        Image(systemName: "gearshape")
-                    }
-                }
-                .tag(SettingsNavigation.Tab.general)
-
-            IntegrationSettingsTab(monitor: monitor)
-                .tabItem {
-                    Label {
-                        Text(.Settings.settingsIntegrationTab)
-                    } icon: {
-                        Image(systemName: "terminal")
-                    }
-                }
-                .tag(SettingsNavigation.Tab.integration)
-
-            AutomationSettingsTab(monitor: monitor)
-                .tabItem {
-                    Label {
-                        Text(.Settings.settingsAutomationTab)
-                    } icon: {
-                        Image(systemName: "bolt.circle")
-                    }
-                }
-                .tag(SettingsNavigation.Tab.automation)
-
-            AssistantUsageSettingsTab()
-                .tabItem {
-                    Label {
-                        Text(.AssistantUsage.assistantUsageTab)
-                    } icon: {
-                        Image(systemName: "chart.bar")
-                    }
-                }
-                .tag(SettingsNavigation.Tab.usage)
+            ForEach(SettingsNavigation.Tab.allCases, id: \.self) { tab in
+                page(tab)
+                    .tabItem { Label { Text(tab.title) } icon: { Image(systemName: tab.symbol) } }
+                    .tag(tab)
+            }
         }
-        .frame(minWidth: 680, idealWidth: 720, minHeight: 560, idealHeight: 680)
+        .frame(minWidth: 680, idealWidth: 760, minHeight: 560, idealHeight: 680)
+    }
+
+    @ViewBuilder
+    private func page(_ tab: SettingsNavigation.Tab) -> some View {
+        switch tab {
+        case .general: GeneralSettingsTab(monitor: monitor)
+        case .integration: IntegrationSettingsTab(monitor: monitor)
+        case .mergeRequests: MergeRequestSettingsTab(monitor: monitor)
+        case .notifications: NotificationsSettingsTab(monitor: monitor)
+        case .codingAgent: CodingAgentSettingsTab(monitor: monitor)
+        case .automation: AutomationSettingsTab(monitor: monitor)
+        }
     }
 }

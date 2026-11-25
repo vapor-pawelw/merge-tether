@@ -265,7 +265,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var autoClaimPipelineFailures = false
     /// A review candidate that just arrived in Reviewing starts its review without a click.
     /// Otherwise it waits, with its automation paused, until the user starts it.
-    var startNewReviewsAutomatically = false
+    var startNewReviewsAutomatically = true
     var conflictPushProjects = ""
     var allowAssistantTools = false
     var assistantToolProjects = ""
@@ -316,6 +316,11 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var scope = MRAutomationScope()
     private var assistantDefaultsVersion = 1
     private var projectPermissionsVersion = 1
+
+    var requireReviewStartConfirmation: Bool {
+        get { !startNewReviewsAutomatically }
+        set { startNewReviewsAutomatically = !newValue }
+    }
 
     var reviewRequested = AutomationRule(promptTemplate: """
         Review the GitLab merge request at {url} using the installed MR skill and repository instructions.
@@ -373,7 +378,9 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         allowAssistantTools = try values.decodeIfPresent(Bool.self, forKey: .allowAssistantTools) ?? false
         assistantToolProjects = try values.decodeIfPresent(String.self, forKey: .assistantToolProjects) ?? ""
         packageDecision = try values.decodeIfPresent(AutomationPackageDecision.self, forKey: .packageDecision) ?? .undecided
+        let requiresStartConfirmation = try values.decodeIfPresent(Bool.self, forKey: .requireReviewStartConfirmation)
         startNewReviewsAutomatically = try values.decodeIfPresent(Bool.self, forKey: .startNewReviewsAutomatically)
+            ?? requiresStartConfirmation.map { !$0 }
             ?? (packageDecision == .enabled)
         allowAutomaticPublicActions = try values.decodeIfPresent(Bool.self, forKey: .allowAutomaticPublicActions) ?? true
         publishAIRepliesWithoutConfirmation = try values.decodeIfPresent(Bool.self, forKey: .publishAIRepliesWithoutConfirmation)
@@ -452,6 +459,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         try values.encodeIfPresent(autoMergeEnabled, forKey: .autoMergeEnabled)
         try values.encodeIfPresent(conflictTasksEnabled, forKey: .conflictTasksEnabled)
         try values.encodeIfPresent(reviewRequested, forKey: .reviewRequested)
+        try values.encode(requireReviewStartConfirmation, forKey: .requireReviewStartConfirmation)
         try values.encodeIfPresent(authorFeedback, forKey: .authorFeedback)
         try values.encodeIfPresent(allowAssistantTools, forKey: .allowAssistantTools)
         try values.encodeIfPresent(assistantToolProjects, forKey: .assistantToolProjects)
@@ -493,6 +501,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case assistant, assistantSelectionCleared, assistantWorkspace, autoMergeEnabled, conflictTasksEnabled, reviewRequested, authorFeedback
+        case requireReviewStartConfirmation
         case allowAssistantTools, assistantToolProjects, packageDecision, workflowRules, allowAutomaticPublicActions
         case autoApprovalThreshold
         case autoMergeProjects, allowConflictPush, allowFollowUpPush, conflictPushProjects, autoReReviewEnabled, publishDraftsWithoutConfirmation, publishAIRepliesWithoutConfirmation, autoApproveEnabled, autoResolveOwnReviewThreads
@@ -643,6 +652,13 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         autoResolveOwnReviewThreads = false
         allowAssistantTools = false
         allowConflictPush = false
+    }
+
+    func waitsForReviewStart(on request: GitLabMergeRequest?, target: MRAutomationScope.Target) -> Bool {
+        guard requireReviewStartConfirmation, hasAutomaticActionConsent, let request,
+              reviewRequested.isEnabled, reviewRequested.runner == .assistant, reviewRequested.isConfigured,
+              reviewRequested.includes(project: request.webURL.gitLabProjectPath) else { return false }
+        return scope.permits(request, host: target.host, username: target.username)
     }
 
     var usesAssistant: Bool {

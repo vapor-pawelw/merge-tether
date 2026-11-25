@@ -35,7 +35,7 @@ private struct CommandCenterMRCardContent: View {
     private var isDraft: Bool { row.isDraft }
     private var finishedState: MergeRequestFinishedState? { .init(row.displayRequest) }
     private var isMuted: Bool {
-        if let entry = row.manualOrderEntry { return !entry.group.automationEnabled && !entry.isNew }
+        if let entry = row.manualOrderEntry { return !entry.group.automationEnabled }
         return monitor.boardActivity(projectID: item.id.projectID, iid: item.id.iid, url: item.url,
             isDraft: isDraft, isFinished: finishedState != nil).isMuted
     }
@@ -47,10 +47,12 @@ private struct CommandCenterMRCardContent: View {
     private var humanAction: MRHumanAction? { presentation.humanAction }
 
     private var contentOpacity: Double { isDraft ? 0.5 : 1 }
-    private var isNewReview: Bool { scopeTarget.map(monitor.settings.newReviewTargets.contains) == true }
-    private func showDetails() {
-        if let scopeTarget { monitor.acknowledgeNewReview(scopeTarget) }
-        onDetails()
+    private var isNewReview: Bool {
+        row.newReviewAssignedAt != nil || scopeTarget.map(monitor.settings.newReviewTargets.contains) == true
+    }
+    private var showsInlineHide: Bool { isNewReview && row.waitsForReviewStart && reviewingContext.nextStep == .runReview }
+    private var newReviewTint: Color {
+        colorScheme == .dark ? Color(red: 0.38, green: 0.88, blue: 0.77) : Color(red: 0.04, green: 0.39, blue: 0.33)
     }
 
     var body: some View {
@@ -65,6 +67,12 @@ private struct CommandCenterMRCardContent: View {
                     statusTopPadding: humanAction == nil ? 0 : 8, statusOpacity: contentOpacity,
                     statusLayout: MRCardStatusLayout(heading: cardHeading, status: cardStatus.opacity(contentOpacity)),
                     statusTrailer: { mergeActionStatus }) { hasDirectMergeAction in
+                    if isNewReview && !showsInlineHide {
+                        Button(action: markReviewSeen) {
+                            Label { Text(.Board.boardReviewAssignmentSeen) } icon: { Image(systemName: "checkmark") }
+                        }
+                        .buttonStyle(.bordered)
+                    }
                     if humanAction?.action == .retryRun {
                         Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
                             .buttonStyle(.plain)
@@ -75,8 +83,15 @@ private struct CommandCenterMRCardContent: View {
                     } else {
                         primaryAction(hasDirectMergeAction: hasDirectMergeAction)
                     }
+                    if showsInlineHide {
+                        Button {
+                            monitor.removeReviewedMergeRequest(row.displayItem)
+                        } label: { Text(.Board.boardReviewAssignmentHide) }
+                        .buttonStyle(.plain)
+                    }
                     if presentation.showsAdditionalCommentReview || finishingCommentReview {
                         Button {
+                            markReviewSeen()
                             guard confirmMRAction(.finishCommentReview, title: .CommentReview.commentReviewFinish) else { return }
                             finishingCommentReview = true
                             Task {
@@ -103,23 +118,31 @@ private struct CommandCenterMRCardContent: View {
         .padding([.leading, .bottom, .trailing], 16)
         .padding(.top, contentTopInset)
         .overlay {
-            RoundedRectangle(cornerRadius: 8).strokeBorder(.primary.opacity(0.14), lineWidth: 1)
-                .opacity(contentOpacity)
-                .allowsHitTesting(false)
+            Group {
+                if isNewReview {
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(newReviewTint.opacity(0.65), lineWidth: 1)
+                        .shadow(color: newReviewTint.opacity(0.30), radius: 3)
+                } else {
+                    RoundedRectangle(cornerRadius: 8).strokeBorder(.primary.opacity(0.14), lineWidth: 1)
+                        .opacity(contentOpacity)
+                }
+            }
+            .allowsHitTesting(false)
         }
         .boardCardInteraction(
             background: colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(white: 0.95),
-            backgroundOpacity: contentOpacity, onDetails: showDetails)
+            backgroundOpacity: contentOpacity, onDetails: openDetails)
         .contextMenu { menuItems }
-        .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
-            Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
-        } message: { Text(.Board.boardRemoveExplanation) }
+        .confirmationDialog(Text(.Board.boardReviewAssignmentHide), isPresented: $confirmRemoval, titleVisibility: .visible) {
+            Button(role: .destructive) { monitor.removeReviewedMergeRequest(row.displayItem) } label: { Text(.Board.boardReviewAssignmentHide) }
+        } message: { Text(.Board.boardReviewAssignmentHideExplanation) }
         .environment(\.gitLabPersonSourceURL, row.displayURL)
     }
 
     @ViewBuilder private var cardHeading: some View {
         cardReference
-        Button(action: showDetails) {
+        Button(action: openDetails) {
             BoardCardTitle(title: row.displayTitle, repositoryPath: row.displayURL.gitLabProjectPath,
                 titleColor: !isDraft && isMuted ? .secondary : .primary)
                 .opacity(contentOpacity)
@@ -131,7 +154,7 @@ private struct CommandCenterMRCardContent: View {
             author
             Spacer(minLength: 16)
             if finishedState == nil {
-                BoardMRApprovalBadge(row: row, monitor: monitor)
+                BoardMRApprovalBadge(row: row, monitor: monitor, onClick: markReviewSeen)
                     .fixedSize(horizontal: true, vertical: false)
             }
         }
@@ -288,13 +311,23 @@ private struct CommandCenterMRCardContent: View {
             if let dependencies = RemoteMRDependencies(summary: row.displayItem.dependencies, projectID: item.id.projectID) {
                 MRDependencyBadge(dependencies: dependencies)
             }
-            if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
-            else {
-                if isNewReview {
-                    BoardStatusChip(title: .Board.boardCompactNew, symbol: "sparkle", tint: .accentColor)
+            if isNewReview {
+                Button(action: markReviewSeen) {
+                    Label { Text(.Board.boardReviewAssignmentNew) } icon: {
+                        Circle().fill(newReviewTint).frame(width: 5, height: 5)
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(newReviewTint)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(newReviewTint.opacity(0.15), in: Capsule())
+                    .contentShape(Capsule())
                 }
-                if isDraft { BoardDraftBadge(tint: draftBadgeTint) }
+                .buttonStyle(.plain)
+                .accessibilityHint(Text(.Board.boardReviewAssignmentSeen))
+                .help(newReviewHelp)
             }
+            if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
+            else if isDraft { BoardDraftBadge(tint: draftBadgeTint) }
         }
         .fixedSize(horizontal: true, vertical: false)
     }
@@ -307,14 +340,14 @@ private struct CommandCenterMRCardContent: View {
     private var cardActions: some View {
         HStack(spacing: 0) {
             if let cardPin, monitor.settings.boardPins.contains(cardPin) {
-                BoardPinButton(pin: cardPin, settings: monitor.settings)
+                BoardPinButton(pin: cardPin, settings: monitor.settings, onClick: markReviewSeen)
             }
             if finishedState == nil, let scopeTarget {
                 BoardAutomationToggle(monitor: monitor, target: scopeTarget,
                     projectPath: item.url.gitLabProjectPath, isDraft: isDraft,
-                    policy: MREffectivePolicySummary.presentation(row: row, monitor: monitor).0)
+                    policy: MREffectivePolicySummary.presentation(row: row, monitor: monitor).0, onClick: markReviewSeen)
             }
-            CopyMergeRequestLinkButton(url: item.url, placement: .header)
+            CopyMergeRequestLinkButton(url: item.url, placement: .header, onClick: markReviewSeen)
             moreMenu
         }
     }
@@ -335,7 +368,10 @@ private struct CommandCenterMRCardContent: View {
     @ViewBuilder
     private func primaryAction(hasDirectMergeAction: Bool) -> some View {
         if let job = row.latestJob, job.execution?.state.isActive == true {
-            Button(role: .destructive) { monitor.cancelAssistantJob(job.id) } label: { Text(.AssistantJobs.assistantJobsStop) }
+            Button(role: .destructive) {
+                markReviewSeen()
+                monitor.cancelAssistantJob(job.id)
+            } label: { Text(.AssistantJobs.assistantJobsStop) }
                 .buttonStyle(.plain)
         } else if let action = humanAction {
             if !hasDirectMergeAction || ![.reviewMerge, .reviewDecision].contains(action.action) {
@@ -361,9 +397,18 @@ private struct CommandCenterMRCardContent: View {
         if let label = reviewingContext.actionLabel {
             switch reviewingContext.nextStep {
             case .runReview:
-                primary(label, cta: .runReview, enabled: monitor.canRunReview(for: item)) {
-                    guard let consent = confirmManualReview(for: item, monitor: monitor) else { return }
-                    start { await monitor.runReview(for: item, confirmed: consent) }
+                primary(label, cta: .runReview, enabled: monitor.canRunReview(for: row.displayItem)) {
+                    let pending = row.waitsForReviewStart ? row.intents.first {
+                        $0.kind == .review && $0.state == .pending && $0.jobID == nil
+                    } : nil
+                    if let pending {
+                        guard let consent = confirmManualReview(for: monitor.reviewRequest(for: pending), monitor: monitor) else { return }
+                        start { await monitor.runMRTodoIntent(id: pending.id, confirmedReview: consent) }
+                    } else {
+                        let current = row.displayItem
+                        guard let consent = confirmManualReview(for: current, monitor: monitor) else { return }
+                        start { await monitor.runReview(for: current, confirmed: consent) }
+                    }
                 }
             case .setupAgent: primary(label) { SettingsNavigation.shared.showCodingAgent(openSettings: { openSettings() }) }
             case .monitoring, .viewDiscussions: primary(label) { openAttention(.feedback) }
@@ -454,15 +499,32 @@ private struct CommandCenterMRCardContent: View {
         }
     }
 
+    private var newReviewHelp: Text {
+        let action = Text(.Board.boardReviewAssignmentSeen)
+        guard let date = row.newReviewAssignedAt else { return action }
+        return action + Text(verbatim: "\n") + Text(date, format: .dateTime.month().day().hour().minute())
+    }
+
+    private func markReviewSeen() {
+        monitor.markReviewAssignmentSeen(row.displayItem)
+    }
+
+    private func openDetails() {
+        markReviewSeen()
+        onDetails()
+    }
+
     private func openAttention(_ section: CommandCenterMRDetailSection) {
+        markReviewSeen()
         if let onAttention { onAttention(section) }
-        else { showDetails() }
+        else { onDetails() }
     }
 
     @ViewBuilder
     private func primary(_ title: LocalizedStringResource, cta: MRActionCTA? = nil, enabled: Bool = true,
                          action: @escaping () -> Void) -> some View {
         Button {
+            markReviewSeen()
             action()
             if isStarting { pendingPrimary = (title, cta) }
         } label: {
@@ -484,7 +546,8 @@ private struct CommandCenterMRCardContent: View {
     }
 
     private var moreMenu: some View {
-        BoardActionsMenu { menuItems }
+        let onClick: (() -> Void)? = isNewReview ? { markReviewSeen() } : nil
+        return BoardActionsMenu(onClick: onClick) { menuItems }
     }
 
     @ViewBuilder private var menuItems: some View {
