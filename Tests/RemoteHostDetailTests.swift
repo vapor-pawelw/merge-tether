@@ -203,6 +203,29 @@ import MergeTetherRemote
         #expect(f.gitlab.requests.count == count)
     }
 
+    @Test func phoneEventLogCapDoesNotMarkTheDiscussionAsTruncated() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        f.usesLiveDetailReader = true
+        let handler = try #require(f.gitlab.handler)
+        f.gitlab.handler = { call in
+            if call.endpoint == "/projects/1/merge_requests/2/resource_label_events?per_page=100" {
+                return try InMemoryGitLab.json((1...31).map { id in
+                    ["id": id, "created_at": "1970-01-01T00:00:50Z", "action": "add", "label": ["name": "Label \(id)"]] as [String: Any]
+                })
+            }
+            return try await handler(call)
+        }
+        let board = try await f.board()
+        let card = try #require(board.cards.first { $0.id == "mr:1:2" })
+        let request = try RemoteDetailRequest(card: card, board: board)
+        await f.transport.onMessage?(.init(type: .detailRequest, detailRequest: request))
+        await f.host.detailTask?.value
+        let details = try #require(f.transport.messages.last?.detailResponse?.details)
+        #expect(details.activity.count == 30)
+        #expect(details.activityPartial == nil)
+        #expect(!details.truncated)
+    }
+
     @Test func phoneReceivesLocalDetailsBeforeGitLabAndCachedDiscussionsOnReopen() async throws {
         let f = try Fixture(); defer { f.clean() }
         f.detailNotes = [.init(id: "1", body: "Previously loaded comment")]
@@ -223,6 +246,7 @@ import MergeTetherRemote
         let local = f.transport.messages.last { $0.detailResponse?.request == first }?.detailResponse
         #expect(local?.details?.description == "Context")
         #expect(local?.details?.threads?.first?.notes.first?.body == "Already read on the Mac")
+        #expect(local?.details?.activityPartial == nil)
         #expect(local?.isPreview == true)
         f.gitlab.write("release-1")
         await f.host.detailTask?.value

@@ -649,7 +649,7 @@ extension RemoteConnection: RemoteHostTransport {}
             details.proposedSolutionDraftIDs = cached.details.proposedSolutionDraftIDs
             details.approvals = cached.details.approvals ?? details.approvals
         }
-        var history = cached?.history ?? RemoteMRGitLabHistory(isPartial: true)
+        var history = cached?.history ?? RemoteMRGitLabHistory(isPartial: request.cachedOnly == true ? true : nil)
         if let notes { history.notes = notes }
         RemoteMRDetailSupplement.append(to: &details, row: row, monitor: monitor, usage: nil, gitLabHistory: history)
         details.usage = cached?.details.usage

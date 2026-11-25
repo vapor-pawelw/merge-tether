@@ -458,14 +458,13 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
                 let retained = list(ids, 100).filter { details.draftContexts?[String($0)] != nil }
                 return retained.isEmpty ? nil : retained
             }
-            details.activity = list(details.activity, RemoteDetailActivity.maximumEntries).map { original in
+            details.activity = details.activity.prefix(RemoteDetailActivity.maximumEntries).map { original in
                 var activity = original
-                activity.title = text(activity.title, 512)
-                activity.status = text(activity.status, 512)
-                activity.summary = activity.summary.map { text($0, 4_000) }
+                activity.title = String(activity.title.prefix(512))
+                activity.status = String(activity.status.prefix(512))
+                activity.summary = activity.summary.map { String($0.prefix(4_000)) }
                 if let threadID = activity.note?.threadID, threadID.utf8.count > 256 {
                     activity.note?.threadID = nil
-                    clipped = true
                 }
                 return activity
             }
@@ -474,8 +473,15 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
         }
         func size() -> Int { (try? JSONEncoder().encode(RemoteMessage(type: .details, detailResponse: result)).count) ?? Int.max }
         guard size() > RemoteCipher.maximumPayloadBytes else { return result }
-        result.details?.truncated = true
         while size() > RemoteCipher.maximumPayloadBytes, var details = result.details {
+            if details.activity.contains(where: { $0.note != nil && $0.summary != nil }) {
+                for index in details.activity.indices where details.activity[index].note != nil {
+                    details.activity[index].summary = nil
+                }
+                result.details = details
+                continue
+            }
+            details.truncated = true
             // Optional explanations go first: they are shown on demand and the comments stay readable without them.
             if details.draftContexts?.isEmpty == false {
                 details.draftContexts = nil
@@ -490,11 +496,6 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
                         thread.notes[index].proposedSolution = nil
                     }
                     return thread
-                }
-            }
-            else if details.activity.contains(where: { $0.note != nil && $0.summary != nil }) {
-                for index in details.activity.indices where details.activity[index].note != nil {
-                    details.activity[index].summary = nil
                 }
             }
             else if var threads = details.threads, !threads.isEmpty {

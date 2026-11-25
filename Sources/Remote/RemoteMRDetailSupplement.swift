@@ -169,7 +169,6 @@ import MergeTetherRemote
             }
         }
         details.activityPartial = gitLabHistory.isPartial
-        if history.entries.count > RemoteDetailActivity.maximumEntries { details.truncated = true }
     }
 
     static func applyFeedback(to details: inout RemoteMRDetails, assessment: ReReviewAssessment?, authorID: Int,

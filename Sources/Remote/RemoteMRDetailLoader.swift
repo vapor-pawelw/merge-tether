@@ -153,7 +153,7 @@ struct RemoteMRGitLabHistory: Sendable {
     }
 
     func retained(publicationNoteIDs: Set<Int>) -> Self {
-        // One extra event preserves the truncation indicator. Keep older events that decide attribution.
+        // Keep bounded event candidates and the older events that determine attribution.
         let retainedCount = RemoteDetailActivity.maximumEntries + 1
         func sorted(_ events: [MRGitLabActivity]) -> [MRGitLabActivity] {
             var seen = Set<String>()

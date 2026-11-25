@@ -8,6 +8,7 @@ struct RemoteMRDetailContent: View {
     var personalApproval: RemotePersonalApprovalControl? = nil
     var reviewerEditing: ReviewerEditing? = nil
     var onRefreshActivity: (() -> Void)? = nil
+    var activityReadInProgress = false
     var canRefreshActivity = false
     /// Present when the Mac accepts comment-origin changes from this phone.
     var onCommentOrigin: ((RemoteCommentOriginRequest) -> Void)? = nil
@@ -123,7 +124,7 @@ struct RemoteMRDetailContent: View {
             }
             section(.RemoteDetail.remoteDetailActivity) {
                 Text(.RemoteDetail.remoteDetailHistoryHelp).font(.caption).foregroundStyle(.secondary)
-                if details.activityPartial == true {
+                if !activityReadInProgress, details.activityPartial == true {
                     Label(.RemoteDetail.remoteDetailActivityPartial, systemImage: "exclamationmark.triangle")
                         .font(.caption).foregroundStyle(.orange)
                     if let onRefreshActivity {
@@ -132,7 +133,7 @@ struct RemoteMRDetailContent: View {
                         }
                         .disabled(!canRefreshActivity)
                     }
-                } else if details.activity.isEmpty {
+                } else if !activityReadInProgress, details.activity.isEmpty {
                     Text(.RemoteDetail.remoteDetailNoActivity).font(.callout).foregroundStyle(.secondary)
                 }
                 LazyVStack(alignment: .leading, spacing: 14) { ForEach(details.activity) { activity in

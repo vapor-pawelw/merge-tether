@@ -135,8 +135,24 @@ import Testing
         let value = try #require(bounded.details?.activity.first)
         #expect(value.title.count == 512 && value.summary?.count == 4_000)
         #expect(value.note?.id == 7 && value.note?.threadID == nil)
-        #expect(bounded.details?.truncated == true && bounded.details?.activityPartial == true)
+        #expect(bounded.details?.truncated == false && bounded.details?.activityPartial == true)
         #expect(try JSONDecoder().decode(RemoteDetailResponse.self, from: JSONEncoder().encode(bounded)) == bounded)
+    }
+
+    @Test func activitySummariesYieldToDiscussionBodiesWithoutReportingATruncatedDiscussion() throws {
+        let board = board(), request = try RemoteDetailRequest(card: board.cards[0], board: board)
+        let body = String(repeating: "a", count: 4_000)
+        let notes = (1...24).map { RemoteDetailNote(id: String($0), body: body) }
+        let activity = (1...31).map { RemoteDetailActivity(id: "note/\($0)", title: "Comment", status: "GitLab",
+            summary: body, createdAt: date, note: .init(id: $0)) }
+        let details = RemoteMRDetails(checkedAt: date, threads: [.init(id: "t", state: .open, notes: notes)], activity: activity)
+
+        let bounded = RemoteDetailResponse(request: request, status: .current, details: details).bounded()
+
+        #expect(bounded.details?.truncated == false)
+        #expect(bounded.details?.threads?.first?.notes.count == notes.count)
+        #expect(bounded.details?.activity.map(\.id) == activity.prefix(30).map(\.id))
+        #expect(bounded.details?.activity.allSatisfy { $0.summary == nil } == true)
     }
 
     @MainActor @Test func historyNavigationCannotUseStaleDetailsOrInheritedThreadsFromAnotherContext() throws {
