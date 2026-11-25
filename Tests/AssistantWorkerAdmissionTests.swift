@@ -330,7 +330,11 @@ struct AssistantWorkerAdmissionTests {
                 }
                 if call.endpoint == "/projects/7/merge_requests/11" {
                     if scenario.hasSuffix("baseline-unavailable"), baselineReads > 0, !workerRan { throw GlabError.timedOut }
-                    if workerRan, sourceHeadChanged, pushedAt == nil { pushedAt = .now }
+                    if workerRan, sourceHeadChanged, pushedAt == nil {
+                        // Keep the GitLab millisecond timestamp at or before the observed head.
+                        let milliseconds = floor(Date.now.timeIntervalSince1970 * 1_000)
+                        pushedAt = Date(timeIntervalSince1970: milliseconds / 1_000)
+                    }
                     var payload: [String: Any] = ["project_id":7,"iid":11,"source_project_id":7,"target_project_id":7,
                         "author":["id":authored ? 1 : 2,"username":authored ? "me" : "other","name":"Author"],
                         "title":"Fixture","web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened",
