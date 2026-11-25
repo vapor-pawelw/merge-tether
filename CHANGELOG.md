@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Move **Run setup again** from GitLab to General settings.
 
+- Stop asking for a review on merge requests you already approved: your current approval, given anywhere, accepts the code and discussions seen so far until the head or MR text changes.
+
 - Edit or restore the AI comment assessment prompt in Advanced automation settings.
 
 - Complete the Polish localization of the Mac and iPhone interfaces, including plural forms, setup, automation, and the iPhone camera permission prompt.
