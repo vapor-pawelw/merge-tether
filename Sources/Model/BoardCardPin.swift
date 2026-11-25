@@ -6,6 +6,7 @@ struct BoardCardPin: Codable, Hashable, Sendable {
         case mergeRequest(projectID: Int, iid: Int)
         case todo(Int)
         case completion(UUID)
+        case hiddenReviewNotification(UUID)
     }
     let host: String
     let username: String

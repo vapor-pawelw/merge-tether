@@ -153,6 +153,7 @@ struct MRBoardProjector {
         var grouping: MRBoardGrouping = .withoutAutomation
         var draftsLast = true
         var completions: [MergeRequestLifecycleLedger.CompletionReceipt] = []
+        var hiddenReviewNotifications: [HiddenReview] = []
     }
     let input: Input
     private let requestFacts: RequestFacts.Index
@@ -421,7 +422,8 @@ struct MRBoardProjector {
             humanAttention: humanAttention, pinnedCards: input.pins, pipelineEvidence: input.pipelineEvidence,
             pipelineEvidenceCheckedAt: input.pipelineEvidenceCheckedAt, preservedOrder: preservedOrder,
             automation: input.automation, displayRequests: input.displayRequests, grouping: input.grouping,
-            completions: input.completions, currentRows: prepared, automaticMerges: automaticMerges,
+            completions: input.completions, hiddenReviewNotifications: input.hiddenReviewNotifications,
+            currentRows: prepared, automaticMerges: automaticMerges,
             assignmentsAreAuthoritative: input.reviewAssignments != nil, newReviewAssignments: newAssignments)
     }
 

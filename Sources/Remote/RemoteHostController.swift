@@ -377,13 +377,15 @@ extension RemoteConnection: RemoteHostTransport {}
             catch { return }
         case .command:
             guard let command = message.command, let pairing else { return }
-            // Seen acknowledges a local receipt. Draft regeneration and suggestion decisions validate their own context.
+            // Inbox updates validate their local receipt. Draft regeneration and suggestion decisions validate their own context.
+            let handlesInboxUpdate = command.isCompletionAcknowledgement
+                || (command.cardID.hasPrefix("completion:") && command.actionID == "restore")
             let cardChange = command.isCardChange ? RemoteCardChange(argument: command.argument) : nil
             let refreshesItself: Bool = switch cardChange {
             case .pin, .refresh: true
             default: false
             }
-            let fresh = if command.isCompletionAcknowledgement || command.isFeedbackSuggestionDecision || command.isDraftRegeneration || refreshesItself { true } else {
+            let fresh = if handlesInboxUpdate || command.isFeedbackSuggestionDecision || command.isDraftRegeneration || refreshesItself { true } else {
                 await refreshSource(deadline: .now + .seconds(35))
             }
             var board = snapshot()
@@ -818,8 +820,9 @@ extension RemoteConnection: RemoteHostTransport {}
             return await executeDraftRegeneration(action, argument: argument)
         }
         if card.id.hasPrefix("completion:") {
-            return RemoteBoardAdapter.acknowledgeCompletion(card, action: action, monitor: monitor, account: account)
-                ? .completed : .changed
+            let handled = RemoteBoardAdapter.acknowledgeCompletion(card, action: action, monitor: monitor, account: account)
+                || RemoteBoardAdapter.handleHiddenReviewNotification(card, action: action, monitor: monitor, account: account)
+            return handled ? .completed : .changed
         }
         if action.id.hasPrefix("intent:"), let id = UUID(uuidString: String(action.id.dropFirst(7))) {
             guard let intent = monitor.currentMRTodoIntents.first(where: { $0.id == id }) else { return .changed }

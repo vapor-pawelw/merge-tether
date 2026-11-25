@@ -186,6 +186,10 @@ private struct CommandCenterMRCardContent: View {
                 if let stage = presentation.mergeStage {
                     MRMergeStageBanner(stage: stage, startedAt: monitor.activityStartedAt(for: item, activity: mergeActivity))
                 }
+                if isNewReview, let scopeTarget,
+                   let notice = monitor.settings.reviewAssignments.incomingReviewFilter.notice(for: scopeTarget) {
+                    IncomingReviewFilterNoticeView(notice: notice)
+                }
                 attentionAndDrafts
                 if let retryError {
                     Label { Text(verbatim: retryError) } icon: {

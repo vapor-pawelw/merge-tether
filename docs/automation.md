@@ -174,7 +174,7 @@ Opening an external destination is not proof that its work completed. A manual s
 
 To-dos are incoming events. A recognized update for an MR already on the board updates its action state and is acknowledged after that state is persisted. The card shows the resulting action, rather than a separate to-do row. The action and any running or failed agent task remain visible after the GitLab to-do disappears.
 
-Two settings control new review requests.
+These settings control how new review requests reach Reviewing.
 
 - **Add new review requests straight to Reviewing** (Settings → Merge requests, on by default) includes current open GitLab reviewer assignments, including drafts, and incoming review requests in Reviewing. Turn it off to leave new candidates with a review to-do in Inbox until you add them. Other events outside the board, such as a failed pipeline, can still offer **Add and handle**.
 - **Start reviewing new merge requests automatically** (Settings → Automation, part of the profile) controls automatic review starts. It is on for Safe, Trusted and Max, subject to the usual rules, scope and CLI readiness. Manual leaves review starts to the user. When a new review waits for a start, its card offers the review action.
@@ -182,6 +182,8 @@ Two settings control new review requests.
 The first successful assignment list establishes a baseline without badges when Reviewing was empty. When it already had cards, additional assignments are marked **New** on the first sync after upgrade. Later assignments stay marked until you open Details, use a card action, or choose **Mark as seen**. Automatic review starts leave an assignment's badge visible. An unavailable assignment list retains the last successful result for that account.
 
 Choose **Hide** from the card menu or directly on a new card awaiting a manual start. Choose **Restore** in the banner or in **Settings → Merge requests → Hidden merge requests** to bring back an active assignment.
+
+**Settings → Merge requests → Incoming review filter** optionally evaluates new review requests for Inbox and Reviewing against your written criteria. It uses the configured lightweight verifier model and requires a working, signed-in agent CLI. A batch shares one verifier run. Accepted requests follow the ordinary routing and review permissions. Rejected requests use the same local hidden state as **Hide**. A banner identifies the MR or lists the batch and offers **Restore**. By default, every new autohide leaves an Inbox update with the verifier's reason. **Mark as seen** dismisses the update while keeping the MR hidden. **Restore** brings the MR back and dismisses the update. Bulk **Mark all as read** also dismisses these notices. The checkbox controls future Inbox updates, and banners remain available independently. **Hidden merge requests** in the same settings tab always offers restoration. A failed, unavailable, uncertain or interrupted assessment lets the request through with a note, including after restarting the app. The Reviewing note clears with **New**. The global automation switch pauses new filtering.
 
 A submitted review is handled by its event type and live MR evidence, regardless of the reviewer identity. Open threads on your MR enter the configured follow-up action. General reviewer comments are assessed by the shared semantic verifier before it starts warranted follow-up work; informational summaries do not require code changes. Reviews with no open threads refresh the durable MR state. A failed evidence read leaves the event unread.
 

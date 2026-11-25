@@ -19,7 +19,7 @@ final class SettingsManager {
     var automaticWritesAllowed: Bool { automaticActionsAllowed && automation.hasAutomaticActionConsent }
     var automaticPublicWritesAllowed: Bool { automaticActionsAllowed && automation.hasAutomaticPublicActionConsent }
     private static let conveniencePersistenceKeys: Set<String> = [
-        "automationEvents", "boardPins", "boardManualOrder", "lastSeenTodoIDs", "reviewAssignments"
+        "automationEvents", "boardPins", "boardManualOrder", "lastSeenTodoIDs", "reviewAssignments", "incomingReviewFilterSettings"
     ]
 
     func recordPersistenceFailure(_ key: String) { persistenceStore.recordFailure(key) }
@@ -47,7 +47,59 @@ final class SettingsManager {
     var autoMergeOptIns: Set<MRAutomationScope.Target> = []
     var automaticActionOptIns: [MRAutomaticAction: Set<MRAutomationScope.Target>] = [:]
     var mergeSubmissions: [MergeSubmissionReceipt] = []
-    var ignoredMergeRequests: Set<MRAutomationScope.Target>
+    private var hiddenMergeRequests: HiddenMergeRequests
+    var ignoredMergeRequests: Set<MRAutomationScope.Target> {
+        get { hiddenMergeRequests.targets }
+        set { hiddenMergeRequests.targets = newValue }
+    }
+    var filteredHiddenReviewDetails: [MRAutomationScope.Target: HiddenReview] { hiddenMergeRequests.details }
+
+    func intakeFilterHolds(_ target: MRAutomationScope.Target) -> Bool {
+        reviewAssignments.incomingReviewFilter.suppresses(target) || hiddenMergeRequests.details[target] != nil
+    }
+
+    func hideFilteredReviews(_ reviews: [HiddenReview], reasons: [MRAutomationScope.Target: String] = [:]) -> Bool {
+        var updated = hiddenMergeRequests
+        let observedAt = Date()
+        for var review in reviews {
+            guard updated.targets.insert(review.target).inserted else { continue }
+            review.inboxNotification = incomingReviewFilterSettings.showHiddenReviewsInInbox
+                ? .init(id: UUID(), observedAt: observedAt, reason: reasons[review.target]) : nil
+            updated.details[review.target] = review
+        }
+        guard updated.targets != hiddenMergeRequests.targets else { return false }
+        return saveHiddenMergeRequests(updated)
+    }
+
+    func acknowledgeHiddenReviewNotifications(_ ids: Set<UUID>, host: String, username: String) -> Bool {
+        var updated = hiddenMergeRequests
+        let matching = updated.details.values.filter { review in
+            review.target.host == host && review.target.username == username
+                && review.inboxNotification.map { ids.contains($0.id) } == true
+        }
+        guard !matching.isEmpty else { return false }
+        for review in matching { updated.details[review.target]?.inboxNotification = nil }
+        return saveHiddenMergeRequests(updated)
+    }
+
+    func restoreHiddenReviews(_ targets: Set<MRAutomationScope.Target>) -> Bool {
+        var updated = hiddenMergeRequests
+        updated.targets.subtract(targets)
+        guard updated.targets != hiddenMergeRequests.targets else { return false }
+        return saveHiddenMergeRequests(updated)
+    }
+
+    private func saveHiddenMergeRequests(_ updated: HiddenMergeRequests) -> Bool {
+        persistenceStore.preserveCorruptValues()
+        guard persistenceStore.save(updated, forKey: Key.ignoredMergeRequests) else { return false }
+        guard persistenceStore.synchronize() else {
+            persistenceStore.save(hiddenMergeRequests, forKey: Key.ignoredMergeRequests)
+            persistenceStore.synchronize()
+            return false
+        }
+        hiddenMergeRequests = updated
+        return true
+    }
     var automation: AutomationSettings {
         didSet {
             if automation.isGloballySuspended == automationGloballyEnabled {
@@ -71,7 +123,7 @@ final class SettingsManager {
     var configuredAutomation: AutomationSettings { automation.ignoringGlobalSuspension }
     /// Whether the killswitch has any configured automation to control.
     var configuredAutomationAvailable: Bool {
-        configuredAutomation.hasEnabledAutomation
+        incomingReviewFilterSettings.activeCriteria != nil || configuredAutomation.hasEnabledAutomation
             || (configuredAutomation.hasAutomaticPublicActionConsent && hasAutomaticActionOptIn())
     }
     var automationGloballyActive: Bool { automationGloballyEnabled && configuredAutomationAvailable }
@@ -126,6 +178,28 @@ final class SettingsManager {
     var effectiveBoardGrouping: MRBoardGrouping { boardGrouping.effective(for: configuredAutomation) }
     var mrLifecycleLedger = MergeRequestLifecycleLedger()
     var reviewAssignments = ReviewAssignmentLedger()
+    private(set) var incomingReviewFilterSettings = IncomingReviewFilterSettings()
+
+    @discardableResult
+    func saveReviewAssignments(_ ledger: ReviewAssignmentLedger) -> Bool {
+        persistenceStore.preserveCorruptValues()
+        guard persistenceStore.save(ledger, forKey: Key.reviewAssignments), persistenceStore.synchronize() else { return false }
+        reviewAssignments = ledger
+        return true
+    }
+
+    @discardableResult
+    func saveIncomingReviewFilterSettings(_ value: IncomingReviewFilterSettings) -> Bool {
+        persistenceStore.preserveCorruptValues()
+        guard persistenceStore.save(value, forKey: Key.incomingReviewFilterSettings) else { return false }
+        guard persistenceStore.synchronize() else {
+            persistenceStore.save(incomingReviewFilterSettings, forKey: Key.incomingReviewFilterSettings)
+            persistenceStore.synchronize()
+            return false
+        }
+        incomingReviewFilterSettings = value
+        return true
+    }
 
     @discardableResult
     func saveBoardManualOrder(_ order: MRBoardManualOrder) -> Bool {
@@ -184,6 +258,7 @@ final class SettingsManager {
         boardManualOrder = store.load(Key.boardManualOrder, fallback: .init())
         mrLifecycleLedger = store.load(Key.mrLifecycleLedger, fallback: .init())
         reviewAssignments = store.load(Key.reviewAssignments, fallback: .init())
+        incomingReviewFilterSettings = store.load(Key.incomingReviewFilterSettings, fallback: .init())
         conflictReceipts = store.load(Key.conflictReceipts, fallback: [])
         reReviewReceipts = store.load(Key.reReviewReceipts, fallback: [:])
         reReviewDraftBaselines = store.load(Key.reReviewDraftBaselines, fallback: [:])
@@ -206,7 +281,7 @@ final class SettingsManager {
             ? Date(timeIntervalSince1970: storedMenuOpenedAt)
             : nil
 
-        self.ignoredMergeRequests = store.load(Key.ignoredMergeRequests, fallback: [])
+        self.hiddenMergeRequests = store.load(Key.ignoredMergeRequests, fallback: .init())
         self.autoApproveOptOuts = store.load(Key.autoApproveOptOuts, fallback: [])
         self.independentApprovalPreferences = store.load(Key.independentApprovalPreferences, fallback: [:])
         self.autoPublishOptOuts = store.load(Key.autoPublishOptOuts, fallback: [])
@@ -297,7 +372,7 @@ final class SettingsManager {
         } else {
             defaults.removeObject(forKey: Key.lastMenuOpenedAt)
         }
-        persistenceStore.save(ignoredMergeRequests, forKey: Key.ignoredMergeRequests)
+        persistenceStore.save(hiddenMergeRequests, forKey: Key.ignoredMergeRequests)
         persistenceStore.save(autoApproveOptOuts, forKey: Key.autoApproveOptOuts)
         let approvalPreferencesSaved = persistenceStore.save(independentApprovalPreferences, forKey: Key.independentApprovalPreferences)
         persistenceStore.save(autoPublishOptOuts, forKey: Key.autoPublishOptOuts)
@@ -477,6 +552,7 @@ final class SettingsManager {
         static let boardManualOrder = "boardManualOrder"
         static let mrLifecycleLedger = "mrLifecycleLedger"
         static let reviewAssignments = "reviewAssignments"
+        static let incomingReviewFilterSettings = "incomingReviewFilterSettings"
         static let autoRemoveFinishedMRs = "autoRemoveFinishedMRs"
         static let showMergedMRCompletions = "showMergedMRCompletions"
         static let showClosedMRCompletions = "showClosedMRCompletions"

@@ -519,6 +519,7 @@ final class MergeWorkflowAutomation {
                 }
                 continue
             }
+            guard !reviewIsHeldByIntakeFilter(next) else { continue }
             guard assistantCanStart else {
                 if next.waitingForCodingAssistant != true {
                     mutate(next.id, ifCurrent: next) { $0.waitingForCodingAssistant = true }
@@ -1010,8 +1011,16 @@ final class MergeWorkflowAutomation {
         glab.resolvedHost == host && glab.currentUsername == user.username
     }
 
+    private func reviewIsHeldByIntakeFilter(_ entry: MergeWorkflowActivityEntry) -> Bool {
+        guard entry.event.kind == .reviewUpdate else { return false }
+        let request = entry.event.mergeRequest
+        let target = MRAutomationScope.Target(host: entry.host, username: entry.user.username,
+            projectID: request.projectID, iid: request.iid)
+        return settings.intakeFilterHolds(target)
+    }
+
     private func shouldProceed(_ entry: MergeWorkflowActivityEntry) -> Bool {
-        settings.automaticWritesAllowed && ownsAdmission(entry)
+        settings.automaticWritesAllowed && ownsAdmission(entry) && !reviewIsHeldByIntakeFilter(entry)
             && entry.event.kind != .reviewWaiting && isCurrent(host: entry.host, user: entry.user)
             && (entry.event.kind != .blockerChange || entry.event.blockerDiagnosis != nil)
             && configuredRule(for: entry.event)?.mode == .assistant

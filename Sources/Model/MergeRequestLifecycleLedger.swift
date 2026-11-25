@@ -188,6 +188,25 @@ struct ReviewAssignmentLedger: Codable, Sendable {
 
     private var listings: [Account: [ID: Entry]] = [:]
     private var baselinesEstablished: Set<Account>?
+    private var savedIncomingReviewFilter: IncomingReviewFilterLedger?
+
+    var incomingReviewFilter: IncomingReviewFilterLedger {
+        get { savedIncomingReviewFilter ?? .init() }
+        set { savedIncomingReviewFilter = newValue }
+    }
+
+    func assignmentTargets(host: String, username: String) -> Set<MRAutomationScope.Target> {
+        Set((entries(host: host, username: username) ?? []).map {
+            .init(host: host, username: username, projectID: $0.request.projectID, iid: $0.request.iid)
+        })
+    }
+
+    mutating func observeInboxForFiltering(_ todos: [Todo], host: String, username: String,
+                                           enabled: Bool, excluding: Set<MRAutomationScope.Target>) {
+        let assigned = assignmentTargets(host: host, username: username)
+        incomingReviewFilter.observeInbox(todos, host: host, username: username, assigned: assigned,
+            enabled: enabled, excluding: excluding)
+    }
 
     func entries(host: String, username: String) -> [Entry]? {
         listings[Account(host: host, username: username)].map { Array($0.values) }
@@ -234,5 +253,58 @@ struct ReviewAssignmentLedger: Codable, Sendable {
         guard listings[account]?[id]?.newSince != nil else { return false }
         listings[account]?[id]?.newSince = nil
         return true
+    }
+}
+
+struct HiddenReview: Codable, Identifiable, Sendable {
+    struct InboxNotification: Codable, Equatable, Sendable {
+        let id: UUID
+        let observedAt: Date
+        let reason: String?
+    }
+
+    let target: MRAutomationScope.Target
+    let title: String
+    let url: URL
+    var inboxNotification: InboxNotification? = nil
+    var id: MRAutomationScope.Target { target }
+}
+
+struct HiddenMergeRequests: Codable {
+    typealias Target = MRAutomationScope.Target
+    var targets: Set<Target> = [] {
+        didSet { details = details.filter { targets.contains($0.key) } }
+    }
+    var details: [Target: HiddenReview] = [:]
+
+    private enum CodingKeys: String, CodingKey { case targets, details }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        if let legacy = try? decoder.singleValueContainer().decode(Set<Target>.self) {
+            targets = legacy
+            return
+        }
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        targets = try values.decode(Set<Target>.self, forKey: .targets)
+        details = try values.decode([Target: HiddenReview].self, forKey: .details)
+        guard details.allSatisfy({ target, review in
+            targets.contains(target) && target == review.target && target.projectID > 0
+                && target.iid.map { review.url.isGitLabMergeRequest(host: target.host, iid: $0) } == true
+        }) else {
+            throw DecodingError.dataCorruptedError(forKey: .details, in: values, debugDescription: "Invalid hidden review identity")
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        if details.isEmpty {
+            var values = encoder.singleValueContainer()
+            try values.encode(targets)
+            return
+        }
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(targets, forKey: .targets)
+        try values.encode(details, forKey: .details)
     }
 }

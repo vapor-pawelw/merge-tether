@@ -84,6 +84,9 @@ struct BoardMRProposalCard: View {
                 FinishedMergeRequestStatus(item: finishedItem, monitor: monitor)
             } else {
                 reasons
+                if let notice = monitor.settings.reviewAssignments.incomingReviewFilter.notice(for: proposal.target) {
+                    IncomingReviewFilterNoticeView(notice: notice)
+                }
                 if failed {
                     BoardStatusChip(title: .Board.boardCompactBlocked, symbol: "exclamationmark.circle", tint: isMuted ? .secondary : .orange)
                         .help(Text(.Menu.menuMrAddFailed))
@@ -157,6 +160,9 @@ struct BoardMRProposalCard: View {
                     BoardMRReferenceLine(iid: iid, projectID: proposal.target.projectID, dependencies: proposal.item?.dependencies)
                 }
                 Text(verbatim: proposal.url.gitLabProjectPath).foregroundStyle(.secondary)
+                if let notice = monitor.settings.reviewAssignments.incomingReviewFilter.notice(for: proposal.target) {
+                    IncomingReviewFilterNoticeView(notice: notice)
+                }
                 ForEach(context.reasons) { value in
                     VStack(alignment: .leading, spacing: 6) {
                         reason(value)

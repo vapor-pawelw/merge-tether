@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Filter each Mac board column by attention, pins and activity section. Reviewing also supports new assignments. Combine choices through the filter icon in each column header.
 
+- Keep automatic review hides in Inbox until you mark them as seen or restore the merge request. Turn off future Inbox updates for autohides in filter settings.
+
+- Filter incoming review requests with plain-language instructions and the configured lightweight verifier. The empty filter field shows examples for keeping and hiding requests. Unavailable or uncertain assessments let the merge request through with a note. A banner shows which merge requests were hidden and offers to restore them. They also appear under **Hidden merge requests**.
+
 - Keep replies private when draft verification cannot find required files at the current commit. Back off transient evidence reads and avoid repeating the verification agent during those retries.
 - Explain known merge blockers without starting an agent, and retire diagnostic tasks when their blocker clears.
 - Show why verifier requests ran and distinguish incomplete, missing and unpriced agent usage.

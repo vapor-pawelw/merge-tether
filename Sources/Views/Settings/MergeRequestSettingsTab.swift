@@ -41,6 +41,8 @@ struct MergeRequestSettingsTab: View {
                 Text(.MRLifecycle.completionSettingsHelp).font(.caption).foregroundStyle(.secondary)
             }
 
+            IncomingReviewFilterSettingsSection(monitor: monitor)
+
             Section {
                 hiddenReviews
             }
@@ -54,17 +56,17 @@ struct MergeRequestSettingsTab: View {
             if requests.isEmpty {
                 Text(.Settings.settingsHiddenReviewsEmpty).foregroundStyle(.secondary)
             }
-            ForEach(requests, id: \.webURL) { request in
+            ForEach(requests) { request in
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(request.title)
-                        Text(verbatim: "\(request.webURL.gitLabProjectPath) !\(request.iid)")
+                        Text(verbatim: "\(request.url.gitLabProjectPath) !\(request.target.iid ?? 0)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 12)
                     Button(.Board.boardReviewAssignmentRestore) {
-                        monitor.restoreReviewedMergeRequest(request)
+                        monitor.restoreReviewedMergeRequests([request])
                     }
                     .fixedSize(horizontal: true, vertical: false)
                 }

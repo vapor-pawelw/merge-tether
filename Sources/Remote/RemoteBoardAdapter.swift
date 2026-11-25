@@ -31,6 +31,40 @@ import MergeTetherRemote
         return monitor.acknowledgeLifecycleCompletion(id: id)
     }
 
+    static func card(_ review: HiddenReview, notice: HiddenReview.InboxNotification, account: String) -> RemoteCard {
+        let project = review.url.gitLabProjectPath
+        let title = String(localized: .Board.boardReviewAssignmentRestore)
+        let detail = [String(localized: .ReviewIntake.reviewIntakeHiddenByVerifier), notice.reason ?? ""]
+            .filter { !$0.isEmpty }.joined(separator: "\n\n")
+        // Paired devices already display completion receipts in Inbox updates.
+        var card = RemoteCard(id: "completion:\(notice.id)", title: review.title, project: project, url: review.url,
+            detail: detail, needsAttention: false, mergeRequestIID: review.target.iid, completionObservedAt: notice.observedAt)
+        if let token = try? RemoteDigest.token([account, card.id, try RemoteDigest.token(review)]) {
+            card.actions = [
+                .init(id: "seen", kind: .markDone, token: token, label: String(localized: .ReviewIntake.reviewIntakeMarkSeen)),
+                .init(id: "restore", kind: .markDone, token: token, label: title),
+            ]
+            card.presentation = .init(repository: project.split(separator: "/").last.map(String.init) ?? project,
+                secondaryCTA: .init(title: title, destination: .actions, actionID: "restore"))
+        }
+        return card
+    }
+
+    static func handleHiddenReviewNotification(_ card: RemoteCard, action: RemoteAction,
+                                                monitor: TodoMonitorService, account: String) -> Bool {
+        guard action.kind == .markDone, card.id.hasPrefix("completion:"),
+              let id = UUID(uuidString: String(card.id.dropFirst("completion:".count))),
+              let host = monitor.glab.resolvedHost, let username = monitor.glab.currentUsername, account == "\(username)@\(host)",
+              let review = monitor.hiddenReviewNotifications.first(where: { $0.inboxNotification?.id == id }),
+              let notice = review.inboxNotification, self.card(review, notice: notice, account: account).actions.contains(action)
+        else { return false }
+        switch action.id {
+        case "seen": return monitor.acknowledgeHiddenReviewNotifications([id])
+        case "restore": return monitor.restoreHiddenReviewNotification(id: id)
+        default: return false
+        }
+    }
+
     static func card(_ item: MergeRequestAttentionMonitor.Item, account: String,
                      extraActions: [RemoteActionKind] = [], context: [String] = []) -> RemoteCard {
         let drafts = item.drafts.enumerated().map { index, draft in
@@ -135,11 +169,17 @@ import MergeTetherRemote
             }
         }
         let rows = board.own + board.reviewed
+        let proposals = Dictionary(board.proposals.map { (boardOrderCardID($0.target), $0.target) },
+            uniquingKeysWith: { first, _ in first })
         for lane in result.lanes.indices {
             for index in result.lanes[lane].cards.indices {
                 var card = result.lanes[lane].cards[index]
+                var noticeTarget = proposals[card.id]
                 if let row = rows.first(where: { "mr:\($0.id.projectID):\($0.id.iid)" == card.id }) {
                     let item = row.item
+                    if row.newReviewAssignedAt != nil {
+                        noticeTarget = monitor.scopeTarget(projectID: row.id.projectID, iid: row.id.iid, url: row.displayURL)
+                    }
                     var extras: [RemoteActionKind] = []
                     let handoffs = monitor.pipelineHandoffs.filter { $0.event.mergeRequest.projectID == item.id.projectID && $0.event.mergeRequest.iid == item.id.iid }
                     if !handoffs.isEmpty { extras.append(.handoff) }
@@ -236,6 +276,10 @@ import MergeTetherRemote
                     card.presentation = .init(repository: todo.project.pathWithNamespace.split(separator: "/").last.map(String.init) ?? "",
                         status: MRActivity.agentStatus(.AutomationProgress.progressNotice, assistant: monitor.settings.automation.assistant),
                         working: true, statusSymbol: MRActionEffect.aiCheck.symbol)
+                }
+                if let noticeTarget,
+                   let notice = monitor.settings.reviewAssignments.incomingReviewFilter.notice(for: noticeTarget) {
+                    card.detail = [card.detail, String(localized: notice.localizedMessage)].filter { !$0.isEmpty }.joined(separator: "\n\n")
                 }
                 card.orderGroup = orderGroups[card.id]
                 if includesCardActions {
@@ -504,6 +548,7 @@ import MergeTetherRemote
         let others = other.compactMap { entry -> RemoteCard? in
             switch entry.content {
             case .completion(let completion): return card(completion, account: account)
+            case .hiddenReview(let review, let notice): return card(review, notice: notice, account: account)
             case .proposal(let proposal):
                 var card = proposal.item.map { self.card($0, account: account) }
                     ?? RemoteCard(id: "mr:\(proposal.target.projectID):\(proposal.target.iid ?? 0)", title: proposal.title,
