@@ -862,17 +862,16 @@ extension RemoteConnection: RemoteHostTransport {}
             return monitor.automationAction(for: todo) == .failed ? .failed : .completed
         }
         let board = monitor.boardSnapshot
-        guard let item = (board.own + board.reviewed).map(\.item)
-            .first(where: { "mr:\($0.id.projectID):\($0.id.iid)" == card.id }),
-              RemoteBoardAdapter.card(item, account: account).drafts == card.drafts,
-              item.mergeRequest?.sha == card.head else { return .changed }
+        guard let row = (board.own + board.reviewed).first(where: { "mr:\($0.id.projectID):\($0.id.iid)" == card.id }),
+              RemoteBoardAdapter.card(row.item, account: account).drafts == card.drafts,
+              row.item.mergeRequest?.sha == card.head else { return .changed }
+        let item = row.item
         if action.kind == .setCommentOrigin {
             guard phoneSupportsCommentOrigins, let request = RemoteCommentOriginRequest(argument: argument) else { return .changed }
             return await executeCommentOrigin(request, item: item)
         }
         if RemoteActionKind.mrControls.contains(action.kind) {
             guard phoneSupportsMRControls else { return .changed }
-            let row = (board.own + board.reviewed).first { $0.item.id == item.id }
             return await executeControl(action, item: item, row: row)
         }
         if action.kind == .editReviewers {
@@ -966,7 +965,12 @@ extension RemoteConnection: RemoteHostTransport {}
             await monitor.attention.confirmReReview(item.id, head: head, fingerprint: fingerprint)
             return monitor.attention.currentOpenItems.first(where: { $0.id == item.id })?.reReviewRequested == true ? .completed : .uncertain
         case .verify:
-            guard let retry = MRVerificationRetry(rawValue: action.id), retry.isAvailable(for: item) else { return .changed }
+            guard let retry = MRVerificationRetry(rawValue: action.id) else { return .changed }
+            let followUp: MRHumanAction.FailedFollowUp? = if retry == .authorFeedback {
+                RemoteBoardAdapter.failedFollowUp(in: row, monitor: monitor,
+                    presentation: .init(row: row, monitor: monitor, allowsRemoval: !item.isAuthored))
+            } else { nil }
+            guard retry.isAvailable(for: item, failedFollowUp: followUp) else { return .changed }
             switch retry {
             case .authorFeedback: monitor.attention.retryAuthorFeedback(item.id)
             case .drafts: monitor.attention.retryDraftProofRecovery(item.id)

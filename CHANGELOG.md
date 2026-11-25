@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Mark all read in the iPhone Inbox or acknowledge a standalone GitLab to-do from its card. Draft merge requests keep their draft styling when the paired Mac uses Polish.
 
-- Show the author follow-up stage, the cause that needs attention, and the relevant verification or retry action in Mac MR Details. Expand the step to see the original comments and diagnostics.
+- Show the author follow-up stage, the cause that needs attention, and the relevant verification or retry action in Mac and iPhone MR Details. Expand the step to see the original comments and diagnostics, including after a worker stops.
 
 - Align Agent Usage cards, filters and cost rows, and let longer dashboard text wrap.
 

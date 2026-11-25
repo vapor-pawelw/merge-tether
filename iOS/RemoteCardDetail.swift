@@ -53,6 +53,7 @@ struct RemoteCardDetail: View {
         }
         let hasConfirmedDiscussions = confirmed?.threads != nil && confirmed?.discussionFingerprint == shown?.discussionFingerprint
             && confirmed?.originResume == shown?.originResume
+        let followUpRecovery = shown?.followUpRecovery
         NavigationStack {
             ScrollViewReader { proxy in
                 ScrollView(showsIndicators: false) {
@@ -61,7 +62,7 @@ struct RemoteCardDetail: View {
                         VStack(alignment: .leading, spacing: 10) {
                             RemoteCardView(card: headerCard(shown), expanded: true, branches: shown?.branches,
                                 mergeRequestDescription: shown?.description, actionsModel: model)
-                            if let verification = feedbackVerification {
+                            if followUpRecovery == nil, let verification = feedbackVerification {
                                 RemoteDetailActionButtons(actions: [verification], runningActionID: runningActionID,
                                     onAction: showConfirmation)
                                     .modifier(RemoteActionAvailability(state: model.state))
@@ -87,7 +88,7 @@ struct RemoteCardDetail: View {
                             }
                             Button(.Remote.remoteClose) { model.state.acknowledgeResult() }
                         }
-                        actionSection.id(RemoteCardCTA.Destination.actions)
+                        actionSection(followUpRecovery).id(RemoteCardCTA.Destination.actions)
                         if current.id.hasPrefix("mr:") {
                             if let details = shown {
                                 RemoteMRDetailContent(details: details, card: current,
@@ -120,7 +121,7 @@ struct RemoteCardDetail: View {
                     guard !scrolledToInitialDestination, !selection.needsDetails || shown != nil else { return }
                     await Task.yield()
                     guard !Task.isCancelled else { return }
-                    scrollTarget = selection.cta?.actionID == feedbackVerification?.id && feedbackVerification != nil
+                    scrollTarget = followUpRecovery == nil && selection.cta?.actionID == feedbackVerification?.id && feedbackVerification != nil
                         ? .overview : selection.destination
                     scrolledToInitialDestination = true
                 }
@@ -358,19 +359,27 @@ struct RemoteCardDetail: View {
     }
 
     @ViewBuilder
-    private var actionSection: some View {
-        if !buttonActions.isEmpty {
+    private func actionSection(_ recovery: RemoteFollowUpRecovery?) -> some View {
+        let recoveryActions = recovery?.orderedActions(in: actionCard?.actions ?? []) ?? []
+        let actions = buttonActions.filter { !recoveryActions.contains($0) }
+        if recovery != nil || !actions.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
-                // The header card above already states the explanation; repeat only the controls.
-                Text(.RemoteDetail.remoteDetailActions).font(.headline)
-                    .accessibilityAddTraits(.isHeader)
-                RemoteDetailActionButtons(actions: buttonActions, runningActionID: runningActionID,
-                    onAction: { action in
-                        if current.id.hasPrefix("completion:"), action.kind == .markDone {
-                            Task { await model.perform(card: current, action: action) }
-                        } else { showConfirmation(action) }
-                    })
-                    .modifier(RemoteActionAvailability(state: model.state))
+                if let recovery {
+                    RemoteFollowUpRecoverySection(recovery: recovery, actions: recoveryActions,
+                        runningActionID: runningActionID, state: model.state, onAction: showConfirmation)
+                }
+                if !actions.isEmpty {
+                    if recovery != nil { Divider() }
+                    Text(.RemoteDetail.remoteDetailActions).font(.headline)
+                        .accessibilityAddTraits(.isHeader)
+                    RemoteDetailActionButtons(actions: actions, runningActionID: runningActionID,
+                        onAction: { action in
+                            if current.id.hasPrefix("completion:"), action.kind == .markDone {
+                                Task { await model.perform(card: current, action: action) }
+                            } else { showConfirmation(action) }
+                        })
+                        .modifier(RemoteActionAvailability(state: model.state))
+                }
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -457,6 +466,90 @@ struct RemoteActionAvailability: ViewModifier {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             content.disabled(!state.canAct(now: context.date))
         }
+    }
+}
+
+private struct RemoteFollowUpRecoverySection: View {
+    let recovery: RemoteFollowUpRecovery
+    let actions: [RemoteAction]
+    let runningActionID: String?
+    let state: RemotePhoneState
+    let onAction: (RemoteAction) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(.CommandCenter.commandCenterFollowUpStage).font(.caption).foregroundStyle(.secondary)
+            Label {
+                Text(recovery.stage == .needsVerification ? .CommandCenter.commandCenterFollowUpNeedsVerification
+                    : .MRHumanAction.mrHumanActionFollowUpFailed)
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+            } icon: {
+                Image(systemName: "exclamationmark.circle").foregroundStyle(.orange)
+            }
+            if let reason = recovery.reason {
+                Text(verbatim: reason).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(actions) { action in
+                    if action == actions.first {
+                        button(action).buttonStyle(.borderedProminent)
+                    } else {
+                        button(action).buttonStyle(.bordered)
+                    }
+                }
+            }
+            .modifier(RemoteActionAvailability(state: state))
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(.CommandCenter.commandCenterFollowUpComments)
+                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    if recovery.comments.isEmpty {
+                        Text(.FeedbackSuggestions.feedbackSuggestionsSourceUnavailable)
+                    }
+                    ForEach(recovery.comments) { comment in
+                        VStack(alignment: .leading, spacing: 4) {
+                            if let url = comment.url, ["https", "http"].contains(url.scheme?.lowercased() ?? "") {
+                                Link(destination: url) {
+                                    Text(verbatim: [comment.author, "#\(comment.id)"].compactMap { $0 }.joined(separator: " · "))
+                                        .frame(minHeight: 44, alignment: .leading)
+                                }.font(.caption.weight(.medium))
+                            }
+                            if let body = comment.body {
+                                Text(verbatim: body).textSelection(.enabled)
+                            } else {
+                                Text(.FeedbackSuggestions.feedbackSuggestionsSourceUnavailable).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    if let diagnostics = recovery.diagnostics, !diagnostics.isEmpty {
+                        Divider()
+                        Text(.AgentExplanation.agentExplanationDiagnostics)
+                            .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text(verbatim: diagnostics).textSelection(.enabled)
+                    }
+                }
+                .padding(.top, 8)
+            } label: {
+                let title: LocalizedStringResource = recovery.commentCount.map {
+                    .CommandCenter.commandCenterFollowUpDetailsWithCount($0)
+                } ?? .CommandCenter.commandCenterFollowUpDetails
+                Text(title)
+            }
+            .font(.callout)
+        }
+        .accessibilityIdentifier("remote.details.follow-up-recovery")
+    }
+
+    private func button(_ action: RemoteAction) -> some View {
+        Button { onAction(action) } label: {
+            RemoteActionProgressLabel(running: runningActionID == action.id) {
+                Text(action.label ?? String(localized: action.kind.title))
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .controlSize(.large)
+        .accessibilityIdentifier("remote.action.\(action.id)")
     }
 }
 

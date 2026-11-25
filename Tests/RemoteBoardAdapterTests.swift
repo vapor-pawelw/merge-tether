@@ -95,6 +95,93 @@ import MergeTetherRemote
         #expect(feedbackOnly.actions.filter { $0.kind == .verify }.map(\.id) == ["verifyAuthorFeedback"])
     }
 
+    @Test(arguments: [AssistantJobExecution.State.succeeded, .failed])
+    func failedFollowUpOffersBoundVerificationAndProjectsOnlyItsReviewComments(workerState: AssistantJobExecution.State) throws {
+        let request = try MRDependencyPresentationTests().request(2, project: 1)
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: request.author.username, projectID: 1, iid: 2)
+        let account = "\(target.username)@\(target.host)"
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
+            url: request.webURL, mergeRequest: request, isAuthored: true)
+        item.observedDiscussionFingerprint = "observed"
+        item.authorFeedbackStatus = .init(head: request.sha!, fingerprint: "observed",
+            semanticContextFingerprint: request.semanticContextFingerprint, phase: .complete)
+        var job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
+            work: .init(host: target.host, projectID: 1, iid: 2), username: target.username, workspace: "", access: .gitLabRead),
+            title: "Handle feedback", prompt: "", createdAt: .now, allowsPush: false,
+            feedbackNoteIDs: [42, 43],
+            verifiedFeedbackNotes: [42: UserAttentionSnapshot.digest("9\nOriginal reviewer wording"),
+                43: UserAttentionSnapshot.digest("9\ntoken: test-only-secret")],
+            execution: .init(state: workerState), taskPrompt: "Handle feedback", mergeRequestURL: request.webURL, workflow: .followUp,
+            expectedHeadSHA: request.sha)
+        var intent = MRTodoIntent(id: UUID(), target: target, kind: .followUp, state: .failed,
+            todoIDs: [5, 2], noteIDs: [42, 43], sourceEvents: [], request: request, headSHA: request.sha!, jobID: job.id,
+            error: "The collected evidence was incomplete.\npassword: test-only-secret", updatedAt: .now)
+        func recovery(_ item: MergeRequestAttentionMonitor.Item) throws -> MRHumanAction.FailedFollowUp {
+            let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: job, intents: [intent])
+            let action = try #require(MRHumanAction(row: row, assistantReady: true))
+            return try #require(action.failedFollowUp(in: row, jobs: [job]))
+        }
+        let failed = try recovery(item)
+        let card = RemoteBoardAdapter.card(item, account: account, failedFollowUp: failed)
+        let action = try #require(card.actions.first(where: \.isAuthorFeedbackVerification))
+        #expect(action.label == String(localized: .AuthorFeedback.authorFeedbackRecheck))
+        #expect(failed.prefersVerification == (workerState == .succeeded))
+        #expect(failed.retryActionID == (workerState == .succeeded ? "intent:\(intent.id)" : "job:\(job.id)"))
+        intent.updatedAt = intent.updatedAt.addingTimeInterval(1)
+        let reread = RemoteBoardAdapter.card(item, account: account, failedFollowUp: try recovery(item))
+        #expect(reread.actions.first(where: \.isAuthorFeedbackVerification)?.token == action.token)
+
+        var details = RemoteMRDetails(checkedAt: .now, threads: [.init(id: "discussion/1", state: .open, notes: [
+            .init(id: "42", author: "Reviewer", body: "Original reviewer wording", authorID: 9),
+            .init(id: "43", author: "Reviewer", body: "token: test-only-secret", authorID: 9),
+            .init(id: "44", author: "Reviewer", body: "Other feedback", authorID: 9)
+        ])])
+        details.discussionFingerprint = item.observedDiscussionFingerprint
+        let projected = RemoteMRDetailSupplement.followUpRecovery(failed, details: details, request: request)
+        #expect(projected.stage == (workerState == .succeeded ? .needsVerification : .stopped))
+        #expect(projected.reason?.contains("test-only-secret") == false)
+        #expect(projected.diagnostics?.contains("password: [redacted]") == true)
+        #expect(projected.comments.map(\.id) == [42, 43])
+        #expect(projected.comments.map(\.body) == ["Original reviewer wording", "token: [redacted]"])
+        details.threads?[0].notes[0].body = "Edited wording"
+        #expect(RemoteMRDetailSupplement.followUpRecovery(failed, details: details, request: request).comments[0].body == nil)
+        details.discussionFingerprint = "different"
+        #expect(RemoteMRDetailSupplement.followUpRecovery(failed, details: details, request: request).comments.allSatisfy { $0.body == nil })
+
+        item.observedDiscussionFingerprint = "edited"
+        let edited = try recovery(item)
+        let updated = RemoteBoardAdapter.card(item, account: account, failedFollowUp: edited)
+        #expect(updated.actions.first(where: \.isAuthorFeedbackVerification)?.token != action.token)
+        #expect(RemoteBoardAdapter.intentActionToken(intent, item: item, account: account,
+            configuration: "configuration", publication: "manual", failedFollowUp: failed)
+            != RemoteBoardAdapter.intentActionToken(intent, item: item, account: account,
+                configuration: "configuration", publication: "manual", failedFollowUp: edited))
+        job.execution?.state = workerState == .succeeded ? .failed : .succeeded
+        let changedJob = RemoteBoardAdapter.card(item, account: account, failedFollowUp: try recovery(item))
+        #expect(changedJob.actions.first(where: \.isAuthorFeedbackVerification)?.token
+            != updated.actions.first(where: \.isAuthorFeedbackVerification)?.token)
+    }
+
+    @Test func failedFollowUpUsesTheSelectedIntentDuringReadOnlyReconciliation() throws {
+        let request = try MRDependencyPresentationTests().request(2, project: 1)
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: request.author.username, projectID: 1, iid: 2)
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
+            url: request.webURL, mergeRequest: request, isAuthored: true)
+        item.observedDiscussionFingerprint = "current-discussion"
+        item.authorFeedbackStatus = .init(head: request.sha!, fingerprint: "current-discussion",
+            semanticContextFingerprint: request.semanticContextFingerprint, readOnlyReconciliation: true, phase: .checking)
+        let reconciled = MRTodoIntent(id: UUID(), target: target, kind: .followUp, state: .failed,
+            todoIDs: [], noteIDs: [42], sourceEvents: [], request: request, headSHA: request.sha!, jobID: nil, updatedAt: .now)
+        let selected = MRTodoIntent(id: UUID(), target: target, kind: .followUp, state: .failed,
+            todoIDs: [], noteIDs: [43], sourceEvents: [], request: request, headSHA: request.sha!, jobID: UUID(), updatedAt: .now)
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [reconciled, selected])
+        let action = try #require(MRHumanAction(row: row, assistantReady: true))
+
+        #expect(row.isReconciling(reconciled))
+        #expect(action.retryIntent?.id == selected.id)
+        #expect(action.failedFollowUp(in: row, jobs: [])?.intent.id == selected.id)
+    }
+
     @Test func manualReReviewConfirmationIsLimitedToTheCurrentNonConcreteFailure() throws {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "MR",
             url: URL(string: "https://gitlab.example.test/g/p/-/merge_requests/2")!, isAuthored: true)

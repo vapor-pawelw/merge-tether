@@ -21,10 +21,12 @@ enum MRVerificationRetry: String, CaseIterable {
         }
     }
 
-    func isAvailable(for item: MergeRequestAttentionMonitor.Item) -> Bool {
+    @MainActor
+    func isAvailable(for item: MergeRequestAttentionMonitor.Item, failedFollowUp: MRHumanAction.FailedFollowUp? = nil) -> Bool {
         guard let request = item.mergeRequest, request.state == "opened", request.sha?.isEmpty == false else { return false }
         switch self {
-        case .authorFeedback: return item.isAuthored && item.authorFeedbackStatus?.phase == .failed
+        case .authorFeedback:
+            return item.isAuthored && (failedFollowUp?.canVerify ?? (item.authorFeedbackStatus?.phase == .failed))
         case .drafts: return item.draftProofRecoveryFailure != nil
         case .reReview: return item.reReviewReadiness == .failed || item.reReviewReadiness == .unavailable
         }
@@ -67,6 +69,64 @@ struct MRHumanAction {
         case none
     }
 
+    struct FailedFollowUp {
+        let intent: MRTodoIntent
+        let job: AssistantAutomationRunner.Handoff?
+        let feedback: AuthorFeedbackStatus?
+        let evidence: FeedbackEvidence
+        let discussionFingerprint: String?
+        let diagnostics: String?
+        let retriesWorker: Bool
+
+        var prefersVerification: Bool { job?.operationalExecution?.state == .succeeded }
+        var canVerify: Bool { feedback.map { $0.phase != .checking } == true }
+        var title: LocalizedStringResource {
+            prefersVerification ? .CommandCenter.commandCenterFollowUpNeedsVerification : .MRHumanAction.mrHumanActionFollowUpFailed
+        }
+        var reason: String? {
+            if prefersVerification { return String(localized: .CommandCenter.commandCenterFollowUpVerificationReason) }
+            let reason = AgentExplanation.summary(diagnostics)
+            return reason == String(localized: title) ? nil : reason
+        }
+        var retryActionID: String {
+            if retriesWorker, let job { return "job:\(job.id)" }
+            return "intent:\(intent.id)"
+        }
+
+        func matchesOriginalNote(_ id: Int, authorID: Int, body: String) -> Bool {
+            guard let revisions = job?.verifiedFeedbackNotes else { return true }
+            return revisions[id] == UserAttentionSnapshot.digest("\(authorID)\n\(body)")
+        }
+    }
+
+    func failedFollowUp(in row: MergeRequestBoardSnapshot.Row,
+                        jobs: [AssistantAutomationRunner.Handoff]) -> FailedFollowUp? {
+        guard row.evidenceMatchesCatalogContext, !row.hasFollowUpInProgress,
+              let intent = row.attentionIntents.first(where: { candidate in
+                  guard candidate.kind == .followUp, candidate.state == .failed, !row.isReconciling(candidate) else { return false }
+                  if action == .retryRun { return retryJob.map { $0.id == candidate.jobID } == true }
+                  return retryIntent?.id == candidate.id
+              }),
+              let request = row.displayRequest, request.state == "opened",
+              intent.target.username == request.author.username,
+              intent.target.projectID == request.projectID, intent.target.iid == request.iid,
+              intent.request.webURL == request.webURL,
+              request.webURL.isGitLabMergeRequest(host: intent.target.host, iid: request.iid) else { return nil }
+        let job = jobs.first {
+            $0.id == intent.jobID && $0.workflow == .followUp
+                && $0.key.username == intent.target.username && $0.key.work.host == intent.target.host
+                && $0.key.work.projectID == request.projectID && $0.key.work.iid == request.iid
+        }
+        let retriesWorker = action == .retryRun && job?.id == retryJob?.id && job?.selectedFollowUpNotes.isEmpty == false
+        guard retriesWorker || retryIntent?.id == intent.id else { return nil }
+        let fingerprint = row.item.observedDiscussionFingerprint
+        let diagnostics = intent.failureExplanation(currentHead: request.sha)
+            ?? job?.execution.flatMap { intent.failureExplanation(currentHead: request.sha, execution: $0) }
+        return .init(intent: intent, job: job, feedback: row.item.authorFeedbackStatus,
+            evidence: Self.followUpEvidence(intent, fingerprint: fingerprint, item: row.item), discussionFingerprint: fingerprint,
+            diagnostics: diagnostics, retriesWorker: retriesWorker)
+    }
+
     private struct EvidenceContext: Equatable {
         let head: String?
         let fingerprint: String?
@@ -99,13 +159,7 @@ struct MRHumanAction {
         switch source {
         case .privateCodeQuestion: return .none
         case .followUp(let intent, let fingerprint):
-            let ids = intent.noteIDs.filter { $0 > 0 }.sorted()
-            guard !ids.isEmpty, intent.headSHA == item.mergeRequest?.sha,
-                  intent.request.webURL == item.url, intent.target.projectID == item.id.projectID,
-                  intent.target.iid == item.id.iid, intent.target.username == intent.request.author.username,
-                  item.url.isGitLabMergeRequest(host: intent.target.host, iid: item.id.iid),
-                  fingerprint == item.observedDiscussionFingerprint else { return .unavailable(ids.first) }
-            return .rawNotes(ids)
+            return Self.followUpEvidence(intent, fingerprint: fingerprint, item: item)
         case .finding(let finding, let context):
             guard let status = item.authorFeedbackStatus, context.matches(status, item: item),
                   status.phase == .complete || status.phase == .waitingPublication,
@@ -127,6 +181,17 @@ struct MRHumanAction {
             if !item.feedback.isEmpty { return .unavailable(nil) }
             return kind == .feedback && (item.needsChanges || item.needsDiscussion) ? .gitLabStatus : .none
         }
+    }
+
+    private static func followUpEvidence(_ intent: MRTodoIntent, fingerprint: String?,
+                                         item: MergeRequestAttentionMonitor.Item) -> FeedbackEvidence {
+        let ids = intent.noteIDs.filter { $0 > 0 }.sorted()
+        guard !ids.isEmpty, intent.headSHA == item.mergeRequest?.sha,
+              intent.request.webURL == item.url, intent.target.projectID == item.id.projectID,
+              intent.target.iid == item.id.iid, intent.target.username == intent.request.author.username,
+              item.url.isGitLabMergeRequest(host: intent.target.host, iid: item.id.iid),
+              fingerprint == item.observedDiscussionFingerprint else { return .unavailable(ids.first) }
+        return .rawNotes(ids)
     }
 
     enum Kind: Equatable { case blockedRun, interruptedRun, publication, commentReview, uncheckedDrafts, duplicateDrafts, verificationFailure, setupAssistant, reviewDecision, approval, pipelineHandoff, merge, feedback, intent }

@@ -27,6 +27,10 @@ import MergeTetherRemote
                 activeFingerprint: details.activeDiscussionFingerprint)
         }
         applyFeedback(to: &details, assessment: assessment, authorID: request.author.id, currentUsername: username)
+        let presentation = MRCardPresentation(row: row, monitor: monitor, allowsRemoval: !item.isAuthored)
+        if let recovery = RemoteBoardAdapter.failedFollowUp(in: row, monitor: monitor, presentation: presentation) {
+            details.followUpRecovery = followUpRecovery(recovery, details: details, request: request)
+        }
         if let change = monitor.commentOrigins.pending(for: target), let resumesAt = change.resumesAt {
             details.originResume = .init(changeID: change.id.uuidString, resumesAt: resumesAt, drafts: change.resumingDrafts)
         }
@@ -228,6 +232,42 @@ import MergeTetherRemote
             guard glab.accountRevision == accountRevision else { return }
             await coordinator.schedule(request: request, notes: notes, knownNoteIDs: known)
         }
+    }
+
+    static func followUpRecovery(_ recovery: MRHumanAction.FailedFollowUp, details: RemoteMRDetails,
+                                 request: GitLabMergeRequest) -> RemoteFollowUpRecovery {
+        let noteIDs: [Int]
+        let count: Int?
+        let currentRead: Bool
+        switch recovery.evidence {
+        case .rawNotes(let ids):
+            noteIDs = ids
+            count = ids.count
+            currentRead = recovery.discussionFingerprint != nil && recovery.discussionFingerprint == details.discussionFingerprint
+        case .unavailable(let id):
+            noteIDs = id.map { [$0] } ?? []
+            count = nil
+            currentRead = false
+        default:
+            noteIDs = []
+            count = nil
+            currentRead = false
+        }
+        let notes = Dictionary(grouping: currentRead ? (details.threads ?? []).flatMap(\.notes) : [], by: \.id)
+        let comments = noteIDs.map { id -> RemoteFollowUpRecovery.Comment in
+            var components = URLComponents(url: request.webURL, resolvingAgainstBaseURL: false)
+            components?.query = nil
+            components?.fragment = "note_\(id)"
+            guard let matches = notes[String(id)], matches.count == 1, let note = matches.first,
+                  let authorID = note.authorID, authorID > 0, !note.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  recovery.matchesOriginalNote(id, authorID: authorID, body: note.body) else {
+                return .init(id: id, url: components?.url)
+            }
+            return .init(id: id, author: note.author, body: GlabService.redactWorkflowEvidence(note.body), url: components?.url)
+        }
+        return .init(stage: recovery.prefersVerification ? .needsVerification : .stopped,
+            reason: recovery.reason, diagnostics: recovery.diagnostics, comments: comments,
+            commentCount: count, retryActionID: recovery.retryActionID)
     }
 
     private static func amount(_ total: AssistantUsageTotal) -> String {

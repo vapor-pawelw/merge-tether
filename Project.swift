@@ -95,6 +95,7 @@ let project = Project(
                         "Resources/MRHumanAction.xcstrings", "Resources/AuthorFeedback.xcstrings", "Resources/MRDependencies.xcstrings",
                         "Resources/CommentReview.xcstrings", "Resources/FeedbackSuggestions.xcstrings", "Resources/DraftRegeneration.xcstrings",
                         "Resources/ActionEffects.xcstrings", "Resources/CommandCenter.xcstrings",
+                        "Resources/AgentExplanation.xcstrings",
                         "Resources/AssistantContext.xcstrings", "Resources/MRFreshness.xcstrings",
                         "Resources/MRIssues.xcstrings",
                         "iOS/Resources/**"],
