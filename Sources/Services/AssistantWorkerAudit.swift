@@ -3,12 +3,15 @@ import Foundation
 @MainActor
 enum AssistantWorkerAudit {
     struct Snapshot: Codable, Equatable, Sendable {
-        private let head: String?
+        let head: String?
+        let observedAt: Date?
         private let approved: Bool?
         private let discussions: Discussions?
 
-        init(head: String?, approved: Bool?, discussions: [GitLabMergeRequestDiscussion]?, userID: Int) {
+        init(head: String?, approved: Bool?, discussions: [GitLabMergeRequestDiscussion]?, userID: Int,
+             observedAt: Date = .now) {
             self.head = head.flatMap { GlabService.isFullGitSHA($0) ? $0 : nil }
+            self.observedAt = observedAt
             self.approved = approved
             self.discussions = discussions.map { Discussions($0, userID: userID) }
         }
@@ -93,9 +96,15 @@ enum AssistantWorkerAudit {
 
     enum Verdict: Equatable {
         case clean
+        case headChanged
         case unexpected([AssistantJobExecution.RemoteEffect])
         /// Comparable live evidence could not be read, so unattended writes cannot be shown to stay in bounds.
         case unavailable
+    }
+
+    private struct Comparison {
+        let verdict: Verdict
+        var sourceHeadChange: AssistantJobExecution.SourceHeadChange? = nil
     }
 
     /// Compares the live MR with the pre-launch baseline and records any effects outside the run's allowances.
@@ -108,17 +117,22 @@ enum AssistantWorkerAudit {
         guard let baseline else { return .unavailable }
         var live = await capture(for: request, host: handoff.key.work.host, user: user,
                                  accountRevision: accountRevision, glab: glab)
-        let first = compare(live, baseline: baseline, handoff: handoff)
-        if first == .unavailable, !Task.isCancelled, glab.accountRevision == accountRevision {
+        var comparison = await compare(live, baseline: baseline, handoff: handoff, request: request, user: user, glab: glab)
+        if comparison.verdict == .unavailable, !Task.isCancelled, glab.accountRevision == accountRevision {
             try? await Task.sleep(for: retryDelay)
             live = await capture(for: request, host: handoff.key.work.host, user: user,
                                  accountRevision: accountRevision, glab: glab)
+            comparison = await compare(live, baseline: baseline, handoff: handoff, request: request, user: user, glab: glab)
         }
         guard !Task.isCancelled else { return .unavailable }
-        let verdict = compare(live, baseline: baseline, handoff: handoff)
+        let currentAccount = glab.accountRevision == accountRevision
+        let verdict = currentAccount ? comparison.verdict : .unavailable
         if let index = activeRunIndex(handoff, in: settings) {
+            if currentAccount, let change = comparison.sourceHeadChange {
+                settings.assistantHandoffs[index].execution?.sourceHeadChange = change
+            }
             switch verdict {
-            case .clean: break
+            case .clean, .headChanged: break
             case .unavailable where handoff.manual != true:
                 settings.assistantHandoffs[index].execution?.pendingWorkerAudit = Pending(
                     baseline: baseline, userID: user.id, sourceProjectID: request.sourceProjectID, sourceBranch: request.sourceBranch)
@@ -127,22 +141,89 @@ enum AssistantWorkerAudit {
             case .unexpected(let effects):
                 settings.assistantHandoffs[index].execution?.remoteEffects = effects
             }
+            if currentAccount, comparison.sourceHeadChange != nil { settings.save() }
         }
         return verdict
     }
 
-    private static func compare(_ live: Snapshot?, baseline: Snapshot, handoff: AssistantAutomationRunner.Handoff) -> Verdict {
-        guard let live else { return .unavailable }
-        let effects = live.effects(since: baseline, allowsPush: AgentProcessEnvironment.pushPermitted(handoff),
+    private static func compare(_ live: Snapshot?, baseline: Snapshot, handoff: AssistantAutomationRunner.Handoff,
+                                request: GitLabMergeRequest, user: GitLabAuthenticatedUser, glab: GlabService) async -> Comparison {
+        guard let live else { return .init(verdict: .unavailable) }
+        var effects = live.effects(since: baseline, allowsPush: AgentProcessEnvironment.pushPermitted(handoff),
                                    allowsOwnResolution: handoff.resolvesOwnThreads == true)
-        if !effects.isEmpty { return .unexpected(effects) }
-        return live.isComplete && baseline.isComplete ? .clean : .unavailable
+        var change: AssistantJobExecution.SourceHeadChange?
+        if effects.contains(.sourceHead), let previous = baseline.head, let current = live.head, let observedAt = live.observedAt {
+            var evidence = AssistantJobExecution.SourceHeadChange(previousSHA: previous, currentSHA: current,
+                previousObservation: baseline.observedAt, currentObservation: observedAt, accountID: user.id)
+            if let projectID = request.sourceProjectID, let startedAt = baseline.observedAt {
+                evidence.pushActorID = await sourcePushActor(projectID: projectID, branch: request.sourceBranch,
+                    previous: previous, current: current, startedAt: startedAt, observedAt: observedAt,
+                    host: handoff.key.work.host, glab: glab)
+            }
+            if evidence.attributedToAnotherAccount { effects.removeAll { $0 == .sourceHead } }
+            change = evidence
+        }
+        let verdict: Verdict
+        if !effects.isEmpty { verdict = .unexpected(effects) }
+        else if !live.isComplete || !baseline.isComplete { verdict = .unavailable }
+        else { verdict = change?.attributedToAnotherAccount == true ? .headChanged : .clean }
+        return .init(verdict: verdict, sourceHeadChange: change)
+    }
+
+    private struct PushEvent: Decodable {
+        struct Push: Decodable {
+            let action: String?
+            let refType: String?
+            let ref: String?
+            let commitFrom: String?
+            let commitTo: String?
+
+            enum CodingKeys: String, CodingKey {
+                case action, ref
+                case refType = "ref_type", commitFrom = "commit_from", commitTo = "commit_to"
+            }
+        }
+
+        let projectID: Int?
+        let authorID: Int?
+        let createdAt: String?
+        let pushData: Push?
+
+        enum CodingKeys: String, CodingKey {
+            case projectID = "project_id", authorID = "author_id", createdAt = "created_at", pushData = "push_data"
+        }
+    }
+
+    private static func sourcePushActor(projectID: Int, branch: String, previous: String, current: String,
+                                        startedAt: Date, observedAt: Date, host: String, glab: GlabService) async -> Int? {
+        guard projectID > 0, !branch.isEmpty, startedAt <= observedAt else { return nil }
+        let pageSize = 100
+        let previousDay = startedAt.addingTimeInterval(-86_400)
+            .formatted(.iso8601.year().month().day().dateSeparator(.dash))
+        guard let events: [PushEvent] = try? await glab.mergeRequestAPI(
+            "/projects/\(projectID)/events?action=pushed&sort=desc&per_page=\(pageSize)&after=\(previousDay)",
+            host: host, timeout: 8) else { return nil }
+        let oldest = events.last?.createdAt.flatMap(MRDiscussionTimestamp.parse)
+        guard events.count < pageSize || oldest.map({ $0 < startedAt }) == true else { return nil }
+        let candidates = events.filter { event in
+            guard event.projectID == projectID else { return false }
+            guard let date = event.createdAt, let time = MRDiscussionTimestamp.parse(date) else { return true }
+            guard time >= startedAt, time <= observedAt else { return false }
+            // GitLab may omit the ref for a bulk push. It could include this branch.
+            return event.pushData?.ref == nil || event.pushData?.ref == branch
+        }
+        guard candidates.count == 1, let event = candidates.first, let rawDate = event.createdAt,
+              MRDiscussionTimestamp.parse(rawDate) != nil, let actor = event.authorID, actor > 0,
+              let push = event.pushData, push.action == "pushed", push.refType == "branch", push.ref == branch,
+              push.commitFrom == previous, push.commitTo == current else { return nil }
+        return actor
     }
 
     static func enforce(_ verdict: Verdict, handoff: AssistantAutomationRunner.Handoff,
                         settings: SettingsManager) -> AssistantJobExecutor.ExecutionError? {
         switch verdict {
         case .clean: return nil
+        case .headChanged: return .headChanged
         case .unavailable: return handoff.manual == true ? nil : .auditUnavailable
         case .unexpected:
             settings.automation.scope[handoff.key.automationTarget] = .paused
@@ -169,16 +250,26 @@ enum AssistantWorkerAudit {
                   request.projectID == work.projectID, request.iid == work.iid, request.webURL == handoff.mergeRequestURL,
                   request.sourceProjectID == audit.sourceProjectID, request.sourceBranch == audit.sourceBranch else { continue }
             let live = await capture(for: request, host: host, user: user, accountRevision: revision, glab: glab)
-            let verdict = compare(live, baseline: audit.baseline, handoff: handoff)
+            let comparison = await compare(live, baseline: audit.baseline, handoff: handoff, request: request, user: user, glab: glab)
+            let verdict = comparison.verdict
             guard verdict != .unavailable, !Task.isCancelled, glab.accountRevision == revision,
                   let index = settings.assistantHandoffs.firstIndex(where: {
                       $0.id == handoff.id && $0.key == handoff.key && $0.execution?.pendingWorkerAudit == audit
                   }) else { continue }
+            if let change = comparison.sourceHeadChange {
+                settings.assistantHandoffs[index].execution?.sourceHeadChange = change
+            }
             if case .unexpected(let effects) = verdict {
                 settings.assistantHandoffs[index].execution?.pendingWorkerAudit = nil
                 settings.assistantHandoffs[index].execution?.remoteEffects = effects
                 settings.assistantHandoffs[index].execution?.error = AssistantJobExecutor.ExecutionError.unexpectedRemoteEffects.rawValue
                 _ = enforce(verdict, handoff: handoff, settings: settings)
+            } else if verdict == .headChanged {
+                // Leave any checkpoint awaiting audit so the stale result cannot become a completion.
+                settings.assistantHandoffs[index].execution?.pendingWorkerAudit = nil
+                settings.assistantHandoffs[index].execution?.state = .failed
+                settings.assistantHandoffs[index].execution?.error = AssistantJobExecutor.ExecutionError.headChanged.rawValue
+                settings.save()
             } else {
                 guard AssistantJobJournal.isKeyReady || !AssistantJobJournal.hasCheckpoint(handoff.id) else { continue }
                 do {

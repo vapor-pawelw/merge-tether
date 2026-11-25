@@ -327,7 +327,8 @@ struct MergeWorkflowMonitorTests {
         #expect(event.context.contains(reviewed))
     }
 
-    @Test(arguments: ["push-before-poll", "first-observation", "completion-observed-later", "unsigned", "diagnosis"])
+    @Test(arguments: ["push-before-poll", "first-observation", "completion-observed-later", "unsigned", "diagnosis",
+                      "external-push", "external-push-first", "unknown-push"])
     func completedNoFindingsReviewSchedulesPushBeforeMonitorObservesReviewedHead(_ scenario: String) async throws {
         let suite = "UnobservedReviewCompletion.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -366,15 +367,23 @@ struct MergeWorkflowMonitorTests {
             return events
         }
 
-        if scenario != "first-observation" {
+        if scenario != "first-observation", scenario != "external-push-first" {
             #expect(await pollAfterRestart().isEmpty)
         }
 
         let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: 7, iid: 13)
+        let externalPush = scenario.hasPrefix("external-push")
+        let movedDuringReview = externalPush || scenario == "unknown-push"
+        var execution = AssistantJobExecution(state: movedDuringReview ? .failed : .succeeded)
+        if movedDuringReview {
+            execution.sourceHeadChange = .init(previousSHA: reviewed, currentSHA: pushed, previousObservation: .now,
+                currentObservation: .now, accountID: user.id, pushActorID: externalPush ? 2 : nil)
+            execution.remoteEffects = externalPush ? nil : [.sourceHead]
+        }
         let run = AssistantAutomationRunner.Handoff(id: UUID(),
             key: .init(assistant: .codex, work: work, username: user.username, workspace: "", access: .gitLabRead),
             title: "Completed review", prompt: "Review", createdAt: Date(), allowsPush: false,
-            execution: .init(state: .succeeded), workflow: .review, expectedHeadSHA: reviewed,
+            execution: execution, workflow: .review, manual: false, expectedHeadSHA: reviewed,
             taskIntent: scenario == "diagnosis" ? .pipelineDiagnosis : .review())
         defer { try? FileManager.default.removeItem(at: AssistantJobJournal.checkpointURL(for: run.id)) }
         let verdict = ReviewVerdict(version: 1, host: host, projectID: work.projectID, iid: work.iid, headSHA: reviewed,
@@ -382,8 +391,8 @@ struct MergeWorkflowMonitorTests {
             username: user.username, userID: user.id, runID: run.id)
         let file = ReviewVerdictStore.fileURL(host: host, projectID: work.projectID, iid: work.iid, in: directory)
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(verdict).write(to: file)
-        if scenario != "unsigned" {
+        if !movedDuringReview { try JSONEncoder().encode(verdict).write(to: file) }
+        if !movedDuringReview, scenario != "unsigned" {
             try await AssistantJobJournal.save(.init(result: .init(status: .succeeded, summary: "Reviewed"), output: ""),
                 for: run, reviewVerdict: verdict)
         }
@@ -397,14 +406,17 @@ struct MergeWorkflowMonitorTests {
         settings.assistantHandoffs = [run]
         settings.save()
         let events = await pollAfterRestart()
-        if scenario == "unsigned" || scenario == "diagnosis" {
+        if scenario == "unsigned" || scenario == "diagnosis" || scenario == "unknown-push" {
             #expect(events.isEmpty)
         } else {
             #expect(events.count == 1)
             let event = try #require(events.first)
             #expect(event.kind == .reviewUpdate)
             #expect(event.mergeRequest.sha == pushed)
-            #expect(event.context.contains("earlier review covered head \(reviewed)"))
+            #expect(event.context.contains(externalPush
+                ? "Another GitLab account pushed during the previous review"
+                : "earlier review covered head \(reviewed)"))
+            if externalPush { #expect(!event.context.contains("Incremental re-review")) }
         }
         #expect(await pollAfterRestart().isEmpty)
     }

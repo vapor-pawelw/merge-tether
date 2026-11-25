@@ -6,6 +6,130 @@ import Testing
 @Suite struct MergeWorkflowExecutionTests {
     @MainActor private final class ReadRetryClock { var date = Date() }
 
+    @Test func blockerTransitionsRemainVisibleAndEquivalentAgentWorkIsDeduplicatedAfterRestart() throws {
+        let suite = "WorkflowBlockerAdmission.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let stored = try entry(jobID: nil)
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: stored.host, username: stored.user.username)
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab)
+        let base = String(repeating: "b", count: 40)
+        let statusChanges = ["security_policy_violations", "discussions_not_resolved", "mergeable"]
+        for status in statusChanges {
+            let request = try blockerRequest(status, from: stored.event.mergeRequest, base: base)
+            automation.receive(.init(kind: .blockerChange, mergeRequest: request, identity: status, context: status),
+                host: stored.host, user: stored.user)
+        }
+
+        let restarted = MergeWorkflowAutomation(settings: SettingsManager(defaults: defaults), glab: glab)
+        let repeated = try blockerRequest("security_policy_violations", from: stored.event.mergeRequest, base: base)
+        restarted.receive(.init(kind: .blockerChange, mergeRequest: repeated, identity: "repeated", context: "Policy changed"),
+            host: stored.host, user: stored.user)
+        let newTarget = try blockerRequest("security_policy_violations", from: stored.event.mergeRequest, target: "release", base: base)
+        restarted.receive(.init(kind: .blockerChange, mergeRequest: newTarget, identity: "new-target", context: "New target"),
+            host: stored.host, user: stored.user)
+        let newBase = try blockerRequest("security_policy_violations", from: stored.event.mergeRequest, base: String(repeating: "c", count: 40))
+        restarted.receive(.init(kind: .blockerChange, mergeRequest: newBase, identity: "new-base", context: "New base"),
+            host: stored.host, user: stored.user)
+
+        let rows = Dictionary(uniqueKeysWithValues: restarted.entries.map { ($0.id, $0.state) })
+        #expect(rows == [
+            "security_policy_violations": .queued, "discussions_not_resolved": .preview, "mergeable": .preview,
+            "repeated": .preview, "new-target": .queued, "new-base": .queued
+        ])
+        #expect(restarted.entries.first { $0.id == "mergeable" }?.summary != nil)
+        #expect(restarted.entries.first { $0.id == "discussions_not_resolved" }?.summary != nil)
+        #expect(gitlab.requests.isEmpty)
+    }
+
+    @Test func aBlockerEventWithMissingBaseChecksLiveEvidenceBeforeDeduplicating() throws {
+        let suite = "WorkflowBlockerPartialEvidence.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        let stored = try entry(jobID: nil)
+        let partial = try blockerRequest("security_policy_violations", from: stored.event.mergeRequest)
+        let full = try blockerRequest("security_policy_violations", from: partial, base: String(repeating: "b", count: 40))
+        let diagnosis: MergeBlockerDiagnosis = try #require(MergeBlockerDiagnosis(request: full, leftMergeTrain: false))
+        settings.assistantHandoffs = [.init(id: UUID(), key: .init(assistant: .codex,
+            work: .init(host: stored.host, projectID: full.projectID, iid: full.iid),
+            username: stored.user.username, workspace: "", access: .gitLabRead),
+            title: "Previous diagnostic", prompt: "Investigate", createdAt: .now, allowsPush: false,
+            execution: .init(state: .succeeded),
+            blockerDiagnosis: diagnosis)]
+        settings.save()
+
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let automation = MergeWorkflowAutomation(settings: SettingsManager(defaults: defaults),
+            glab: gitlab.service(host: stored.host, username: stored.user.username))
+        automation.receive(.init(kind: .blockerChange, mergeRequest: partial, identity: "partial", context: "New observation"),
+            host: stored.host, user: stored.user)
+        #expect(automation.entries.first?.state == .queued)
+    }
+
+    @Test(arguments: ["cleared", "rejoined-train", "checking"])
+    func obsoleteBlockerRetiresQueuedWorkWithoutStartingAnAgent(_ change: String) async throws {
+        let suite = "WorkflowBlockerCleared.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        let stored = try entry(jobID: nil)
+        let leftTrain = change == "rejoined-train"
+        let blocked = try blockerRequest(leftTrain ? "mergeable" : "security_policy_violations", from: stored.event.mergeRequest)
+        let cleared = try blockerRequest(change == "checking" ? "checking" : "mergeable", from: stored.event.mergeRequest)
+        let encoded = String(decoding: try JSONEncoder().encode(cleared), as: UTF8.self)
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        gitlab.handler = { call in
+            switch call.endpoint {
+            case "/user": return InMemoryGitLab.output(#"{"id":1,"username":"me"}"#)
+            case "/projects/7/merge_requests/11": return InMemoryGitLab.output(encoded)
+            case "/projects/7/merge_trains?scope=active&per_page=100":
+                return InMemoryGitLab.output(#"[{"merge_request":{"project_id":7,"iid":11}}]"#)
+            default: return InMemoryGitLab.output("[]")
+            }
+        }
+        let glab = gitlab.service(host: stored.host, username: stored.user.username)
+        let coordinator = AssistantJobCoordinator(healthStore: AssistantCLIHealthStore(defaults: defaults), execute: { _, _ in
+            .init(result: .init(status: .succeeded, summary: "Fixture"), output: "")
+        })
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, jobCoordinator: coordinator, retryWait: { _ in })
+        automation.receive(.init(kind: .blockerChange, mergeRequest: blocked, identity: "blocker", context: "Investigate",
+            leftMergeTrain: leftTrain ? true : nil),
+            host: stored.host, user: stored.user)
+        automation.startNext()
+        let deadline = ContinuousClock.now + .seconds(5)
+        while automation.entries.first.map({ [.queued, .running].contains($0.state) }) == true,
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        await coordinator.waitForTermination()
+
+        #expect(automation.entries.first?.state == (change == "checking" ? .failed : .skipped))
+        #expect(automation.entries.first?.isReadOnlyFailure == (change == "checking"))
+        #expect(settings.assistantHandoffs.isEmpty)
+        var expected = ["/user", "/projects/7/merge_requests/11"]
+        if leftTrain { expected.append("/projects/7/merge_trains?scope=active&per_page=100") }
+        if change == "checking" { expected = expected + expected + expected }
+        #expect(gitlab.requests.map(\.endpoint) == expected)
+    }
+
+    private func blockerRequest(_ status: String, from request: GitLabMergeRequest,
+                                target: String? = nil, base: String? = nil) throws -> GitLabMergeRequest {
+        var fields = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+        fields["detailed_merge_status"] = status
+        if let target { fields["target_branch"] = target }
+        if let base { fields["diff_refs"] = ["base_sha": base] }
+        return try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: fields))
+    }
+
     @Test func reReviewHandoffRejectsHeadChangesAndTheNextObservationRecomputesScope() async throws {
         let suite = "WorkflowReviewHandoff.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -786,7 +910,7 @@ import Testing
         let settings = SettingsManager(defaults: defaults)
         settings.automation.applyPreset(.full, for: .codex)
         let original = try entry(jobID: nil)
-        let request = original.event.mergeRequest
+        let request = try blockerRequest("security_policy_violations", from: original.event.mergeRequest)
         let head = try #require(request.sha)
         let event = MergeWorkflowEvent(kind: .blockerChange, mergeRequest: request, identity: "read-retry", context: "Read-only admission")
         let encoder = JSONEncoder()
@@ -1129,7 +1253,8 @@ import Testing
             try await Task.sleep(for: .seconds(60))
             return .init(result: .init(status: .succeeded, summary: "Done"), output: "")
         })
-        automation.receive(.init(kind: .blockerChange, mergeRequest: request, identity: "unrelated-admission", context: "Read failure"),
+        let blocker = try blockerRequest("security_policy_violations", from: request)
+        automation.receive(.init(kind: .blockerChange, mergeRequest: blocker, identity: "unrelated-admission", context: "Read failure"),
             host: stored.host, user: stored.user)
         automation.startNext()
         try await gitlab.waitFor("read-started")

@@ -144,13 +144,16 @@ struct AssistantUsageTests {
         }
     }
 
-    @Test("A malformed completed turn cannot silently turn a partial total into a full estimate")
+    @Test("A malformed completed turn leaves valid earlier usage in the partial subtotal")
     func malformedTurnAfterValidUsage() {
         let data = Data("""
             {"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":10,"output_tokens":20}}
             {"type":"turn.completed","usage":{"input_tokens":"invalid","cached_input_tokens":0,"output_tokens":1}}
             """.utf8)
-        #expect(AssistantUsageParser.parse(data, assistant: .codex, model: "gpt-6.1-sol").estimatedUSD == nil)
+        let result = AssistantUsageParser.parse(data, assistant: .codex, model: "gpt-6.1-sol")
+        #expect(result.tokens == .init(input: 100, cachedInput: 10, output: 20))
+        #expect(result.estimatedUSD != nil)
+        #expect(result.terminalComplete == false)
     }
 
     @Test("Claude per-model estimates are used only when every model reports a valid cost")

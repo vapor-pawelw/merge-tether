@@ -1,6 +1,97 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "assistantUsagePurposeAuthorFeedback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Author feedback verification"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Weryfikacja uwag do własnego MR"}}
+      }
+    },
+    "assistantUsagePurposeReReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Re-review readiness"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Gotowość do ponownego przeglądu"}}
+      }
+    },
+    "assistantUsagePurposeManualFeedback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Manual feedback verification"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Ręczna weryfikacja uwag"}}
+      }
+    },
+    "assistantUsagePurposeDraftProof": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Draft evidence verification"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Weryfikacja dowodów dla szkiców"}}
+      }
+    },
+    "assistantUsagePurposeCommentOrigin": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Comment authorship assessment"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Ocena autorstwa komentarzy"}}
+      }
+    },
+    "assistantUsagePurposeNotice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Notification classification"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Klasyfikacja powiadomień"}}
+      }
+    },
+    "assistantUsagePurposeIssue": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Linked issue assessment"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Ocena powiązanych zadań"}}
+      }
+    },
+    "assistantUsageIncompleteUsage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Partial usage"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Częściowe dane o użyciu"}}
+      }
+    },
+    "assistantUsageMissingUsage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Missing usage estimate"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak danych do oszacowania kosztu"}}
+      }
+    },
+    "assistantUsageUnpricedModel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Model without a rate"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Model bez stawki"}}
+      }
+    },
+    "assistantUsageVerifierPurposes": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Verifier requests by purpose"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Żądania weryfikatora według celu"}}
+      }
+    },
+    "assistantUsageRecentVerifierRequests": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Recent verifier requests"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Ostatnie żądania weryfikatora"}}
+      }
+    },
+    "assistantUsageOriginatingAttempt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Originating attempt"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Identyfikator powiązanej próby"}}
+      }
+    },
     "assistantUsagePeriod": {
       "extractionState": "manual",
       "localizations": {

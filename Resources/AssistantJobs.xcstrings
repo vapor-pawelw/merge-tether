@@ -109,6 +109,41 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Commit źródłowy zmienił się, gdy wysyłanie zmian było wyłączone dla tego uruchomienia"}}
       }
     },
+    "assistant.jobs.audit.head.transition": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Source commits %1$@ → %2$@"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Commity źródłowe %1$@ → %2$@"}}
+      }
+    },
+    "assistant.jobs.audit.head.previous.observation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Previous commit observed %1$@"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Poprzedni commit odczytano %1$@"}}
+      }
+    },
+    "assistant.jobs.audit.head.current.observation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "New commit observed %1$@"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Nowy commit odczytano %1$@"}}
+      }
+    },
+    "assistant.jobs.audit.head.actor": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Push recorded for GitLab account %1$@"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "GitLab przypisał push do konta %1$@"}}
+      }
+    },
+    "assistant.jobs.audit.head.actor.unknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Push actor unknown"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie ustalono, kto wykonał push"}}
+      }
+    },
     "assistant.jobs.transcript": {
       "extractionState": "manual",
       "localizations": {

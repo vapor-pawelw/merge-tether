@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Align Agent Usage cards, filters and cost rows, and let longer dashboard text wrap.
 
+- Keep replies private when draft verification cannot find required files at the current commit. Back off transient evidence reads and avoid repeating the verification agent during those retries.
+- Explain known merge blockers without starting an agent, and retire diagnostic tasks when their blocker clears.
+- Show why verifier requests ran and distinguish incomplete, missing and unpriced agent usage.
+- Record the old and new source commits when a branch moves during an agent run. A verified push by another account invalidates the stale run without pausing the merge request.
+
 - Use the selected preset and approval threshold for automatic approval. Refresh the review when the MR target or diff base changes.
 
 - Authenticate locally stored AI comment assessments, overrides and review evidence. Reuse a reply worker’s verified source assessment for automatic publication.

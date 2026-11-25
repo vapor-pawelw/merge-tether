@@ -828,28 +828,82 @@ struct DraftProofRecoveryTests {
     @Test func transientEvidenceRetriesAreBoundedAndRefreshAfterCooldownWithoutReplayingAWorker() async throws {
         let f = try Fixture()
         defer { f.clean() }
-        f.verifyFailuresRemaining = 2
+        f.fetchFailuresRemaining = 2
         let coordinator = f.coordinator()
         coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
         try await f.settle(coordinator)
-        #expect(f.assessments == 3 && f.publication().count == 1)
+        #expect(f.fetches == 4 && f.assessments == 1 && f.publication().count == 1)
         #expect(!coordinator.isReadOnlyFailure(work: f.work))
         coordinator.retry(work: f.work, username: "me")
-        f.verifyFails = true
+        f.fetchFailuresRemaining = 100
         coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
         try await f.settle(coordinator)
-        #expect(f.assessments == 6)
+        #expect(f.fetches == 7 && f.assessments == 1)
         #expect(coordinator.isReadOnlyFailure(work: f.work))
+        var restored = f.coordinator()
+        restored.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restored)
+        #expect(f.fetches == 7 && f.assessments == 1)
+        f.clock = f.clock.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
+        restored.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restored)
+        #expect(f.fetches == 10 && f.assessments == 1)
+        #expect(f.settings.automationEvents.filter { $0.action == .verification && $0.state == .failed }.count == 1)
+        f.clock = f.clock.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
+        f.fetchFailuresRemaining = 0
+        restored = f.coordinator()
+        restored.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restored)
+        #expect(f.fetches == 10 && f.assessments == 1)
+        f.clock = f.clock.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown)
+        restored.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restored)
+        #expect(f.fetches == 12 && f.assessments == 2 && f.repairJobs.isEmpty)
+        #expect(!restored.isReadOnlyFailure(work: f.work))
+    }
+
+    @Test func invalidVerifierResponseDoesNotReplayGitLabReadsOrSolicitAnotherResponse() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.verificationFailure = .invalidEvidence
+        let coordinator = f.coordinator()
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(coordinator)
+        #expect(f.fetches == 1 && f.assessments == 1 && f.publication().isEmpty)
+        #expect(coordinator.failure(work: f.work) != nil && !coordinator.isReadOnlyFailure(work: f.work))
+
+        f.clock = f.clock.addingTimeInterval(24 * 60 * 60)
+        f.verificationFailure = nil
         let restored = f.coordinator()
         restored.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
         try await f.settle(restored)
-        #expect(f.assessments == 6)
-        f.clock = f.clock.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
-        f.verifyFails = false
+        #expect(f.fetches == 1 && f.assessments == 1 && f.publication().isEmpty)
+
+        restored.retry(work: f.work, username: "me")
         restored.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
         try await f.settle(restored)
-        #expect(f.assessments == 7 && f.repairJobs.isEmpty)
-        #expect(!restored.isReadOnlyFailure(work: f.work))
+        #expect(f.assessments == 2 && f.publication().count == 1)
+    }
+
+    @Test func repeatedOpaqueVerifierFailureUsesOneDelayedRetry() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.verifyFails = true
+        let coordinator = f.coordinator()
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(coordinator)
+        #expect(f.assessments == 1 && coordinator.isReadOnlyFailure(work: f.work))
+
+        f.clock = f.clock.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
+        let restored = f.coordinator()
+        restored.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restored)
+        #expect(f.assessments == 2 && !restored.isReadOnlyFailure(work: f.work))
+
+        f.clock = f.clock.addingTimeInterval(24 * 60 * 60)
+        restored.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restored)
+        #expect(f.assessments == 2 && f.publication().isEmpty)
     }
 
     @Test func transientFinalReadCannotSolicitASecondSemanticOpinion() async throws {
@@ -2040,9 +2094,14 @@ struct DraftProofRecoveryTests {
         let coordinator = fixture.coordinator()
         coordinator.schedule(snapshot: fixture.snapshot, origin: fixture.proof, configuration: fixture.settings.automation)
         try await fixture.settle(coordinator)
-        #expect(fixture.assessments == 3)
+        #expect(fixture.assessments == 1)
         #expect(FollowUpVerificationStore.contextReceipts(work: fixture.work, username: "me", settings: fixture.settings, in: fixture.folder).isEmpty)
         #expect(coordinator.failure(work: fixture.work) != nil)
+        fixture.clock = fixture.clock.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
+        let restarted = fixture.coordinator()
+        restarted.schedule(snapshot: fixture.snapshot, origin: fixture.proof, configuration: fixture.settings.automation)
+        try await fixture.settle(restarted)
+        #expect(fixture.assessments == 1)
     }
 
     @Test func recoveryPresentationIsBoundToCurrentMetadataDiscussionAndPolicy() async throws {
@@ -2385,7 +2444,7 @@ struct DraftProofRecoveryTests {
         let restarted = f.coordinator()
         restarted.schedule(snapshot: f.snapshot, origin: f.proof, draftIDs: [13], configuration: f.settings.automation)
         try await f.settle(restarted)
-        #expect(f.assessments == (failure ? 3 : 1))
+        #expect(f.assessments == 1)
         #expect(f.receipts().isEmpty)
     }
 
@@ -2717,14 +2776,18 @@ struct DraftProofRecoveryTests {
         #expect(f.receipts().contains { $0.headSHA == f.snapshot.request.sha })
     }
 
-    @Test func missingHistoricalFilesDoNotStrandAnotherKnownOriginForTheSameDraft() async throws {
+    @Test(arguments: [false, true])
+    func missingHistoricalFilesDoNotStrandAnotherKnownOrigin(_ sibling: Bool) async throws {
         let f = try Fixture()
         defer { f.clean() }
+        if sibling { try f.addSibling() }
         let old = f.proof
+        let missingDraft = old.drafts[0]
+        let supportedDraft = sibling ? old.drafts[1] : missingDraft
         let other = FollowUpVerification(version: 1, sealed: true, verificationID: UUID(), runID: old.runID,
             host: old.host, projectID: old.projectID, iid: old.iid, username: old.username, userID: old.userID,
             headSHA: old.headSHA, sourceProjectID: old.sourceProjectID, sourceBranch: old.sourceBranch,
-            files: [.init(path: "Sources/Current.swift", sha256: old.files[0].sha256)], drafts: old.drafts)
+            files: [.init(path: "Sources/Current.swift", sha256: old.files[0].sha256)], drafts: [supportedDraft])
         let archive = FollowUpVerificationStore.recordURL(kind: "follow-up-verifications-archive", work: f.work,
             username: "me", in: f.folder).deletingPathExtension()
         try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
@@ -2732,15 +2795,48 @@ struct DraftProofRecoveryTests {
         f.snapshot.request = try f.request(head: String(repeating: "b", count: 40))
         f.snapshot.branchHead = f.snapshot.request.sha!
         f.live = f.snapshot
-        f.unreadableFiles = ["Sources/Fixed.swift"]
+        f.missingFiles = ["Sources/Fixed.swift"]
         let coordinator = f.coordinator()
-        coordinator.schedule(snapshot: f.snapshot, origin: old, configuration: f.settings.automation)
+        coordinator.schedule(snapshot: f.snapshot, origin: old, draftIDs: [missingDraft.id], configuration: f.settings.automation)
         try await f.settle(coordinator)
-        #expect(f.assessments == 0 && f.receipts().isEmpty)
-        coordinator.schedule(snapshot: f.snapshot, origin: other, configuration: f.settings.automation)
-        try await f.settle(coordinator)
+        #expect(f.fetches == 1 && f.assessments == 0 && f.receipts().isEmpty)
+        #expect(coordinator.failure(work: f.work) != nil && !coordinator.isReadOnlyFailure(work: f.work))
+
+        let restored = f.coordinator()
+        f.clock = f.clock.addingTimeInterval(24 * 60 * 60)
+        restored.schedule(snapshot: f.snapshot, origin: old, draftIDs: [missingDraft.id], configuration: f.settings.automation)
+        try await f.settle(restored)
+        #expect(f.fetches == 1 && f.assessments == 0 && f.receipts().isEmpty)
+
+        restored.schedule(snapshot: f.snapshot, origin: other, configuration: f.settings.automation)
+        try await f.settle(restored)
         #expect(f.assessments == 1)
         #expect(f.receipts().first?.files.map(\.path) == ["Sources/Current.swift"])
+        #expect(f.receipts().first?.drafts.map(\.id) == [supportedDraft.id])
+    }
+
+    @Test(arguments: [false, true])
+    func missingFileCanBeCheckedAgainAfterNewHeadOrExplicitRetry(_ manual: Bool) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.missingFiles = ["Sources/Fixed.swift"]
+        let coordinator = f.coordinator()
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(coordinator)
+        #expect(f.assessments == 0 && f.publication().isEmpty)
+
+        f.missingFiles = []
+        let restored = f.coordinator()
+        if manual {
+            restored.retry(work: f.work, username: "me")
+        } else {
+            f.snapshot.request = try f.request(head: String(repeating: "b", count: 40))
+            f.snapshot.branchHead = f.snapshot.request.sha!
+            f.live = f.snapshot
+        }
+        restored.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restored)
+        #expect(f.assessments == 1 && f.publication().first?.headSHA == f.snapshot.request.sha)
     }
 
     @Test func anotherOriginsPreflightFenceCannotInterruptANormalizedSiblingCheck() async throws {
@@ -2790,10 +2886,12 @@ struct DraftProofRecoveryTests {
         var snapshot: DraftProofRecoveryCoordinator.Snapshot
         var live: DraftProofRecoveryCoordinator.Snapshot
         var assessments = 0
+        var fetches = 0
         var verifierThinking: [VerificationThinking] = []
         var automationAvailable = true
         var verifyFails = false
-        var verifyFailuresRemaining = 0
+        var verificationFailure: DraftProofRecoveryVerifier.Failure?
+        var fetchFailuresRemaining = 0
         var fetchFailuresAfterAssessment = 0
         var clock = Date()
         var holdVerification = false
@@ -2803,6 +2901,7 @@ struct DraftProofRecoveryTests {
         var duringAssessment: (() -> Void)?
         var duringFetch: (() async -> Void)?
         var unreadableFiles: Set<String> = []
+        var missingFiles: Set<String> = []
         var remoteHash = AICommentAssessmentStore.digest("source and test")
         init() throws {
             folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -2969,19 +3068,26 @@ struct DraftProofRecoveryTests {
         func coordinator() -> DraftProofRecoveryCoordinator {
             DraftProofRecoveryCoordinator(settings: settings, directory: folder, canAutomate: { [self] _ in automationAvailable },
                 fetch: { [self] _ in
+                    fetches += 1
                     await duringFetch?()
+                    if fetchFailuresRemaining > 0 {
+                        fetchFailuresRemaining -= 1; throw GlabError.timedOut
+                    }
                     if assessments > 0 && fetchFailuresAfterAssessment > 0 {
-                        fetchFailuresAfterAssessment -= 1; throw DraftProofRecoveryVerifier.Failure.failed
+                        fetchFailuresAfterAssessment -= 1; throw GlabError.timedOut
                     }
                     return live
                 }, hashFile: { [self] _, file in
+                    if missingFiles.contains(file.path) {
+                        throw GlabError.nonZeroExit(code: 1, stderr: "glab: 404 File Not Found")
+                    }
                     if unreadableFiles.contains(file.path) { throw DraftProofRecoveryVerifier.Failure.failed }
                     return remoteHash
                 }, verify: { [self] input, _, _ in
                     assessments += 1
                     verifierThinking.append(input.thinking)
                     if verifyFails { throw DraftProofRecoveryVerifier.Failure.failed }
-                    if verifyFailuresRemaining > 0 { verifyFailuresRemaining -= 1; throw DraftProofRecoveryVerifier.Failure.failed }
+                    if let verificationFailure { throw verificationFailure }
                     duringAssessment?()
                     if holdVerification { await withCheckedContinuation { verificationGate = $0 } }
                     return .init(drafts: claimsOverride ?? input.requestedDraftIDs.map { .init(draftID: $0, state: claimState, reason: "Source and regression tests inspected against current live HEAD.") })

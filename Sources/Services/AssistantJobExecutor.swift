@@ -147,7 +147,9 @@ enum AssistantJobExecutor {
                 user: user, accountRevision: revision, glab: glab, settings: settings)
             if let violation = AssistantWorkerAudit.enforce(verdict, handoff: handoff, settings: settings),
                case .success = outcome { throw violation }
-            return try outcome.get()
+            let reviewed = try outcome.get()
+            try await AssistantJobJournal.save(reviewed, for: handoff)
+            return reviewed
         }
         let generationBaseline = try? await glab.fetchOwnDraftNotes(projectID: request.projectID, iid: request.iid,
             host: handoff.key.work.host, userID: user.id)
@@ -294,6 +296,15 @@ enum AssistantJobExecutor {
                 authorization.request = latest
             }
             let latest = authorization.request
+            if handoff.manual != true, handoff.taskIntent != .conflictResolution,
+               handoff.workflowEventKind == .blockerChange
+                || AssistantAutomationRunner.originatingWorkflowEvent(for: handoff, settings: settings) == .blockerChange {
+                guard let diagnosis = AssistantAutomationRunner.originatingBlockerDiagnosis(for: handoff, settings: settings) else {
+                    throw CancellationError()
+                }
+                do { try await glab.verifyMergeBlocker(diagnosis, in: latest, host: handoff.key.work.host) }
+                catch is MergeBlockerDiagnosis.Superseded { throw CancellationError() }
+            }
             if AssistantAutomationRunner.isForeignPipelineDiagnosis(for: handoff, history: settings.assistantHandoffs) {
                 guard let diagnosis = handoff.foreignPipelineDiagnosis else { throw ExecutionError.contextUnavailable }
                 try await diagnosis.verify(request: latest, user: user, host: handoff.key.work.host, glab: glab)

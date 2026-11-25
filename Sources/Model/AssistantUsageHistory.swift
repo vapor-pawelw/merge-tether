@@ -9,12 +9,25 @@ struct AssistantUsageTotal: Codable, Equatable, Sendable {
     var outputTokens = 0
     var tokensUnavailable: Bool?
     var costUnavailable: Bool?
+    var estimateIssues: [AssistantUsageEstimateIssue: Int]?
+
+    var hasKnownEstimate: Bool {
+        costUnavailable != true && runs > 0
+            && (estimatedUSD > 0 || unknownCostRuns < runs || (estimateIssues?[.incompleteUsage] ?? 0) > 0)
+    }
 
     mutating func add(_ other: Self) {
         let runCount = runs.addingReportingOverflow(other.runs)
         let unknownCount = unknownCostRuns.addingReportingOverflow(other.unknownCostRuns)
         runs = runCount.overflow ? Int.max : runCount.partialValue
         unknownCostRuns = unknownCount.overflow ? Int.max : unknownCount.partialValue
+        if let issues = other.estimateIssues {
+            for (issue, count) in issues {
+                let sum = (estimateIssues?[issue] ?? 0).addingReportingOverflow(count)
+                if estimateIssues == nil { estimateIssues = [:] }
+                estimateIssues?[issue] = sum.overflow ? Int.max : sum.partialValue
+            }
+        }
         let dollars = estimatedUSD + other.estimatedUSD
         if costUnavailable == true || other.costUnavailable == true || !dollars.isFinite
             || dollars < 0 || runCount.overflow || unknownCount.overflow {
@@ -46,6 +59,9 @@ struct AssistantUsageEntry: Sendable {
     let assistant: AutomationAssistant
     let total: AssistantUsageTotal
     var mergeRequest: AssistantUsageMergeRequest? = nil
+    var purpose: AssistantUsagePurpose? = nil
+    var receiptID: UUID? = nil
+    var correlationID: UUID? = nil
 }
 
 struct AssistantUsageMergeRequestTotal: Identifiable, Sendable {
@@ -76,6 +92,24 @@ struct AssistantUsageSnapshot: Sendable {
             result.add(entry.total)
         }
         return result
+    }
+
+    func verifierTotalsByPurpose(for mergeRequest: AssistantUsageMergeRequest? = nil,
+                                 interval: DateInterval? = nil) -> [AssistantUsagePurpose: AssistantUsageTotal] {
+        var totals: [AssistantUsagePurpose: AssistantUsageTotal] = [:]
+        for entry in entries where entry.role == .verifier && Self.contains(entry.date, in: interval)
+            && (mergeRequest == nil || entry.mergeRequest?.id == mergeRequest?.id) {
+            guard let purpose = entry.purpose else { continue }
+            totals[purpose, default: .init()].add(entry.total)
+        }
+        return totals
+    }
+
+    func recentVerifierRequests(for mergeRequest: AssistantUsageMergeRequest) -> [AssistantUsageEntry] {
+        let requests = entries.filter {
+            $0.role == .verifier && $0.mergeRequest?.id == mergeRequest.id && $0.receiptID != nil && $0.purpose != nil
+        }
+        return Array(requests.sorted { $0.date > $1.date }.prefix(20))
     }
 
     func mergeRequestTotals(interval: DateInterval?, now: Date = Date()) -> [AssistantUsageMergeRequestTotal] {
@@ -167,7 +201,7 @@ struct AssistantUsageSummary: Sendable {
     var averageDailyUSD: Double? {
         let total = overall
         guard coveredDays > 0, total.costUnavailable != true else { return nil }
-        guard total.runs == 0 || total.estimatedUSD > 0 || total.unknownCostRuns < total.runs else { return nil }
+        guard total.runs == 0 || total.hasKnownEstimate else { return nil }
         return total.estimatedUSD / Double(coveredDays)
     }
 }

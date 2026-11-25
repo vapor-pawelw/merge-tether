@@ -297,13 +297,16 @@ final class MergeWorkflowMonitor {
         if let old = previous.status, let status, old != status {
             changes.append("Merge status changed from \(old) to \(status).")
         }
-        if previous.inTrain == true, inTrain == false {
+        let leftMergeTrain = previous.inTrain == true && inTrain == false
+        if leftMergeTrain {
             changes.append("The still-open MR left the active merge train.")
         }
         if !changes.isEmpty { current.revision += 1 }
         snapshot.blocker = current
         guard !changes.isEmpty else { return nil }
-        return observation.event(.blockerChange, token: String(current.revision), context: changes.joined(separator: " "))
+        var event = observation.event(.blockerChange, token: String(current.revision), context: changes.joined(separator: " "))
+        event.leftMergeTrain = leftMergeTrain ? true : nil
+        return event
     }
 
     private func stackDependencyMerged(
@@ -509,6 +512,17 @@ final class MergeWorkflowMonitor {
                 previous.reviewedNoteRevisions = nil
                 recoveredReview = true
             }
+            let externallySuperseded = covered != true && reviewHistory.contains { job in
+                guard job.key.work.host == account.host, job.key.username == username,
+                      job.key.work.projectID == request.projectID, job.key.work.iid == request.iid,
+                      job.manual != true, job.execution?.state == .failed, job.execution?.cancellationOrigin != .user,
+                      job.execution?.remoteEffects?.isEmpty != false, job.execution?.pendingWorkerAudit == nil,
+                      let change = job.execution?.sourceHeadChange, change.accountID == account.userID,
+                      change.attributedToAnotherAccount, change.previousSHA == job.expectedHeadSHA, change.currentSHA == head
+                else { return false }
+                return AssistantAutomationRunner.recordsReviewVerdict(for: job, history: reviewHistory)
+            }
+            let supersededInstructions = "Another GitLab account pushed during the previous review. Review the current diff and discussions at the new head."
             let epoch = previous.reviewCoverageEpoch ?? 0
             let changedActiveNotes = if let reviewedNotes = previous.reviewedNoteRevisions, let discussions {
                 MergeRequestDiffDigest.changedNotes(from: reviewedNotes,
@@ -517,6 +531,8 @@ final class MergeWorkflowMonitor {
             } else { [Int]() }
             let staleEvidence = if let changedTarget {
                 "target-" + UserAttentionSnapshot.digest("\(changedTarget.targetProjectID)|\(changedTarget.targetBranch)|\(changedTarget.baseSHA)")
+            } else if externallySuperseded {
+                "external-push-" + head
             } else {
                 await staleReviewContext(request, discussions: discussions, glab: glab,
                     account: account, verdict: verdict, changedActiveNotes: changedActiveNotes)
@@ -534,6 +550,7 @@ final class MergeWorkflowMonitor {
                     let observation = Observation(glab: glab, account: account, request: request)
                     events.append(observation.event(.reviewUpdate, token: head + "-context-" + staleContext,
                         context: changedTarget != nil ? targetReviewInstructions
+                            : externallySuperseded ? supersededInstructions
                             : metadataNeedsReview ? IncrementalReviewScope.metadataReviewInstructions
                             : "Your recorded review does not cover the current discussion content at this head. Recheck current discussions and record a fresh review verdict."))
                 }
@@ -572,7 +589,7 @@ final class MergeWorkflowMonitor {
                 var scope = IncrementalReviewScope(currentHead: head)
                 let observedReviewHead = previous.head == diagnosedHead ? nil : previous.head
                 let reviewedBaseline = previous.reviewedHead == head ? observedReviewHead : previous.reviewedHead ?? observedReviewHead
-                if changedHead, let reviewed = reviewedBaseline {
+                if changedHead, !externallySuperseded, let reviewed = reviewedBaseline {
                     scope.reviewedHead = reviewed
                     if let reviewedDiff = previous.reviewedDiff, reviewedDiff.headSHA == reviewed,
                        let currentDiff = try? await glab.fetchReviewDiffSnapshot(for: request, host: account.host) {
@@ -592,6 +609,8 @@ final class MergeWorkflowMonitor {
                 }
                 if changedTarget != nil {
                     parts.append(targetReviewInstructions)
+                } else if externallySuperseded {
+                    parts.append(supersededInstructions)
                 } else if metadataNeedsReview {
                     parts.append(IncrementalReviewScope.metadataReviewInstructions)
                 } else if staleUnreported {

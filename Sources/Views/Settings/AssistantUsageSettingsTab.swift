@@ -13,6 +13,7 @@ struct AssistantUsageSettingsContent: View {
     @State private var summary = AssistantUsageSummary()
     @State private var chartData = AssistantUsageChartData()
     @State private var mergeRequestRanking: [AssistantUsageMergeRequestTotal] = []
+    @State private var verifierTotals: [AssistantUsagePurpose: AssistantUsageTotal] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -112,6 +113,8 @@ struct AssistantUsageSettingsContent: View {
             }
             .fixedSize(horizontal: false, vertical: true)
 
+            AssistantUsageVerifierBreakdown(totals: verifierTotals)
+
             VStack(alignment: .leading, spacing: 8) {
                 Text(.AssistantUsage.assistantUsageByAgentTitle).font(.headline)
                 Text(.AssistantUsage.assistantUsageByAgentHelp).font(.caption).foregroundStyle(.secondary)
@@ -168,6 +171,11 @@ struct AssistantUsageSettingsContent: View {
         chartData = snapshot.chartData(granularity: granularity, interval: interval, now: now)
         mergeRequestRanking = Array(snapshot.mergeRequestTotals(interval: interval, now: now)
             .filter { $0.total.hasKnownEstimate }.prefix(5))
+        if let range = snapshot.accountingRange(interval: interval, now: now, through: .hour) {
+            verifierTotals = snapshot.verifierTotalsByPurpose(interval: range)
+        } else {
+            verifierTotals = [:]
+        }
     }
 
     private func rebuildChart() {
@@ -239,10 +247,7 @@ private struct AssistantUsageTotalCard: View {
             AssistantUsageTotalAmount(total: total).font(.title3.weight(.semibold))
             Text(detail).font(.caption).foregroundStyle(.secondary)
             Text(.AssistantUsage.assistantUsageRuns(total.runs)).font(.caption).foregroundStyle(.secondary)
-            if total.unknownCostRuns > 0 {
-                Text(.AssistantUsage.assistantUsageUnknownRuns(total.unknownCostRuns))
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            AssistantUsageEstimateIssues(total: total)
             if total.inputTokens > 0 || total.outputTokens > 0 {
                 Text(.AssistantUsage.assistantUsageTokens(total.inputTokens, total.cachedInputTokens, total.outputTokens))
                     .font(.caption).foregroundStyle(.secondary)
@@ -254,6 +259,88 @@ private struct AssistantUsageTotalCard: View {
             }
         }
         .textSelection(.enabled)
+    }
+}
+
+struct AssistantUsageEstimateIssues: View {
+    let total: AssistantUsageTotal
+
+    var body: some View {
+        if total.unknownCostRuns > 0 {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(AssistantUsageEstimateIssue.allCases, id: \.self) { issue in
+                    if let count = total.estimateIssues?[issue], count > 0 {
+                        LabeledContent {
+                            Text(count, format: .number).monospacedDigit()
+                        } label: {
+                            Text(issue.title)
+                        }
+                    }
+                }
+                let remaining = (total.estimateIssues ?? [:]).values.reduce(total.unknownCostRuns) {
+                    $0 - min($0, max(0, $1))
+                }
+                if remaining > 0 {
+                    Text(.AssistantUsage.assistantUsageUnknownRuns(remaining))
+                }
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+struct AssistantUsageVerifierBreakdown: View {
+    let totals: [AssistantUsagePurpose: AssistantUsageTotal]
+    var recentRequests: [AssistantUsageEntry] = []
+
+    var body: some View {
+        if !totals.isEmpty {
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(AssistantUsagePurpose.allCases, id: \.self) { purpose in
+                        if let total = totals[purpose] {
+                            AssistantUsageCostRow(amount: .init(total: total, precise: true)) {
+                                Text(purpose.title)
+                            }
+                            Text(.AssistantUsage.assistantUsageRuns(total.runs)).foregroundStyle(.secondary)
+                            AssistantUsageEstimateIssues(total: total)
+                        }
+                    }
+                    if !recentRequests.isEmpty {
+                        Divider()
+                        Text(.AssistantUsage.assistantUsageRecentVerifierRequests).fontWeight(.semibold)
+                        ForEach(recentRequests, id: \.receiptID) { request in
+                            recentRequest(request)
+                        }
+                    }
+                }
+                .font(.caption)
+                .padding(.top, 8)
+            } label: { Text(.AssistantUsage.assistantUsageVerifierPurposes) }
+        }
+    }
+
+    @ViewBuilder private func recentRequest(_ request: AssistantUsageEntry) -> some View {
+        if let purpose = request.purpose {
+            VStack(alignment: .leading, spacing: 3) {
+                AssistantUsageCostRow(amount: .init(total: request.total, precise: true)) {
+                    Text(purpose.title).fontWeight(.medium)
+                }
+                HStack(spacing: 8) {
+                    Text(request.assistant.usageLabel)
+                    Text(verbatim: AssistantUsagePeriod.dateTimeLabel(request.date))
+                }
+                if let correlationID = request.correlationID {
+                    LabeledContent {
+                        Text(verbatim: correlationID.uuidString)
+                            .fontDesign(.monospaced)
+                            .textSelection(.enabled)
+                    } label: { Text(.AssistantUsage.assistantUsageOriginatingAttempt) }
+                }
+                AssistantUsageEstimateIssues(total: request.total)
+            }
+            .foregroundStyle(.secondary)
+        }
     }
 }
 
@@ -578,12 +665,6 @@ private struct AssistantUsageAgentSplit: View {
                 AssistantUsageTotalAmount(total: byAssistant[assistant] ?? .init(), precise: true)
             }
         }
-    }
-}
-
-private extension AssistantUsageTotal {
-    var hasKnownEstimate: Bool {
-        costUnavailable != true && runs > 0 && (estimatedUSD > 0 || unknownCostRuns < runs)
     }
 }
 

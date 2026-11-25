@@ -101,7 +101,8 @@ enum MRNoticeClassifier {
                 "-c", "model_reasoning_effort=\"medium\"", "--output-schema", schemaURL.path, "-o", resultURL.path, "-"],
                 environment: environment, currentDirectory: folder, timeout: 120,
                 input: Data((prompt + "\n\n" + String(decoding: encoded, as: UTF8.self)).utf8),
-                usage: .init(role: .verifier, assistant: assistant, model: model, mergeRequest: usageMergeRequest))
+                usage: .init(role: .verifier, assistant: assistant, model: model,
+                    mergeRequest: usageMergeRequest, purpose: .noticeClassification))
             guard output.exitCode == 0, !Task.isCancelled else { throw Failure.failed }
             result = try JSONDecoder().decode(Result.self, from: Data(contentsOf: resultURL))
         } else {
@@ -110,7 +111,8 @@ enum MRNoticeClassifier {
                 "--settings", #"{"sandbox":{"enabled":false}}"#, "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
                 "--setting-sources", "", "--no-session-persistence", "--output-format", "json", "--json-schema", schema],
                 environment: environment, currentDirectory: folder, timeout: 120, input: encoded,
-                usage: .init(role: .verifier, assistant: assistant, model: model, mergeRequest: usageMergeRequest))
+                usage: .init(role: .verifier, assistant: assistant, model: model,
+                    mergeRequest: usageMergeRequest, purpose: .noticeClassification))
             struct Envelope: Decodable { let is_error: Bool?; let structured_output: Result? }
             let envelope = try JSONDecoder().decode(Envelope.self, from: output.stdout)
             guard output.exitCode == 0, envelope.is_error == false, !Task.isCancelled,

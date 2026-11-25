@@ -40,7 +40,8 @@ extension AutomationAssistant {
             target: .init(host: host, projectID: request.projectID, iid: request.iid, url: request.webURL, expectedUsername: user.username),
             semanticContextFingerprint: request.semanticContextFingerprint, thinking: configuration.verificationThinking,
             ignoredSuggestions: settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target),
-            excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: user.username).sorted()),
+            excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: user.username).sorted(),
+            usagePurpose: .manualFeedback, usageCorrelationID: UUID()),
             assistant: assistant, model: model)
     }
 }

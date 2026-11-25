@@ -89,7 +89,8 @@ struct AssistantJobRow: View {
                 if let error = execution.errorExplanation, error != execution.attentionExplanation {
                     Text(verbatim: GlabService.redactWorkflowEvidence(error)).foregroundStyle(.orange).textSelection(.enabled)
                 }
-                if let effects = execution.remoteEffects, !effects.isEmpty {
+                let effects = execution.remoteEffects ?? []
+                if !effects.isEmpty || execution.sourceHeadChange != nil {
                     VStack(alignment: .leading, spacing: 4) {
                         Label {
                             Text(.AssistantJobs.assistantJobsAuditHeading)
@@ -99,9 +100,24 @@ struct AssistantJobRow: View {
                         ForEach(effects) { effect in
                             Text(effect.title)
                         }
+                        if let change = execution.sourceHeadChange {
+                            Text(.AssistantJobs.assistantJobsAuditHeadTransition(change.previousSHA, change.currentSHA))
+                                .textSelection(.enabled)
+                            if let previous = change.previousObservation {
+                                Text(.AssistantJobs.assistantJobsAuditHeadPreviousObservation(
+                                    previous.formatted(date: .abbreviated, time: .standard)))
+                            }
+                            Text(.AssistantJobs.assistantJobsAuditHeadCurrentObservation(
+                                change.currentObservation.formatted(date: .abbreviated, time: .standard)))
+                            if let actor = change.pushActorID {
+                                Text(.AssistantJobs.assistantJobsAuditHeadActor(String(actor)))
+                            } else {
+                                Text(.AssistantJobs.assistantJobsAuditHeadActorUnknown)
+                            }
+                        }
                     }
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(effects.isEmpty ? Color.secondary : Color.orange)
                 }
                 if let output = execution.output, !output.isEmpty {
                     DisclosureGroup(isExpanded: $transcriptExpanded) {

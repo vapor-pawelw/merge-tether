@@ -1,6 +1,15 @@
 import Foundation
 
 extension AssistantAutomationRunner {
+    static func originatingBlockerDiagnosis(for job: Handoff, settings: SettingsManager) -> MergeBlockerDiagnosis? {
+        if let diagnosis = job.blockerDiagnosis { return diagnosis }
+        return settings.workflowActivity.first {
+            $0.assistantJobID == job.id && $0.host == job.key.work.host && $0.user.username == job.key.username
+                && $0.event.mergeRequest.projectID == job.key.work.projectID && $0.event.mergeRequest.iid == job.key.work.iid
+                && $0.event.mergeRequest.sha == job.expectedHeadSHA
+        }?.event.blockerDiagnosis
+    }
+
     static func originatingWorkflowEvent(for job: Handoff, settings: SettingsManager) -> MergeWorkflowTrigger? {
         let kinds = Set(settings.workflowActivity.filter {
             $0.assistantJobID == job.id && $0.host == job.key.work.host && $0.user.username == job.key.username

@@ -86,10 +86,7 @@ struct ReadOnlyReviewJob {
             } catch is CancellationError { throw CancellationError() }
             catch { result.blocker = GlabService.redactWorkflowEvidence(error.localizedDescription) }
         }
-        let outcome = AssistantJobCoordinator.Outcome(result: result,
-            output: GlabService.redactWorkflowEvidence(review.summary))
-        try await AssistantJobJournal.save(outcome, for: handoff)
-        return outcome
+        return .init(result: result, output: GlabService.redactWorkflowEvidence(review.summary))
     }
 
     func save(_ draftProposals: [ReadOnlyReviewResult.Draft], baselineDrafts: [GitLabDraftNote],

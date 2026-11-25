@@ -4,6 +4,32 @@ import Testing
 
 @Suite("Assistant usage persistence")
 struct AssistantUsageStoreTests {
+    @Test("Hourly compaction preserves verifier purpose and estimate diagnostics")
+    func archivedVerifierDiagnostics() async throws {
+        let file = temporaryFile()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let store = AssistantUsageStore(file: file, receiptLimit: 1)
+        let date = try instant("2026-11-04T08:05:00Z"), target = usageMR()
+        let first = UUID(), second = UUID(), third = UUID()
+        try await store.begin(id: first, role: .verifier, assistant: .claude, date: date,
+            mergeRequest: target, purpose: .draftProofRecovery, correlationID: first)
+        try await store.finish(id: first, measurement: .init(tokens: nil, estimatedUSD: nil, pricingVersion: nil), complete: false)
+        try await store.begin(id: second, role: .verifier, assistant: .claude, date: date,
+            mergeRequest: target, purpose: .commentOrigin)
+        try await store.finish(id: second, measurement: .init(tokens: nil, estimatedUSD: nil, pricingVersion: nil), complete: false)
+        try await store.begin(id: third, role: .verifier, assistant: .claude, date: date,
+            mergeRequest: target, purpose: .draftProofRecovery, correlationID: third)
+        try await store.finish(id: third, measurement: .init(tokens: nil, estimatedUSD: 0.5, pricingVersion: "claude-cli"), complete: false)
+
+        let snapshot = try await AssistantUsageStore(file: file).snapshot()
+        let totals = snapshot.verifierTotalsByPurpose(for: target)
+        #expect(totals[.draftProofRecovery]?.runs == 2)
+        #expect(totals[.draftProofRecovery]?.estimateIssues == [.missingUsage: 1, .incompleteUsage: 1])
+        #expect(totals[.commentOrigin]?.estimateIssues == [.missingUsage: 1])
+        #expect(snapshot.recentVerifierRequests(for: target).map(\.correlationID) == [third])
+        #expect(snapshot.total(for: target, role: .verifier).runs == 3)
+    }
+
     @Test("legacy shared lifetime usage stays read-only and separate from installation totals")
     func legacySharedLifetimeUsage() async throws {
         let home = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)

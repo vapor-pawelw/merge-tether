@@ -23,6 +23,19 @@ struct AssistantJobExecution: Codable, Equatable, Sendable {
         var isActive: Bool { self == .queued || self == .running }
     }
 
+    struct SourceHeadChange: Codable, Equatable, Sendable {
+        let previousSHA: String
+        let currentSHA: String
+        let previousObservation: Date?
+        let currentObservation: Date
+        let accountID: Int
+        var pushActorID: Int?
+
+        var attributedToAnotherAccount: Bool {
+            pushActorID.map { $0 > 0 && $0 != accountID } == true
+        }
+    }
+
     var state: State
     var startedAt: Date?
     var finishedAt: Date?
@@ -34,6 +47,7 @@ struct AssistantJobExecution: Codable, Equatable, Sendable {
     var cancellationOrigin: CancellationOrigin? = nil
     var remoteEffects: [RemoteEffect]? = nil
     var pendingWorkerAudit: AssistantWorkerAudit.Pending? = nil
+    var sourceHeadChange: SourceHeadChange? = nil
 
     var errorExplanation: String? {
         error.map { GlabService.redactWorkflowEvidence(AssistantJobExecutor.ExecutionError.displayMessage(for: $0)) }

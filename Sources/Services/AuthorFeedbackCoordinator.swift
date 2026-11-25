@@ -679,7 +679,8 @@ final class AuthorFeedbackCoordinator {
             semanticContextFingerprint: request.semanticContextFingerprint,
             thinking: input.configuration.verificationThinking, blockedFollowUps: stoppedContexts,
             ignoredSuggestions: input.ignoredSuggestions, completedFollowUp: completedFollowUp,
-            excludedReplyAuthorIDs: excludedReplyAuthors(input).sorted()).activeEvidence
+            excludedReplyAuthorIDs: excludedReplyAuthors(input).sorted(), usagePurpose: .authorFeedback,
+            usageCorrelationID: input.id).activeEvidence
         let blockedContexts = verificationInput.blockedFollowUps
         let blockedHead = blockedContexts.isEmpty ? "" : verificationInput.headSHA
         let replyFingerprint = ReviewVerdict.fingerprint(verificationInput.resolvedOverviewReplyEvidence ?? []) ?? ""

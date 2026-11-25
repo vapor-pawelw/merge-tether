@@ -523,7 +523,8 @@ final class ReReviewCoordinator {
                                                               url: request.webURL, expectedUsername: context.username),
                                                           semanticContextFingerprint: request.semanticContextFingerprint,
                                                           thinking: thinking, ignoredSuggestions: activeIgnored,
-                                                          excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: context.username).sorted())
+                                                          excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: context.username).sorted(),
+                                                          usageCorrelationID: verificationID)
                         let assessment = try await verifyReReview(input.activeEvidence, assistant, model)
                         _ = try assessment.reviewers(in: discussions, authorID: user.id, ignoredSuggestions: activeIgnored,
                             excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: context.username))

@@ -206,6 +206,7 @@ enum AssistantAutomationRunner {
         var workflowOriginKnown: Bool? = nil
         var pipelineHandoffConfirmation: PipelineHandoffConfirmation? = nil
         var readOnlyReview: Bool? = nil
+        var blockerDiagnosis: MergeBlockerDiagnosis? = nil
 
         var deliveredFeedbackTodos: [Todo.FeedbackIdentity] {
             if let execution { return execution.state == .succeeded ? feedbackTodos ?? [] : [] }
@@ -352,7 +353,8 @@ enum AssistantAutomationRunner {
         workflowEventKind: MergeWorkflowTrigger? = nil,
         pipelineHandoffConfirmation: PipelineHandoffConfirmation? = nil,
         preparedWorkflowReview: PreparedWorkflowReview? = nil,
-        readOnlyReview: Bool = false
+        readOnlyReview: Bool = false,
+        blockerDiagnosis: MergeBlockerDiagnosis? = nil
     ) async throws -> Handoff {
         guard mrWorkflow != .draftReply else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
         let usesReadOnlyReview = readOnlyReview || (retryOf.flatMap { id in
@@ -432,7 +434,8 @@ enum AssistantAutomationRunner {
         var semanticContextFingerprint: String?
         var reviewer: GitLabAuthenticatedUser?
         var pipelineDiagnosis: ForeignPipelineDiagnosis?
-        if foreignDiagnosis || jobCoordinator == nil || configurationSnapshot != nil || (reviewRetry != nil && glab != nil) {
+        if foreignDiagnosis || jobCoordinator == nil || configurationSnapshot != nil || blockerDiagnosis != nil
+            || (reviewRetry != nil && glab != nil) {
             let service = glab ?? GlabService()
             let snapshot: (request: GitLabMergeRequest, user: GitLabAuthenticatedUser)
             do {
@@ -466,6 +469,9 @@ enum AssistantAutomationRunner {
             reviewer = snapshot.user
             guard let headSHA, GlabService.isFullGitSHA(headSHA) else { throw AssistantJobExecutor.ExecutionError.contextUnavailable }
             if let expectedHeadSHA, expectedHeadSHA != headSHA { throw AssistantJobExecutor.ExecutionError.headChanged }
+            if let blockerDiagnosis {
+                try await service.verifyMergeBlocker(blockerDiagnosis, in: snapshot.request, host: work.host)
+            }
             if foreignDiagnosis {
                 if let reviewRetry {
                     try AssistantJobExecutor.validateHeadSnapshot(expected: reviewRetry.expectedHeadSHA, actual: headSHA)
@@ -610,7 +616,8 @@ enum AssistantAutomationRunner {
             taskIntent: intent, foreignPipelineDiagnosis: pipelineDiagnosis,
             workflowEventKind: workflowEventKind, workflowOriginKnown: true,
             pipelineHandoffConfirmation: pipelineHandoffConfirmation,
-            readOnlyReview: usesReadOnlyReview ? true : nil
+            readOnlyReview: usesReadOnlyReview ? true : nil,
+            blockerDiagnosis: blockerDiagnosis
         )
         for (noteID, revision) in verifiedFeedbackNotes ?? [:] {
             settings.authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision,
@@ -685,6 +692,15 @@ enum AssistantAutomationRunner {
             throw AssistantJobExecutor.ExecutionError.disabledPermission
         }
         let originatingTrigger = handoff.workflowEventKind ?? originatingWorkflowEvent(for: handoff, settings: settings)
+        let blocker: MergeBlockerDiagnosis?
+        if !manual, originatingTrigger == .blockerChange, handoff.taskIntent != .conflictResolution {
+            guard let diagnosis = originatingBlockerDiagnosis(for: handoff, settings: settings) else {
+                throw MergeBlockerDiagnosis.Superseded()
+            }
+            blocker = diagnosis
+        } else {
+            blocker = nil
+        }
         let retryConfiguration = settings.automation
         let retryAccountRevision = glab?.accountRevision
         func validateAutomaticRetryAdmission() throws {
@@ -758,7 +774,7 @@ enum AssistantAutomationRunner {
                                     configurationSnapshot: manual ? nil : retryConfiguration, glab: manual ? glab?.freshSession() : glab,
                                     draftRepair: handoff.draftRepair, retryOf: handoff.id, automaticRetryIdentity: automaticRetryIdentity,
                                     feedbackRecoveryRootID: handoff.feedbackRecoveryRootID, taskIntent: handoff.taskIntent,
-                                    workflowEventKind: originatingTrigger)
+                                    workflowEventKind: originatingTrigger, blockerDiagnosis: blocker)
             for index in settings.workflowActivity.indices where settings.workflowActivity[index].assistantJobID == handoff.id {
                 settings.workflowActivity[index].assistantJobID = replacement.id
                 settings.workflowActivity[index].state = .waitingForAssistant

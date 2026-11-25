@@ -5,6 +5,8 @@ struct AssistantUsageMRDetailCost: View {
 
     @State private var totals: [AssistantUsageRole: AssistantUsageTotal]?
     @State private var agentTotals: [AutomationAssistant: AssistantUsageTotal] = [:]
+    @State private var verifierTotals: [AssistantUsagePurpose: AssistantUsageTotal] = [:]
+    @State private var recentVerifierRequests: [AssistantUsageEntry] = []
     @State private var loadedIdentity: String?
     @State private var refreshID = UUID()
     @State private var loadFailed = false
@@ -31,6 +33,8 @@ struct AssistantUsageMRDetailCost: View {
                             roleRow(assistant.usageLabel, detail: .AssistantUsage.assistantUsageByAgentCardDetail,
                                 total: agentTotals[assistant] ?? .init())
                         }
+                        AssistantUsageVerifierBreakdown(totals: verifierTotals, recentRequests: recentVerifierRequests)
+                            .padding(.horizontal, rowInset)
                     } else if !loadFailed || loadedIdentity != mergeRequest.id {
                         ProgressView().controlSize(.small)
                     }
@@ -69,9 +73,7 @@ struct AssistantUsageMRDetailCost: View {
             Text(.AssistantUsage.assistantUsageMRAgentRequests(total.runs))
                 .monospacedDigit()
                 .help(Text(.AssistantUsage.assistantUsageMRAgentRequestsHelp))
-            if total.unknownCostRuns > 0 {
-                Text(.AssistantUsage.assistantUsageMRUnknownRuns(total.unknownCostRuns)).foregroundStyle(.secondary)
-            }
+            AssistantUsageEstimateIssues(total: total)
             if total.runs > 0 {
                 if total.inputTokens > 0 || total.outputTokens > 0 || total.tokensUnavailable != true {
                     Text(.AssistantUsage.assistantUsageTokens(total.inputTokens, total.cachedInputTokens, total.outputTokens))
@@ -107,6 +109,8 @@ struct AssistantUsageMRDetailCost: View {
             agentTotals = Dictionary(uniqueKeysWithValues: AutomationAssistant.allCases.map {
                 ($0, snapshot.total(for: mergeRequest, assistant: $0))
             })
+            verifierTotals = snapshot.verifierTotalsByPurpose(for: mergeRequest)
+            recentVerifierRequests = snapshot.recentVerifierRequests(for: mergeRequest)
             loadFailed = false
         } catch {
             guard !Task.isCancelled else { return }

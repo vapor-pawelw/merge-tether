@@ -190,7 +190,8 @@ enum AICommentOriginAssessor {
                 "-c", "model_reasoning_effort=\"\(thinking.rawValue)\"", "-c", "web_search=\"disabled\"", "-c", "agents.enabled=false",
                 "--disable", "apps", "--disable", "plugins", "--disable", "memories", "--output-schema", schemaURL.path, "-o", resultURL.path, "-"],
                 environment: processEnvironment, currentDirectory: folder, timeout: 90, input: Data((prompt + "\n\n" + String(decoding: data, as: UTF8.self)).utf8),
-                usage: .init(role: .verifier, assistant: assistant, model: model, mergeRequest: usageMergeRequest))
+                usage: .init(role: .verifier, assistant: assistant, model: model,
+                    mergeRequest: usageMergeRequest, purpose: .commentOrigin))
             guard output.exitCode == 0, !Task.isCancelled else { throw AssessmentError.failed }
             result = try Data(contentsOf: resultURL)
         } else {
@@ -199,7 +200,8 @@ enum AICommentOriginAssessor {
                 "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#, "--setting-sources", "", "--no-session-persistence",
                 "--output-format", "json", "--json-schema", String(decoding: schemaData, as: UTF8.self)],
                 environment: processEnvironment, currentDirectory: folder, timeout: 90, input: data,
-                usage: .init(role: .verifier, assistant: assistant, model: model, mergeRequest: usageMergeRequest))
+                usage: .init(role: .verifier, assistant: assistant, model: model,
+                    mergeRequest: usageMergeRequest, purpose: .commentOrigin))
             guard output.exitCode == 0, !Task.isCancelled else { throw AssessmentError.failed }
             struct Envelope: Decodable { let is_error: Bool?; let structured_output: AICommentOriginAssessment? }
             let envelope = try JSONDecoder().decode(Envelope.self, from: output.stdout)

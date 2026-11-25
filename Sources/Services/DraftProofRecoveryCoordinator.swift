@@ -64,6 +64,8 @@ final class DraftProofRecoveryCoordinator {
         var assessment: DraftProofRecoveryVerifier.Assessment? = nil
         var context: AttemptContext? = nil
         var retryAfter: Date? = nil
+        var retryFailures: Int? = nil
+        var verifierFailures: Int? = nil
         var repairTerminal: Bool? = nil
         var repairRetryAfter: Date? = nil
         var repairCodingPolicy: String? = nil
@@ -278,12 +280,14 @@ final class DraftProofRecoveryCoordinator {
             + "|" + origin.verificationID.uuidString)
         let request = Request(snapshot: snapshot, origin: origin, draftIDs: selected,
             configuration: configuration, context: context, id: id, stoppedRepairRunIDs: stoppedIDs, workRevision: workRevision)
-        let resume = previous.first {
+        let prior = previous.first {
             $0.id == id && $0.context?.key == context.key && $0.context?.originID == context.originID
                 && $0.context?.drafts == context.drafts && $0.context?.discussionFingerprint == context.discussionFingerprint
-        }?.pendingAssessment
+        }
         tasks[snapshot.work]?.cancel()
-        states[snapshot.work] = .init(id: id, phase: .checking, context: context, pendingAssessment: resume)
+        states[snapshot.work] = .init(id: id, phase: .checking, reason: prior?.reason, context: context,
+            retryFailures: prior?.retryFailures, verifierFailures: prior?.verifierFailures,
+            pendingAssessment: prior?.pendingAssessment)
         pending[snapshot.work] = request
         startNext()
     }
@@ -327,21 +331,30 @@ final class DraftProofRecoveryCoordinator {
                 do {
                     // Persist before invoking the verifier; a restart cannot silently repeat it.
                     try Task.checkCancellation()
-                    try writeAttempt(states[work] ?? .init(id: request.id, phase: .checking), request: request)
-                    record(request, state: .queued, message: String(localized: .DraftProofRecovery.draftProofRecoveryChecking))
+                    let attempt = states[work] ?? .init(id: request.id, phase: .checking)
+                    try writeAttempt(attempt, request: request)
+                    if attempt.reason == nil {
+                        record(request, state: .queued, message: String(localized: .DraftProofRecovery.draftProofRecoveryChecking))
+                    }
                     try await process(request)
                 } catch {
-                    guard !Task.isCancelled, states[work]?.id == request.id else { return }
+                    guard !Task.isCancelled, let prior = states[work], prior.id == request.id else { return }
                     let reason: String
                     if let blocked = error as? Blocked { reason = blocked.reason }
                     else { reason = GlabService.redactWorkflowEvidence(String(localized: .DraftProofRecovery.draftProofRecoveryFailed) + " " + String(describing: error)) }
-                    let semanticPending = states[work]?.pendingAssessment
+                    let priorFailures = prior.reason == reason ? prior.retryFailures ?? 0 : 0
+                    let failureCount = min(max(priorFailures, 0), 3) + 1
+                    var verifierFailures = prior.verifierFailures
+                    if case DraftProofRecoveryVerifier.Failure.failed = error {
+                        verifierFailures = min(max(verifierFailures ?? 0, 0), 1) + 1
+                    }
+                    let delay = canRetry(error, verifierFailures: verifierFailures ?? 0) ? Self.retryDelay(for: failureCount) : nil
                     states[work] = .init(id: request.id, phase: .blocked, reason: reason,
                         assessment: nil, context: request.context,
-                        retryAfter: error is Blocked || error is CancellationError ? nil : now().addingTimeInterval(ReadOnlyAssessmentRetry.cooldown),
-                        pendingAssessment: semanticPending)
+                        retryAfter: delay.map { now().addingTimeInterval($0) }, retryFailures: delay.map { _ in failureCount },
+                        verifierFailures: verifierFailures, pendingAssessment: prior.pendingAssessment)
                     saveAttempt(states[work]!, request: request)
-                    record(request, state: .failed, message: reason)
+                    if reason != prior.reason { record(request, state: .failed, message: reason) }
                 }
             }
         }
@@ -358,6 +371,20 @@ final class DraftProofRecoveryCoordinator {
     private struct EvidenceAuthenticationUnavailable: Error {}
     private struct VerifierUnavailable: Error, CustomStringConvertible {
         var description: String { String(localized: .DraftProofRecovery.draftProofRecoveryUnavailable) }
+    }
+
+    private func canRetry(_ error: any Error, verifierFailures: Int) -> Bool {
+        switch error {
+        case let read as GlabError: read.isTransientReadFailure
+        case is VerifierUnavailable, is EvidenceAuthenticationUnavailable, is AssistantUsageRunner.AccessError: true
+        case DraftProofRecoveryVerifier.Failure.unavailable, ProcessRunner.RunError.timedOut: true
+        case DraftProofRecoveryVerifier.Failure.failed: verifierFailures == 1
+        default: false
+        }
+    }
+
+    private static func retryDelay(for failures: Int) -> TimeInterval {
+        ReadOnlyAssessmentRetry.cooldown * Double(1 << (min(max(failures, 1), 4) - 1))
     }
     private struct Prepared {
         let snapshot: Snapshot
@@ -428,7 +455,23 @@ final class DraftProofRecoveryCoordinator {
         }
     }
 
-    private func prepare(_ input: Request) async throws -> Prepared {
+    private func retryEvidenceReads<Value>(_ input: Request, read: @MainActor () async throws -> Value) async throws -> Value {
+        let result: Result<Value, any Error> = try await ReadOnlyAssessmentRetry.run(isCurrent: { current(input) }, wait: retryWait) {
+            do { return .success(try await read()) }
+            catch let error as GlabError where error.isTransientReadFailure { throw error }
+            catch { return .failure(error) }
+        }
+        return try result.get()
+    }
+
+    private func evidenceHash(_ snapshot: Snapshot, file: FollowUpVerification.FileEvidence) async throws -> String {
+        do { return try await hashFile(snapshot, file) }
+        catch let error as GlabError where error.isNotFound {
+            throw Blocked(reason: String(localized: .DraftProofRecovery.draftProofRecoveryFileMissing))
+        }
+    }
+
+    private func readCurrentEvidence(_ input: Request) async throws -> (Snapshot, [FollowUpVerification.FileEvidence], String) {
         let snapshot = input.snapshot
         let live = try await fetch(snapshot)
         guard current(input), sameContext(snapshot, live), pipelineEvidence(snapshot.request) == pipelineEvidence(live.request),
@@ -437,7 +480,7 @@ final class DraftProofRecoveryCoordinator {
         }
         var files: [FollowUpVerification.FileEvidence] = []
         for file in input.origin.files {
-            let hash = try await hashFile(live, file)
+            let hash = try await evidenceHash(live, file: file)
             guard current(input) else { throw CancellationError() }
             files.append(.init(path: file.path, sha256: hash))
         }
@@ -445,6 +488,12 @@ final class DraftProofRecoveryCoordinator {
               FollowUpVerificationStore.validRecoveryEvidence(headSHA: head, files: files, origin: input.origin) else {
             throw Blocked(reason: String(localized: .DraftProofRecovery.draftProofRecoverySourceChanged))
         }
+        return (live, files, head)
+    }
+
+    private func prepare(_ input: Request) async throws -> Prepared {
+        let snapshot = input.snapshot
+        let (live, files, head) = try await retryEvidenceReads(input) { try await readCurrentEvidence(input) }
         let model = input.configuration.assistant == .codex
             ? input.configuration.codexVerificationModel.rawValue : input.configuration.claudeVerificationModel.rawValue
         guard await AssistantJobJournal.loadKey() else { throw EvidenceAuthenticationUnavailable() }
@@ -478,17 +527,24 @@ final class DraftProofRecoveryCoordinator {
             context: Self.pendingAssessmentDomain)
         states[snapshot.work]?.pendingAssessment = pending
         try writeAttempt(states[snapshot.work]!, request: input)
+        let (final, fingerprint) = try await retryEvidenceReads(input) { try await revalidate(input, files: files) }
+        return Prepared(snapshot: final, files: files, assessment: assessment, model: model, head: head, fingerprint: fingerprint)
+    }
+
+    private func revalidate(_ input: Request, files: [FollowUpVerification.FileEvidence]) async throws -> (Snapshot, String) {
+        let snapshot = input.snapshot
         let final = try await fetch(snapshot)
         guard current(input), sameContext(snapshot, final), matchesOwnership(final, origin: input.origin, draftIDs: input.draftIDs),
+              pipelineEvidence(snapshot.request) == pipelineEvidence(final.request),
               let fingerprint = ReviewVerdict.fingerprint(final.discussions) else {
             throw Blocked(reason: String(localized: .DraftProofRecovery.draftProofRecoveryChanged))
         }
         for file in files {
-            guard try await hashFile(final, file) == file.sha256, current(input) else {
+            guard try await evidenceHash(final, file: file) == file.sha256, current(input) else {
                 throw Blocked(reason: String(localized: .DraftProofRecovery.draftProofRecoverySourceChanged))
             }
         }
-        return Prepared(snapshot: final, files: files, assessment: assessment, model: model, head: head, fingerprint: fingerprint)
+        return (final, fingerprint)
     }
 
     private func pendingAssessmentDigest(_ pending: PendingAssessment, request: Request) throws -> Data {
@@ -503,11 +559,7 @@ final class DraftProofRecoveryCoordinator {
 
     private func process(_ input: Request) async throws {
         let snapshot = input.snapshot
-        let checked: Result<Prepared, Blocked> = try await ReadOnlyAssessmentRetry.run(isCurrent: { current(input) }, wait: retryWait) {
-            do { return .success(try await prepare(input)) }
-            catch let blocked as Blocked { return .failure(blocked) }
-        }
-        let prepared = try checked.get()
+        let prepared = try await prepare(input)
         let assessment = prepared.assessment
         states[snapshot.work]?.assessment = assessment
         try writeAttempt(states[snapshot.work]!, request: input)
@@ -753,7 +805,7 @@ final class DraftProofRecoveryCoordinator {
         var bound = attempt
         bound.context = request.context
         if bound.phase == .checking, bound.assessment == nil {
-            bound.retryAfter = now().addingTimeInterval(ReadOnlyAssessmentRetry.cooldown)
+            bound.retryAfter = now().addingTimeInterval(Self.retryDelay(for: bound.retryFailures ?? 1))
         }
         return persistAttempt(bound, work: request.snapshot.work, username: request.snapshot.user.username)
     }

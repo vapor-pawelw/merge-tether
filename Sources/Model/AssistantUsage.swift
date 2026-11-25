@@ -4,6 +4,34 @@ enum AssistantUsageRole: String, Codable, CaseIterable, Sendable {
     case codingAgent, verifier
 }
 
+enum AssistantUsagePurpose: String, Codable, CaseIterable, Sendable {
+    case authorFeedback, reReview, manualFeedback, draftProofRecovery, commentOrigin, noticeClassification, issueAssessment
+
+    var title: LocalizedStringResource {
+        switch self {
+        case .authorFeedback: .AssistantUsage.assistantUsagePurposeAuthorFeedback
+        case .reReview: .AssistantUsage.assistantUsagePurposeReReview
+        case .manualFeedback: .AssistantUsage.assistantUsagePurposeManualFeedback
+        case .draftProofRecovery: .AssistantUsage.assistantUsagePurposeDraftProof
+        case .commentOrigin: .AssistantUsage.assistantUsagePurposeCommentOrigin
+        case .noticeClassification: .AssistantUsage.assistantUsagePurposeNotice
+        case .issueAssessment: .AssistantUsage.assistantUsagePurposeIssue
+        }
+    }
+}
+
+enum AssistantUsageEstimateIssue: String, Codable, CaseIterable, Sendable {
+    case incompleteUsage, missingUsage, unpricedModel
+
+    var title: LocalizedStringResource {
+        switch self {
+        case .incompleteUsage: .AssistantUsage.assistantUsageIncompleteUsage
+        case .missingUsage: .AssistantUsage.assistantUsageMissingUsage
+        case .unpricedModel: .AssistantUsage.assistantUsageUnpricedModel
+        }
+    }
+}
+
 extension AutomationAssistant {
     var usageLabel: LocalizedStringResource {
         switch self {
@@ -82,9 +110,12 @@ enum AssistantUsageParser {
             guard header.type == "turn.completed" else { continue }
             guard let event = try? JSONDecoder().decode(Event.self, from: bytes),
                   let usage = event.usage, usage.input_tokens >= 0, usage.cached_input_tokens >= 0,
-                  usage.output_tokens >= 0, usage.cached_input_tokens <= usage.input_tokens,
-                  let combined = tokens.adding(.init(input: usage.input_tokens,
-                    cachedInput: usage.cached_input_tokens, output: usage.output_tokens)) else { return unknown }
+                  usage.output_tokens >= 0, usage.cached_input_tokens <= usage.input_tokens else {
+                failed = true
+                continue
+            }
+            guard let combined = tokens.adding(.init(input: usage.input_tokens,
+                cachedInput: usage.cached_input_tokens, output: usage.output_tokens)) else { return unknown }
             tokens = combined
             found = true
         }

@@ -113,6 +113,14 @@ enum ReReviewVerifier {
         /// must not raise new concerns about them.
         var priorAssessment: PriorAssessment? = nil
         var resolvedOverviewReplyEvidence: [GitLabMergeRequestDiscussion]? = nil
+        var usagePurpose: AssistantUsagePurpose? = nil
+        var usageCorrelationID: UUID? = nil
+
+        private enum CodingKeys: String, CodingKey {
+            case authorID, headSHA, title, description, diff, discussions, target, semanticContextFingerprint
+            case thinking, blockedFollowUps, ignoredSuggestions, completedFollowUp, excludedReplyAuthorIDs
+            case priorAssessment, resolvedOverviewReplyEvidence
+        }
 
         var discussionsWithReplyEvidence: [GitLabMergeRequestDiscussion] {
             discussions + (resolvedOverviewReplyEvidence ?? [])
@@ -617,6 +625,9 @@ enum ReReviewVerifier {
             AssistantUsageMergeRequest(host: $0.host, username: $0.expectedUsername, projectID: $0.projectID, iid: $0.iid,
                 title: input.title, url: $0.url.absoluteString)
         }
+        let usage = AssistantUsageRunner.Context(role: .verifier, assistant: assistant, model: model,
+            mergeRequest: usageMergeRequest, purpose: input.usagePurpose ?? .reReview,
+            correlationID: input.usageCorrelationID)
         let environment = await verificationEnvironment
         if assistant == .codex {
             let schemaURL = folder.appending(path: "schema.json")
@@ -629,7 +640,7 @@ enum ReReviewVerifier {
                 "--disable", "memories", "--output-schema", schemaURL.path, "-o", outputURL.path, "-"],
                 environment: environment, currentDirectory: folder, timeout: TimeInterval(verificationBudgetSeconds),
                 input: Data((prompt + "\n\n" + evidence).utf8),
-                usage: .init(role: .verifier, assistant: assistant, model: model, mergeRequest: usageMergeRequest))
+                usage: usage)
             guard output.exitCode == 0, !Task.isCancelled else { throw VerificationError.failed }
             result = try Data(contentsOf: outputURL)
         } else {
@@ -639,7 +650,7 @@ enum ReReviewVerifier {
                 "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
                 "--setting-sources", "", "--no-session-persistence", "--output-format", "json", "--json-schema", constrainedSchema],
                 environment: environment, currentDirectory: folder, timeout: TimeInterval(verificationBudgetSeconds), input: Data(evidence.utf8),
-                usage: .init(role: .verifier, assistant: assistant, model: model, mergeRequest: usageMergeRequest))
+                usage: usage)
             guard output.exitCode == 0, !Task.isCancelled else { throw VerificationError.failed }
             struct Envelope: Decodable {
                 let is_error: Bool?

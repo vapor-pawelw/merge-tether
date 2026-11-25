@@ -337,6 +337,55 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się potwierdzić prośby o ponowny przegląd"}}
       }
     },
+    "menu.workflow.blocker.commits": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "GitLab requires a source branch with commits."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "GitLab wymaga gałęzi źródłowej zawierającej commity."}}
+      }
+    },
+    "menu.workflow.blocker.jira": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "The title or description must reference a Jira issue."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Tytuł lub opis musi zawierać odniesienie do zgłoszenia w Jirze."}}
+      }
+    },
+    "menu.workflow.blocker.mergeable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "GitLab reports that the branches can merge cleanly."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "GitLab zgłasza, że gałęzie można scalić bez konfliktów."}}
+      }
+    },
+    "menu.workflow.blocker.mergeTime": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "GitLab is waiting for the configured merge time."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "GitLab czeka na wyznaczony czas scalenia."}}
+      }
+    },
+    "menu.workflow.blocker.rebase": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Rebase the source branch before merging."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Przed scaleniem wykonaj rebase gałęzi źródłowej."}}
+      }
+    },
+    "menu.workflow.blocker.statusChecks": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "External status checks must pass before merging."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Przed scaleniem muszą przejść zewnętrzne sprawdzenia stanu."}}
+      }
+    },
+    "menu.workflow.blocker.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "The merge request title must match the project rule."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Tytuł merge requesta musi pasować do reguły projektu."}}
+      }
+    },
     "menu.workflow.state.waitingForAssistant": {
       "extractionState": "manual",
       "localizations": {

@@ -161,7 +161,8 @@ enum DraftProofRecoveryVerifier {
                 "--disable", "apps", "--disable", "plugins", "--disable", "memories", "--output-schema", schemaURL.path, "-o", resultURL.path, "-"],
                 environment: environment, currentDirectory: folder, timeout: 240,
                 input: Data((prompt + "\n\n" + String(decoding: data, as: UTF8.self)).utf8),
-                usage: .init(role: .verifier, assistant: assistant, model: model, mergeRequest: usageMergeRequest))
+                usage: .init(role: .verifier, assistant: assistant, model: model,
+                    mergeRequest: usageMergeRequest, purpose: .draftProofRecovery, correlationID: origin.runID))
             guard output.exitCode == 0, !Task.isCancelled else { throw Failure.failed }
             result = try Data(contentsOf: resultURL)
         } else {
@@ -170,7 +171,8 @@ enum DraftProofRecoveryVerifier {
                 "--settings", #"{"sandbox":{"enabled":false}}"#, "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
                 "--setting-sources", "", "--no-session-persistence", "--output-format", "json", "--json-schema", String(decoding: schemaData, as: UTF8.self)],
                 environment: environment, currentDirectory: folder, timeout: 240, input: data,
-                usage: .init(role: .verifier, assistant: assistant, model: model, mergeRequest: usageMergeRequest))
+                usage: .init(role: .verifier, assistant: assistant, model: model,
+                    mergeRequest: usageMergeRequest, purpose: .draftProofRecovery, correlationID: origin.runID))
             guard output.exitCode == 0, !Task.isCancelled else { throw Failure.failed }
             struct Envelope: Decodable { let is_error: Bool?; let structured_output: Assessment? }
             let envelope = try JSONDecoder().decode(Envelope.self, from: output.stdout)

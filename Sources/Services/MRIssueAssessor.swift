@@ -232,7 +232,7 @@ enum MRIssueAssessor {
             mergeRequest: requests.count == 1 ? requests.first.map {
                 .init(host: $0.target.host, username: $0.target.username, projectID: $0.request.projectID,
                       iid: $0.request.iid, title: $0.request.title, url: $0.request.webURL.absoluteString)
-            } : nil)
+            } : nil, purpose: .issueAssessment)
         let environment = AgentProcessEnvironment.readOnly(AssistantCLI.environment)
         let result: Response
         if assistant == .codex {

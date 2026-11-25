@@ -49,6 +49,13 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Pliki źródłowe lub testy w repozytorium różnią się od tych zapisanych w danych z weryfikacji. Przejrzyj zmiany przed ponownym sprawdzeniem szkiców."}}
       }
     },
+    "draftProofRecoveryFileMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "GitLab could not find a source or test file needed to verify this draft at the current commit. Review the draft or verify it again when the evidence is available."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "GitLab nie znalazł w bieżącym commicie pliku źródłowego lub testu potrzebnego do zweryfikowania szkicu. Przejrzyj szkic lub zweryfikuj go ponownie, gdy plik będzie dostępny."}}
+      }
+    },
     "draftProofRecoveryFailed": {
       "extractionState": "manual",
       "localizations": {

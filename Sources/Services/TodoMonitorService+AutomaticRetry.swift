@@ -90,6 +90,19 @@ extension TodoMonitorService {
               let expected = job.expectedHeadSHA, GlabService.isFullGitSHA(expected) else { return .deferred }
         guard head == expected else { return .obsolete }
         if job.taskIntent == .conflictResolution, !request.hasMergeConflict { return .obsolete }
+        let origin = job.workflowEventKind ?? AssistantAutomationRunner.originatingWorkflowEvent(for: job, settings: settings)
+        if origin == .blockerChange, job.taskIntent != .conflictResolution {
+            guard let diagnosis = AssistantAutomationRunner.originatingBlockerDiagnosis(for: job, settings: settings) else { return .obsolete }
+            do {
+                try await glab.verifyMergeBlocker(diagnosis, in: request, host: job.key.work.host)
+            } catch is MergeBlockerDiagnosis.Superseded {
+                return .obsolete
+            } catch AssistantJobExecutor.ExecutionError.contextUnavailable {
+                return .deferred
+            }
+            guard glab.accountRevision == revision, settings.automation == configuration,
+                  !Task.isCancelled, !retryWasStopped(job.id) else { return retryWasStopped(job.id) ? .obsolete : .deferred }
+        }
         if let priorID = job.pipelineReservation?.pipelineID ?? job.foreignPipelineDiagnosis?.pipelineID {
             guard let pipeline = request.headPipeline, let currentID = pipeline.id else { return .deferred }
             if currentID != priorID || pipeline.status == "success" { return .obsolete }
@@ -127,7 +140,7 @@ extension TodoMonitorService {
             case AssistantAutomationRunner.HandoffError.pipelinePassed(_),
                  AssistantAutomationRunner.HandoffError.pipelineSuperseded(_),
                  AssistantJobExecutor.ExecutionError.inactiveMergeRequest,
-                 AssistantJobExecutor.ExecutionError.headChanged:
+                 AssistantJobExecutor.ExecutionError.headChanged, is MergeBlockerDiagnosis.Superseded:
                 return .obsolete
             default: throw error
             }

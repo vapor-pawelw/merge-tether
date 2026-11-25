@@ -89,6 +89,31 @@ struct AssistantWorkerAdmissionTests {
         #expect(f.gitlab.requests.allSatisfy { $0.method == "GET" })
     }
 
+    @Test(arguments: ["external", "busy-project", "own-account", "wrong-ref", "wrong-project", "stale-event", "ambiguous", "truncated-window"])
+    func onlyAnExactlyAttributedExternalPushObsoletesTheReviewWithoutPausing(_ scenario: String) async throws {
+        let f = try Fixture(assistant: .codex, scenario: "audit-push-\(scenario)")
+        defer { f.clean() }
+        let target = f.handoff.key.automationTarget
+        let attributed = scenario == "external" || scenario == "busy-project"
+        do {
+            _ = try await AssistantJobExecutor.execute(f.handoff, settings: f.settings, glab: f.glab,
+                pipelineWorkDetector: f.claims, detectCLI: { _ in .ready(f.cli) })
+            Issue.record("The review of the old source head cannot complete")
+        } catch let failure as AssistantJobFailure {
+            let expected: AssistantJobExecutor.ExecutionError = attributed ? .headChanged : .unexpectedRemoteEffects
+            #expect(failure.description == expected.description)
+        }
+        let reopened = SettingsManager(defaults: f.defaults)
+        #expect((reopened.effectiveAutomationScope[target] == .paused) == !attributed)
+        #expect((reopened.assistantHandoffs[0].execution?.remoteEffects ?? []).contains(.sourceHead) == !attributed)
+        let sourceChange = try #require(reopened.assistantHandoffs[0].execution?.sourceHeadChange)
+        #expect(sourceChange.previousSHA == f.head)
+        #expect(sourceChange.currentSHA == String(repeating: "b", count: 40))
+        #expect(try #require(sourceChange.previousObservation) <= sourceChange.currentObservation)
+        #expect(sourceChange.pushActorID == (attributed ? 2 : (scenario == "own-account" ? 1 : nil)))
+        #expect(f.gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
     @Test(arguments: AutomationAssistant.allCases)
     func aReplyWorkerSuppliesPublicationEvidenceThroughItsStructuredResult(_ assistant: AutomationAssistant) async throws {
         let f = try Fixture(assistant: assistant, scenario: "reply-assessment")
@@ -201,6 +226,7 @@ struct AssistantWorkerAdmissionTests {
         let scenario: String
         var baselineReads = 0
         var auditReadRecovered = false
+        var pushedAt: Date?
         var labels = ["eligible"]
         var targetBranch = "main"
         var pipelineStatus = "failed"
@@ -296,20 +322,46 @@ struct AssistantWorkerAdmissionTests {
                 #expect(call.method == "GET")
                 let workerRan = FileManager.default.fileExists(atPath: cli.path + ".started")
                 let fullEffectChange = ["audit-observed", "audit-failed", "audit-changed-account", "audit-missing-approvals"].contains(scenario)
+                let sourceHeadChanged = fullEffectChange || allowedPush || scenario.hasPrefix("audit-push-")
+                let newHead = String(repeating: "b", count: 40)
                 let actorID = scenario == "audit-other-account" ? 2 : 1
                 if call.endpoint == "/user" {
                     return try InMemoryGitLab.json(["id": workerRan && scenario == "audit-changed-account" ? 9 : 1, "username": "me"])
                 }
                 if call.endpoint == "/projects/7/merge_requests/11" {
                     if scenario.hasSuffix("baseline-unavailable"), baselineReads > 0, !workerRan { throw GlabError.timedOut }
+                    if workerRan, sourceHeadChanged, pushedAt == nil { pushedAt = .now }
                     var payload: [String: Any] = ["project_id":7,"iid":11,"source_project_id":7,"target_project_id":7,
                         "author":["id":authored ? 1 : 2,"username":authored ? "me" : "other","name":"Author"],
                         "title":"Fixture","web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened",
-                        "draft":false,"sha":workerRan && (fullEffectChange || allowedPush) ? String(repeating: "b", count: 40) : head,
+                        "draft":false,"sha":workerRan && sourceHeadChanged ? newHead : head,
                         "source_branch":"feature","target_branch":targetBranch,"labels":labels]
                     if pipeline && pipelineStatus != "missing" { payload["head_pipeline"] = ["id":pipelineID,"project_id":7,"status":pipelineStatus,"sha":head,"ref":"feature"] }
                     if scenario == "follow-up-advanced-head" && threadResolved { payload["sha"] = String(repeating: "b", count: 40) }
                     return try InMemoryGitLab.json(payload)
+                }
+                if call.endpoint.hasPrefix("/projects/7/events?") {
+                    guard scenario.hasPrefix("audit-push-"), let pushedAt else { return InMemoryGitLab.output("[]") }
+                    let formatter = ISO8601DateFormatter()
+                    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                    let timestamp = scenario == "audit-push-stale-event" ? pushedAt.addingTimeInterval(-3600) : pushedAt
+                    let event: [String: Any] = [
+                        "project_id": scenario == "audit-push-wrong-project" ? 8 : 7,
+                        "author_id": scenario == "audit-push-own-account" ? 1 : 2,
+                        "created_at": formatter.string(from: timestamp),
+                        "push_data": ["action": "pushed", "ref_type": "branch",
+                            "ref": scenario == "audit-push-wrong-ref" ? "another-branch" : "feature",
+                            "commit_from": head, "commit_to": newHead]
+                    ]
+                    if scenario == "audit-push-busy-project" || scenario == "audit-push-truncated-window" {
+                        var unrelated = event
+                        unrelated["push_data"] = ["ref_type": "branch", "ref": "unrelated"]
+                        if scenario == "audit-push-busy-project" {
+                            unrelated["created_at"] = formatter.string(from: pushedAt.addingTimeInterval(-3600))
+                        }
+                        return try InMemoryGitLab.json([event] + Array(repeating: unrelated, count: 99))
+                    }
+                    return try InMemoryGitLab.json(scenario == "audit-push-ambiguous" ? [event, event] : [event])
                 }
                 if call.endpoint.contains("/draft_notes") {
                     baselineReads += 1

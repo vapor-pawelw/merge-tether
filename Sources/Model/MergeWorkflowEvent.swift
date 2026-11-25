@@ -22,6 +22,113 @@ struct MergeWorkflowEvent: Codable, Sendable {
     var isInfrastructureFailure = false
     var noteIDs: [Int] = []
     var failedPipelineJobIDs: [Int]? = nil
+    var leftMergeTrain: Bool? = nil
+
+    var blockerDiagnosis: MergeBlockerDiagnosis? {
+        guard kind == .blockerChange else { return nil }
+        return .init(request: mergeRequest, leftMergeTrain: leftMergeTrain == true)
+    }
+
+    var blockerExplanation: LocalizedStringResource? {
+        guard kind == .blockerChange, leftMergeTrain != true else { return nil }
+        switch mergeRequest.detailedMergeStatus {
+        case "ci_must_pass": return .MergeActions.mergeActionsPipeline
+        case "commits_status": return .Menu.menuWorkflowBlockerCommits
+        case "conflict": return .MergeActions.mergeActionsConflicts
+        case "discussions_not_resolved": return .MergeActions.mergeActionsDiscussions
+        case "draft_status": return .MergeActions.mergeActionsDraft
+        case "jira_association_missing": return .Menu.menuWorkflowBlockerJira
+        case "mergeable": return .Menu.menuWorkflowBlockerMergeable
+        case "merge_time": return .Menu.menuWorkflowBlockerMergeTime
+        case "need_rebase": return .Menu.menuWorkflowBlockerRebase
+        case "not_approved": return .MergeActions.mergeActionsApprovals
+        case "requested_changes": return .MergeActions.mergeActionsChangesRequested
+        case "status_checks_must_pass": return .Menu.menuWorkflowBlockerStatusChecks
+        case "title_regex": return .Menu.menuWorkflowBlockerTitle
+        default: return nil
+        }
+    }
+}
+
+/// Identifies the same diagnostic independently of the number of events GitLab reports.
+struct MergeBlockerDiagnosis: Codable, Equatable, Sendable {
+    struct Superseded: Error {}
+
+    private static let diagnosticStatuses: Set<String> = [
+        "blocked_status", "external_status_checks", "merge_request_blocked",
+        "security_policy_violations", "locked_paths", "locked_lfs_files"
+    ]
+    private static let checkingStatuses: Set<String> = ["approvals_syncing", "checking", "preparing", "unchecked"]
+
+    let leftMergeTrain: Bool
+    private let status: String?
+    private let head: String
+    private let sourceProjectID: Int?
+    private let sourceBranch: String
+    private let targetProjectID: Int?
+    private let targetBranch: String
+    private let targetBase: String?
+    private let diffStart: String?
+    private let trainPipelineID: Int?
+
+    init?(request: GitLabMergeRequest, leftMergeTrain: Bool) {
+        let status = request.detailedMergeStatus
+        guard let head = request.sha, GlabService.isFullGitSHA(head),
+              leftMergeTrain || status.map(Self.diagnosticStatuses.contains) == true else { return nil }
+        self.leftMergeTrain = leftMergeTrain
+        self.status = leftMergeTrain ? nil : status
+        self.head = head
+        sourceProjectID = request.sourceProjectID
+        sourceBranch = request.sourceBranch
+        targetProjectID = request.targetProjectID
+        targetBranch = request.targetBranch
+        targetBase = request.diffRefs?.baseSHA
+        diffStart = request.diffRefs?.startSHA
+        trainPipelineID = leftMergeTrain ? request.headPipeline?.id : nil
+    }
+
+    func validate(_ request: GitLabMergeRequest) throws {
+        guard request.state == "opened", head == request.sha, sourceBranch == request.sourceBranch,
+              targetBranch == request.targetBranch,
+              Self.compatible(sourceProjectID, request.sourceProjectID),
+              Self.compatible(targetProjectID, request.targetProjectID),
+              Self.compatible(targetBase, request.diffRefs?.baseSHA),
+              Self.compatible(diffStart, request.diffRefs?.startSHA),
+              Self.compatible(trainPipelineID, request.headPipeline?.id) else { throw Superseded() }
+        guard Self.matches(sourceProjectID, request.sourceProjectID),
+              Self.matches(targetProjectID, request.targetProjectID),
+              Self.matches(targetBase, request.diffRefs?.baseSHA),
+              Self.matches(diffStart, request.diffRefs?.startSHA),
+              Self.matches(trainPipelineID, request.headPipeline?.id) else {
+            throw AssistantJobExecutor.ExecutionError.contextUnavailable
+        }
+        if !leftMergeTrain {
+            guard let currentStatus = request.detailedMergeStatus, !Self.checkingStatuses.contains(currentStatus) else {
+                throw AssistantJobExecutor.ExecutionError.contextUnavailable
+            }
+            guard status == currentStatus else { throw Superseded() }
+        }
+    }
+
+    func isEquivalent(to other: Self) -> Bool {
+        leftMergeTrain == other.leftMergeTrain && status == other.status && head == other.head
+            && sourceBranch == other.sourceBranch && targetBranch == other.targetBranch
+            && Self.compatible(sourceProjectID, other.sourceProjectID)
+            && Self.compatible(targetProjectID, other.targetProjectID)
+            && Self.compatible(targetBase, other.targetBase)
+            && Self.compatible(diffStart, other.diffStart)
+            && Self.compatible(trainPipelineID, other.trainPipelineID)
+    }
+
+    private static func matches<Value: Equatable>(_ expected: Value?, _ actual: Value?) -> Bool {
+        expected == nil || expected == actual
+    }
+
+    // A list response can omit evidence present on the single-MR response.
+    // An omitted value alone does not make a repeated event new work.
+    private static func compatible<Value: Equatable>(_ first: Value?, _ second: Value?) -> Bool {
+        first == nil || second == nil || first == second
+    }
 }
 
 struct GitLabMergeRequestReviewer: Decodable, Sendable {

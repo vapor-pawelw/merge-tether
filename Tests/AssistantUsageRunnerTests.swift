@@ -4,6 +4,39 @@ import Testing
 
 @Suite("Assistant usage process capture")
 struct AssistantUsageRunnerTests {
+    @Test("Verifier requests record their purpose, originating attempt, and estimate diagnostic")
+    func verifierAttributionAndEstimateDiagnostics() async throws {
+        let file = temporaryFile()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let store = AssistantUsageStore(file: file)
+        let target = AssistantUsageMergeRequest(host: "gitlab.example.test", username: "me", projectID: 7, iid: 11)
+        let attempt = UUID()
+        let turn = #"{"type":"turn.completed","usage":{"input_tokens":1000000,"cached_input_tokens":0,"output_tokens":0}}"#
+        let error = #"{"type":"error","message":"provider interruption"}"#
+
+        _ = try await AssistantUsageRunner.run(URL(fileURLWithPath: "/usr/bin/printf"),
+            arguments: ["%s\n", error, turn], environment: [:],
+            usage: .init(role: .verifier, assistant: .codex, model: "gpt-6-luna", mergeRequest: target,
+                purpose: .draftProofRecovery, correlationID: attempt), store: store)
+        _ = try await AssistantUsageRunner.run(URL(fileURLWithPath: "/bin/echo"),
+            arguments: [turn], environment: [:],
+            usage: .init(role: .verifier, assistant: .codex, model: "unpriced-fixture", mergeRequest: target,
+                purpose: .reReview), store: store)
+        _ = try await AssistantUsageRunner.run(URL(fileURLWithPath: "/bin/echo"),
+            arguments: ["no usage"], environment: [:],
+            usage: .init(role: .verifier, assistant: .claude, mergeRequest: target,
+                purpose: .commentOrigin), store: store)
+
+        let snapshot = try await AssistantUsageStore(file: file).snapshot()
+        let total = snapshot.total(for: target, role: .verifier)
+        #expect(total.estimatedUSD == 0.1 && total.unknownCostRuns == 3)
+        #expect(total.estimateIssues == [.incompleteUsage: 1, .unpricedModel: 1, .missingUsage: 1])
+        let entries = snapshot.recentVerifierRequests(for: target)
+        #expect(entries.count == 3)
+        #expect(entries.first { $0.purpose == .draftProofRecovery }?.correlationID == attempt)
+        #expect(entries.first { $0.purpose == .draftProofRecovery }?.total.inputTokens == 1_000_000)
+    }
+
     @MainActor @Test func latePersistenceHoldPreventsTheExecutableAfterUsagePreparation() async throws {
         // given
         let file = temporaryFile()

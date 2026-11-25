@@ -1,6 +1,16 @@
 import Foundation
 import Observation
 
+extension GlabService {
+    func verifyMergeBlocker(_ diagnosis: MergeBlockerDiagnosis, in request: GitLabMergeRequest, host: String) async throws {
+        try diagnosis.validate(request)
+        if diagnosis.leftMergeTrain {
+            let active = try await fetchActiveMergeTrainIIDs(projectID: request.projectID, host: host)
+            guard !active.contains(request.iid) else { throw MergeBlockerDiagnosis.Superseded() }
+        }
+    }
+}
+
 enum MergeWorkflowActivityState: String, Codable {
     case preview, notified, awaitingPipelineHandoff, alreadyRegistered, queued, running, waitingForAssistant, completed, failed, skipped
 }
@@ -218,7 +228,8 @@ final class MergeWorkflowAutomation {
                 }
             } else if entry.state == .queued, entry.assistantJobID == nil,
                       entry.event.kind != .pipelineFailure,
-                      entry.event.kind == .reviewUpdate || entry.deferredForWorker == true || entry.deferredForCapacity == true {
+                      entry.event.kind == .reviewUpdate || entry.event.blockerDiagnosis != nil
+                        || entry.deferredForWorker == true || entry.deferredForCapacity == true {
                 continue
             }
             settings.workflowActivity[index].state = .skipped
@@ -421,7 +432,11 @@ final class MergeWorkflowAutomation {
         case .preview: entry.state = .preview
         case .notify: entry.state = .preview
         case .assistant:
-            if event.kind == .pipelineFailure {
+            if event.kind == .blockerChange {
+                if event.blockerDiagnosis.map({ hasEquivalentBlockerDiagnosis($0, for: entry) }) != false {
+                    entry.state = .preview
+                }
+            } else if event.kind == .pipelineFailure {
                 if let key = pipelineKey(entry) {
                     entry.state = pipelineDisposition(entry, key: key)
                 } else {
@@ -430,6 +445,9 @@ final class MergeWorkflowAutomation {
             }
         }
 
+        if entry.state == .preview, let explanation = event.blockerExplanation {
+            entry.summary = String(localized: explanation)
+        }
         if entry.state == .queued, !hasQueueCapacity {
             if event.kind == .reviewUpdate {
                 // The monitor has already recorded this update, so a later poll won't emit it again.
@@ -444,6 +462,29 @@ final class MergeWorkflowAutomation {
         settings.save()
     }
 
+    private func hasEquivalentBlockerDiagnosis(_ diagnosis: MergeBlockerDiagnosis, for entry: MergeWorkflowActivityEntry) -> Bool {
+        let target = workKey(entry)
+        return savedBlockerDiagnoses(for: entry).contains(diagnosis) || currentAdmissions.contains { previous in
+            guard previous.id != entry.id, workKey(previous) == target, previous.user == entry.user,
+                  previous.event.blockerDiagnosis == diagnosis else { return false }
+            if let jobID = previous.assistantJobID {
+                // New handoffs were already compared against their own fuller live evidence.
+                return !settings.assistantHandoffs.contains { $0.id == jobID && $0.blockerDiagnosis != nil }
+            }
+            let previouslyAdmitted = (previous.createdAt, previous.id) < (entry.createdAt, entry.id)
+            return previouslyAdmitted && (previous.isReadOnlyFailure
+                || [.queued, .running, .waitingForAssistant].contains(previous.state))
+        }
+    }
+
+    private func savedBlockerDiagnoses(for entry: MergeWorkflowActivityEntry) -> [MergeBlockerDiagnosis] {
+        let target = workKey(entry)
+        return settings.assistantHandoffs.compactMap { job in
+            guard job.key.work == target, job.key.username == entry.user.username else { return nil }
+            return job.blockerDiagnosis
+        }
+    }
+
     func startNext() {
         guard work == nil else { return }
         for entry in currentAdmissions where entry.state == .failed && entry.isReadOnlyFailure
@@ -456,6 +497,18 @@ final class MergeWorkflowAutomation {
         }
         for next in currentAdmissions.reversed() where next.state == .queued && next.assistantJobID == nil {
             let mode = configuredRule(for: next.event)?.mode
+            if next.event.kind == .blockerChange, mode == .assistant,
+               next.event.blockerDiagnosis.map({ hasEquivalentBlockerDiagnosis($0, for: next) }) != false {
+                mutate(next.id, ifCurrent: next) {
+                    $0.state = .preview
+                    $0.deferredForWorker = nil
+                    $0.deferredForCapacity = nil
+                    $0.waitingForCodingAssistant = nil
+                    $0.readOnlyFailure = nil
+                    $0.summary = $0.event.blockerExplanation.map { String(localized: $0) }
+                }
+                continue
+            }
             guard next.event.kind != .reviewWaiting, mode == .assistant else {
                 mutate(next.id, ifCurrent: next) {
                     $0.state = mode == .notify || mode == .preview ? .preview : .skipped
@@ -499,6 +552,8 @@ final class MergeWorkflowAutomation {
                         $0.state = noAgent ? .queued : .skipped
                         $0.waitingForCodingAssistant = noAgent ? true : nil
                     }
+                } catch is MergeBlockerDiagnosis.Superseded {
+                    update(next.id, .skipped, ifCurrent: next)
                 } catch AssistantJobExecutor.ExecutionError.headChanged where next.event.kind == .reviewUpdate {
                     update(next.id, .skipped, ifCurrent: next)
                     onRemoteChange?()
@@ -552,6 +607,7 @@ final class MergeWorkflowAutomation {
     private func execute(_ entry: MergeWorkflowActivityEntry, preparedReviewJobID: UUID?) async throws {
         let event = entry.event
         let original = event.mergeRequest
+        let blocker = event.blockerDiagnosis
         let assessmentConfiguration = settings.automation
         let assessmentAccountRevision = glab.accountRevision
         var assessmentTargetSHA: String?
@@ -571,6 +627,10 @@ final class MergeWorkflowAutomation {
                       self.settings.effectiveAutomationScope.permits(current, host: entry.host, username: entry.user.username),
                       self.configuredRule(for: event)?.includes(current) == true, self.shouldProceed(entry)
                 else { throw CancellationError() }
+                if let blocker {
+                    do { try await self.glab.verifyMergeBlocker(blocker, in: current, host: entry.host) }
+                    catch is MergeBlockerDiagnosis.Superseded { throw CancellationError() }
+                }
                 return current
             }
         } catch is CancellationError { throw CancellationError() }
@@ -715,6 +775,17 @@ final class MergeWorkflowAutomation {
               configuredRule(for: event)?.includes(current) == true,
               shouldProceed(entry), settingsBeforeLaunch.preservingScope(from: settings.automation) == settings.automation
         else { throw CancellationError() }
+        let currentBlocker = blocker.flatMap { MergeBlockerDiagnosis(request: current, leftMergeTrain: $0.leftMergeTrain) }
+        if let blocker {
+            do { try blocker.validate(current) }
+            catch AssistantJobExecutor.ExecutionError.contextUnavailable {
+                throw PrelaunchReadFailure(cause: AssistantJobExecutor.ExecutionError.contextUnavailable,
+                    configuration: settingsBeforeLaunch)
+            }
+            if let currentBlocker, savedBlockerDiagnoses(for: entry).contains(where: { $0.isEquivalent(to: currentBlocker) }) {
+                throw MergeBlockerDiagnosis.Superseded()
+            }
+        }
         if event.kind == .pipelineFailure {
             guard current.headPipeline?.id == event.pipelineID else { throw CancellationError() }
             _ = try await glab.verifiedFailedPipeline(for: current, host: entry.host, expectedUser: entry.user)
@@ -786,7 +857,7 @@ final class MergeWorkflowAutomation {
         }
         let isolation = mrWorkflow == .followUp ? "\n\n\(AssistantAutomationRunner.isolatedFixInstructions)" : ""
         let suppliedEvidence = readsInCodex ? "" : "\n\n<gitlab-evidence>\n" + evidence + "\n</gitlab-evidence>"
-        let bindLaunchSnapshot = event.kind == .reviewUpdate || entry.pipelineClaimAssessment != nil
+        let bindLaunchSnapshot = event.kind == .reviewUpdate || blocker != nil || entry.pipelineClaimAssessment != nil
             || failureAfterInfrastructureRetry != nil
         if let failureAfterInfrastructureRetry, let handoff {
             guard failureJobs(entry, request: current) == failureAfterInfrastructureRetry,
@@ -822,7 +893,8 @@ final class MergeWorkflowAutomation {
                 expectedHeadSHA: bindLaunchSnapshot || confirmation != nil ? current.sha : nil, jobCoordinator: jobCoordinator,
                 configurationSnapshot: bindLaunchSnapshot ? settingsBeforeLaunch : nil,
                 glab: glab.freshSession(), workflowEventKind: event.kind, pipelineHandoffConfirmation: confirmation,
-                preparedWorkflowReview: preparedReviewJobID.map { .init(jobID: $0, user: entry.user) }
+                preparedWorkflowReview: preparedReviewJobID.map { .init(jobID: $0, user: entry.user) },
+                blockerDiagnosis: currentBlocker
             )
         } catch let failure as AssistantAutomationRunner.ReviewAdmissionReadFailure where event.kind == .reviewUpdate {
             throw PrelaunchReadFailure(cause: failure.cause, configuration: settingsBeforeLaunch)
@@ -941,6 +1013,7 @@ final class MergeWorkflowAutomation {
     private func shouldProceed(_ entry: MergeWorkflowActivityEntry) -> Bool {
         settings.automaticWritesAllowed && ownsAdmission(entry)
             && entry.event.kind != .reviewWaiting && isCurrent(host: entry.host, user: entry.user)
+            && (entry.event.kind != .blockerChange || entry.event.blockerDiagnosis != nil)
             && configuredRule(for: entry.event)?.mode == .assistant
             && (entry.event.kind != .pipelineFailure || settings.automation.autoClaimPipelineFailures
                 || confirmedPipelineHandoffs.contains(entry.id))

@@ -283,8 +283,11 @@ enum MRDiscussionTimestamp {
     }()
     private static let wholeSeconds = ISO8601DateFormatter()
 
+    static func parse(_ raw: String) -> Date? {
+        fractional.date(from: raw) ?? wholeSeconds.date(from: raw)
+    }
+
     static func display(_ raw: String) -> String {
-        let date = fractional.date(from: raw) ?? wholeSeconds.date(from: raw)
-        return date?.formatted(date: .abbreviated, time: .shortened) ?? raw
+        parse(raw)?.formatted(date: .abbreviated, time: .shortened) ?? raw
     }
 }

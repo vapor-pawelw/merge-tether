@@ -4,12 +4,12 @@ import Testing
 
 @MainActor
 struct TodoMonitorAutomaticRetryTests {
-    @Test(arguments: ["current", "current-conflict"])
+    @Test(arguments: ["current", "current-conflict", "blocker-current"])
     func retryUsesFreshEvidenceAndTheSelectedProviderWithoutManualConsent(_ scenario: String) async throws {
         try await exercise(scenario)
     }
 
-    @Test(arguments: ["closed", "head", "pipeline-passed", "pipeline-replaced", "user-stopped", "user-failed", "user-interrupted", "late-user-interrupted", "resolved-conflict"])
+    @Test(arguments: ["closed", "head", "pipeline-passed", "pipeline-replaced", "user-stopped", "user-failed", "user-interrupted", "late-user-interrupted", "resolved-conflict", "blocker-cleared", "blocker-retargeted"])
     func obsoleteWorkDoesNotCreateAnotherRun(_ change: String) async throws {
         try await exercise(change)
     }
@@ -100,16 +100,28 @@ struct TodoMonitorAutomaticRetryTests {
         let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
         let pipeline = change.hasPrefix("pipeline-") || change.hasPrefix("claim-")
         let conflict = change.hasSuffix("-conflict")
+        let blocker = change.hasPrefix("blocker-")
+        let mergeStatus: String? = blocker ? (change == "blocker-cleared" ? "mergeable" : "security_policy_violations") : nil
         if conflict { settings.automation.conflictTasksEnabled = true; settings.automation.allowConflictPush = false }
-        let original = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .claude,
+        var original = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .claude,
             work: work, username: "me", workspace: "", access: .configuredTools), title: "Repair",
             prompt: "Historical data", createdAt: .now, allowsPush: false,
             pipelineReservation: pipeline ? .init(host: host, projectID: 1, mergeRequestIID: 2, pipelineID: 10) : nil,
             execution: .init(state: change == "user-stopped" ? .cancelled : (change == "user-interrupted" ? .interrupted : .failed),
                 finishedAt: .now, cancellationOrigin: change.hasPrefix("user-") ? .user : nil),
             taskPrompt: "Review current evidence", mergeRequestURL: URL(string: "https://\(host)/g/p/-/merge_requests/2"),
-            workflow: pipeline || conflict ? nil : .review, expectedHeadSHA: source,
-            taskIntent: conflict ? .conflictResolution : nil, workflowOriginKnown: true)
+            workflow: pipeline || conflict || blocker ? nil : .review, expectedHeadSHA: source,
+            taskIntent: conflict ? .conflictResolution : nil, workflowEventKind: blocker ? .blockerChange : nil, workflowOriginKnown: true)
+        if blocker {
+            let stored = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data("""
+            {"project_id":1,"iid":2,"author":{"id":7,"username":"me","name":"Me"},"title":"MR",
+            "web_url":"https://\(host)/g/p/-/merge_requests/2","state":"opened","draft":false,"sha":"\(source)",
+            "source_project_id":1,"source_branch":"feature","target_project_id":1,"target_branch":"main",
+            "detailed_merge_status":"security_policy_violations","labels":[]}
+            """.utf8))
+            let diagnosis: MergeBlockerDiagnosis = try #require(MergeBlockerDiagnosis(request: stored, leftMergeTrain: false))
+            original.blockerDiagnosis = diagnosis
+        }
         settings.assistantHandoffs = [original]
         if change == "disabled" { settings.automation.packageDecision = .disabled }
         if change == "ignored" { settings.ignoredMergeRequests.insert(target) }
@@ -140,7 +152,9 @@ struct TodoMonitorAutomaticRetryTests {
                 return try InMemoryGitLab.json([
                     "id": 2, "iid": 2, "project_id": 1, "title": "MR", "state": change == "closed" ? "closed" : "opened",
                     "author": ["id": conflict && change != "foreign-conflict" ? 7 : 9, "username": "author", "name": "Author"],
-                    "web_url": "https://\(host)/g/p/-/merge_requests/2", "source_branch": "feature", "target_branch": "main",
+                    "web_url": "https://\(host)/g/p/-/merge_requests/2", "source_branch": "feature",
+                    "target_branch": change == "blocker-retargeted" ? "release" : "main",
+                    "detailed_merge_status": mergeStatus as Any? ?? NSNull(),
                     "source_project_id": 1, "target_project_id": 1, "has_conflicts": conflict && change != "resolved-conflict",
                     "labels": [], "draft": false, "sha": change == "missing-head" ? NSNull() as Any : (change == "invalid-head" ? "invalid" : (change == "head" ? String(repeating: "b", count: 40) : source)),
                     "head_pipeline": ["id": change == "pipeline-replaced" ? 11 : 10, "project_id": 1,
@@ -229,9 +243,9 @@ struct TodoMonitorAutomaticRetryTests {
             #expect(settings.assistantAutomaticRetryAttempts.isEmpty && launches == 0)
         }
         switch result {
-        case .started(let child): #expect(["current", "current-conflict"].contains(change) && launches == 1 && child.retryOf == original.id)
-        case .obsolete: #expect(["closed", "head", "pipeline-passed", "pipeline-replaced", "user-stopped", "user-failed", "user-interrupted", "late-user-interrupted", "late-stop", "resolved-conflict", "retry-closed", "retry-head", "retry-pipeline-passed", "retry-pipeline-superseded"].contains(change) && launches == (change.hasPrefix("retry-") ? 1 : 0))
-        case .deferred: #expect(!["current", "current-conflict"].contains(change) && !["closed", "head", "pipeline-passed", "pipeline-replaced", "user-stopped", "user-failed", "user-interrupted", "late-user-interrupted", "retry-closed", "retry-head", "retry-pipeline-passed", "retry-pipeline-superseded"].contains(change) && launches == (change.hasPrefix("retry-") ? 1 : 0))
+        case .started(let child): #expect(["current", "current-conflict", "blocker-current"].contains(change) && launches == 1 && child.retryOf == original.id)
+        case .obsolete: #expect(["closed", "head", "pipeline-passed", "pipeline-replaced", "user-stopped", "user-failed", "user-interrupted", "late-user-interrupted", "late-stop", "resolved-conflict", "retry-closed", "retry-head", "retry-pipeline-passed", "retry-pipeline-superseded", "blocker-cleared", "blocker-retargeted"].contains(change) && launches == (change.hasPrefix("retry-") ? 1 : 0))
+        case .deferred: #expect(!["current", "current-conflict", "blocker-current"].contains(change) && !["closed", "head", "pipeline-passed", "pipeline-replaced", "user-stopped", "user-failed", "user-interrupted", "late-user-interrupted", "retry-closed", "retry-head", "retry-pipeline-passed", "retry-pipeline-superseded", "blocker-cleared", "blocker-retargeted"].contains(change) && launches == (change.hasPrefix("retry-") ? 1 : 0))
         case .failed: Issue.record("Unexpected retry failure")
         }
     }

@@ -54,7 +54,7 @@ enum GlabError: Error, Equatable, Sendable {
         let reason: String? = switch status {
         case 401: "unauthorized"
         case 403: "forbidden"
-        case 404: "not found"
+        case 404: #"(?:file\s+)?not found"#
         case 408: "request timeout"
         case 429: "too many requests"
         case 500: "internal server error"
