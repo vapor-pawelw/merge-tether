@@ -6,11 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
-- Fix a Reviewing card stuck on "Preparing review" with a running timer after its worker was cancelled or had already finished.
+- Recognize agent usage limits and sign-in problems from the CLIs' structured status instead of wording alone: Claude's API status, and Codex's account and rate-limit endpoints when a Codex run fails with an unrecognized message.
 
 - Add new review requests straight to Reviewing, marked **New**, instead of the inbox (Settings → General, on by default). Turn it off to keep them in the inbox, where **Add** tracks one and **Ignore this MR** discards it; automation does not pick up inbox candidates.
 
 - Add **Start reviewing new merge requests automatically** to the automation profile: on for Safe, Trusted and Max, off for Manual. When off, a new review waits with its automation paused until you start it from its card.
+
+- Fix a Reviewing card stuck on "Preparing review" with a running timer after its worker was cancelled or had already finished.
 
 - Stop asking for a review on merge requests you already approved: your current approval, given anywhere, accepts the code and discussions seen so far until the head or MR text changes.
 
