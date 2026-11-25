@@ -170,7 +170,6 @@ struct BoardAutomationToggle: View {
     var isDraft = false
     /// Saved policy for this MR, shown in the popover instead of on the card.
     var policy: MREffectivePolicyPresentation? = nil
-    var onClick: () -> Void = {}
     @State private var showingDetails = false
 
     private var editor: MRAutomationScopeEditor {
@@ -183,7 +182,6 @@ struct BoardAutomationToggle: View {
             let choice = editor.choice
             let help = Text(summary.active ? .Menu.menuScopeButtonHelpActive : .Menu.menuScopeButtonHelpPaused)
             Button {
-                onClick()
                 if NSEvent.modifierFlags.contains(.option) {
                     Task { await editor.toggle() }
                 } else {

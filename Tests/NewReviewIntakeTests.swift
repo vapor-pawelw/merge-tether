@@ -77,6 +77,42 @@ struct NewReviewIntakeTests {
     }
 
     @Test(arguments: [false, true])
+    func macCardClearsNewOnFirstClickAndOpensDetailsOnNextClick(confirmedAssignment: Bool) async throws {
+        try await fixture(preset: .manual) { monitor, settings in
+            settings.automation.startNewReviewsAutomatically = false
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(mergeRequestJSON.utf8))
+            settings.newReviewTargets.remove(target)
+            monitor.trackReviewCandidate(target, projectPath: request.webURL.gitLabProjectPath, markNew: !confirmedAssignment)
+            if confirmedAssignment {
+                settings.reviewAssignments.observe([], host: host, username: "alice", at: Date())
+                settings.reviewAssignments.observe([request], host: host, username: "alice", at: Date())
+            }
+
+            let item = MergeRequestAttentionMonitor.Item(id: .init(projectID: request.projectID, iid: request.iid),
+                title: request.title, url: request.webURL, mergeRequest: request)
+            @MainActor func row() -> MergeRequestBoardSnapshot.Row {
+                let assignedAt = settings.reviewAssignments.entries(host: host, username: "alice")?
+                    .first { $0.request.iid == request.iid }?.newSince
+                return .init(item: item, latestJob: nil, intents: [], newReviewAssignedAt: assignedAt)
+            }
+
+            var detailsOpened = 0
+            let newRow = row()
+            #expect((newRow.newReviewAssignedAt != nil) == confirmedAssignment)
+            try #require(monitor.isNewReviewAssignment(newRow))
+            CommandCenterMRCard(row: newRow, monitor: monitor) { detailsOpened += 1 }.activate()
+
+            #expect(detailsOpened == 0)
+            #expect(settings.heldNewReviewTargets.contains(target))
+            let seenRow = row()
+            #expect(!monitor.isNewReviewAssignment(seenRow))
+
+            CommandCenterMRCard(row: seenRow, monitor: monitor) { detailsOpened += 1 }.activate()
+            #expect(detailsOpened == 1)
+        }
+    }
+
+    @Test(arguments: [false, true])
     func phoneSharesTheNewBadgeAndCanAcknowledgeTheSameAssignment(confirmedAssignment: Bool) async throws {
         try await fixture(preset: .manual) { monitor, settings in
             settings.automation.startNewReviewsAutomatically = false

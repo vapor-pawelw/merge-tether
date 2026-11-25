@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 /// A containing sheet must release Escape while a child popover owns dismissal.
@@ -23,7 +22,6 @@ private struct BoardHeaderControlHover: ViewModifier {
 }
 
 struct BoardActionsMenu<Content: View>: View {
-    var onClick: (() -> Void)?
     @ViewBuilder var content: () -> Content
 
     var body: some View {
@@ -31,11 +29,6 @@ struct BoardActionsMenu<Content: View>: View {
             BoardCardActionIcon(systemName: "ellipsis")
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-        .background {
-            if let onClick {
-                BoardMenuTracking(action: onClick).allowsHitTesting(false)
-            }
-        }
         .boardHeaderControlHover()
         .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
         .help(Text(.CommandCenter.commandCenterActions))
@@ -43,57 +36,12 @@ struct BoardActionsMenu<Content: View>: View {
     }
 }
 
-/// Wait for the native menu to close so marking a card seen cannot remove the menu's anchor in the New filter.
-private struct BoardMenuTracking: NSViewRepresentable {
-    let action: () -> Void
-
-    func makeNSView(context: Context) -> Anchor {
-        let view = Anchor()
-        view.observeMenus()
-        return view
-    }
-
-    func updateNSView(_ view: Anchor, context: Context) {
-        view.action = action
-    }
-
-    static func dismantleNSView(_ view: Anchor, coordinator: ()) {
-        NotificationCenter.default.removeObserver(view)
-    }
-
-    final class Anchor: NSView {
-        var action: (() -> Void)?
-        private weak var openedMenu: NSMenu?
-
-        func observeMenus() {
-            NotificationCenter.default.addObserver(self, selector: #selector(menuOpened(_:)),
-                name: NSMenu.didBeginTrackingNotification, object: nil)
-            NotificationCenter.default.addObserver(self, selector: #selector(menuClosed(_:)),
-                name: NSMenu.didEndTrackingNotification, object: nil)
-        }
-
-        @objc private func menuOpened(_ notification: Notification) {
-            guard let window, let event = NSApp.currentEvent,
-                  event.type == .leftMouseDown || event.type == .leftMouseUp,
-                  event.window === window, !isHiddenOrHasHiddenAncestor,
-                  bounds.intersection(visibleRect).contains(convert(event.locationInWindow, from: nil)) else { return }
-            openedMenu = notification.object as? NSMenu
-        }
-
-        @objc private func menuClosed(_ notification: Notification) {
-            guard let openedMenu, notification.object as? NSMenu === openedMenu else { return }
-            self.openedMenu = nil
-            action?()
-        }
-    }
-}
-
 /// The background exposes a keyboard action; the fallback tap also covers static text.
 private struct BoardCardInteraction: ViewModifier {
     let background: Color?
     let backgroundOpacity: Double
-    let detailsLabel: LocalizedStringResource
-    let onDetails: () -> Void
+    let actionLabel: LocalizedStringResource
+    let onActivate: () -> Void
     @State private var isHovered = false
     @Environment(\.colorScheme) private var colorScheme
 
@@ -101,7 +49,7 @@ private struct BoardCardInteraction: ViewModifier {
         let dark = colorScheme == .dark
         content
             .background {
-                Button(action: onDetails) {
+                Button(action: onActivate) {
                     RoundedRectangle(cornerRadius: 8)
                         .fill(background ?? Color(white: dark ? 0.095 : 0.99))
                         .overlay {
@@ -112,10 +60,10 @@ private struct BoardCardInteraction: ViewModifier {
                         .contentShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(Text(detailsLabel))
+                .accessibilityLabel(Text(actionLabel))
             }
             .onHover { isHovered = $0 }
-            .onTapGesture(perform: onDetails)
+            .onTapGesture(perform: onActivate)
     }
 }
 
@@ -126,10 +74,11 @@ extension View {
 
     func boardCardInteraction(title: String, repositoryPath: String, iid: Int? = nil,
                               background: Color? = nil, backgroundOpacity: Double = 1,
-                              onDetails: @escaping () -> Void) -> some View {
+                              actionLabel: LocalizedStringResource? = nil,
+                              onActivate: @escaping () -> Void) -> some View {
         let reference = iid.map { "\(repositoryPath) !\($0)" } ?? repositoryPath
         return modifier(BoardCardInteraction(background: background, backgroundOpacity: backgroundOpacity,
-            detailsLabel: .Board.boardDetailsFor(title, reference), onDetails: onDetails))
+            actionLabel: actionLabel ?? .Board.boardDetailsFor(title, reference), onActivate: onActivate))
     }
 }
 

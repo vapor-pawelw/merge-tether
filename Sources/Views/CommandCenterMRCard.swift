@@ -9,10 +9,20 @@ struct CommandCenterMRCard: View {
     var onAttention: ((CommandCenterMRDetailSection) -> Void)? = nil
     let onDetails: () -> Void
 
+    private var isNewReview: Bool { monitor.isNewReviewAssignment(row) }
+
     var body: some View {
         CommandCenterMRCardContent(row: row, monitor: monitor, allowsRemoval: allowsRemoval,
-            onAttention: onAttention, onDetails: onDetails,
+            onAttention: onAttention, onDetails: onDetails, onActivate: activate, isNewReview: isNewReview,
             presentation: .init(row: row, monitor: monitor, allowsRemoval: allowsRemoval))
+    }
+
+    func activate() {
+        if isNewReview {
+            monitor.markReviewAssignmentSeen(row.displayItem)
+        } else {
+            onDetails()
+        }
     }
 }
 
@@ -22,6 +32,8 @@ private struct CommandCenterMRCardContent: View {
     var allowsRemoval = false
     var onAttention: ((CommandCenterMRDetailSection) -> Void)? = nil
     let onDetails: () -> Void
+    let onActivate: () -> Void
+    let isNewReview: Bool
     @State private var isStarting = false
     @State private var pendingPrimary: (title: LocalizedStringResource, cta: MRActionCTA?)?
     @State private var finishingCommentReview = false
@@ -47,9 +59,6 @@ private struct CommandCenterMRCardContent: View {
     private var humanAction: MRHumanAction? { presentation.humanAction }
 
     private var contentOpacity: Double { isDraft ? 0.5 : 1 }
-    private var isNewReview: Bool {
-        monitor.isNewReviewAssignment(row)
-    }
     private var showsInlineHide: Bool { isNewReview && row.waitsForReviewStart && reviewingContext.nextStep == .runReview }
     private var newReviewTint: Color {
         colorScheme == .dark ? Color(red: 0.38, green: 0.88, blue: 0.77) : Color(red: 0.04, green: 0.39, blue: 0.33)
@@ -132,7 +141,7 @@ private struct CommandCenterMRCardContent: View {
         }
         .boardCardInteraction(title: row.displayTitle, repositoryPath: row.displayURL.gitLabProjectPath,
             iid: item.id.iid, background: colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(white: 0.95),
-            backgroundOpacity: contentOpacity, onDetails: openDetails)
+            backgroundOpacity: contentOpacity, actionLabel: newReviewActionLabel, onActivate: onActivate)
         .contextMenu { menuItems }
         .confirmationDialog(Text(.Board.boardReviewAssignmentHide), isPresented: $confirmRemoval, titleVisibility: .visible) {
             Button(role: .destructive) { monitor.removeReviewedMergeRequest(row.displayItem) } label: { Text(.Board.boardReviewAssignmentHide) }
@@ -141,20 +150,22 @@ private struct CommandCenterMRCardContent: View {
     }
 
     @ViewBuilder private var cardHeading: some View {
+        let actionTitle: LocalizedStringResource = isNewReview ? .Board.boardReviewAssignmentSeen : .Board.boardDetails
         cardReference
-        Button(action: openDetails) {
+        Button(action: onActivate) {
             BoardCardTitle(title: row.displayTitle, repositoryPath: row.displayURL.gitLabProjectPath,
                 titleColor: !isDraft && isMuted ? .secondary : .primary)
                 .opacity(contentOpacity)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(Text(verbatim: "\(row.displayTitle)\n\(row.displayURL.gitLabProjectPath)\n") + Text(.Board.boardDetails))
+        .help(Text(verbatim: "\(row.displayTitle)\n\(row.displayURL.gitLabProjectPath)\n") + Text(actionTitle))
+        .accessibilityHint(Text(actionTitle))
         HStack(spacing: 0) {
             author
             Spacer(minLength: 16)
             if finishedState == nil {
-                BoardMRApprovalBadge(row: row, monitor: monitor, onClick: markReviewSeen)
+                BoardMRApprovalBadge(row: row, monitor: monitor)
                     .fixedSize(horizontal: true, vertical: false)
             }
         }
@@ -344,15 +355,15 @@ private struct CommandCenterMRCardContent: View {
     private var cardActions: some View {
         HStack(spacing: 0) {
             if let cardPin, monitor.settings.boardPins.contains(cardPin) {
-                BoardPinButton(pin: cardPin, settings: monitor.settings, onClick: markReviewSeen)
+                BoardPinButton(pin: cardPin, settings: monitor.settings)
             }
             if finishedState == nil, let scopeTarget {
                 BoardAutomationToggle(monitor: monitor, target: scopeTarget,
                     projectPath: item.url.gitLabProjectPath, isDraft: isDraft,
-                    policy: MREffectivePolicySummary.presentation(row: row, monitor: monitor).0, onClick: markReviewSeen)
+                    policy: MREffectivePolicySummary.presentation(row: row, monitor: monitor).0)
             }
-            CopyMergeRequestLinkButton(url: item.url, placement: .header, onClick: markReviewSeen)
-            moreMenu
+            CopyMergeRequestLinkButton(url: item.url, placement: .header)
+            BoardActionsMenu { menuItems }
         }
     }
 
@@ -503,6 +514,11 @@ private struct CommandCenterMRCardContent: View {
         }
     }
 
+    private var newReviewActionLabel: LocalizedStringResource? {
+        guard isNewReview else { return nil }
+        return .Board.boardReviewAssignmentSeenFor(row.displayTitle, "\(row.displayURL.gitLabProjectPath) !\(item.id.iid)")
+    }
+
     private var newReviewHelp: Text {
         let action = Text(.Board.boardReviewAssignmentSeen)
         guard let date = row.newReviewAssignedAt else { return action }
@@ -511,11 +527,6 @@ private struct CommandCenterMRCardContent: View {
 
     private func markReviewSeen() {
         monitor.markReviewAssignmentSeen(row.displayItem)
-    }
-
-    private func openDetails() {
-        markReviewSeen()
-        onDetails()
     }
 
     private func openAttention(_ section: CommandCenterMRDetailSection) {
@@ -549,12 +560,12 @@ private struct CommandCenterMRCardContent: View {
         }
     }
 
-    private var moreMenu: some View {
-        let onClick: (() -> Void)? = isNewReview ? { markReviewSeen() } : nil
-        return BoardActionsMenu(onClick: onClick) { menuItems }
-    }
-
     @ViewBuilder private var menuItems: some View {
+        if isNewReview {
+            Button(action: onDetails) {
+                Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
+            }
+        }
         MRCommonMenuItems(item: item, monitor: monitor, boardPin: cardPin,
             onRemove: allowsRemoval ? { confirmRemoval = true } : nil)
     }

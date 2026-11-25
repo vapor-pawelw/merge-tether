@@ -60,6 +60,13 @@
         }
       }
     },
+    "board.reviewAssignment.seen.for.%@.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Mark as seen: %1$@ (%2$@)" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Oznacz jako widziane: %1$@ (%2$@)" } }
+      }
+    },
     "board.reviewAssignment.hidden.%@": {
       "extractionState": "manual",
       "localizations": {

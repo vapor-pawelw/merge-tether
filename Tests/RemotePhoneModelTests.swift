@@ -4,7 +4,38 @@ import MergeTetherRemote
 
 @MainActor @Suite struct RemotePhoneModelTests {
     @Test(arguments: [false, true])
-    func openingANewReviewRequestsSeenOnlyForAWritableSnapshot(_ partial: Bool) async throws {
+    func tappingANewReviewAcknowledgesBeforeItCanOpenDetails(_ partial: Bool) async throws {
+        let f = try PhoneFixture(), model = f.model
+        let seen = RemoteAction(id: RemoteAction.reviewSeenID, kind: .markDone, token: String(repeating: "a", count: 64))
+        var card = f.board.cards[0]
+        card.id = "mr:1:2"
+        card.boardTraits = .init(needsAttention: false, isNew: true, isInactive: false)
+        card.actions = [seen]
+        var board = f.board
+        board.lanes = [.init(id: .reviewed, cards: [card])]
+        board.partial = partial
+        model.connect(); await model.refresh(); await f.reply(board: board)
+        let transport = f.transports[0]
+        transport.onCommand = { command in
+            await transport.onMessage?(.init(type: .result, result: .init(id: command.id, status: .completed)))
+        }
+
+        var detailsOpened = 0
+        await model.activateCard(card) { detailsOpened += 1 }
+        await model.activateCard(card) { detailsOpened += 1 }
+        #expect(detailsOpened == 0)
+        #expect(transport.sent.compactMap(\.command).map(\.actionID) == (partial ? [] : [seen.id]))
+
+        card.boardTraits?.isNew = false
+        card.actions = []
+        board.lanes[0].cards = [card]
+        await model.refresh(); await f.reply(board: board)
+        await model.activateCard(card) { detailsOpened += 1 }
+        #expect(detailsOpened == 1)
+    }
+
+    @Test(arguments: [false, true])
+    func openingANewReviewRequestsSeenOnlyForATappedCTAOnAWritableSnapshot(_ partial: Bool) async throws {
         let f = try PhoneFixture(), model = f.model
         let seen = RemoteAction(id: RemoteAction.reviewSeenID, kind: .markDone, token: String(repeating: "a", count: 64))
         var card = f.board.cards[0]
@@ -20,7 +51,12 @@ import MergeTetherRemote
             RemoteMessage.cachedDetailsCapability, RemoteMessage.reviewBoardCapability])
         let transport = f.transports[0]
         #expect(transport.sent.first?.capabilities?.contains(RemoteMessage.reviewBoardCapability) == true)
-        await model.requestDetails(card: card, acknowledgingReview: seen)
+        let overview = RemoteCardSelection(card: card)
+        await model.requestDetails(card: card, acknowledgingReview: overview.reviewSeenAction)
+        #expect(try #require(transport.sent.last?.detailRequest).reviewSeenToken == nil)
+        model.cancelDetails()
+        let action = RemoteCardSelection(card: card, cta: .init(title: "Review", destination: .actions))
+        await model.requestDetails(card: card, acknowledgingReview: action.reviewSeenAction)
         let request = try #require(transport.sent.last?.detailRequest)
         #expect(request.reviewSeenToken == (partial ? nil : seen.token))
         #expect(request.cachedOnly == true)

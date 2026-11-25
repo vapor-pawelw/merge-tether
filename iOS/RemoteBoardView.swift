@@ -342,6 +342,15 @@ struct RemoteCardView: View {
     private var showsActions: Bool {
         !expanded && onOpen != nil && (primaryCTA != nil || secondaryCTA != nil || directAction != nil)
     }
+    private var activationTitle: LocalizedStringResource {
+        actionsModel != nil && card.reviewSeenAction != nil ? .Board.boardReviewAssignmentSeen : .Board.boardDetails
+    }
+    private var activation: (() -> Void)? {
+        guard let onOpen else { return nil }
+        guard let actionsModel else { return onOpen }
+        return { Task { await actionsModel.activateCard(card, showDetails: onOpen) } }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if expanded {
@@ -362,7 +371,7 @@ struct RemoteCardView: View {
         .padding(.top, expanded ? 16 : 14)
         .background(Color(uiColor: .secondarySystemGroupedBackground).opacity(contentOpacity),
                     in: RoundedRectangle(cornerRadius: 16))
-        .modifier(RemoteCardInteraction(onOpen: onOpen))
+        .modifier(RemoteCardInteraction(onActivate: activation, title: activationTitle))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("remote.card.\(card.id)")
         .overlay {
@@ -372,6 +381,7 @@ struct RemoteCardView: View {
         }
         .environment(\.gitLabPersonSourceURL, card.url)
     }
+
     @ViewBuilder
     private var cardActions: some View {
         if let secondary = secondaryCTA {
@@ -435,7 +445,7 @@ struct RemoteCardView: View {
             repositoryReference
             title.opacity(contentOpacity)
             people
-            RemoteCardCornerActions(card: card, model: actionsModel, onOpenAction: onOpenCTA)
+            RemoteCardCornerActions(card: card, model: actionsModel, onOpenAction: onOpenCTA, onShowDetails: onOpen)
                 .fixedSize().zIndex(2)
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 if let dependencies = card.dependencies {
@@ -718,12 +728,13 @@ private struct RemoteMRDependencyRow: View {
 }
 
 private struct RemoteCardInteraction: ViewModifier {
-    let onOpen: (() -> Void)?
+    let onActivate: (() -> Void)?
+    let title: LocalizedStringResource
     @ViewBuilder func body(content: Content) -> some View {
-        if let onOpen {
+        if let onActivate {
             content.contentShape(Rectangle())
-                .onTapGesture(perform: onOpen)
-                .accessibilityAction(named: Text(.Board.boardDetails), onOpen)
+                .onTapGesture(perform: onActivate)
+                .accessibilityAction(named: Text(title), onActivate)
         } else { content }
     }
 }

@@ -7,6 +7,7 @@ struct RemoteCardCornerActions: View {
     let card: RemoteCard
     let model: RemotePhoneModel?
     let onOpenAction: ((RemoteCardCTA) -> Void)?
+    let onShowDetails: (() -> Void)?
 
     @State private var panel: Panel?
     @State private var confirmRemoval = false
@@ -69,6 +70,12 @@ struct RemoteCardCornerActions: View {
 
     private func menu(_ url: URL) -> some View {
         Menu {
+            if card.boardTraits?.isNew == true, let onShowDetails {
+                Button(action: onShowDetails) {
+                    Label(.Board.boardDetails, systemImage: "rectangle.expand.vertical")
+                }
+                .accessibilityIdentifier("remote.card.details.\(card.id)")
+            }
             Button { copy(url) } label: { Label(.CommandCenter.commandCenterCopyLink, systemImage: "link") }
             Link(destination: url) {
                 Label(.CommandCenter.commandCenterOpenGitLab, systemImage: "arrow.up.right.square")

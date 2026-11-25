@@ -121,7 +121,7 @@ struct RemoteCardDetail: View {
                 }
                 .task(id: detailIdentity) {
                     guard current.id.hasPrefix("mr:") else { return }
-                    let seen = openedReview ? nil : original.reviewSeenAction
+                    let seen = openedReview ? nil : initialSelection?.reviewSeenAction
                     openedReview = true
                     await model.requestDetails(card: current, acknowledgingReview: seen)
                 }

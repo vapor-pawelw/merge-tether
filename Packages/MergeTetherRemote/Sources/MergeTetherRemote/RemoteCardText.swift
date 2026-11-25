@@ -13,6 +13,7 @@ public struct RemoteCardSelection: Identifiable, Equatable, Sendable {
     public var id: String { card.id }
     public var destination: RemoteCardCTA.Destination { cta?.destination ?? .overview }
     public var needsDetails: Bool { [.feedback, .assistantRuns, .discussions].contains(destination) }
+    public var reviewSeenAction: RemoteAction? { cta?.duplicatesCardTap == false ? card.reviewSeenAction : nil }
 
     public init(card: RemoteCard, cta: RemoteCardCTA? = nil) {
         self.card = card; self.cta = cta

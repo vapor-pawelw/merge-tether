@@ -6,7 +6,6 @@ struct BoardPinButton: View {
     let pin: BoardCardPin?
     let settings: SettingsManager
     var placement: Placement = .header
-    var onClick: () -> Void = {}
 
     private var isPinned: Bool {
         guard let pin else { return false }
@@ -40,7 +39,6 @@ struct BoardPinButton: View {
 
     private func toggle() {
         guard let pin else { return }
-        onClick()
         settings.setBoardPin(pin, pinned: !isPinned)
     }
 }

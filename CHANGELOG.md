@@ -73,7 +73,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Combine agent configuration and usage in the **Agent** tab, reorder the settings tabs, and group startup and setup in **General**.
 
-- Highlight new review assignments with a teal badge and card outline. Clear the highlight on opening details or using the card menu. Click the badge or **Mark as seen** at the lower left to clear it directly.
+- Highlight new review assignments with a teal badge and a card outline on Mac. Click or tap a new review card to clear **New**. Open Details with the next click or tap, or choose **Show details** from the card menu to keep **New**. **Mark as seen** also clears the badge.
 
 - Give merge request settings, notifications, and coding agent setup their own Mac settings tabs. Find hidden assignments in a collapsed section under Merge requests. Mark newly visible assignments on upgrade when Reviewing already contained cards.
 

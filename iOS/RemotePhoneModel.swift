@@ -492,6 +492,14 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         await requestDetails(card: card, force: needsDetailReload, fromGitLab: needsLiveDetailReload)
     }
 
+    func activateCard(_ card: RemoteCard, showDetails: () -> Void) async {
+        if let action = card.reviewSeenAction {
+            await perform(card: card, action: action)
+        } else {
+            showDetails()
+        }
+    }
+
     func requestDetails(card: RemoteCard, force: Bool = false, fromGitLab: Bool? = nil,
                         acknowledgingReview action: RemoteAction? = nil) async {
         guard supportsDetails, state.board?.cards.contains(where: { $0.id == card.id }) == true else { return }
