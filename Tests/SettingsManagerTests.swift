@@ -37,6 +37,26 @@ struct SettingsManagerTests {
         #expect(defaults.bool(forKey: "promoteBoardAttention"))
     }
 
+    @Test func issueDiscoveryDefaultsToOnAndPreservesChangesAcrossRestart() throws {
+        let suite = "IssueDiscovery.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let fresh = SettingsManager(defaults: defaults)
+        #expect(fresh.findMergeRequestIssues)
+
+        defaults.set(false, forKey: "notificationsEnabled")
+        let upgraded = SettingsManager(defaults: defaults)
+        #expect(upgraded.findMergeRequestIssues)
+        upgraded.findMergeRequestIssues = false
+        #expect(upgraded.save())
+        let restarted = SettingsManager(defaults: defaults)
+        #expect(!restarted.findMergeRequestIssues)
+
+        restarted.findMergeRequestIssues = true
+        #expect(restarted.save())
+        #expect(SettingsManager(defaults: defaults).findMergeRequestIssues)
+    }
+
     @Test(arguments: ["automation", "mergeSubmissions", "automationReceipts", "automationAttemptReceipts",
         "authorFeedbackAttempts", "feedbackSuggestionDecisions", "pipelineRefreshAttempts",
         "pipelineClaimAssessmentAttempts", "pendingTodoAcknowledgements", "assistantHandoffs",

@@ -134,6 +134,58 @@ struct MRIssueCoordinatorTests {
         #expect(!gitlab.requests.contains { $0.endpoint == "/projects/34/merge_requests/17" })
     }
 
+    @Test func disablingIssueDiscoverySkipsBoardAndDetailEvidenceReads() async throws {
+        let mr = try request("Implements PAY-73")
+        let gitlab = InMemoryGitLab()
+        let suite = "MRIssueCoordinatorTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { gitlab.close(); defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "findMergeRequestIssues")
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
+        let glab = gitlab.service(host: target.host, username: target.username)
+        settings.glabPath = glab.glabPath
+        settings.resolvedHost = target.host
+        gitlab.handler = { command in
+            switch command.arguments.first {
+            case "config": return InMemoryGitLab.output(target.host)
+            case "auth": return InMemoryGitLab.output("Logged in to \(target.host) as \(target.username)")
+            default: break
+            }
+            if command.endpoint == "graphql" {
+                defer { if Task.isCancelled { gitlab.write("relations-cancelled") } }
+                try await gitlab.pause(ifPresent: "pause-relations", entered: "relations-entered", until: "release-relations")
+            }
+            return InMemoryGitLab.output("[]")
+        }
+        let monitor = TodoMonitorService(settings: settings, glab: glab,
+                                         assistantDependencies: .init(probe: { _ in .missingCLI }))
+        let coordinator = monitor.makeIssueCoordinator()
+        monitor.mergeRequestIssues = coordinator
+        coordinator.observe(mr, target: target, revision: glab.accountRevision, at: Date())
+
+        monitor.markBoardIssueRefresh()
+        monitor.assessCatalogIssues([mr])
+        monitor.requestIssueAssessment(for: mr)
+        monitor.enqueueIssueMetadataRefresh(projectID: mr.projectID, iid: mr.iid, host: target.host, username: target.username)
+        await Task.yield()
+        try await settle(coordinator)
+
+        #expect(!gitlab.requests.contains { $0.endpoint == "graphql" || $0.endpoint == "/projects/34/merge_requests/12" })
+
+        gitlab.write("pause-relations")
+        monitor.setMergeRequestIssueDiscovery(true)
+        monitor.requestIssueAssessment(for: mr)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !gitlab.has("relations-entered"), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(gitlab.has("relations-entered"))
+
+        monitor.setMergeRequestIssueDiscovery(false)
+        gitlab.write("release-relations")
+        try await settle(coordinator)
+        #expect(gitlab.has("relations-cancelled"))
+    }
+
     @Test func anOrdinaryPollReusesUnchangedEvidenceAndReassessesChangedRelations() async throws {
         let mr = try request("Prevents retry duplication")
         var now = Date(), reads = 0, assessments = 0

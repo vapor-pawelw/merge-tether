@@ -420,6 +420,11 @@ The reply row shows the waiting private draft count first. **Published reply fro
 
 ## Issues implemented by a merge request
 
+**Find work items and Jira links** in **Settings → Merge requests** is on by
+default. Turning it off stops issue discovery and hides issue tags on Mac and
+from subsequent iPhone board and detail refreshes. Turning it back on can reuse
+confirmed results.
+
 Mac and iPhone show a tag beside the MR number when a task is in scope. Select a
 linked task to open or copy its link. A reference without a known URL is
 displayed as text. A count opens a list of the tasks and their available links.

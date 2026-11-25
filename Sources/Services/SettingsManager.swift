@@ -195,6 +195,7 @@ final class SettingsManager {
     var reviewingAutomationOffExpanded: Bool
     var boardOrderingMethod: MRBoardOrderingMethod
     var promoteBoardAttention: Bool
+    var findMergeRequestIssues: Bool
     private(set) var boardManualOrder: MRBoardManualOrder
     var boardGrouping: MRBoardGrouping = .withoutAutomation
     var effectiveBoardGrouping: MRBoardGrouping { boardGrouping.effective(for: configuredAutomation) }
@@ -291,6 +292,7 @@ final class SettingsManager {
         reviewingAutomationOffExpanded = defaults.bool(forKey: Key.reviewingAutomationOffExpanded)
         boardOrderingMethod = defaults.string(forKey: Key.boardOrderingMethod).flatMap(MRBoardOrderingMethod.init(rawValue:)) ?? .manual
         promoteBoardAttention = defaults.bool(forKey: Key.promoteBoardAttention)
+        findMergeRequestIssues = defaults.bool(forKey: Key.findMergeRequestIssues)
         boardManualOrder = store.load(Key.boardManualOrder, fallback: .init())
         mrLifecycleLedger = store.load(Key.mrLifecycleLedger, fallback: .init())
         reviewAssignments = store.load(Key.reviewAssignments, fallback: .init())
@@ -377,6 +379,7 @@ final class SettingsManager {
         defaults.set(reviewingAutomationOffExpanded, forKey: Key.reviewingAutomationOffExpanded)
         defaults.set(boardOrderingMethod.rawValue, forKey: Key.boardOrderingMethod)
         defaults.set(promoteBoardAttention, forKey: Key.promoteBoardAttention)
+        defaults.set(findMergeRequestIssues, forKey: Key.findMergeRequestIssues)
         persistenceStore.save(conflictReceipts, forKey: Key.conflictReceipts)
         persistenceStore.save(reReviewReceipts, forKey: Key.reReviewReceipts)
         persistenceStore.save(reReviewDraftBaselines, forKey: Key.reReviewDraftBaselines)
@@ -557,6 +560,7 @@ final class SettingsManager {
             Key.reviewingAutomationOffExpanded: true,
             Key.boardOrderingMethod: MRBoardOrderingMethod.manual.rawValue,
             Key.promoteBoardAttention: true,
+            Key.findMergeRequestIssues: true,
             Key.onboardingCompleted: false,
             Key.launchAtLoginPreference: true,
             Key.hasLaunchedBefore: false,
@@ -585,6 +589,7 @@ final class SettingsManager {
         static let reviewingAutomationOffExpanded = "board.reviewing.automationOffExpanded"
         static let boardOrderingMethod = "boardOrderingMethod"
         static let promoteBoardAttention = "promoteBoardAttention"
+        static let findMergeRequestIssues = "findMergeRequestIssues"
         static let boardManualOrder = "boardManualOrder"
         static let mrLifecycleLedger = "mrLifecycleLedger"
         static let reviewAssignments = "reviewAssignments"

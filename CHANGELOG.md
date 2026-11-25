@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Turn verifier discovery of work items and Jira links on or off in **Settings → Merge requests**. It is on by default.
+
 - Show GitLab and MergeTether events together in iPhone MR Details. Open the matching discussion from a comment event.
 
 - Mark all read in the iPhone Inbox or acknowledge a standalone GitLab to-do from its card. Draft merge requests keep their draft styling when the paired Mac uses Polish.

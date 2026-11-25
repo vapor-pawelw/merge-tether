@@ -16,6 +16,20 @@
         } } }
       }
     },
+    "mr.issues.discoveryToggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Find work items and Jira links" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Wyszukuj zadania i linki do Jiry" } }
+      }
+    },
+    "mr.issues.discoveryHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Uses the verifier to show issues addressed by each merge request." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Weryfikator wskazuje zadania realizowane przez dany merge request." } }
+      }
+    },
     "mr.issues.inScope": {
       "extractionState": "manual",
       "localizations": {

@@ -2,6 +2,18 @@ import Foundation
 import MergeTetherRemote
 
 @MainActor extension TodoMonitorService {
+    func setMergeRequestIssueDiscovery(_ enabled: Bool) {
+        guard settings.findMergeRequestIssues != enabled else { return }
+        settings.findMergeRequestIssues = enabled
+        settings.save()
+        if enabled {
+            assessCatalogIssues(attention.currentOpenItems.compactMap(\.mergeRequest))
+        } else {
+            forcedIssueBoardRevision = nil
+            mergeRequestIssues?.cancelAssessments()
+        }
+    }
+
     func makeIssueCoordinator() -> MRIssueCoordinator {
         let file = InstallationStorage.current.root.appending(path: "Merge Request Issues/cache.json")
         return MRIssueCoordinator(file: file, isCurrentAccount: { [weak self] target, revision in
@@ -35,7 +47,7 @@ import MergeTetherRemote
     }
 
     func issueTags(for request: GitLabMergeRequest?) -> [RemoteMRIssue] {
-        guard let mergeRequestIssues, let request,
+        guard settings.findMergeRequestIssues, let mergeRequestIssues, let request,
               let target = scopeTarget(projectID: request.projectID, iid: request.iid, url: request.webURL)
         else { return [] }
         return mergeRequestIssues.issues(for: request, target: target, revision: glab.accountRevision)
@@ -48,11 +60,11 @@ import MergeTetherRemote
     }
 
     func markBoardIssueRefresh() {
-        if mergeRequestIssues != nil { forcedIssueBoardRevision = glab.accountRevision }
+        if settings.findMergeRequestIssues, mergeRequestIssues != nil { forcedIssueBoardRevision = glab.accountRevision }
     }
 
     func assessCatalogIssues(_ requests: [GitLabMergeRequest]) {
-        guard let mergeRequestIssues else { return }
+        guard settings.findMergeRequestIssues, let mergeRequestIssues else { return }
         let revision = glab.accountRevision
         let force = forcedIssueBoardRevision == revision
         forcedIssueBoardRevision = nil
@@ -62,14 +74,16 @@ import MergeTetherRemote
     }
 
     func enqueueIssueMetadataRefresh(projectID: Int, iid: Int, host: String, username: String) {
-        guard mergeRequestIssues != nil else { return }
+        guard settings.findMergeRequestIssues, mergeRequestIssues != nil else { return }
         let target = MRAutomationScope.Target(host: host, username: username, projectID: projectID, iid: iid)
         let revision = glab.accountRevision
         Task(priority: .utility) { [weak self] in
-            guard let self, let mergeRequestIssues, isCurrentIssueAccount(target, revision: revision) else { return }
+            guard let self, settings.findMergeRequestIssues, let mergeRequestIssues,
+                  isCurrentIssueAccount(target, revision: revision) else { return }
             let startedAt = Date()
             guard let request = try? await glab.fetchMergeRequest(projectID: projectID, iid: iid, host: host),
-                  !Task.isCancelled, isCurrentIssueAccount(target, revision: revision) else { return }
+                  !Task.isCancelled, settings.findMergeRequestIssues,
+                  isCurrentIssueAccount(target, revision: revision) else { return }
             recordBoardDisplayRequest(request, for: target, url: request.webURL, accountRevision: revision, readStartedAt: startedAt)
             mergeRequestIssues.requestAssessment(for: request, target: target, revision: revision, force: true)
         }
@@ -77,7 +91,8 @@ import MergeTetherRemote
 
     private func permitsIssueAssessment(for request: GitLabMergeRequest, target: MRAutomationScope.Target) -> Bool {
         // Draft action restrictions do not apply to read-only board metadata.
-        request.state == "opened" && settings.automaticWritesAllowed && settings.automation.scope.resolve(target).active
+        settings.findMergeRequestIssues && request.state == "opened"
+            && settings.automaticWritesAllowed && settings.automation.scope.resolve(target).active
     }
 
     private func isCurrentIssueAccount(_ target: MRAutomationScope.Target, revision: UInt64) -> Bool {

@@ -41,6 +41,15 @@ struct MergeRequestSettingsTab: View {
                 Text(.MRLifecycle.completionSettingsHelp).font(.caption).foregroundStyle(.secondary)
             }
 
+            Section {
+                Toggle(isOn: Binding(
+                    get: { monitor.settings.findMergeRequestIssues },
+                    set: { monitor.setMergeRequestIssueDiscovery($0) }
+                )) { Text(.MRIssues.mrIssuesDiscoveryToggle) }
+            } footer: {
+                Text(.MRIssues.mrIssuesDiscoveryHelp)
+            }
+
             IncomingReviewFilterSettingsSection(monitor: monitor)
 
             Section {
