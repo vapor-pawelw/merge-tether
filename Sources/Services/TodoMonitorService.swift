@@ -1740,7 +1740,8 @@ final class TodoMonitorService {
 
     func markDone(_ todo: Todo) async { await todoStore.markDone(todo, automatically: false) }
 
-    func acknowledgeVisibleTodo(_ todo: Todo, shouldProceed: @escaping @MainActor @Sendable () -> Bool) async -> Bool {
+    func acknowledgeVisibleTodo(_ todo: Todo,
+                                shouldProceed: @escaping @MainActor @Sendable () -> Bool) async -> InboxTodoStore.AcknowledgementResult {
         await todoStore.acknowledgeVisibleTodo(todo, shouldProceed: shouldProceed)
     }
 

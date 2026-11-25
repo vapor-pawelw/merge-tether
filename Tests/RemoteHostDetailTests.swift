@@ -784,7 +784,7 @@ import MergeTetherRemote
             settings.mrLifecycleLedger.record(request, for: .init(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2))
             settings.save()
             gitlab.handler = { [gitlab] call in
-                if call.endpoint.hasPrefix("/todos?"), gitlab.has("inbox-todos") {
+                if call.arguments.contains(where: { $0.hasPrefix("/todos?") }), gitlab.has("inbox-todos") {
                     return try gitlab.response("inbox-todos")
                 }
                 if call.method == "POST", call.endpoint == "/todos/401/mark_as_done", gitlab.has("fail-todo-401") {

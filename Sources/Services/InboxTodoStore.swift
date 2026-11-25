@@ -4,6 +4,10 @@ import Observation
 /// Account-scoped inbox state. The monitor coordinates MR routing and automation after a successful read.
 @MainActor @Observable
 final class InboxTodoStore {
+    enum AcknowledgementResult {
+        case acknowledged, notStarted, uncertain
+    }
+
     struct Fetch {
         let host: String?
         let username: String?
@@ -104,9 +108,9 @@ final class InboxTodoStore {
         _ = await performMarkDone(todo, automatically: automatically)
     }
 
-    func acknowledgeVisibleTodo(_ todo: Todo, shouldProceed: @escaping @MainActor @Sendable () -> Bool) async -> Bool {
+    func acknowledgeVisibleTodo(_ todo: Todo, shouldProceed: @escaping @MainActor @Sendable () -> Bool) async -> AcknowledgementResult {
         // Keep the card visible while the write is pending so admission can recheck the Inbox.
-        guard !optimisticallyDone.contains(todo.id), guardedAcknowledgements.insert(todo.id).inserted else { return false }
+        guard !optimisticallyDone.contains(todo.id), guardedAcknowledgements.insert(todo.id).inserted else { return .notStarted }
         defer { guardedAcknowledgements.remove(todo.id) }
         return await performMarkDone(todo, automatically: false, shouldProceed: shouldProceed)
     }
@@ -140,26 +144,30 @@ final class InboxTodoStore {
     }
 
     private func performMarkDone(_ todo: Todo, automatically: Bool,
-                                 shouldProceed: @escaping @MainActor @Sendable () -> Bool = { true }) async -> Bool {
+                                 shouldProceed: @escaping @MainActor @Sendable () -> Bool = { true }) async -> AcknowledgementResult {
         guard !automatically || settings.automaticPublicWritesAllowed else {
             optimisticallyDone.remove(todo.id)
-            return false
+            return .notStarted
         }
         let host = self.host
         let username = glab.currentUsername
         let revision = glab.accountRevision
+        var authorizationRejected = false
         let result = await glab.markAsDone(id: todo.id, host: host) {
-            !Task.isCancelled && self.host == host && self.username == username
+            let allowed = !Task.isCancelled && self.host == host && self.username == username
                 && self.glab.currentUsername == username && self.accountRevision == revision
                 && self.glab.accountRevision == revision && (!automatically || self.settings.automaticPublicWritesAllowed)
                 && shouldProceed()
+            authorizationRejected = !allowed
+            return allowed
         }
         optimisticallyDone.remove(todo.id)
-        guard self.host == host, glab.currentUsername == username, glab.accountRevision == revision else { return false }
+        if authorizationRejected { return .notStarted }
+        guard self.host == host, glab.currentUsername == username, glab.accountRevision == revision else { return .uncertain }
         if case .failure(let error) = result, !error.isNotFound {
             reportActionFailure(error)
             Log.monitor.error("Mark-as-done failed for \(todo.id, privacy: .public): \(String(describing: error), privacy: .private)")
-            return false
+            return .uncertain
         }
         if isLoading { acknowledgedDuringFetch.insert(todo.id) }
         allTodos.removeAll { $0.id == todo.id }
@@ -169,6 +177,6 @@ final class InboxTodoStore {
             settings.pendingTodoAcknowledgements.remove(.init(host: host, username: username, todo: todo.feedbackIdentity))
         }
         settings.save()
-        return true
+        return .acknowledged
     }
 }

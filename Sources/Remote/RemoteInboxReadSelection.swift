@@ -48,18 +48,22 @@ import MergeTetherRemote
                 return Entry(current)?.token == token
             }
             guard stillVisible() else { continue }
-            let success: Bool
+            let outcome: InboxTodoStore.AcknowledgementResult
             switch entry.item.content {
             case .todo(let todo):
-                success = await monitor.acknowledgeVisibleTodo(todo, shouldProceed: stillVisible)
+                outcome = await monitor.acknowledgeVisibleTodo(todo, shouldProceed: stillVisible)
             case .completion(let completion):
-                success = monitor.acknowledgeLifecycleCompletion(id: completion.id)
+                outcome = monitor.acknowledgeLifecycleCompletion(id: completion.id) ? .acknowledged : .uncertain
             case .hiddenReview(_, let notice):
-                success = monitor.acknowledgeHiddenReviewNotifications([notice.id])
+                outcome = monitor.acknowledgeHiddenReviewNotifications([notice.id]) ? .acknowledged : .uncertain
             case .proposal, .job:
                 continue
             }
-            if success { acknowledged += 1 } else { uncertain = true }
+            switch outcome {
+            case .acknowledged: acknowledged += 1
+            case .notStarted: continue
+            case .uncertain: uncertain = true
+            }
         }
         if acknowledged == entries.count { return .completed }
         if acknowledged > 0 { return .partial }
@@ -74,6 +78,10 @@ import MergeTetherRemote
             isCurrent() && !monitor.isAssessingNotice(todo) && monitor.boardSnapshot.otherTodos.contains(todo)
         }
         guard stillVisible() else { return .changed }
-        return await monitor.acknowledgeVisibleTodo(todo, shouldProceed: stillVisible) ? .completed : .uncertain
+        switch await monitor.acknowledgeVisibleTodo(todo, shouldProceed: stillVisible) {
+        case .acknowledged: return .completed
+        case .notStarted: return .changed
+        case .uncertain: return .uncertain
+        }
     }
 }
