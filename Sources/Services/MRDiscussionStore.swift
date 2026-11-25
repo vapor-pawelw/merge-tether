@@ -31,7 +31,7 @@ final class MRDiscussionStore {
     private let legacyAssessmentDirectory: URL?
     private let displayAssessmentDirectory: URL?
     private let provenanceDirectory: URL
-    private var authenticatedUserID: Int?
+    private(set) var authenticatedUserID: Int?
     private(set) var currentUser: PersonIdentity?
     private var loadedRevision: UInt64?
     private var assessmentCriteria: String?

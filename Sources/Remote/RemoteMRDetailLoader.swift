@@ -5,8 +5,14 @@ import MergeTetherRemote
 @MainActor enum RemoteMRDetailLoader {
     enum ReadError: Error { case changed }
 
+    struct Result {
+        var details: RemoteMRDetails
+        var history: RemoteMRGitLabHistory = .init()
+        var userID: Int? = nil
+    }
+
     static func load(source: GitLabMergeRequest, drafts: [GitLabDraftNote], glab: GlabService,
-                     criteriaOverride: String? = nil) async throws -> RemoteMRDetails {
+                     criteriaOverride: String? = nil) async throws -> Result {
         let revision = glab.accountRevision, executable = glab.glabPath
         guard let host = glab.resolvedHost, let username = glab.currentUsername,
               source.webURL.isGitLabMergeRequest(host: host, iid: source.iid),
@@ -22,18 +28,22 @@ import MergeTetherRemote
         let current = try await glab.fetchMergeRequest(projectID: source.projectID, iid: source.iid, host: host)
         try check(current)
         let store = MRDiscussionStore()
-        async let discussionRead: Void = store.refresh(target: .init(host: host, username: username,
-            projectID: source.projectID, iid: source.iid, url: source.webURL), glab: glab, criteriaOverride: criteriaOverride)
+        let target = MRDiscussionTarget(host: host, username: username, projectID: source.projectID,
+            iid: source.iid, url: source.webURL)
+        async let discussionRead: Void = store.refresh(target: target, glab: glab, criteriaOverride: criteriaOverride)
+        async let resourceRead = MRGitLabActivityStore.readResources(for: target, glab: glab, timeout: 15)
         async let counts = try? glab.fetchMergeRequestApprovalProgress(projectID: source.projectID, iid: source.iid, host: host)
         async let rules: RemoteApprovalRuleState? = try? glab.mergeRequestAPI(
             "/projects/\(source.projectID)/merge_requests/\(source.iid)/approval_state", host: host)
         async let reviewers = try? glab.fetchMergeRequestReviewers(projectID: source.projectID, iid: source.iid, host: host)
-        let (progress, ruleState, reviewerHistory, _) = await (counts, rules, reviewers, discussionRead)
+        let (progress, ruleState, reviewerHistory, resources, _) = await (counts, rules, reviewers, resourceRead, discussionRead)
         let latest = try await glab.fetchMergeRequest(projectID: source.projectID, iid: source.iid, host: host)
         try check(latest)
         guard try await glab.fetchAuthenticatedUser(host: host, expectedUsername: username) == user else { throw ReadError.changed }
         try check(latest)
+        if let discussionUserID = store.authenticatedUserID, discussionUserID != user.id { throw ReadError.changed }
         let discussions = store.hasLoaded && !store.hasError ? store.discussions : nil
+        let history = RemoteMRGitLabHistory(resources: resources, notes: discussions.map { _ in store.activity })
         let origins = store.origins
         let authorKinds = store.authorKinds
         let extraContexts = store.extraContexts
@@ -43,7 +53,7 @@ import MergeTetherRemote
                 extraContexts: extraContexts)
         }.value
         try check(latest)
-        return details
+        return .init(details: details, history: history, userID: user.id)
     }
 
     nonisolated static func project(request: GitLabMergeRequest, progress: MergeRequestApprovalProgress?, rules: RemoteApprovalRuleState?,
@@ -121,6 +131,57 @@ import MergeTetherRemote
             details.proposedSolutionDraftIDs = proposals.isEmpty ? nil : proposals
         }
         return details
+    }
+}
+
+struct RemoteMRGitLabHistory: Sendable {
+    var resources: [MRGitLabActivity.Resource: [MRGitLabActivity]] = [:]
+    var notes: [MRGitLabActivity]?
+    var isPartial: Bool? = nil
+
+    var entries: [MRGitLabActivity] { (notes ?? []) + resources.values.flatMap { $0 } }
+    var hasMissingSources: Bool { resources.count != MRGitLabActivity.Resource.allCases.count || notes == nil }
+
+    func fillingMissingSources(from previous: Self?) -> Self {
+        var history = self
+        history.isPartial = hasMissingSources ? true : nil
+        if let previous {
+            history.resources.merge(previous.resources, uniquingKeysWith: { current, _ in current })
+            history.notes = history.notes ?? previous.notes
+        }
+        return history
+    }
+
+    func retained(publicationNoteIDs: Set<Int>) -> Self {
+        // One extra event preserves the truncation indicator. Keep older events that decide attribution.
+        let retainedCount = RemoteDetailActivity.maximumEntries + 1
+        func sorted(_ events: [MRGitLabActivity]) -> [MRGitLabActivity] {
+            var seen = Set<String>()
+            return events.filter { seen.insert($0.id).inserted }.sorted {
+                $0.createdAt == $1.createdAt ? $0.id < $1.id : $0.createdAt > $1.createdAt
+            }
+        }
+        var history = self
+        history.resources = resources.mapValues { events in
+            let events = sorted(events)
+            let olderMerges = events.dropFirst(retainedCount).lazy.filter {
+                if case .state("merged") = $0.kind { return true }
+                return false
+            }.prefix(2)
+            return Array(events.prefix(retainedCount)) + Array(olderMerges)
+        }
+        history.notes = notes.map { events in
+            let events = sorted(events)
+            let relatedNotes = events.dropFirst(retainedCount).filter {
+                if case .comment(let id, _) = $0.kind { return publicationNoteIDs.contains(id) }
+                return false
+            }
+            return (Array(events.prefix(retainedCount)) + relatedNotes).map { event in
+                .init(id: event.id, createdAt: event.createdAt, actor: event.actor, kind: event.kind,
+                    body: event.body.map { String($0.prefix(4_000)) })
+            }
+        }
+        return history
     }
 }
 

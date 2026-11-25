@@ -15,7 +15,7 @@ import MergeTetherRemote
     }
 
     static func append(to details: inout RemoteMRDetails, row: MergeRequestBoardSnapshot.Row,
-                       monitor: TodoMonitorService, usage: AssistantUsageSnapshot?) {
+                       monitor: TodoMonitorService, usage: AssistantUsageSnapshot?, gitLabHistory: RemoteMRGitLabHistory) {
         let item = row.evidenceMatchesCatalogContext ? row.item : row.displayItem
         guard let request = row.displayRequest, let host = monitor.glab.resolvedHost,
               let username = monitor.glab.currentUsername else { return }
@@ -104,26 +104,7 @@ import MergeTetherRemote
             details.feedback.append(.init(label: String(localized: .FeedbackSuggestions.feedbackSuggestionsIgnored),
                 value: decision.concernSummary + "\n\n" + decision.concernReason))
         }
-        let history = MRAutomationHistory(target: target, handoffs: monitor.assistantHandoffs,
-            workflows: monitor.authoredMergeRequests.workflow.entries, events: monitor.settings.automationEvents)
-        details.activity = history.entries.prefix(30).compactMap { entry -> RemoteDetailActivity? in
-            switch entry.source {
-            case .job(let job, let attempt):
-                return .init(id: entry.id, title: String(localized: .AutomationHistory.automationHistoryRun(attempt)) + " · " + job.title,
-                    status: jobStatus(job.execution?.state),
-                    summary: (job.execution?.attentionExplanation ?? job.execution?.summary ?? job.execution?.errorExplanation).map(GlabService.redactWorkflowEvidence),
-                    createdAt: entry.createdAt, head: job.expectedHeadSHA)
-            case .workflow(let workflow):
-                return .init(id: entry.id, title: String(localized: workflow.event.kind.displayLabel),
-                    status: workflowStatus(workflow.state), summary: workflow.summary.map { GlabService.redactWorkflowEvidence(AssistantJobExecutor.ExecutionError.displayMessage(for: $0)) }, createdAt: entry.createdAt)
-            case .event(let event):
-                return .init(id: entry.id, title: String(localized: event.title),
-                    status: eventStatus(event.state), summary: event.message.map { GlabService.redactWorkflowEvidence(AssistantJobExecutor.ExecutionError.displayMessage(for: $0)) }, createdAt: entry.createdAt)
-            case .gitLab:
-                return nil
-            }
-        }
-        if history.entries.count > 30 { details.truncated = true }
+        appendActivity(to: &details, target: target, monitor: monitor, gitLabHistory: gitLabHistory)
         details.usage = usage.map { snapshot in
             let identity = AssistantUsageMergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
             var overall = AssistantUsageTotal()
@@ -150,6 +131,45 @@ import MergeTetherRemote
             return roles + agents + [.init(label: String(localized: .AssistantUsage.assistantUsageMRLifetimeCost),
                 value: amount(overall) + "\n\n" + String(localized: .AssistantUsage.assistantUsageMRHistoryHelp))]
         }
+    }
+
+    private static func appendActivity(to details: inout RemoteMRDetails, target: MRAutomationScope.Target,
+                                       monitor: TodoMonitorService, gitLabHistory: RemoteMRGitLabHistory) {
+        let history = MRAutomationHistory(target: target, handoffs: monitor.assistantHandoffs,
+            workflows: monitor.authoredMergeRequests.workflow.entries, events: monitor.settings.automationEvents,
+            gitLab: gitLabHistory.entries)
+        details.activity = history.entries.prefix(RemoteDetailActivity.maximumEntries).map { entry in
+            switch entry.source {
+            case .job(let job, let attempt):
+                return .init(id: entry.id, title: String(localized: .AutomationHistory.automationHistoryRun(attempt)) + " · " + job.title,
+                    status: jobStatus(job.execution?.state),
+                    summary: (job.execution?.attentionExplanation ?? job.execution?.summary ?? job.execution?.errorExplanation).map(GlabService.redactWorkflowEvidence),
+                    createdAt: entry.createdAt, head: job.expectedHeadSHA)
+            case .workflow(let workflow):
+                return .init(id: entry.id, title: String(localized: workflow.event.kind.displayLabel),
+                    status: workflowStatus(workflow.state), summary: workflow.summary.map { GlabService.redactWorkflowEvidence(AssistantJobExecutor.ExecutionError.displayMessage(for: $0)) }, createdAt: entry.createdAt)
+            case .event(let event):
+                return .init(id: entry.id, title: String(localized: event.title),
+                    status: eventStatus(event.state), summary: event.message.map { GlabService.redactWorkflowEvidence(AssistantJobExecutor.ExecutionError.displayMessage(for: $0)) }, createdAt: entry.createdAt)
+            case .gitLab(let event, let appEvent):
+                let source: LocalizedStringResource = appEvent == nil
+                    ? .AutomationHistory.automationHistorySourceGitLab : .AutomationHistory.automationHistorySourceMergeTether
+                let headline = event.systemHeadline
+                let status = [
+                    String(localized: source),
+                    entry.isAutomatic ? String(localized: .AutomationHistory.automationHistoryAutomated) : nil,
+                    headline == nil ? event.actor : nil
+                ].compactMap { $0 }.joined(separator: " · ")
+                let note = event.noteID.map {
+                    RemoteDetailActivity.Note(id: $0, threadID: event.discussionID.flatMap { $0.isEmpty ? nil : "discussion/\($0)" })
+                }
+                return .init(id: entry.id, title: GlabService.redactWorkflowEvidence(headline ?? String(localized: event.title)),
+                    status: GlabService.redactWorkflowEvidence(status), summary: event.body.map(GlabService.redactWorkflowEvidence),
+                    createdAt: entry.createdAt, note: note)
+            }
+        }
+        details.activityPartial = gitLabHistory.isPartial
+        if history.entries.count > RemoteDetailActivity.maximumEntries { details.truncated = true }
     }
 
     static func applyFeedback(to details: inout RemoteMRDetails, assessment: ReReviewAssessment?, authorID: Int,

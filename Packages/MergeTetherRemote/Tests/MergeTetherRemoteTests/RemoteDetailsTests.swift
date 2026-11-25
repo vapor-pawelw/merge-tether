@@ -100,6 +100,71 @@ import Testing
         #expect(state.displayedDetails(for: card, board: board)?.description == "Mac snapshot")
     }
 
+    @Test func historyNotesRequireAnExactDiscussionAndUseOnlyThePairedMergeRequestForGitLabLinks() {
+        var card = board().cards[0]
+        card.url = URL(string: "https://gitlab.example.test:8443/g/p/-/merge_requests/2?tab=notes#old")
+        let account = "me@gitlab.example.test:8443"
+        let note = RemoteDetailActivity.Note(id: 7, threadID: "discussion/a")
+        let thread = RemoteDetailThread(id: "discussion/a", state: .open, notes: [.init(id: "7", body: "Comment")])
+        let other = RemoteDetailThread(id: "discussion/b", state: .general, notes: thread.notes)
+        #expect(note.matchingThread(in: [other, thread]) == thread)
+        #expect(note.matchingThread(in: [other]) == nil)
+        #expect(note.matchingThread(in: [thread, thread]) == nil)
+        #expect(RemoteDetailActivity.Note(id: 7).matchingThread(in: [thread]) == nil)
+        #expect(note.linkURL(card: card, account: account)?.absoluteString == "https://gitlab.example.test:8443/g/p/-/merge_requests/2#note_7")
+        #expect(note.linkURL(card: card, account: "me@gitlab.example.test") == nil)
+        #expect(note.linkURL(card: card, account: "me@other.test:8443") == nil)
+        for unsafe in ["https://user@gitlab.example.test:8443/g/p/-/merge_requests/2",
+                       "https://gitlab.example.test:8443/g/p/-/merge_requests/3",
+                       "file:///g/p/-/merge_requests/2"] {
+            card.url = URL(string: unsafe)
+            #expect(note.linkURL(card: card, account: account) == nil)
+        }
+    }
+
+    @Test func historyAddsOptionalNoteMetadataAndClipsItWithoutChangingLinkIdentity() throws {
+        let legacy = Data(#"{"id":"job/1","title":"Review","status":"Completed","createdAt":0}"#.utf8)
+        #expect(try JSONDecoder().decode(RemoteDetailActivity.self, from: legacy).note == nil)
+        let board = board()
+        let request = try RemoteDetailRequest(card: board.cards[0], board: board)
+        let activity = RemoteDetailActivity(id: "note/7", title: String(repeating: "A", count: 600), status: "GitLab",
+            summary: String(repeating: "B", count: 4_100), createdAt: date,
+            note: .init(id: 7, threadID: "discussion/" + String(repeating: "a", count: 300)))
+        let details = RemoteMRDetails(checkedAt: date, activity: [activity], activityPartial: true)
+        let bounded = RemoteDetailResponse(request: request, status: .current, details: details).bounded()
+        let value = try #require(bounded.details?.activity.first)
+        #expect(value.title.count == 512 && value.summary?.count == 4_000)
+        #expect(value.note?.id == 7 && value.note?.threadID == nil)
+        #expect(bounded.details?.truncated == true && bounded.details?.activityPartial == true)
+        #expect(try JSONDecoder().decode(RemoteDetailResponse.self, from: JSONEncoder().encode(bounded)) == bounded)
+    }
+
+    @MainActor @Test func historyNavigationCannotUseStaleDetailsOrInheritedThreadsFromAnotherContext() throws {
+        var board = board()
+        let state = RemoteDetailState(), card = board.cards[0]
+        let note = RemoteDetailActivity.Note(id: 7, threadID: "discussion/a")
+        let activity = RemoteDetailActivity(id: "note/7", title: "Comment", status: "GitLab", createdAt: date, note: note)
+        let thread = RemoteDetailThread(id: "discussion/a", state: .open, notes: [.init(id: "7", body: "Comment")])
+        let first = try #require(state.begin(card: card, board: board, now: date))
+        state.receive(.init(request: first, status: .current,
+            details: .init(checkedAt: date, threads: [thread], activity: [activity])), board: board)
+        #expect(state.displayedDetails(for: card, board: board)?.activity.first?.note == note)
+
+        board.lanes[0].cards[0].contextRevision = "retargeted"
+        let updated = board.cards[0]
+        state.update(board: board)
+        #expect(state.displayedDetails(for: updated, board: board)?.activity.first?.note == nil)
+        let second = try #require(state.begin(card: updated, board: board, now: date))
+        state.receive(.init(request: second, status: .current, details: .init(checkedAt: date, activity: [activity])), board: board)
+        let shown = try #require(state.displayedDetails(for: updated, board: board))
+        #expect(shown.threads == [thread])
+        #expect(shown.activity.first?.note?.id == 7)
+        #expect(shown.activity.first?.note?.threadID == nil)
+        let third = try #require(state.begin(card: updated, board: board, now: date))
+        state.receive(.init(request: third, status: .current, details: .init(checkedAt: date, activity: [activity])), board: board)
+        #expect(state.displayedDetails(for: updated, board: board)?.activity.first?.note?.threadID == nil)
+    }
+
     @MainActor @Test func previewsKeepTheReadPendingAndPreserveCachedDiscussionsThroughFailures() throws {
         var board = board()
         let card = board.cards[0], state = RemoteDetailState()

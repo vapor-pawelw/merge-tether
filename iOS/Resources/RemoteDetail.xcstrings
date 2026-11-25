@@ -572,15 +572,29 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Activity and agent runs"
+            "value": "Event log"
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Aktywność i zadania agenta"
+            "value": "Dziennik zdarzeń"
           }
         }
+      }
+    },
+    "remoteDetail.activityPartial": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Some GitLab activity is unavailable."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Część aktywności GitLab jest niedostępna."}}
+      }
+    },
+    "remoteDetail.openDiscussion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Open discussion"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz dyskusję"}}
       }
     },
     "remoteDetail.noActivity": {

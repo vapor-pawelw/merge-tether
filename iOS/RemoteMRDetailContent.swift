@@ -4,14 +4,18 @@ import MergeTetherRemote
 struct RemoteMRDetailContent: View {
     let details: RemoteMRDetails
     let card: RemoteCard
+    let account: String
     var personalApproval: RemotePersonalApprovalControl? = nil
     var reviewerEditing: ReviewerEditing? = nil
+    var onRefreshActivity: (() -> Void)? = nil
+    var canRefreshActivity = false
     /// Present when the Mac accepts comment-origin changes from this phone.
     var onCommentOrigin: ((RemoteCommentOriginRequest) -> Void)? = nil
     @Environment(\.colorScheme) private var colorScheme
     @State private var showingApprovals = false
     @State private var reviewerEditor = ReviewerEditorState()
     @State private var discussionsExpanded = true
+    @State private var selectedActivityNote: RemoteDetailActivity.Note?
     /// Holds that stop work lead; saved rules sit with the reference data, as on the Mac.
     private var rules: [String] { details.rules ?? [] }
     private var visiblePolicy: [String] { card.visiblePolicy(details.policy.filter { !rules.contains($0) }) }
@@ -119,9 +123,22 @@ struct RemoteMRDetailContent: View {
             }
             section(.RemoteDetail.remoteDetailActivity) {
                 Text(.RemoteDetail.remoteDetailHistoryHelp).font(.caption).foregroundStyle(.secondary)
-                if details.activity.isEmpty { Text(.RemoteDetail.remoteDetailNoActivity).font(.callout).foregroundStyle(.secondary) }
+                if details.activityPartial == true {
+                    Label(.RemoteDetail.remoteDetailActivityPartial, systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.orange)
+                    if let onRefreshActivity {
+                        Button(action: onRefreshActivity) {
+                            Text(.RemoteDetail.remoteDetailRefresh).frame(minHeight: 44)
+                        }
+                        .disabled(!canRefreshActivity)
+                    }
+                } else if details.activity.isEmpty {
+                    Text(.RemoteDetail.remoteDetailNoActivity).font(.callout).foregroundStyle(.secondary)
+                }
                 LazyVStack(alignment: .leading, spacing: 14) { ForEach(details.activity) { activity in
-                    RemoteActivityRow(activity: activity)
+                    let note = activity.note
+                    RemoteActivityRow(activity: activity, noteURL: note?.linkURL(card: card, account: account),
+                        openDiscussion: note?.matchingThread(in: details.threads) != nil ? { selectedActivityNote = note } : nil)
                     Divider()
                 } }
             }
@@ -142,7 +159,40 @@ struct RemoteMRDetailContent: View {
                 automaticApprovalOff: card.presentation?.automaticApprovalOff == true, reviewerEditor: reviewerEditor)
                 .presentationDetents([.medium, .large])
         }
+        .sheet(item: $selectedActivityNote) { note in
+            if let thread = activityDiscussion(note) {
+                activityDiscussionSheet(thread: thread, note: note)
+            }
+        }
+        .onChange(of: selectedActivityNote.flatMap(activityDiscussion) == nil) { _, unavailable in
+            if unavailable { selectedActivityNote = nil }
+        }
         .modifier(ReviewerSaveErrorAlert(state: reviewerEditor, editorClosed: !showingApprovals))
+    }
+
+    private func activityDiscussion(_ note: RemoteDetailActivity.Note) -> RemoteDetailThread? {
+        guard details.activity.contains(where: { $0.note == note }) else { return nil }
+        return note.matchingThread(in: details.threads)
+    }
+
+    private func activityDiscussionSheet(thread: RemoteDetailThread, note: RemoteDetailActivity.Note) -> some View {
+        NavigationStack {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    RemoteDiscussionCard(thread: thread, mergeRequestURL: card.url, initiallyExpanded: true)
+                        .padding(16)
+                }
+                .task { proxy.scrollTo(String(note.id), anchor: .top) }
+            }
+            .background(Color(uiColor: .systemGroupedBackground))
+            .navigationTitle(Text(.RemoteDetail.remoteDetailDiscussions))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(.Remote.remoteClose) { selectedActivityNote = nil }
+                }
+            }
+        }
     }
 
     @ViewBuilder private func fieldView(_ field: RemoteDetailField) -> some View {
@@ -209,8 +259,19 @@ struct RemoteMRDetailContent: View {
 
 private struct RemoteActivityRow: View {
     let activity: RemoteDetailActivity
+    let noteURL: URL?
+    let openDiscussion: (() -> Void)?
     @State private var expanded = false
+
     var body: some View {
+        if activity.summary != nil || activity.head != nil || noteURL != nil || openDiscussion != nil {
+            disclosure
+        } else {
+            heading
+        }
+    }
+
+    private var disclosure: some View {
         DisclosureGroup(isExpanded: $expanded) {
             // Full-width leading stack: without it the disclosure centres short lines.
             VStack(alignment: .leading, spacing: 4) {
@@ -222,24 +283,39 @@ private struct RemoteActivityRow: View {
                     Text(.RemoteSecurity.remoteSecurityCommit).font(.caption).foregroundStyle(.secondary)
                     Text(verbatim: head).font(.caption.monospaced()).textSelection(.enabled)
                 }
+                if let openDiscussion {
+                    Button(action: openDiscussion) {
+                        Label(.RemoteDetail.remoteDetailOpenDiscussion, systemImage: "bubble.left")
+                            .frame(minHeight: 44)
+                    }
+                    .tint(.accentColor)
+                }
+                if let noteURL {
+                    Link(destination: noteURL) {
+                        Label(.CommandCenter.commandCenterOpenGitLab, systemImage: "arrow.up.right.square")
+                            .frame(minHeight: 44)
+                    }
+                    .tint(.accentColor)
+                }
             }
             .multilineTextAlignment(.leading)
             .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
         } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(verbatim: activity.title).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
-                Text(verbatim: activity.status).font(.callout).foregroundStyle(.secondary)
-                Text(activity.createdAt, format: .dateTime.year().month().day().hour().minute())
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            .multilineTextAlignment(.leading)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            // The whole row toggles, not only the chevron.
-            .contentShape(Rectangle())
-            .onTapGesture { withAnimation { expanded.toggle() } }
+            heading.contentShape(Rectangle()).onTapGesture { withAnimation { expanded.toggle() } }
         }
         // Like the thread disclosures: a neutral chevron instead of link-blue labels.
         .tint(.secondary)
+    }
+
+    private var heading: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(verbatim: activity.title).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+            Text(verbatim: activity.status).font(.callout).foregroundStyle(.secondary)
+            Text(activity.createdAt, format: .dateTime.year().month().day().hour().minute())
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .multilineTextAlignment(.leading)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
     }
 }
 
@@ -252,13 +328,15 @@ private struct RemoteDiscussionCard: View {
     var draftContexts: [String: String] = [:]
     var proposalIDs: Set<Int> = []
     var onCommentOrigin: ((RemoteCommentOriginRequest) -> Void)? = nil
-    @State private var expanded = false
+    var initiallyExpanded = false
+    @State private var expansion: Bool?
     @State private var threadOriginRequest: ThreadOriginRequest?
 
     private struct ThreadOriginRequest: Identifiable {
         let id = UUID()
         let origin: RemoteDetailNote.Origin?
     }
+    private var expanded: Bool { expansion ?? initiallyExpanded }
     private var color: Color {
         switch thread.state { case .open: .orange; case .resolved: .green; case .general: .secondary }
     }
@@ -282,6 +360,7 @@ private struct RemoteDiscussionCard: View {
                             if index > 0 { noteHeader(note) }
                             noteContent(note)
                         }
+                        .id(note.id)
                         if note.id != thread.notes.last?.id { Divider() }
                     }
                 }.padding(.top, 12)
@@ -364,7 +443,7 @@ private struct RemoteDiscussionCard: View {
     }
 
     private func toggleExpansion() {
-        withAnimation(.snappy) { expanded.toggle() }
+        withAnimation(.snappy) { expansion = !expanded }
     }
 
     private var threadOriginTitle: Text {

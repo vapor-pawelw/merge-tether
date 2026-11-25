@@ -262,14 +262,55 @@ public struct RemoteAutomationStatus: Codable, Equatable, Sendable {
 }
 
 public struct RemoteDetailActivity: Codable, Equatable, Identifiable, Sendable {
+    public static let maximumEntries = 30
+
+    public struct Note: Codable, Equatable, Identifiable, Sendable {
+        public let id: Int
+        public var threadID: String?
+
+        public init(id: Int, threadID: String? = nil) {
+            self.id = id; self.threadID = threadID
+        }
+
+        public func matchingThread(in threads: [RemoteDetailThread]?) -> RemoteDetailThread? {
+            guard id > 0, let threadID else { return nil }
+            let matches = threads?.filter { $0.id == threadID } ?? []
+            guard matches.count == 1, let thread = matches.first,
+                  thread.notes.count(where: { $0.id == String(id) }) == 1 else { return nil }
+            return thread
+        }
+
+        public func linkURL(card: RemoteCard, account: String) -> URL? {
+            let cardID = card.id.split(separator: ":", omittingEmptySubsequences: false)
+            guard id > 0, cardID.count == 3, cardID[0] == "mr",
+                  let projectID = Int(cardID[1]), projectID > 0, let iid = Int(cardID[2]), iid > 0,
+                  let separator = account.lastIndex(of: "@"), separator != account.startIndex,
+                  let expected = URLComponents(string: "https://" + account[account.index(after: separator)...]),
+                  expected.path.isEmpty, expected.query == nil, expected.fragment == nil,
+                  let source = card.url, source.absoluteString.utf8.count <= 2_048,
+                  var url = URLComponents(url: source, resolvingAgainstBaseURL: false),
+                  let host = url.host, !host.isEmpty, host.lowercased() == expected.host?.lowercased(),
+                  url.user == nil, url.password == nil, url.scheme == "https" || url.scheme == "http",
+                  url.path.hasSuffix("/-/merge_requests/\(iid)") else { return nil }
+            let defaultPort = url.scheme == "https" ? 443 : 80
+            guard (url.port ?? defaultPort) == (expected.port ?? defaultPort) else { return nil }
+            url.query = nil
+            url.fragment = "note_\(id)"
+            return url.url
+        }
+    }
+
     public let id: String
     public var title: String
     public var status: String
     public var summary: String?
     public let createdAt: Date
     public var head: String?
-    public init(id: String, title: String, status: String, summary: String? = nil, createdAt: Date, head: String? = nil) {
+    public var note: Note?
+    public init(id: String, title: String, status: String, summary: String? = nil, createdAt: Date,
+                head: String? = nil, note: Note? = nil) {
         self.id = id; self.title = title; self.status = status; self.summary = summary; self.createdAt = createdAt; self.head = head
+        self.note = note
     }
 }
 
@@ -285,6 +326,7 @@ public struct RemoteMRDetails: Codable, Equatable, Sendable {
     public var rules: [String]?
     public var feedback: [RemoteDetailField]
     public var activity: [RemoteDetailActivity]
+    public var activityPartial: Bool?
     public var usage: [RemoteDetailField]?
     public var truncated: Bool
     public var discussionFingerprint: String?
@@ -312,10 +354,12 @@ public struct RemoteMRDetails: Codable, Equatable, Sendable {
                 approvals: RemoteApprovalDetails? = nil, threads: [RemoteDetailThread]? = nil,
                 reasons: [String] = [], policy: [String] = [], feedback: [RemoteDetailField] = [],
                 activity: [RemoteDetailActivity] = [], usage: [RemoteDetailField]? = nil, truncated: Bool = false,
+                activityPartial: Bool? = nil,
                 branches: RemoteDetailBranches? = nil) {
         self.checkedAt = checkedAt; self.metadata = metadata; self.description = description; self.approvals = approvals
         self.threads = threads; self.reasons = reasons; self.policy = policy; self.feedback = feedback
         self.activity = activity; self.usage = usage; self.truncated = truncated
+        self.activityPartial = activityPartial
         self.branches = branches
     }
 }
@@ -414,9 +458,15 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
                 let retained = list(ids, 100).filter { details.draftContexts?[String($0)] != nil }
                 return retained.isEmpty ? nil : retained
             }
-            details.activity = list(details.activity, 30).map { original in
+            details.activity = list(details.activity, RemoteDetailActivity.maximumEntries).map { original in
                 var activity = original
+                activity.title = text(activity.title, 512)
+                activity.status = text(activity.status, 512)
                 activity.summary = activity.summary.map { text($0, 4_000) }
+                if let threadID = activity.note?.threadID, threadID.utf8.count > 256 {
+                    activity.note?.threadID = nil
+                    clipped = true
+                }
                 return activity
             }
             details.truncated = clipped
@@ -440,6 +490,11 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
                         thread.notes[index].proposedSolution = nil
                     }
                     return thread
+                }
+            }
+            else if details.activity.contains(where: { $0.note != nil && $0.summary != nil }) {
+                for index in details.activity.indices where details.activity[index].note != nil {
+                    details.activity[index].summary = nil
                 }
             }
             else if var threads = details.threads, !threads.isEmpty {
@@ -478,11 +533,15 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
 }
 
 @MainActor @Observable public final class RemoteDetailState {
+    private struct CachedDisplay {
+        let response: RemoteDetailResponse
+        let threadsRequest: RemoteDetailRequest?
+    }
     public private(set) var pending: RemoteDetailRequest?
     public private(set) var openRequest: RemoteDetailRequest?
     public private(set) var response: RemoteDetailResponse?
     public private(set) var failure: RemoteDetailResponse.Status?
-    private var displayCache: [String: RemoteDetailResponse] = [:]
+    private var displayCache: [String: CachedDisplay] = [:]
     private var deadline = Date.distantPast
     private var originRevisions: [String: UInt64] = [:]
     private var authorKindRevisions: [String: UInt64] = [:]
@@ -513,16 +572,26 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
         else {
             openRequest = nil
             failure = value.status
-            if value.status == .changed { response = nil }
+            if value.status == .changed {
+                response = nil
+                invalidateActivityNavigation(cardID: value.request.cardID)
+            }
         }
     }
     public func update(board: RemoteBoard) {
-        if displayCache.values.contains(where: { $0.request.hostSession != board.hostSession || $0.request.account != board.account }) {
+        if displayCache.values.contains(where: {
+            $0.response.request.hostSession != board.hostSession || $0.response.request.account != board.account
+        }) {
             displayCache.removeAll()
         }
         if let openRequest, !openRequest.matches(board) { self.openRequest = nil }
         if let response, !response.request.matches(board) { self.response = nil }
         if let pending, !pending.matches(board) { self.pending = nil; failure = .changed }
+        for card in board.cards {
+            if let cached = displayCache[card.id], !cached.response.request.matches(board) {
+                invalidateActivityNavigation(cardID: card.id)
+            }
+        }
     }
     public func disconnect() { pending = nil; openRequest = nil; originRevisions = [:]; authorKindRevisions = [:] }
     public func prepareToReload() { disconnect(); failure = nil }
@@ -578,22 +647,36 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
     }
 
     public func displayedDetails(for card: RemoteCard, board: RemoteBoard) -> RemoteMRDetails? {
-        guard let cached = displayCache[card.id],
-              cached.request.hostSession == board.hostSession, cached.request.account == board.account,
-              var details = cached.details else { return nil }
-        if (details.draftContexts != nil || details.originResume != nil), !cached.request.matches(board) {
+        guard let cached = displayCache[card.id], cached.response.request.hostSession == board.hostSession,
+              cached.response.request.account == board.account, var details = cached.response.details else { return nil }
+        if !cached.response.request.matches(board) {
             details.draftContexts = nil
             details.proposedSolutionDraftIDs = nil
             details.originResume = nil
+            for index in details.activity.indices { details.activity[index].note = nil }
+        } else if cached.threadsRequest?.matches(board) != true {
+            for index in details.activity.indices { details.activity[index].note?.threadID = nil }
         }
         return details
+    }
+
+    private func invalidateActivityNavigation(cardID: String) {
+        guard let cached = displayCache[cardID], var details = cached.response.details,
+              cached.threadsRequest != nil || details.activity.contains(where: { $0.note != nil }) else { return }
+        for index in details.activity.indices { details.activity[index].note = nil }
+        var response = cached.response
+        response.details = details
+        displayCache[cardID] = .init(response: response, threadsRequest: nil)
     }
 
     private func cacheForDisplay(_ value: RemoteDetailResponse) {
         guard var details = value.details else { return }
         let id = value.request.cardID
-        if let cached = displayCache[id], let previous = cached.details,
-           cached.request.hostSession == value.request.hostSession, cached.request.account == value.request.account {
+        var threadsRequest = details.threads == nil ? nil : value.request
+        if let snapshot = displayCache[id], let previous = snapshot.response.details,
+           snapshot.response.request.hostSession == value.request.hostSession,
+           snapshot.response.request.account == value.request.account {
+            let cached = snapshot.response
             let sameContent = (value.request.contentDigest ?? value.request.cardDigest)
                 == (cached.request.contentDigest ?? cached.request.cardDigest)
             // Keep richer sections through a partial host preview or an optional GitLab read failure.
@@ -602,6 +685,7 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
             }
             if details.threads == nil {
                 details.threads = previous.threads
+                threadsRequest = snapshot.threadsRequest
                 details.discussionFingerprint = previous.discussionFingerprint
                 details.activeDiscussionFingerprint = previous.activeDiscussionFingerprint
                 if sameContent, details.draftContexts == nil {
@@ -618,12 +702,12 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
         }
         var cached = value
         cached.details = details
-        displayCache[id] = cached
+        displayCache[id] = .init(response: cached, threadsRequest: threadsRequest)
         guard displayCache.count > 16 else { return }
         let olderIDs = displayCache.keys.filter { $0 != id }
         let oldest = olderIDs.min { lhs, rhs in
-            let lhsCheckedAt = displayCache[lhs]?.details?.checkedAt ?? Date.distantPast
-            let rhsCheckedAt = displayCache[rhs]?.details?.checkedAt ?? Date.distantPast
+            let lhsCheckedAt = displayCache[lhs]?.response.details?.checkedAt ?? Date.distantPast
+            let rhsCheckedAt = displayCache[rhs]?.response.details?.checkedAt ?? Date.distantPast
             return lhsCheckedAt < rhsCheckedAt
         }
         if let oldest {

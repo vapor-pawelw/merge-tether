@@ -39,35 +39,15 @@ struct MREventLogGitLabRow: View {
     }
 
     private var title: Text {
-        switch event.kind {
-        case .comment: Text(.AutomationHistory.automationHistoryComment)
-        case .systemNote:
-            if let summary { Text(verbatim: [event.actor, summary].compactMap { $0 }.joined(separator: " ")) }
-            else { Text(.AutomationHistory.automationHistorySystemNote) }
-        case .state("opened"): Text(.AutomationHistory.automationHistoryOpened)
-        case .state("reopened"): Text(.AutomationHistory.automationHistoryReopened)
-        case .state("closed"): Text(.AutomationHistory.automationHistoryClosed)
-        case .state("merged"): Text(.AutomationHistory.automationHistoryMerged)
-        case .state(let state): Text(.AutomationHistory.automationHistoryStateChanged(state))
-        case .label("add", let name): Text(.AutomationHistory.automationHistoryAddedLabel(name ?? ""))
-        case .label("remove", let name): Text(.AutomationHistory.automationHistoryRemovedLabel(name ?? ""))
-        case .label(_, let name): Text(.AutomationHistory.automationHistoryChangedLabel(name ?? ""))
-        case .milestone("add", let title): Text(.AutomationHistory.automationHistoryAddedMilestone(title ?? ""))
-        case .milestone("remove", let title): Text(.AutomationHistory.automationHistoryRemovedMilestone(title ?? ""))
-        case .milestone(_, let title): Text(.AutomationHistory.automationHistoryChangedMilestone(title ?? ""))
-        }
-    }
-
-    private var summary: String? {
-        guard let line = event.body?.prefix(240).split(whereSeparator: \.isNewline).first else { return nil }
-        return SafeInlineMarkdown.render(String(line)).map { String($0.characters) } ?? String(line)
+        if let headline = event.systemHeadline { Text(verbatim: headline) }
+        else { Text(event.title) }
     }
 
     private var context: Text? {
         let parts: [String?]
         switch event.kind {
-        case .comment: parts = [event.actor, summary]
-        case .systemNote where summary != nil: parts = []
+        case .comment: parts = [event.actor, event.summary]
+        case .systemNote where event.systemHeadline != nil: parts = []
         default: parts = [event.actor]
         }
         let context = parts.compactMap { $0 }.joined(separator: " · ")
