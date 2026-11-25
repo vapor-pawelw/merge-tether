@@ -222,6 +222,7 @@ import MergeTetherRemote
             username: monitor.glab.currentUsername, pinnedCards: monitor.settings.boardPins)
         var result = project(board: board, other: other, session: session, account: account,
             intents: monitor.settings.mrActionIntents, conflictReceipts: monitor.settings.conflictReceipts)
+        result.codingProvider = monitor.settings.automation.selectedAssistant?.rawValue
         if includesReviewBoard {
             result.hiddenReviews = monitor.hiddenReviewAssignments.filter { account == "\($0.target.username)@\($0.target.host)" }
                 .map { hiddenAssignmentCard($0, account: account) }
@@ -335,7 +336,8 @@ import MergeTetherRemote
                                     ? "\n\n" + String(localized: publication.reviewConfirmation) : "")
                                 card.actions.append(.init(id: "intent:\(intent.id)", kind: .prepare, token: token,
                                     confirmationText: confirmation, label: label,
-                                    confirmationID: effect.confirmationID(variant: [variant, reviewMode].compactMap { $0 }.joined(separator: "."))))
+                                    confirmationID: effect.confirmationID(variant: [variant, reviewMode].compactMap { $0 }.joined(separator: ".")),
+                                    codingProvider: effect.requiresCodingAssistant ? result.codingProvider : nil))
                             }
                         }
                         if let job = humanAction?.retryJob ?? row.latestJob, row.stoppedJobNeedsAttention,
@@ -351,7 +353,8 @@ import MergeTetherRemote
                             card.actions.append(.init(id: "job:\(job.id)", kind: .retryJob, token: token,
                                 confirmationText: confirmation, label: label,
                                 confirmationID: MRActionCTA.retryRun.confirmationID(variant:
-                                    [job.retryConfirmationVariant, reviewMode].compactMap { $0 }.joined(separator: "."))))
+                                    [job.retryConfirmationVariant, reviewMode].compactMap { $0 }.joined(separator: ".")),
+                                codingProvider: job.key.assistant.rawValue))
                         }
                     }
                     card.actions += mrControls(item: item, row: row, monitor: monitor, account: account, busy: busy)
@@ -716,7 +719,8 @@ import MergeTetherRemote
                     detail: String(localized: .Remote.remoteAssistantPending))
                 if MergeRequestBoardSnapshot.Row.jobNeedsAttention(job.execution?.state), job.taskPrompt != nil,
                    let token = try? RemoteDigest.token([account, try RemoteDigest.token(job)]) {
-                    card.actions = [.init(id: "job:\(job.id)", kind: .retryJob, token: token)]
+                    card.actions = [.init(id: "job:\(job.id)", kind: .retryJob, token: token,
+                        codingProvider: job.key.assistant.rawValue)]
                 }
                 return jobProgress(card, job: job, intents: intents, conflictReceipts: conflictReceipts)
             }

@@ -163,7 +163,7 @@ struct RemoteBoardView: View {
                 if batch.phase == .generating || batch.phase == .saving {
                     ProgressView().controlSize(.small)
                 } else {
-                    Image(systemName: "wand.and.stars").foregroundStyle(.tint)
+                    CodingProviderIcon().foregroundStyle(.tint)
                 }
                 Text(batch.phase.regenerationTitle)
                     .font(.callout.weight(.medium))
@@ -218,6 +218,7 @@ struct RemoteBoardView: View {
 private struct RemoteCardCTAButton: View {
     let cta: RemoteCardCTA
     let canAct: ((Date) -> Bool)?
+    var action: RemoteAction? = nil
     var labelHitArea: CardControlHitArea? = nil
     let onTap: () -> Void
 
@@ -231,10 +232,11 @@ private struct RemoteCardCTAButton: View {
 
     private var button: some View {
         Button(action: onTap) {
+            let label = RemoteActionLabel(action: action, title: Text(verbatim: cta.title))
             if let labelHitArea {
-                Text(verbatim: cta.title).contentShape(.interaction, labelHitArea)
+                label.contentShape(.interaction, labelHitArea)
             } else {
-                Text(verbatim: cta.title)
+                label
             }
         }
     }
@@ -259,7 +261,7 @@ private struct RemoteConnectionToolbar: View {
                 if model.supportsDraftRegeneration, model.draftRegenerationBatch == nil,
                    model.draftRegenerationCount(for: .all) > 0 {
                     Button(action: onRegenerateDrafts) {
-                        Label(.DraftRegeneration.draftRegenerationAllAction, systemImage: "wand.and.stars")
+                        Label { Text(.DraftRegeneration.draftRegenerationAllAction) } icon: { CodingProviderIcon() }
                     }
                     .disabled(!model.draftRegenerationIsAvailable || !model.state.canAct(now: now))
                     .accessibilityIdentifier("draft-regeneration.all")
@@ -399,6 +401,7 @@ struct RemoteCardView: View {
                 .modifier(RemoteActionAvailability(state: actionsModel.state))
             } else {
                 RemoteCardCTAButton(cta: secondary, canAct: { actionsModel?.state.canAct(now: $0) == true },
+                                    action: card.actions.first { $0.id == secondary.actionID },
                                     labelHitArea: CardControlHitArea()) { onOpenCTA?(secondary) }
                     .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
                     .accessibilityIdentifier("remote.secondary-cta.\(card.id)")
@@ -432,7 +435,8 @@ struct RemoteCardView: View {
             .modifier(RemoteActionAvailability(state: actionsModel.state))
             .accessibilityIdentifier("remote.\(actionIdentifier).\(card.id)")
         } else if let cta = primaryCTA {
-            RemoteCardCTAButton(cta: cta, canAct: { actionsModel?.state.canAct(now: $0) == true }) { onOpenCTA?(cta) }
+            RemoteCardCTAButton(cta: cta, canAct: { actionsModel?.state.canAct(now: $0) == true },
+                action: card.actions.first { $0.id == cta.actionID }) { onOpenCTA?(cta) }
                 .font(.subheadline.weight(.semibold)).buttonStyle(.bordered)
                 .controlSize(.large)
                 .accessibilityIdentifier("remote.cta.\(card.id)")
@@ -596,7 +600,13 @@ struct RemoteCardView: View {
                 HStack(spacing: 5) {
                     if card.presentation?.working == true {
                         ProgressView().controlSize(.mini)
-                        if let symbol = card.presentation?.statusSymbol { Image(systemName: symbol).accessibilityHidden(true) }
+                        if let symbol = card.presentation?.statusSymbol {
+                            if symbol == "sparkles" || symbol == "sparkle.magnifyingglass" {
+                                CodingProviderIcon()
+                            } else {
+                                Image(systemName: symbol).accessibilityHidden(true)
+                            }
+                        }
                     }
                     if let message = card.presentation?.statusPeopleMessage {
                         PeopleMessageLabel(message: message).font(.subheadline)

@@ -64,7 +64,7 @@ struct AssistantJobRow: View {
                 }
                 Spacer(minLength: 12)
                 if !finished, handoff.execution?.state.isActive == true {
-                    MRActionEffectIcon(effect: .agent)
+                    MRActionEffectIcon(effect: .agent, assistant: handoff.key.assistant)
                     ProgressView().controlSize(.small)
                 }
                 Text(stateLabel).font(.caption.weight(.medium))
@@ -150,7 +150,10 @@ struct AssistantJobRow: View {
                                 await monitor.retryAssistantJob(handoff.id)
                                 retryError = monitor.assistantJobActionError
                             }
-                        } label: { Text(.AssistantJobs.assistantJobsRetry) }
+                        } label: {
+                            MRActionLabel(title: .AssistantJobs.assistantJobsRetry, cta: .retryRun, working: isRetrying)
+                        }
+                        .environment(\.codingProviderGlyph, handoff.key.assistant.glyph)
                         .disabled(isRetrying
                                   || AssistantAutomationRunner.isWorking(on: handoff.key.work))
                     }

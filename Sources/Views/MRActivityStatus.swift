@@ -5,11 +5,12 @@ struct MRActivityStatus: View {
     let status: String
     let startedAt: Date?
     var effect: MRActionEffect? = nil
+    var assistant: AutomationAssistant? = nil
 
     var body: some View {
         HStack(spacing: 6) {
             ProgressView().controlSize(.mini)
-            if let effect { MRActionEffectIcon(effect: effect) }
+            if let effect { MRActionEffectIcon(effect: effect, assistant: assistant) }
             if let startedAt {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     Text(.AutomationProgress.progressTimedStatus(status,

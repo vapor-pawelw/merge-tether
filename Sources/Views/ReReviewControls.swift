@@ -15,7 +15,7 @@ struct ReReviewControls: View {
             VStack(alignment: .leading, spacing: 6) {
                 if readiness == .checking {
                     MRActivityStatus(status: MRActivity.agentStatus(readiness.message, assistant: assistant),
-                        startedAt: nil, effect: .aiCheck)
+                        startedAt: nil, effect: .aiCheck, assistant: assistant)
                         .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 } else {
                     Label { Text(readiness.message) } icon: { Image(systemName: "exclamationmark.triangle") }

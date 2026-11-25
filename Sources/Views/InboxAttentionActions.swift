@@ -31,7 +31,7 @@ struct InboxAttentionActions: View {
             }
             if feedbackAction == .running {
                 MRActivityStatus(status: MRActivity.agentStatus(.Menu.menuTodoAutomationRunning, assistant: assistant),
-                    startedAt: nil, effect: .agent)
+                    startedAt: nil, effect: .agent, assistant: assistant)
             } else if feedbackAction == .ready(.assistant) || feedbackAction == .failed {
                 if feedbackAction == .failed { Text(.Menu.menuTodoAutomationFailed).foregroundStyle(.orange) }
                 Button {

@@ -93,7 +93,7 @@ struct RemoteCardCornerActions: View {
                     actionButton(ready, symbol: "checkmark.circle")
                 }
                 if let review = card.actions.first(where: { $0.kind == .runReview }), onOpenAction != nil {
-                    actionButton(review, symbol: "sparkle.magnifyingglass")
+                    actionButton(review)
                 }
                 if let seen = card.reviewSeenAction, let model {
                     Button {
@@ -142,12 +142,16 @@ struct RemoteCardCornerActions: View {
         }
     }
 
-    private func actionButton(_ action: RemoteAction, symbol: String) -> some View {
+    private func actionButton(_ action: RemoteAction, symbol: String? = nil) -> some View {
         Button {
             onOpenAction?(.init(title: action.label ?? String(localized: action.kind.title),
                 destination: .actions, actionID: action.id))
         } label: {
-            Label { Text(action.kind.title) } icon: { Image(systemName: symbol) }
+            if let symbol {
+                Label(action.kind.title, systemImage: symbol)
+            } else {
+                RemoteActionLabel(action: action, title: Text(action.kind.title))
+            }
         }
         .disabled(model?.state.canAct() != true)
     }

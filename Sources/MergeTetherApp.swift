@@ -99,6 +99,7 @@ struct MergeTetherApp: App {
         Window(String(localized: .CommandCenter.commandCenterTitle), id: "main") {
             CommandCenterView(monitor: appDelegate.monitor, updates: appDelegate.updates)
                 .environment(\.avatarCache, appDelegate.avatarCache)
+                .environment(\.codingProviderGlyph, appDelegate.monitor.settings.automation.selectedAssistant?.glyph)
                 .background(MainWindowFrameReader())
         }
         .defaultSize(width: 1280, height: 820)
@@ -111,6 +112,7 @@ struct MergeTetherApp: App {
 
         MenuBarExtra {
             MenuBarStatusMenu(monitor: appDelegate.monitor)
+                .environment(\.codingProviderGlyph, appDelegate.monitor.settings.automation.selectedAssistant?.glyph)
         } label: {
             MenuBarStatusLabel(monitor: appDelegate.monitor)
         }
@@ -139,6 +141,7 @@ struct MergeTetherApp: App {
 
         Settings {
             SettingsView(monitor: appDelegate.monitor)
+                .environment(\.codingProviderGlyph, appDelegate.monitor.settings.automation.selectedAssistant?.glyph)
         }
         .windowResizability(.contentMinSize)
 

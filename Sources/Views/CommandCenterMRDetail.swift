@@ -74,6 +74,7 @@ private struct CommandCenterMRDetailContent: View {
     @State private var isManuallyRefreshingDiscussions = false
     @State private var feedbackDecisionConfirmation: FeedbackDecisionConfirmation?
     @State private var isUpdatingFeedbackDecision = false
+    @State private var feedbackRecheck: MRFeedbackRecheckProgress?
     @State private var feedbackDecisionError: String?
     @State private var originChangeFailed = false
     @State private var regenerationPresentation: DraftRegenerationPresentation?
@@ -137,7 +138,16 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     private var showsPublication: Bool { finishedState == nil && !item.drafts.isEmpty }
-    private var showsDecisions: Bool { finishedState == nil && (needsHumanAttention || initialSection == .drafts || showsPublication) }
+    private var showsDecisions: Bool {
+        finishedState == nil && (needsHumanAttention || initialSection == .drafts || showsPublication || activeFeedbackRecheck != nil)
+    }
+    private var activeFeedbackRecheck: MRFeedbackRecheckProgress? {
+        guard let feedbackRecheck, finishedState == nil,
+              feedbackRecheck.isActive(for: target, revision: monitor.glab.accountRevision, refreshing: monitor.attention.isLoading,
+                  phase: monitor.attention.authorFeedbackCoordinator?.status(projectID: item.id.projectID, iid: item.id.iid)?.phase)
+        else { return nil }
+        return feedbackRecheck
+    }
     private var showsFeedbackDetails: Bool {
         finishedState == nil && presentationItem.authorFeedbackStatus?.hasVisibleDetails == true
     }
@@ -165,16 +175,18 @@ private struct CommandCenterMRDetailContent: View {
         let discussions = discussionSnapshot
         let row = presentationRow
         let presentation = MRCardPresentation(row: row, monitor: monitor, allowsRemoval: isReviewed)
+        let feedbackRecheck = activeFeedbackRecheck
         let humanAction = presentation.humanAction
         let failedFollowUp = showsDecisions ? humanAction?.failedFollowUp(in: row, jobs: jobs) : nil
         ScrollViewReader { proxy in
             let scrollView = ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    header(presentation, showsFeedbackRecheck: failedFollowUp == nil).id(Anchor.overview)
+                    header(presentation, showsFeedbackRecheck: failedFollowUp == nil && feedbackRecheck == nil,
+                        isRecheckingFeedback: feedbackRecheck != nil).id(Anchor.overview)
                     // The decision the user has to make leads; merge state and automation rules support it.
                     if showsDecisions {
                         nextStep(proxy: proxy, citationContext: citationContext, discussions: discussions,
-                            humanAction: humanAction, failedFollowUp: failedFollowUp).id(Anchor.drafts)
+                            humanAction: humanAction, failedFollowUp: failedFollowUp, feedbackRecheck: feedbackRecheck).id(Anchor.drafts)
                     }
                     if finishedState == nil {
                         VStack(alignment: .leading, spacing: 8) {
@@ -186,7 +198,7 @@ private struct CommandCenterMRDetailContent: View {
                                     Task { await scroll(to: .feedbackStatus, proxy: proxy) }
                                 }, showsExplanations: false,
                                 showsReplySources: !(showsDecisions && showsFeedbackDetails),
-                                showsFeedbackVerification: presentationItem.authorFeedbackStatus == nil,
+                                showsFeedbackVerification: presentationItem.authorFeedbackStatus == nil && feedbackRecheck == nil,
                                 showsStatusCard: true,
                                 textFont: .callout,
                                 coveredBlockers: shownRequirements(presentation)?.coveredBlockers ?? [],
@@ -307,6 +319,9 @@ private struct CommandCenterMRDetailContent: View {
             .onChange(of: monitor.commentOrigins.revision) { _, _ in
                 Task { await discussionStore.reloadOrigins(glab: monitor.glab) }
             }
+            .onChange(of: feedbackRecheck != nil) { _, checking in
+                if !checking { self.feedbackRecheck = nil }
+            }
             .onChange(of: jobs.first?.id) { _, _ in retryError = nil }
             .onAppear {
                 publicationSession.open(with: item.drafts, accountAvailable: discussionTarget != nil,
@@ -322,6 +337,7 @@ private struct CommandCenterMRDetailContent: View {
                 regenerationPresentation = nil
                 reviewStartError = nil
                 feedbackDecisionConfirmation = nil
+                self.feedbackRecheck = nil
                 feedbackDecisionError = nil
             }
             .onChange(of: needsHumanAttention) { _, required in
@@ -422,7 +438,7 @@ private struct CommandCenterMRDetailContent: View {
         return hasDependencyBlocker ? status.dependencyReadiness.holdReason : nil
     }
 
-    private func header(_ progress: MRCardPresentation, showsFeedbackRecheck: Bool) -> some View {
+    private func header(_ progress: MRCardPresentation, showsFeedbackRecheck: Bool, isRecheckingFeedback: Bool) -> some View {
         let mergeActivity = progress.mergeActivity
         let feedback = showsFeedbackRecheck ? presentationItem.authorFeedbackStatus : nil
         return VStack(alignment: .leading, spacing: 12) {
@@ -480,7 +496,8 @@ private struct CommandCenterMRDetailContent: View {
                             .font(.callout.weight(needsHumanAttention ? .medium : .regular))
                             .foregroundStyle(needsHumanAttention ? .orange : .secondary)
                         }
-                        if progress.working, mergeActivity == nil, let status = progress.status {
+                        if progress.working, mergeActivity == nil, let status = progress.status,
+                           !(isRecheckingFeedback && progress.activityEffect == .aiCheck) {
                             MRActivityStatus(status: status,
                                 startedAt: monitor.activityStartedAt(for: item, activity: progress.activity), effect: progress.activityEffect)
                             .font(.callout).foregroundStyle(.secondary)
@@ -514,9 +531,14 @@ private struct CommandCenterMRDetailContent: View {
         }
     }
 
-    private func feedbackRecheckButton(_ feedback: AuthorFeedbackStatus) -> some View {
+    private func feedbackRecheckButton(_ feedback: AuthorFeedbackStatus, retryIntentID: UUID? = nil) -> some View {
         Button {
-            guard confirmMRAction(.verifyFeedback, title: .AuthorFeedback.authorFeedbackRecheck, monitor: monitor) else { return }
+            guard activeFeedbackRecheck == nil,
+                  confirmMRAction(.verifyFeedback, title: .AuthorFeedback.authorFeedbackRecheck, monitor: monitor),
+                  let target else { return }
+            if monitor.attention.isLoading {
+                feedbackRecheck = .init(target: target, accountRevision: monitor.glab.accountRevision, retryIntentID: retryIntentID)
+            }
             monitor.attention.retryAuthorFeedback(item.id)
         } label: {
             MRActionLabel(title: .AuthorFeedback.authorFeedbackRecheck, cta: .verifyFeedback)
@@ -548,11 +570,18 @@ private struct CommandCenterMRDetailContent: View {
 
     private func nextStep(proxy: ScrollViewProxy, citationContext: MRCommentCitation.Context?,
                           discussions: MRDiscussionSnapshot, humanAction: MRHumanAction?,
-                          failedFollowUp: MRHumanAction.FailedFollowUp?) -> some View {
+                          failedFollowUp: MRHumanAction.FailedFollowUp?, feedbackRecheck: MRFeedbackRecheckProgress?) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(.CommandCenter.commandCenterNextStep).font(.headline)
             VStack(alignment: .leading, spacing: 12) {
-                if let failedFollowUp {
+                if let feedbackRecheck {
+                    let assistant = monitor.settings.automation.assistant
+                    if feedbackRecheck.retryIntentID != nil {
+                        Text(.CommandCenter.commandCenterFollowUpStage).font(.caption).foregroundStyle(.secondary)
+                    }
+                    MRActivityStatus(status: MRActivity.agentStatus(.AuthorFeedback.authorFeedbackChecking, assistant: assistant),
+                        startedAt: nil, effect: .aiCheck, assistant: assistant)
+                } else if let failedFollowUp {
                     failedFollowUpStep(failedFollowUp, citationContext: citationContext, proxy: proxy)
                         .id(failedFollowUp.intent.id)
                 } else if let action = humanAction {
@@ -618,9 +647,10 @@ private struct CommandCenterMRDetailContent: View {
                     draftRegenerationButton
                     publicationThreads(discussions)
                 }
-                decisionActions(excludingIntentID: failedFollowUp?.intent.id)
-                FollowUpAutomationHoldView(row: presentationRow, monitor: monitor, showsRetryRequired: failedFollowUp == nil)
-                if showsFeedbackDetails {
+                decisionActions(excludingIntentID: feedbackRecheck?.retryIntentID ?? failedFollowUp?.intent.id)
+                FollowUpAutomationHoldView(row: presentationRow, monitor: monitor,
+                    showsRetryRequired: failedFollowUp == nil && feedbackRecheck == nil)
+                if showsFeedbackDetails, feedbackRecheck == nil {
                     VStack(alignment: .leading, spacing: 8) {
                         Divider()
                         feedbackCheck(citationContext: citationContext).id(Anchor.feedbackStatus)
@@ -656,6 +686,7 @@ private struct CommandCenterMRDetailContent: View {
             }
         } label: {
             MRActionLabel(title: title, cta: .retryRun, working: isRetrying)
+        .environment(\.codingProviderGlyph, job.key.assistant.glyph)
         }
         .mrActionHelp(.retryRun)
         .disabled(isRetrying || job.execution?.state.isActive != false
@@ -683,13 +714,17 @@ private struct CommandCenterMRDetailContent: View {
             HStack(spacing: 8) {
                 if recovery.retriesWorker, let job = recovery.job {
                     retryStoppedRun(job, title: MRHumanAction.retryLabel(job)).buttonStyle(.borderedProminent)
-                    if let feedback = recovery.feedback { feedbackRecheckButton(feedback).buttonStyle(.bordered) }
+                    if let feedback = recovery.feedback {
+                        feedbackRecheckButton(feedback, retryIntentID: recovery.intent.id).buttonStyle(.bordered)
+                    }
                 } else if recovery.prefersVerification, let feedback = recovery.feedback {
-                    feedbackRecheckButton(feedback).buttonStyle(.borderedProminent)
+                    feedbackRecheckButton(feedback, retryIntentID: recovery.intent.id).buttonStyle(.borderedProminent)
                     retry.buttonStyle(.bordered)
                 } else {
                     retry.buttonStyle(.borderedProminent)
-                    if let feedback = recovery.feedback { feedbackRecheckButton(feedback).buttonStyle(.bordered) }
+                    if let feedback = recovery.feedback {
+                        feedbackRecheckButton(feedback, retryIntentID: recovery.intent.id).buttonStyle(.bordered)
+                    }
                 }
             }
             DisclosureGroup {
@@ -735,7 +770,7 @@ private struct CommandCenterMRDetailContent: View {
         let scope = DraftRegenerationScope.mergeRequest(projectID: item.id.projectID, iid: item.id.iid)
         if let phase = coordinator.batch?.phase {
             Button { regenerationPresentation = .init(scope: nil) } label: {
-                Label(phase.regenerationTitle, systemImage: "wand.and.stars")
+                Label { Text(phase.regenerationTitle) } icon: { CodingProviderIcon() }
             }
             .buttonStyle(.bordered)
         } else if coordinator.count(for: scope) > 0 {
@@ -743,7 +778,7 @@ private struct CommandCenterMRDetailContent: View {
                 guard requireCodingAssistant(monitor) else { return }
                 regenerationPresentation = .init(scope: scope)
             } label: {
-                Label(.DraftRegeneration.draftRegenerationMrAction, systemImage: "wand.and.stars")
+                Label { Text(.DraftRegeneration.draftRegenerationMrAction) } icon: { CodingProviderIcon() }
             }
             .buttonStyle(.bordered)
             .disabled(!coordinator.isAvailable)

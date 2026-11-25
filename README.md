@@ -40,7 +40,7 @@ open MergeTether.xcworkspace
 
 Run the `MergeTether` scheme in Xcode. For downloadable builds, check the features listed in their release notes. [Build guide](docs/building.md) · [GitHub Releases](https://github.com/vapor-pawelw/merge-tether/releases)
 
-The board works with `glab` alone. To run agent actions or automation, select a signed-in **Codex CLI** or **Claude CLI** during onboarding or in **Settings → Agent**.
+The board works with `glab` alone. To run agent actions or automation, select **ChatGPT (Codex CLI)** or **Claude CLI** during onboarding or in **Settings → Agent** and sign in to the selected CLI.
 
 ## Delegate a review or a follow-up
 

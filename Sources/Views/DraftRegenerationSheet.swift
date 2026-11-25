@@ -69,7 +69,7 @@ struct DraftRegenerationSheet: View {
                 compose(scope)
             } else {
                 ContentUnavailableView {
-                    Label(.DraftRegeneration.draftRegenerationNoBatch, systemImage: "wand.and.stars")
+                    Label { Text(.DraftRegeneration.draftRegenerationNoBatch) } icon: { CodingProviderIcon() }
                 }
             }
         }
@@ -175,7 +175,9 @@ struct DraftRegenerationSheet: View {
             HStack {
                 Spacer()
                 if pending { ProgressView().controlSize(.small) }
-                Button(.DraftRegeneration.draftRegenerationGenerate) { generate(scope) }
+                Button { generate(scope) } label: {
+                    Label { Text(.DraftRegeneration.draftRegenerationGenerate) } icon: { CodingProviderIcon() }
+                }
                     .buttonStyle(.borderedProminent)
                     .disabled(pending || !isAvailable() || total == 0
                               || (addInstructions && (additionalInstructions.isEmpty || instructionsTooLong)))

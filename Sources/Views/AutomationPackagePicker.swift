@@ -168,6 +168,7 @@ struct AutomationAssistantPicker: View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(AutomationAssistant.allCases, id: \.self) { candidate in
                 HStack {
+                    CodingProviderIcon(provider: candidate.glyph)
                     Text(candidate.displayName)
                     Spacer()
                     if let status = statuses[candidate], !status.isReady {

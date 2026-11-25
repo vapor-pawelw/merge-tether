@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// A call-to-action label whose icon shows the action's effect: sparkles for AI
-/// work, a bolt when automation resumes, otherwise the caller's own icon.
+/// A call-to-action label with the selected provider for AI work.
 struct MRActionLabel: View {
     let title: LocalizedStringResource
     let cta: MRActionCTA
@@ -10,7 +9,11 @@ struct MRActionLabel: View {
 
     var body: some View {
         MRActionProgressLabel(working: working) {
-            if let symbol = cta.symbol ?? fallbackSymbol {
+            if cta.requiresCodingAssistant {
+                Label { Text(title).lineLimit(1) } icon: {
+                    CodingProviderIcon().help(cta.help)
+                }
+            } else if let symbol = cta.symbol ?? fallbackSymbol {
                 Label { Text(title).lineLimit(1) } icon: {
                     Image(systemName: symbol).help(cta.help)
                 }
@@ -41,12 +44,23 @@ struct MRActionProgressLabel<Title: View>: View {
 /// Identifies the AI work shown in a status or job history.
 struct MRActionEffectIcon: View {
     let effect: MRActionEffect
+    var assistant: AutomationAssistant? = nil
 
     var body: some View {
-        if let symbol = effect.symbol {
-            Image(systemName: symbol).foregroundStyle(.secondary)
+        if effect == .agent || effect == .aiCheck {
+            CodingProviderIcon(provider: assistant?.glyph).foregroundStyle(.secondary)
                 .help(Text(effect.kindDescription))
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel(Text(effect.kindDescription))
+        }
+    }
+}
+
+extension AutomationAssistant {
+    var glyph: CodingProviderGlyph {
+        switch self {
+        case .codex: .codex
+        case .claude: .claude
         }
     }
 }

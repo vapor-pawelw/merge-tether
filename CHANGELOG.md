@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Show smaller ChatGPT and Claude glyphs on AI actions and activity on Mac and iOS. The ChatGPT provider uses Codex CLI.
+
+- Match the ChatGPT and Claude icons in the Agent settings tab to the size of neighboring icons.
+
+- Keep verification progress visible in Mac MR Details while **Verify feedback again** checks reviewer feedback.
+
 - Turn verifier discovery of work items and Jira links on or off in **Settings → Merge requests**. It is on by default.
 
 - Show GitLab and MergeTether events together in iPhone MR Details. Open the matching discussion from a comment event.

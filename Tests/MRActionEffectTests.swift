@@ -1,9 +1,17 @@
+import AppKit
 import Foundation
 import Testing
 @testable import MergeTether
 
 struct MRActionEffectTests {
     private static let aiSymbols: Set<String> = ["sparkles", "sparkle.magnifyingglass"]
+
+    @MainActor @Test(arguments: AutomationAssistant.allCases)
+    func providerGlyphIsBundledAsASquareTemplate(_ assistant: AutomationAssistant) throws {
+        let glyph = try #require(NSImage(named: .init(assistant.glyph.assetName)))
+        #expect(glyph.isTemplate)
+        #expect(glyph.size.width == glyph.size.height)
+    }
 
     @Test(arguments: MRActionCTA.allCases)
     func aiIconsAreReservedForAIWork(_ cta: MRActionCTA) {

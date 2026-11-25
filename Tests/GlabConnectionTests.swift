@@ -84,7 +84,7 @@ struct GlabConnectionTests {
             (.Settings.settingsMergeRequestsTab, "Merge requesty"),
             (.Settings.settingsNotificationsTab, "Powiadomienia"),
             (.Settings.settingsCodingAgentTab, "Agent"),
-            (AutomationAssistant.codex.displayName, "Codex CLI"),
+            (AutomationAssistant.codex.displayName, "ChatGPT (Codex CLI)"),
             (AutomationAssistant.claude.displayName, "Claude CLI"),
         ]
         for (var resource, expected) in strings {

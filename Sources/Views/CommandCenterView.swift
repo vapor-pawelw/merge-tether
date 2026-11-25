@@ -144,7 +144,7 @@ struct CommandCenterView: View {
         let regeneration = monitor.draftRegeneration
         if let phase = regeneration.batch?.phase {
             Button { regenerationPresentation = .init(scope: nil) } label: {
-                Label(phase.regenerationTitle, systemImage: "wand.and.stars")
+                Label { Text(phase.regenerationTitle) } icon: { CodingProviderIcon() }
                     .overlay(alignment: .topTrailing) {
                         if phase == .ready {
                             Circle().fill(Color.accentColor).frame(width: 7, height: 7)
@@ -159,7 +159,7 @@ struct CommandCenterView: View {
                 guard requireCodingAssistant(monitor) else { return }
                 regenerationPresentation = .init(scope: .all)
             } label: {
-                Label(.DraftRegeneration.draftRegenerationAllAction, systemImage: "wand.and.stars")
+                Label { Text(.DraftRegeneration.draftRegenerationAllAction) } icon: { CodingProviderIcon() }
             }
             .disabled(!regeneration.isAvailable)
             .help(Text(.DraftRegeneration.draftRegenerationAllAction))
@@ -285,6 +285,7 @@ struct CommandCenterView: View {
                 Button { SettingsNavigation.shared.showCodingAgent(openSettings: { openSettings() }) } label: {
                     HStack(spacing: 5) {
                         if let assistant = monitor.settings.automation.selectedAssistant {
+                            CodingProviderIcon(provider: assistant.glyph)
                             Text(assistant.displayName)
                             Image(systemName: monitor.selectedAssistantReady ? "checkmark.circle" : "exclamationmark.circle")
                         } else {

@@ -29,10 +29,13 @@ public struct RemoteAction: Codable, Equatable, Identifiable, Sendable {
     public var label: String?
     /// Stable action variant for UI preferences when the action ID includes a particular run or MR.
     public var confirmationID: String?
+    /// A retry can use the original job's provider after the selected provider changes.
+    public var codingProvider: String?
     public init(id: String, kind: RemoteActionKind, token: String, confirmationText: String? = nil,
-                label: String? = nil, confirmationID: String? = nil) {
+                label: String? = nil, confirmationID: String? = nil, codingProvider: String? = nil) {
         self.id = id; self.kind = kind; self.token = token; self.confirmationText = confirmationText; self.label = label
         self.confirmationID = confirmationID
+        self.codingProvider = codingProvider
     }
 
     public var suppressibleConfirmationID: String? {
@@ -285,6 +288,8 @@ public struct RemoteBoard: Codable, Equatable, Sendable {
     public var automationPaused: Bool?
     public var lanes: [RemoteLane]
     public var draftRegeneration: RemoteDraftRegenerationControl?
+    /// Selected coding provider for display. Unknown values can fall back to a generic icon.
+    public var codingProvider: String?
     public var inboxReadAction: RemoteAction?
     public var cardAssistants: [RemoteCardAssistant]?
     public var issueTagsOmitted: Bool?

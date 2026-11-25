@@ -1,5 +1,6 @@
-import SwiftUI
+import AppKit
 import Observation
+import SwiftUI
 
 @MainActor @Observable
 final class SettingsNavigation {
@@ -77,13 +78,27 @@ struct SettingsView: View {
         TabView(selection: $navigation.selection) {
             ForEach(SettingsNavigation.Tab.allCases, id: \.self) { tab in
                 page(tab)
-                    .tabItem { Label { Text(tab.title) } icon: { Image(systemName: tab.symbol) } }
+                    .tabItem { Label { Text(tab.title) } icon: { tabIcon(tab) } }
                     .tag(tab)
             }
         }
         .frame(minWidth: 680, idealWidth: 760, minHeight: 560, idealHeight: 680)
         .onChange(of: monitor.settings.automation.scope) { editor.updateScope(from: monitor.settings) }
         .onChange(of: monitor.settings.automation.selectedAssistant, initial: true) { editor.updateAssistant(from: monitor.settings) }
+    }
+
+    private func tabIcon(_ tab: SettingsNavigation.Tab) -> Image {
+        guard tab == .codingAgent, let provider = monitor.settings.automation.selectedAssistant?.glyph,
+              let glyph = NSImage(named: .init(provider.assetName)) else {
+            return Image(systemName: tab.symbol)
+        }
+        // The native toolbar scales custom images to its icon slot.
+        let image = NSImage(size: NSSize(width: 32, height: 32), flipped: false) { bounds in
+            glyph.draw(in: bounds.insetBy(dx: 6, dy: 6))
+            return true
+        }
+        image.isTemplate = true
+        return Image(nsImage: image)
     }
 
     @ViewBuilder

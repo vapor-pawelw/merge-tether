@@ -544,10 +544,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Codex CLI"
+            "value": "ChatGPT (Codex CLI)"
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Codex CLI"}}
+        "pl": {"stringUnit": {"state": "translated", "value": "ChatGPT (Codex CLI)"}}
       }
     },
     "settings.automation.assistant.picker": {

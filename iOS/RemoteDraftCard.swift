@@ -23,7 +23,7 @@ struct RemoteDraftCard: View {
                 Spacer(minLength: 0)
                 if let onRegenerate {
                     Button(action: onRegenerate) {
-                        Image(systemName: "wand.and.stars").frame(minWidth: 44, minHeight: 44)
+                        CodingProviderIcon().frame(minWidth: 44, minHeight: 44)
                     }
                     .buttonStyle(.plain).foregroundStyle(.tint)
                     .accessibilityLabel(Text(.DraftRegeneration.draftRegenerationOneAction))

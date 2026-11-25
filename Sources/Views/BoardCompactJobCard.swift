@@ -150,7 +150,8 @@ struct BoardJobStatusActions: View {
                     MRActivityStatus(status: handoff.progressStatus(intents: monitor.settings.mrActionIntents,
                         conflictReceipts: monitor.settings.conflictReceipts),
                         startedAt: handoff.execution?.state == .running
-                            ? handoff.execution?.startedAt ?? handoff.createdAt : handoff.createdAt, effect: .agent)
+                            ? handoff.execution?.startedAt ?? handoff.createdAt : handoff.createdAt, effect: .agent,
+                        assistant: handoff.key.assistant)
                         .font(.caption).foregroundStyle(muted ? Color.secondary : Color.blue)
                 } else {
                     BoardStatusChip(title: .Board.boardCompactBlocked, symbol: "exclamationmark.circle",
@@ -172,6 +173,7 @@ struct BoardJobStatusActions: View {
                             await monitor.retryAssistantJob(handoff.id)
                         }
                     } label: { MRActionLabel(title: .MRHumanAction.mrHumanActionActionRetryRun, cta: .retryRun) }
+                    .environment(\.codingProviderGlyph, handoff.key.assistant.glyph)
                     .buttonStyle(.bordered)
                     .mrActionHelp(.retryRun)
                     .disabled(retrying || AssistantAutomationRunner.isWorking(on: handoff.key.work))

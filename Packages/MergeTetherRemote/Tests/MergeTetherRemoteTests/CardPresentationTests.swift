@@ -3,6 +3,20 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct CardPresentationTests {
+    @Test(arguments: ["codex", "claude", "future-provider"])
+    func codingProviderSurvivesBoardRoundTrip(_ provider: String) throws {
+        let legacy = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [])
+        let encoder = JSONEncoder()
+        let encoded = try encoder.encode(legacy)
+        var payload = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        #expect(payload["codingProvider"] == nil)
+
+        payload["codingProvider"] = provider
+        let board = try JSONDecoder().decode(RemoteBoard.self, from: JSONSerialization.data(withJSONObject: payload))
+        let roundTrip = try JSONSerialization.jsonObject(with: encoder.encode(board)) as? [String: Any]
+        #expect(roundTrip?["codingProvider"] as? String == provider)
+    }
+
     @Test func pinStateAndCommandsRequireThePhoneCapabilityWithoutChangingLegacyDetailRequests() throws {
         let payload = Data(#"{"id":"mr:1:2","title":"MR","project":"g/p","detail":"","drafts":[],"pinned":true,"actions":[{"id":"editCard","kind":"editCard","token":"pin"}]}"#.utf8)
         let card = try JSONDecoder().decode(RemoteCard.self, from: payload)

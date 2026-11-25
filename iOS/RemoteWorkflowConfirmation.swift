@@ -79,7 +79,7 @@ struct RemoteWorkflowConfirmationSheet: View {
 
     private var accept: some View {
         Button { onAccept(remember) } label: {
-            confirmation.title.frame(maxWidth: .infinity)
+            RemoteActionLabel(action: confirmation.action, title: confirmation.title).frame(maxWidth: .infinity)
         }
         .buttonStyle(.borderedProminent).controlSize(.large)
         .accessibilityIdentifier("remote.confirmation.accept")

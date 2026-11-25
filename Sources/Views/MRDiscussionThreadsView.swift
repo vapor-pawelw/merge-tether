@@ -440,7 +440,7 @@ private struct MRDiscussionDraftView: View {
                 Spacer(minLength: 4)
                 if let extraContext { ExtraContextButton(context: extraContext) }
                 if let onRegenerate, let id = draft.id, DraftPublicationSelection.canSelect(draft) {
-                    Button { onRegenerate(draft) } label: { Image(systemName: "wand.and.stars") }
+                    Button { onRegenerate(draft) } label: { CodingProviderIcon() }
                         .buttonStyle(.borderless).foregroundStyle(Color.accentColor)
                         .disabled(selectionDisabled)
                         .help(Text(.DraftRegeneration.draftRegenerationOneAction))

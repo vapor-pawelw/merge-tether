@@ -33,6 +33,17 @@ enum MRVerificationRetry: String, CaseIterable {
     }
 }
 
+struct MRFeedbackRecheckProgress {
+    let target: MRAutomationScope.Target
+    let accountRevision: UInt64
+    let retryIntentID: UUID?
+
+    func isActive(for target: MRAutomationScope.Target?, revision: UInt64, refreshing: Bool,
+                  phase: AuthorFeedbackStatus.Phase?) -> Bool {
+        self.target == target && accountRevision == revision && (refreshing || phase == .checking)
+    }
+}
+
 @MainActor
 struct PreparedReplyContext {
     let draftID: Int

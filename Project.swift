@@ -84,6 +84,7 @@ let project = Project(
             ]),
             sources: ["iOS/**/*.swift", "Sources/Model/AssistantLaunchContext.swift",
                       "Sources/Views/StatusFlowLayout.swift", "Sources/Views/PersonLabel.swift",
+                      "Sources/Views/CodingProviderIcon.swift",
                       "Sources/Views/ExtraContextMarkdown.swift", "Sources/Views/DraftRegenerationSheet.swift",
                       "Sources/Views/MergeRequestDescription.swift", "Sources/Views/MRDetailSection.swift",
                       "Sources/Views/MergeRequestAttentionCallout.swift",
@@ -97,7 +98,7 @@ let project = Project(
                         "Resources/ActionEffects.xcstrings", "Resources/CommandCenter.xcstrings",
                         "Resources/AgentExplanation.xcstrings",
                         "Resources/AssistantContext.xcstrings", "Resources/MRFreshness.xcstrings",
-                        "Resources/MRIssues.xcstrings",
+                        "Resources/MRIssues.xcstrings", "Resources/ProviderGlyphs.xcassets",
                         "iOS/Resources/**"],
             dependencies: [.target(name: "MergeTetherRemote")],
             settings: .settings(base: [

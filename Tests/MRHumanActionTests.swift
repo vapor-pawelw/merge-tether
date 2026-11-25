@@ -775,6 +775,20 @@ struct MRHumanActionTests {
         #expect(String(localized: action.actionLabel) == "Verify feedback again")
     }
 
+    @Test func clickedFeedbackRecheckKeepsProgressAcrossTheReadAndVerifierPhases() {
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2)
+        let alternate = UUID()
+        let check = MRFeedbackRecheckProgress(target: target, accountRevision: 4, retryIntentID: alternate)
+
+        #expect(check.isActive(for: target, revision: 4, refreshing: true, phase: nil))
+        #expect(check.isActive(for: target, revision: 4, refreshing: false, phase: .checking))
+        #expect(check.retryIntentID == alternate)
+        #expect(!check.isActive(for: target, revision: 4, refreshing: false, phase: .complete))
+        #expect(!check.isActive(for: target, revision: 4, refreshing: false, phase: .failed))
+        #expect(!check.isActive(for: target, revision: 5, refreshing: true, phase: .checking))
+        #expect(!check.isActive(for: nil, revision: 4, refreshing: true, phase: .checking))
+    }
+
     @Test func missingAssistantUsesSetupOnlyWhenNoPublicationDecisionIsPending() throws {
         var item = item()
         item.needsDiscussion = true

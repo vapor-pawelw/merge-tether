@@ -355,7 +355,7 @@ struct RemoteCardDetail: View {
     private var draftRegenerationButton: some View {
         if let phase = model.draftRegenerationBatch?.phase {
             Button { regenerationPresentation = .init(scope: nil) } label: {
-                Label(phase.regenerationTitle, systemImage: "wand.and.stars")
+                Label { Text(phase.regenerationTitle) } icon: { CodingProviderIcon() }
                     .frame(minHeight: 44)
             }
             .buttonStyle(.bordered)
@@ -363,7 +363,7 @@ struct RemoteCardDetail: View {
             let scope = DraftRegenerationScope.mergeRequest(projectID: target.projectID, iid: target.iid)
             if model.draftRegenerationCount(for: scope) > 0 {
                 Button { regenerationPresentation = .init(scope: scope) } label: {
-                    Label(.DraftRegeneration.draftRegenerationMrAction, systemImage: "wand.and.stars")
+                    Label { Text(.DraftRegeneration.draftRegenerationMrAction) } icon: { CodingProviderIcon() }
                         .frame(minHeight: 44)
                 }
                 .buttonStyle(.bordered)
@@ -571,7 +571,7 @@ private struct RemoteFollowUpRecoverySection: View {
     private func button(_ action: RemoteAction) -> some View {
         Button { onAction(action) } label: {
             RemoteActionProgressLabel(running: runningActionID == action.id) {
-                Text(action.label ?? String(localized: action.kind.title))
+                RemoteActionLabel(action: action, title: Text(action.label ?? String(localized: action.kind.title)))
             }
             .frame(maxWidth: .infinity)
         }
@@ -592,7 +592,7 @@ private struct RemoteDetailActionButtons: View {
             ForEach(actions.filter { !Self.secondaryKinds.contains($0.kind) }) { action in
                 Button(role: action.kind == .stopJob ? .destructive : nil) { onAction(action) } label: {
                     RemoteActionProgressLabel(running: runningActionID == action.id) {
-                        title(action)
+                        RemoteActionLabel(action: action, title: title(action))
                     }
                     .frame(maxWidth: .infinity)
                 }

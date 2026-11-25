@@ -54,6 +54,31 @@ extension RemoteActionKind {
         }
     }
 }
+
+private extension RemoteAction {
+    var usesCodingProvider: Bool {
+        switch kind {
+        case .prepare: !id.hasPrefix("intent:") || codingProvider != nil
+        case .handoff, .verify, .retryJob, .runReview, .checkThreads, .startDraftRegeneration: true
+        default: false
+        }
+    }
+}
+
+struct RemoteActionLabel: View {
+    let action: RemoteAction?
+    let title: Text
+
+    var body: some View {
+        if let action, action.usesCodingProvider {
+            Label { title } icon: {
+                CodingProviderIcon(provider: action.codingProvider.flatMap(CodingProviderGlyph.init(rawValue:)))
+            }
+        } else {
+            title
+        }
+    }
+}
 extension RemoteCommandResult.Status {
     var title: LocalizedStringResource {
         switch self {

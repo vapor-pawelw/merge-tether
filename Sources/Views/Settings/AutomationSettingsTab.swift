@@ -361,8 +361,8 @@ struct AutomationSettingsTab: View {
         return Toggle(isOn: isOn) {
             HStack(spacing: 4) {
                 Text(title)
-                if let symbol = effect?.symbol {
-                    Image(systemName: symbol).foregroundStyle(.secondary).accessibilityHidden(true)
+                if effect == .agent || effect == .aiCheck {
+                    CodingProviderIcon().foregroundStyle(.secondary)
                 }
             }
         }

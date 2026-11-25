@@ -12,6 +12,7 @@ import SwiftUI
         WindowGroup {
             RemoteBoardView(model: model)
                 .environment(\.remoteAvatarThumbnails, model.avatarThumbnails)
+                .environment(\.codingProviderGlyph, model.state.board?.codingProvider.flatMap(CodingProviderGlyph.init(rawValue:)))
                 .onOpenURL { model.offerPairing($0.absoluteString) }
                 .onChange(of: phase, initial: true) {
                     switch phase {
