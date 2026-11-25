@@ -3,6 +3,22 @@ import Foundation
 struct IncomingReviewFilterSettings: Codable, Equatable, Sendable {
     var enabled = false
     var criteria = ""
+    var showHiddenReviewsInInbox = true
+
+    private enum CodingKeys: String, CodingKey { case enabled, criteria, showHiddenReviewsInInbox }
+
+    init(enabled: Bool = false, criteria: String = "", showHiddenReviewsInInbox: Bool = true) {
+        self.enabled = enabled
+        self.criteria = criteria
+        self.showHiddenReviewsInInbox = showHiddenReviewsInInbox
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try values.decode(Bool.self, forKey: .enabled)
+        criteria = try values.decode(String.self, forKey: .criteria)
+        showHiddenReviewsInInbox = try values.decodeIfPresent(Bool.self, forKey: .showHiddenReviewsInInbox) ?? true
+    }
 
     var activeCriteria: String? {
         let text = criteria.trimmingCharacters(in: .whitespacesAndNewlines)

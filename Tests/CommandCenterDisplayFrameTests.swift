@@ -33,6 +33,27 @@ struct CommandCenterDisplayFrameTests {
         #expect(Set(frame.inbox.notificationIDs) == [pin, .init(host: host, username: "me", item: .completion(completion.id))])
     }
 
+    @Test func automaticallyHiddenReviewsAppearAsDismissibleUpdatesForTheCurrentAccount() throws {
+        let hidden = item(42)
+        let notice = HiddenReview.InboxNotification(id: UUID(), observedAt: Date(), reason: "Outside scope")
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 42)
+        let review = HiddenReview(target: target, title: hidden.title, url: hidden.url, inboxNotification: notice)
+        let other = HiddenReview(target: .init(host: host, username: "other", projectID: 1, iid: 42),
+            title: hidden.title, url: hidden.url, inboxNotification: notice)
+        let board = MergeRequestBoardSnapshot(own: [], reviewed: [], todos: [], attention: [], handoffs: [],
+            host: host, username: "me", ignoredTargets: [target], hiddenReviewNotifications: [review, other])
+        let inbox = CommandCenterDisplayFrame(board: board, jobs: [], host: host, username: "me", pinnedCards: []).inbox
+        let id = BoardCardPin(host: host, username: "me", item: .hiddenReviewNotification(notice.id))
+        #expect(inbox.triage.isEmpty)
+        #expect(inbox.updates.map(\.id) == [id])
+        #expect(inbox.notificationIDs == [id])
+        let phone = RemoteBoardAdapter.project(board: board, other: inbox.items, session: UUID(), account: "me@\(host)")
+        let card = try #require(phone.cards.first)
+        #expect(card.actions.map(\.id) == ["seen", "restore"])
+        #expect(card.presentation?.secondaryCTA?.actionID == "restore")
+        #expect(card.detail.contains("Outside scope"))
+    }
+
     @Test func eachDisplayFrameUsesCurrentRowsWithoutMutatingTheEarlierFrame() throws {
         // given
         let original = try item(request(head: "head-a", title: "Before"))

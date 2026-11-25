@@ -23,7 +23,7 @@ struct CommandCenterDisplayFrame {
                     triage.append(item)
                     notificationIDs.append(item.id)
                 case .job: jobs.append(item)
-                case .completion:
+                case .completion, .hiddenReview:
                     updates.append(item)
                     notificationIDs.append(item.id)
                 }

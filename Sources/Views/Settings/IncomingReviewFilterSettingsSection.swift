@@ -20,14 +20,20 @@ struct IncomingReviewFilterSettingsSection: View {
                     .font(.body)
                     .frame(minHeight: 85)
                     .accessibilityLabel(Text(.ReviewIntake.reviewIntakeCriteria))
+                Toggle(isOn: $draft.showHiddenReviewsInInbox) {
+                    Text(.ReviewIntake.reviewIntakeShowHiddenInInbox)
+                }
+                .toggleStyle(.checkbox)
+                .help(Text(.ReviewIntake.reviewIntakeShowHiddenInInboxHelp))
                 agentStatus
             }
             if draft != monitor.settings.incomingReviewFilterSettings {
                 HStack {
                     Spacer()
                     Button(.ReviewIntake.reviewIntakeSave) {
+                        let criteriaChanged = draft.activeCriteria != monitor.settings.incomingReviewFilterSettings.activeCriteria
                         saveFailed = !monitor.settings.saveIncomingReviewFilterSettings(draft)
-                        if !saveFailed { monitor.incomingReviewFilter.configurationChanged() }
+                        if !saveFailed && criteriaChanged { monitor.incomingReviewFilter.configurationChanged() }
                     }
                     .disabled(draft.enabled && draft.activeCriteria == nil)
                 }

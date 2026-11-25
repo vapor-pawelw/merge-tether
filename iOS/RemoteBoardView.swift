@@ -359,10 +359,24 @@ struct RemoteCardView: View {
     @ViewBuilder
     private var cardActions: some View {
         if let secondary = secondaryCTA {
-            RemoteCardCTAButton(cta: secondary, canAct: { actionsModel?.state.canAct(now: $0) == true },
-                                labelHitArea: CardControlHitArea()) { onOpenCTA?(secondary) }
-                .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
-                .accessibilityIdentifier("remote.secondary-cta.\(card.id)")
+            if let actionsModel, card.id.hasPrefix("completion:"),
+               let action = card.actions.first(where: { $0.id == secondary.actionID && $0.kind == .markDone }) {
+                Button {
+                    Task { await actionsModel.perform(card: card, action: action) }
+                } label: {
+                    RemoteActionProgressLabel(running: actionsModel.pendingActionCard?.id == card.id
+                        && actionsModel.state.pending?.actionID == action.id) {
+                        Text(verbatim: secondary.title)
+                    }
+                }
+                .font(.subheadline.weight(.medium)).buttonStyle(.bordered).controlSize(.large)
+                .modifier(RemoteActionAvailability(state: actionsModel.state))
+            } else {
+                RemoteCardCTAButton(cta: secondary, canAct: { actionsModel?.state.canAct(now: $0) == true },
+                                    labelHitArea: CardControlHitArea()) { onOpenCTA?(secondary) }
+                    .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("remote.secondary-cta.\(card.id)")
+            }
         }
         Spacer(minLength: 0)
         if let action = directAction, let actionsModel {
@@ -377,11 +391,12 @@ struct RemoteCardView: View {
                 }
             } label: {
                 RemoteActionProgressLabel(running: pending?.actionID == action.id) {
-                    Text(seen ? .Remote.remoteSeen : .CommentReview.commentReviewFinish)
+                    if let label = action.label { Text(verbatim: label) }
+                    else { Text(seen ? .Remote.remoteSeen : .CommentReview.commentReviewFinish) }
                 }
             }
             Group {
-                if seen { button.buttonStyle(.bordered).tint(.secondary) }
+                if seen && action.label == nil { button.buttonStyle(.bordered).tint(.secondary) }
                 else { button.buttonStyle(.borderedProminent) }
             }
             .font(.subheadline.weight(.semibold)).controlSize(.large)

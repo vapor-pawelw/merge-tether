@@ -135,6 +135,8 @@ struct CommandCenterInboxView: View {
         switch item.content {
         case .completion(let completion):
             BoardMRCompletionCard(completion: completion, monitor: monitor)
+        case .hiddenReview(let review, let notice):
+            BoardHiddenReviewCard(review: review, notice: notice, monitor: monitor)
         case .proposal(let proposal):
             BoardMRProposalCard(proposal: proposal, monitor: monitor)
         case .todo(let todo):

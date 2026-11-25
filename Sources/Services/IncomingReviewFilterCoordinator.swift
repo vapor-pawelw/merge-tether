@@ -199,7 +199,11 @@ final class IncomingReviewFilterCoordinator {
             return .init(target: target, title: original.title, url: original.url)
         }
         let toHide = Set(hideable.map(\.target))
-        let hidden = !hideable.isEmpty && settings.hideFilteredReviews(hideable) ? toHide : []
+        let reasons = Dictionary(uniqueKeysWithValues: rejected.compactMap { candidate -> (Target, String)? in
+            guard toHide.contains(candidate.target), let result = decisions[candidate.entry.id] else { return nil }
+            return (candidate.target, GlabService.redactWorkflowEvidence(result.reason))
+        })
+        let hidden = !hideable.isEmpty && settings.hideFilteredReviews(hideable, reasons: reasons) ? toHide : []
         settle(batch, hidden: hidden) { candidate in
             guard let decision = decisions[candidate.entry.id], initial[candidate.entry.id] != nil else {
                 return .bypassed(.uncertain(nil))

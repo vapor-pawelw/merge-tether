@@ -393,6 +393,91 @@
           }
         }
       }
+    },
+    "reviewIntakeShowHiddenInInbox": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep automatically hidden merge requests in Inbox"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pokazuj automatycznie ukryte MR-y w Inboxie"
+          }
+        }
+      }
+    },
+    "reviewIntakeShowHiddenInInboxHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New notices stay in Inbox until you mark them as seen or restore the merge request. Banners still appear."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nowe wpisy pozostają w Inboxie do oznaczenia jako widziane lub przywrócenia MR-a. Banery nadal się pojawiają."
+          }
+        }
+      }
+    },
+    "reviewIntakeHiddenByVerifier": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically hidden by the verifier"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatycznie ukryty przez weryfikator"
+          }
+        }
+      }
+    },
+    "reviewIntakeMarkSeen": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mark as seen"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oznacz jako widziane"
+          }
+        }
+      }
+    },
+    "reviewIntakeMarkSeenHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dismiss this Inbox update and keep the merge request hidden."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usuń ten wpis z Inboxa. MR pozostanie ukryty."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

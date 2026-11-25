@@ -653,6 +653,7 @@ final class TodoMonitorService {
         input.grouping = settings.boardGrouping
         input.draftsLast = settings.effectiveBoardGrouping == .drafts
         input.completions = lifecycleCompletions
+        input.hiddenReviewNotifications = hiddenReviewNotifications
         return .init(input: input)
     }
 
@@ -894,6 +895,25 @@ final class TodoMonitorService {
         guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
               settings.reviewAssignments.markSeen(target) else { return }
         settings.save()
+    }
+
+    var hiddenReviewNotifications: [HiddenReview] {
+        guard let account = boardDisplayAccount else { return [] }
+        return settings.filteredHiddenReviewDetails.values.filter {
+            $0.target.host == account.host && $0.target.username == account.username && $0.inboxNotification != nil
+        }.sorted { ($0.target.projectID, $0.target.iid ?? 0) < ($1.target.projectID, $1.target.iid ?? 0) }
+    }
+
+    @discardableResult
+    func acknowledgeHiddenReviewNotifications(_ ids: Set<UUID>) -> Bool {
+        guard !ids.isEmpty, let host = glab.resolvedHost, let username = glab.currentUsername else { return false }
+        return settings.acknowledgeHiddenReviewNotifications(ids, host: host, username: username)
+    }
+
+    @discardableResult
+    func restoreHiddenReviewNotification(id: UUID) -> Bool {
+        guard let review = hiddenReviewNotifications.first(where: { $0.inboxNotification?.id == id }) else { return false }
+        return restoreReviewedMergeRequests([review])
     }
 
     var hiddenReviewAssignments: [HiddenReview] {
@@ -1609,6 +1629,7 @@ final class TodoMonitorService {
     func markDone(_ todo: Todo) async { await todoStore.markDone(todo, automatically: false) }
 
     func markInboxNotificationsRead(_ notifications: [BoardCardPin], accountRevision: UInt64) async {
+        var hiddenReviews: Set<UUID> = []
         for notification in notifications {
             guard !Task.isCancelled, glab.accountRevision == accountRevision else { return }
             guard notification.host == glab.resolvedHost, notification.username == glab.currentUsername else { continue }
@@ -1617,10 +1638,14 @@ final class TodoMonitorService {
                 if let todo = currentAccountTodos.first(where: { $0.id == id }) { await markDone(todo) }
             case .completion(let id):
                 acknowledgeLifecycleCompletion(id: id)
+            case .hiddenReviewNotification(let id):
+                hiddenReviews.insert(id)
             case .mergeRequest:
                 continue
             }
         }
+        guard !Task.isCancelled, glab.accountRevision == accountRevision else { return }
+        acknowledgeHiddenReviewNotifications(hiddenReviews)
     }
 
     /// Hides the to-do immediately but waits `undoWindow` before calling GitLab.

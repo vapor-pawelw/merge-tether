@@ -257,9 +257,16 @@ struct ReviewAssignmentLedger: Codable, Sendable {
 }
 
 struct HiddenReview: Codable, Identifiable, Sendable {
+    struct InboxNotification: Codable, Equatable, Sendable {
+        let id: UUID
+        let observedAt: Date
+        let reason: String?
+    }
+
     let target: MRAutomationScope.Target
     let title: String
     let url: URL
+    var inboxNotification: InboxNotification? = nil
     var id: MRAutomationScope.Target { target }
 }
 

@@ -88,6 +88,7 @@ struct IncomingReviewFilterTests {
         #expect(settings.reviewAssignments.entries(host: host, username: username)?
             .first(where: { $0.request.iid == 3 })?.newSince == nil)
         #expect(autoHidden.map(\.target) == [target(3)])
+        #expect(settings.filteredHiddenReviewDetails[target(3)]?.inboxNotification?.reason == "Outside scope")
         #expect(final.notice(for: target(4)) == .uncertain("Missing context"))
         #expect(final.notice(for: target(5)) == .uncertain(nil))
         #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
@@ -156,6 +157,46 @@ struct IncomingReviewFilterTests {
         let restored = SettingsManager(defaults: defaults)
         #expect(restored.ignoredMergeRequests == [target(2)])
         #expect(restored.filteredHiddenReviewDetails.isEmpty)
+    }
+
+    @Test func legacyFilterPreferencesEnableInboxNoticesByDefault() throws {
+        let preferences = try JSONDecoder().decode(IncomingReviewFilterSettings.self,
+            from: Data(#"{"enabled":true,"criteria":"Review only migrations"}"#.utf8))
+        #expect(preferences.showHiddenReviewsInInbox)
+        #expect(preferences.activeCriteria == "Review only migrations")
+    }
+
+    @Test func inboxNoticeSurvivesRestartAndAcknowledgingItKeepsTheMergeRequestHidden() throws {
+        let suite = "IncomingReviewFilter.Inbox.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        let source = try request(2)
+        let review = HiddenReview(target: target(2), title: source.title, url: source.webURL)
+        #expect(settings.hideFilteredReviews([review]))
+        let reloaded = SettingsManager(defaults: defaults)
+        let notification = try #require(reloaded.filteredHiddenReviewDetails[target(2)]?.inboxNotification)
+        #expect(!reloaded.acknowledgeHiddenReviewNotifications([notification.id], host: host, username: "someone-else"))
+        #expect(reloaded.acknowledgeHiddenReviewNotifications([notification.id], host: host, username: username))
+        let afterAcknowledgement = SettingsManager(defaults: defaults)
+        #expect(afterAcknowledgement.ignoredMergeRequests.contains(target(2)))
+        #expect(afterAcknowledgement.filteredHiddenReviewDetails[target(2)]?.inboxNotification == nil)
+    }
+
+    @Test func optingOutSkipsOnlyFutureInboxNoticesAndRestoringRemovesExistingNotice() throws {
+        let settings = try filteringSettings()
+        let first = try request(2), second = try request(3)
+        #expect(settings.hideFilteredReviews([.init(target: target(2), title: first.title, url: first.webURL)]))
+        var preferences = settings.incomingReviewFilterSettings
+        preferences.showHiddenReviewsInInbox = false
+        #expect(settings.saveIncomingReviewFilterSettings(preferences))
+        #expect(settings.hideFilteredReviews([.init(target: target(3), title: second.title, url: second.webURL)]))
+        #expect(settings.filteredHiddenReviewDetails[target(2)]?.inboxNotification != nil)
+        #expect(settings.ignoredMergeRequests.contains(target(3)))
+        #expect(settings.filteredHiddenReviewDetails[target(3)]?.inboxNotification == nil)
+        #expect(settings.restoreHiddenReviews([target(2)]))
+        #expect(settings.filteredHiddenReviewDetails[target(2)] == nil)
+        #expect(!settings.ignoredMergeRequests.contains(target(2)))
     }
 
     @Test func duplicateOrMalformedVerdictsDoNotAuthorizeRejectingTheirTargets() throws {

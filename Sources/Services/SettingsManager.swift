@@ -58,12 +58,27 @@ final class SettingsManager {
         reviewAssignments.incomingReviewFilter.suppresses(target) || hiddenMergeRequests.details[target] != nil
     }
 
-    func hideFilteredReviews(_ reviews: [HiddenReview]) -> Bool {
+    func hideFilteredReviews(_ reviews: [HiddenReview], reasons: [MRAutomationScope.Target: String] = [:]) -> Bool {
         var updated = hiddenMergeRequests
-        for review in reviews {
-            updated.targets.insert(review.target)
+        let observedAt = Date()
+        for var review in reviews {
+            guard updated.targets.insert(review.target).inserted else { continue }
+            review.inboxNotification = incomingReviewFilterSettings.showHiddenReviewsInInbox
+                ? .init(id: UUID(), observedAt: observedAt, reason: reasons[review.target]) : nil
             updated.details[review.target] = review
         }
+        guard updated.targets != hiddenMergeRequests.targets else { return false }
+        return saveHiddenMergeRequests(updated)
+    }
+
+    func acknowledgeHiddenReviewNotifications(_ ids: Set<UUID>, host: String, username: String) -> Bool {
+        var updated = hiddenMergeRequests
+        let matching = updated.details.values.filter { review in
+            review.target.host == host && review.target.username == username
+                && review.inboxNotification.map { ids.contains($0.id) } == true
+        }
+        guard !matching.isEmpty else { return false }
+        for review in matching { updated.details[review.target]?.inboxNotification = nil }
         return saveHiddenMergeRequests(updated)
     }
 

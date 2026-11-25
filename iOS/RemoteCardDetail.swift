@@ -366,7 +366,7 @@ struct RemoteCardDetail: View {
                     .accessibilityAddTraits(.isHeader)
                 RemoteDetailActionButtons(actions: buttonActions, runningActionID: runningActionID,
                     onAction: { action in
-                        if current.id.hasPrefix("completion:"), action.id == "seen" {
+                        if current.id.hasPrefix("completion:"), action.kind == .markDone {
                             Task { await model.perform(card: current, action: action) }
                         } else { showConfirmation(action) }
                     })
@@ -499,8 +499,8 @@ private struct RemoteDetailActionButtons: View {
         }
     }
     private func title(_ action: RemoteAction) -> Text {
-        if action.id == "seen", action.kind == .markDone { Text(.Remote.remoteSeen) }
-        else if let label = action.label { Text(verbatim: label) }
+        if let label = action.label { Text(verbatim: label) }
+        else if action.id == "seen", action.kind == .markDone { Text(.Remote.remoteSeen) }
         else { Text(action.kind.title) }
     }
 }

@@ -109,6 +109,7 @@ struct MergeRequestBoardSnapshot {
     let proposals: [Proposal]
     let otherTodos: [Todo]
     let completions: [MergeRequestLifecycleLedger.CompletionReceipt]
+    let hiddenReviewNotifications: [HiddenReview]
     private struct ReviewedMembership: Hashable {
         let id: MergeRequestAttentionMonitor.Item.ID
         let url: URL
@@ -129,6 +130,7 @@ struct MergeRequestBoardSnapshot {
          automation: AutomationSettings? = nil, displayRequests: [GitLabMergeRequest] = [],
          grouping: MRBoardGrouping = .withoutAutomation,
          completions: [MergeRequestLifecycleLedger.CompletionReceipt] = [],
+         hiddenReviewNotifications: [HiddenReview] = [],
          currentRows: [MergeRequestAttentionMonitor.Item.ID: MRCurrentRowProjection] = [:],
          automaticMerges: Set<MergeRequestAttentionMonitor.Item.ID> = [],
          assignmentsAreAuthoritative: Bool = false,
@@ -143,6 +145,10 @@ struct MergeRequestBoardSnapshot {
             return receipt.target.host == host && receipt.target.username == username
                 && receipt.target.projectID > 0 && (receipt.kind == .merged || receipt.kind == .closed)
                 && receipt.url.isGitLabMergeRequest(host: receipt.target.host, iid: iid)
+        }
+        self.hiddenReviewNotifications = hiddenReviewNotifications.filter { review in
+            review.target.host == host && review.target.username == username
+                && ignoredTargets.contains(review.target) && review.inboxNotification != nil
         }
         let validatedDisplay = displayRequests.filter { request in
             guard let host, let username, !username.isEmpty, request.projectID > 0, request.iid > 0 else { return false }
@@ -317,6 +323,7 @@ struct MergeRequestBoardSnapshot {
         proposals = original.proposals
         otherTodos = original.otherTodos
         completions = original.completions
+        hiddenReviewNotifications = original.hiddenReviewNotifications
         reviewedMembership = original.reviewedMembership
         ignoredTargets = original.ignoredTargets
         automation = original.automation
@@ -343,6 +350,7 @@ struct MergeRequestBoardSnapshot {
             case todo(Todo)
             case job(AssistantAutomationRunner.Handoff)
             case completion(MergeRequestLifecycleLedger.CompletionReceipt)
+            case hiddenReview(HiddenReview, HiddenReview.InboxNotification)
         }
         let id: BoardCardPin
         let content: Content
@@ -362,9 +370,16 @@ struct MergeRequestBoardSnapshot {
         cards += otherTodos.compactMap { todo in
             BoardCardPin.todo(host: host, username: username, id: todo.id).map { .init(id: $0, content: .todo(todo)) }
         }
-        cards += completions.filter { $0.target.host == host && $0.target.username == username }.map {
-            .init(id: .init(host: host, username: username, item: .completion($0.id)), content: .completion($0))
+        let completionCards = completions.filter { $0.target.host == host && $0.target.username == username }.map { receipt in
+            (receipt.observedAt, OtherCard(id: .init(host: host, username: username, item: .completion(receipt.id)),
+                content: .completion(receipt)))
         }
+        let hiddenCards = hiddenReviewNotifications.compactMap { review -> (Date, OtherCard)? in
+            guard review.target.host == host, review.target.username == username, let notice = review.inboxNotification else { return nil }
+            return (notice.observedAt, OtherCard(id: .init(host: host, username: username, item: .hiddenReviewNotification(notice.id)),
+                content: .hiddenReview(review, notice)))
+        }
+        cards += (completionCards + hiddenCards).sorted { $0.0 > $1.0 }.map(\.1)
         let rows = own + reviewed + otherMergeRequests
         let accountJobs = jobs.filter { job in
             !job.isObsoleteReminder && job.key.work.host == host && job.key.username == username
@@ -406,7 +421,7 @@ struct MergeRequestBoardSnapshot {
         let isDraft: Bool
         let finished: Bool
         switch content {
-        case .completion: return .regular
+        case .completion, .hiddenReview: return .regular
         case .proposal(let proposal):
             target = proposal.target
             let request = knownRequests[.init(projectID: target.projectID, iid: target.iid ?? 0)]
