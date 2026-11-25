@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Show the author follow-up stage, the cause that needs attention, and the relevant verification or retry action in Mac MR Details. Expand the step to see the original comments and diagnostics.
+
 - Align Agent Usage cards, filters and cost rows, and let longer dashboard text wrap.
 
 - Filter each Mac board column by attention, pins and activity section. Reviewing also supports new assignments. Combine choices through the filter icon in each column header.

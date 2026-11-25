@@ -4,7 +4,7 @@ import SwiftUI
 struct BoardMRIntentActions: View {
     let row: MergeRequestBoardSnapshot.Row
     let monitor: TodoMonitorService
-    @State private var starting: Set<UUID> = []
+    var excludingIntentID: UUID? = nil
     @Environment(\.openSettings) private var openSettings
 
     private var needsCLI: Bool {
@@ -13,13 +13,14 @@ struct BoardMRIntentActions: View {
     }
 
     var body: some View {
+        let intents = Self.visibleIntents(row.attentionIntents, excluding: excludingIntentID)
         // Nothing to show adds no container, so the parent stack leaves no gap.
-        if !Self.visibleIntents(row.attentionIntents).isEmpty || needsCLI { content }
+        if !intents.isEmpty || needsCLI { content(intents) }
     }
 
-    private var content: some View {
+    private func content(_ intents: [MRTodoIntent]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(Self.visibleIntents(row.attentionIntents), id: \.id) { intent in
+            ForEach(intents) { intent in
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Label {
@@ -43,20 +44,9 @@ struct BoardMRIntentActions: View {
                         if intent.state == .running || intent.state == .verifying {
                             ProgressView().controlSize(.small)
                         } else {
-                            Button {
-                                let title = intent.state == .failed ? LocalizedStringResource.Board.boardIntentRetry : Self.action(intent.kind)
-                                starting.insert(intent.id)
-                                Task {
-                                    defer { starting.remove(intent.id) }
-                                    await runConfirmedIntent(intent, monitor: monitor, title: title)
-                                }
-                            } label: {
-                                let title = intent.state == .failed ? LocalizedStringResource.Board.boardIntentRetry : Self.action(intent.kind)
-                                if let cta = MRActionCTA(intent: intent.kind) { MRActionLabel(title: title, cta: cta) }
-                                else { Text(title) }
-                            }
-                            .disabled(starting.contains(intent.id))
-                            .mrActionHelp(MRActionCTA(intent: intent.kind))
+                            MRIntentActionButton(intent: intent,
+                                title: intent.state == .failed ? .Board.boardIntentRetry : Self.action(intent.kind),
+                                monitor: monitor)
                         }
                     }
                     if let error = intent.error {
@@ -86,7 +76,7 @@ struct BoardMRIntentActions: View {
 
     /// One row per kind: queued duplicates read as the same task twice. A running one wins,
     /// then a failure that needs a retry, then the oldest pending one.
-    static func visibleIntents(_ intents: [MRTodoIntent]) -> [MRTodoIntent] {
+    static func visibleIntents(_ intents: [MRTodoIntent], excluding intentID: UUID? = nil) -> [MRTodoIntent] {
         let open = intents.filter { $0.state != .completed }
         func rank(_ intent: MRTodoIntent) -> Int {
             switch intent.state { case .running, .verifying: 0; case .failed: 1; default: 2 }
@@ -95,7 +85,7 @@ struct BoardMRIntentActions: View {
         for intent in open where chosen[intent.kind].map({ rank(intent) < rank($0) }) ?? true {
             chosen[intent.kind] = intent
         }
-        return open.filter { chosen[$0.kind]?.id == $0.id }
+        return open.filter { chosen[$0.kind]?.id == $0.id && $0.id != intentID }
     }
 
     static func title(_ kind: MRTodoIntent.Kind) -> LocalizedStringResource {
@@ -126,5 +116,29 @@ struct BoardMRIntentActions: View {
         case .conflict: "arrow.triangle.branch"
         case .refresh: "arrow.clockwise"
         }
+    }
+}
+
+struct MRIntentActionButton: View {
+    let intent: MRTodoIntent
+    let title: LocalizedStringResource
+    let monitor: TodoMonitorService
+    @State private var starting = false
+
+    var body: some View {
+        let cta = MRActionCTA(intent: intent.kind)
+        Button {
+            guard !starting else { return }
+            starting = true
+            Task {
+                defer { starting = false }
+                await runConfirmedIntent(intent, monitor: monitor, title: title)
+            }
+        } label: {
+            if let cta { MRActionLabel(title: title, cta: cta) }
+            else { Text(title) }
+        }
+        .disabled(starting)
+        .mrActionHelp(cta)
     }
 }

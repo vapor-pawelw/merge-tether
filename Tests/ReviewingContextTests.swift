@@ -61,6 +61,22 @@ struct ReviewingContextTests {
         #expect(visible.map(\.id) == [running.id, failed.id])
     }
 
+    @Test func aFeaturedFollowUpLeavesOnlyIndependentTaskRows() throws {
+        let request = try request()
+        func intent(_ kind: MRTodoIntent.Kind, _ state: MRTodoIntent.State) -> MRTodoIntent {
+            .init(id: UUID(), target: .init(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2),
+                kind: kind, state: state, todoIDs: [], noteIDs: [], sourceEvents: [], request: request,
+                headSHA: "abc", updatedAt: .now)
+        }
+        let failedFollowUp = intent(.followUp, .failed)
+        let pendingFollowUp = intent(.followUp, .pending)
+        let pendingPipeline = intent(.pipeline, .pending)
+        let intents = [pendingFollowUp, failedFollowUp, pendingPipeline]
+
+        #expect(BoardMRIntentActions.visibleIntents(intents).map(\.id) == [failedFollowUp.id, pendingPipeline.id])
+        #expect(BoardMRIntentActions.visibleIntents(intents, excluding: failedFollowUp.id).map(\.id) == [pendingPipeline.id])
+    }
+
     @Test(arguments: [false, true])
     func adoptedDraftKeepsOrdinaryManualActionsWithoutStartingAutomaticWork(_ ready: Bool) throws {
         let request = try request(draft: true)

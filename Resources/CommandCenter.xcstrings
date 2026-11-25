@@ -379,6 +379,56 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Ten MR nie wymaga teraz decyzji."}}
       }
     },
+    "commandCenter.followUpComments": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Selected comments"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Wybrane komentarze"}}
+      }
+    },
+    "commandCenter.followUpDetails": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Follow-up details"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Szczegóły obsługi uwag"}}
+      }
+    },
+    "commandCenter.followUpDetailsWithCount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"variations": {"plural": {
+          "one": {"stringUnit": {"state": "translated", "value": "Follow-up details · %lld comment"}},
+          "other": {"stringUnit": {"state": "translated", "value": "Follow-up details · %lld comments"}}
+        }}},
+        "pl": {"variations": {"plural": {
+          "one": {"stringUnit": {"state": "translated", "value": "Szczegóły obsługi uwag · %lld komentarz"}},
+          "few": {"stringUnit": {"state": "translated", "value": "Szczegóły obsługi uwag · %lld komentarze"}},
+          "many": {"stringUnit": {"state": "translated", "value": "Szczegóły obsługi uwag · %lld komentarzy"}},
+          "other": {"stringUnit": {"state": "translated", "value": "Szczegóły obsługi uwag · komentarze (%lld)"}}
+        }}}
+      }
+    },
+    "commandCenter.followUpStage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Author follow-up"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Obsługa uwag przez autora"}}
+      }
+    },
+    "commandCenter.followUpNeedsVerification": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Feedback needs verification"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Uwagi wymagają weryfikacji"}}
+      }
+    },
+    "commandCenter.followUpVerificationReason": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "The agent finished. Check the current review feedback to see what still needs attention."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Agent zakończył pracę. Sprawdź bieżące uwagi z przeglądu, aby ustalić, co jeszcze wymaga uwagi."}}
+      }
+    },
     "commandCenter.feedbackCheck": {
       "extractionState": "manual",
       "localizations": {

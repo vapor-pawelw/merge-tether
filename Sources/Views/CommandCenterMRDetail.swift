@@ -163,15 +163,21 @@ private struct CommandCenterMRDetailContent: View {
     var body: some View {
         let citationContext = self.citationContext
         let discussions = discussionSnapshot
-        let presentation = MRCardPresentation(row: presentationRow, monitor: monitor, allowsRemoval: isReviewed)
+        let row = presentationRow
+        let presentation = MRCardPresentation(row: row, monitor: monitor, allowsRemoval: isReviewed)
+        let humanAction = presentation.humanAction
+        let failedFollowUp: MRTodoIntent? = if showsDecisions, let intent = humanAction?.retryIntent,
+            intent.kind == .followUp, intent.state == .failed {
+            BoardMRIntentActions.visibleIntents(row.attentionIntents).first { $0.id == intent.id && $0.state == .failed }
+        } else { nil }
         ScrollViewReader { proxy in
             let scrollView = ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    header(presentation).id(Anchor.overview)
+                    header(presentation, showsFeedbackRecheck: failedFollowUp == nil).id(Anchor.overview)
                     // The decision the user has to make leads; merge state and automation rules support it.
                     if showsDecisions {
                         nextStep(proxy: proxy, citationContext: citationContext, discussions: discussions,
-                            humanAction: presentation.humanAction).id(Anchor.drafts)
+                            humanAction: humanAction, failedFollowUp: failedFollowUp).id(Anchor.drafts)
                     }
                     if finishedState == nil {
                         VStack(alignment: .leading, spacing: 8) {
@@ -419,8 +425,9 @@ private struct CommandCenterMRDetailContent: View {
         return hasDependencyBlocker ? status.dependencyReadiness.holdReason : nil
     }
 
-    private func header(_ progress: MRCardPresentation) -> some View {
+    private func header(_ progress: MRCardPresentation, showsFeedbackRecheck: Bool) -> some View {
         let mergeActivity = progress.mergeActivity
+        let feedback = showsFeedbackRecheck ? presentationItem.authorFeedbackStatus : nil
         return VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 headerReference
@@ -499,23 +506,26 @@ private struct CommandCenterMRDetailContent: View {
             if finishedState != nil {
                 Button { monitor.acknowledgeFinishedMergeRequest(item) } label: { Text(.MRLifecycle.seen) }
                     .buttonStyle(.bordered).help(Text(.MRLifecycle.seenHelp))
-            } else if monitor.canMarkMergeRequestReady(item) || presentationItem.authorFeedbackStatus != nil {
+            } else if monitor.canMarkMergeRequestReady(item) || feedback != nil {
                 HStack(spacing: 10) {
                     MarkMergeRequestReadyButton(item: item, monitor: monitor).buttonStyle(.bordered)
-                    if let feedback = presentationItem.authorFeedbackStatus {
-                        Button {
-                            guard confirmMRAction(.verifyFeedback, title: .AuthorFeedback.authorFeedbackRecheck, monitor: monitor) else { return }
-                            monitor.attention.retryAuthorFeedback(item.id)
-                        } label: {
-                            MRActionLabel(title: .AuthorFeedback.authorFeedbackRecheck, cta: .verifyFeedback)
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(feedback.phase == .checking)
-                        .mrActionHelp(.verifyFeedback)
+                    if let feedback {
+                        feedbackRecheckButton(feedback).buttonStyle(.bordered)
                     }
                 }
             }
         }
+    }
+
+    private func feedbackRecheckButton(_ feedback: AuthorFeedbackStatus) -> some View {
+        Button {
+            guard confirmMRAction(.verifyFeedback, title: .AuthorFeedback.authorFeedbackRecheck, monitor: monitor) else { return }
+            monitor.attention.retryAuthorFeedback(item.id)
+        } label: {
+            MRActionLabel(title: .AuthorFeedback.authorFeedbackRecheck, cta: .verifyFeedback)
+        }
+        .disabled(feedback.phase == .checking)
+        .mrActionHelp(.verifyFeedback)
     }
 
     /// The card's requirement list, shown where the single waiting sentence used to be.
@@ -540,11 +550,15 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     private func nextStep(proxy: ScrollViewProxy, citationContext: MRCommentCitation.Context?,
-                          discussions: MRDiscussionSnapshot, humanAction: MRHumanAction?) -> some View {
+                          discussions: MRDiscussionSnapshot, humanAction: MRHumanAction?,
+                          failedFollowUp: MRTodoIntent?) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(.CommandCenter.commandCenterNextStep).font(.headline)
             VStack(alignment: .leading, spacing: 12) {
-                if let action = humanAction {
+                if let action = humanAction, let failedFollowUp {
+                    failedFollowUpStep(action, intent: failedFollowUp, citationContext: citationContext, proxy: proxy)
+                        .id(failedFollowUp.id)
+                } else if let action = humanAction {
                     if !item.needsConfirmation || (action.kind != .publication && action.kind != .approval) {
                         Text(verbatim: action.explanation).font(.body.weight(.medium)).foregroundStyle(.primary)
                             .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
@@ -624,8 +638,8 @@ private struct CommandCenterMRDetailContent: View {
                     draftRegenerationButton
                     publicationThreads(discussions)
                 }
-                decisionActions
-                FollowUpAutomationHoldView(row: presentationRow, monitor: monitor)
+                decisionActions(excludingIntentID: failedFollowUp?.id)
+                FollowUpAutomationHoldView(row: presentationRow, monitor: monitor, showsRetryRequired: failedFollowUp == nil)
                 if showsFeedbackDetails {
                     VStack(alignment: .leading, spacing: 8) {
                         Divider()
@@ -646,6 +660,65 @@ private struct CommandCenterMRDetailContent: View {
                         .frame(width: 3).padding(.vertical, 12)
                 }
             }
+        }
+    }
+
+    private func failedFollowUpStep(_ action: MRHumanAction, intent: MRTodoIntent,
+                                    citationContext: MRCommentCitation.Context?, proxy: ScrollViewProxy) -> some View {
+        let job = jobs.first { $0.id == intent.jobID && $0.workflow == .followUp }
+        let workerFinished = job?.operationalExecution?.state == .succeeded
+        let feedback = presentationItem.authorFeedbackStatus
+        let retry = MRIntentActionButton(intent: intent, title: action.actionLabel, monitor: monitor)
+        let detailsTitle: LocalizedStringResource = if case .rawNotes(let ids) = action.feedbackEvidence(for: item) {
+            .CommandCenter.commandCenterFollowUpDetailsWithCount(ids.count)
+        } else { .CommandCenter.commandCenterFollowUpDetails }
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(.CommandCenter.commandCenterFollowUpStage).font(.caption).foregroundStyle(.secondary)
+            Label {
+                Text(workerFinished ? .CommandCenter.commandCenterFollowUpNeedsVerification : action.message)
+                    .fontWeight(.semibold).fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "exclamationmark.circle").foregroundStyle(.orange)
+            }
+            if workerFinished {
+                Text(.CommandCenter.commandCenterFollowUpVerificationReason).font(.callout).foregroundStyle(.secondary)
+            } else if let reason = AgentExplanation.summary(action.detail), reason != action.explanation {
+                Text(verbatim: reason).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            HStack(spacing: 8) {
+                if workerFinished, let feedback {
+                    feedbackRecheckButton(feedback).buttonStyle(.borderedProminent)
+                    retry.buttonStyle(.bordered)
+                } else {
+                    retry.buttonStyle(.borderedProminent)
+                    if let feedback { feedbackRecheckButton(feedback).buttonStyle(.bordered) }
+                }
+            }
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(.CommandCenter.commandCenterFollowUpComments)
+                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    attentionSourceEvidence(for: action, citationContext: citationContext)
+                    if let detail = action.detail, !detail.isEmpty {
+                        Divider()
+                        Text(.AgentExplanation.agentExplanationDiagnostics)
+                            .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text(verbatim: detail).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let job {
+                        Button { openHistory(proxy: proxy, jobID: job.id) } label: {
+                            Text(.MRHumanAction.mrHumanActionActionReviewRun)
+                        }
+                        .buttonStyle(.link)
+                    }
+                }
+                .padding(.top, 8)
+                .padding(.leading, 16)
+            } label: {
+                Text(detailsTitle).foregroundStyle(.secondary)
+            }
+            .font(.callout)
         }
     }
 
@@ -746,9 +819,9 @@ private struct CommandCenterMRDetailContent: View {
 
     /// Flattened into the caller's stack so absent controls leave no empty gap.
     @ViewBuilder
-    private var decisionActions: some View {
+    private func decisionActions(excludingIntentID: UUID? = nil) -> some View {
             CommentReviewImpactView(item: item, reReviewEnabled: monitor.settings.automation.autoReReviewEnabled)
-            BoardMRIntentActions(row: presentationRow, monitor: monitor)
+            BoardMRIntentActions(row: presentationRow, monitor: monitor, excludingIntentID: excludingIntentID)
             ReReviewControls(item: presentationItem, monitor: monitor.attention, requireAssistant: { requireCodingAssistant(monitor) }, assistant: monitor.settings.automation.assistant,
                 hidesStaleResult: MRCardPresentation(row: presentationRow, monitor: monitor, allowsRemoval: isReviewed).working)
             InboxAttentionActions(item: presentationItem, monitor: monitor, feedbackAction: monitor.attentionFeedbackAction(for: item),
@@ -855,7 +928,7 @@ private struct CommandCenterMRDetailContent: View {
         if !showsDecisions {
             if item.needsConfirmation { confirmationControls }
             // Flattened: an empty wrapper would still take the parent's spacing.
-            decisionActions
+            decisionActions()
             FollowUpAutomationHoldView(row: presentationRow, monitor: monitor)
             if showsFeedbackDetails { feedbackCheck(citationContext: citationContext).id(Anchor.feedbackStatus) }
         }
@@ -882,9 +955,9 @@ private struct CommandCenterMRDetailContent: View {
         }
     }
 
-    private func openHistory(proxy: ScrollViewProxy) {
+    private func openHistory(proxy: ScrollViewProxy, jobID: UUID? = nil) {
         historyExpanded = true
-        focusedJobID = jobs.first?.id
+        focusedJobID = jobID ?? jobs.first?.id
         historyNavigationID = UUID()
         Task { await scroll(to: .assistantRuns, proxy: proxy) }
     }

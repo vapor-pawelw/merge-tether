@@ -248,10 +248,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The feedback follow-up did not finish. Review or retry it."
+            "value": "Feedback follow-up stopped"
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Obsługa uwag się nie zakończyła. Sprawdź wynik lub spróbuj ponownie."}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Obsługa uwag została zatrzymana"}}
       }
     },
     "mrHumanAction.pipelineFailed": {
@@ -591,7 +591,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Retry author follow-up"
+            "value": "Retry follow-up"
           }
         },
         "pl": {"stringUnit": {"state": "translated", "value": "Ponów obsługę uwag"}}

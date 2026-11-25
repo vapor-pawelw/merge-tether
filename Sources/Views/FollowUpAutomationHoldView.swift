@@ -3,6 +3,7 @@ import SwiftUI
 struct FollowUpAutomationHoldView: View {
     let row: MergeRequestBoardSnapshot.Row
     let monitor: TodoMonitorService
+    var showsRetryRequired = true
     @Environment(\.openSettings) private var openSettings
 
     private var reason: MRFollowUpAutomationHold? {
@@ -36,7 +37,7 @@ struct FollowUpAutomationHoldView: View {
     }
 
     var body: some View {
-        if let reason {
+        if let reason, reason != .retryRequired || showsRetryRequired {
             VStack(alignment: .leading, spacing: 6) {
                 Label { Text(.AutomationHold.automationHoldTitle) } icon: { Image(systemName: "pause.circle") }
                     .font(.subheadline.weight(.medium))

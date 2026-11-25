@@ -154,6 +154,22 @@ struct MRHumanActionTests {
         #expect(action.feedbackEvidence(for: item) == (kind == .followUp ? .unavailable(42) : .none))
     }
 
+    @Test func failedFollowUpSeparatesItsStatusFromTheRetryAndDiagnostic() throws {
+        let request = try MRDependencyPresentationTests().request(2, project: 1)
+        let item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
+            url: request.webURL, mergeRequest: request)
+        let intent = MRTodoIntent(id: UUID(), target: .init(host: "gitlab.example.test", username: "author7", projectID: 1, iid: 2),
+            kind: .followUp, state: .failed, todoIDs: [], noteIDs: [42], sourceEvents: [], request: request,
+            headSHA: request.sha!, error: "The assistant could not finish checking the discussion.", updatedAt: .now)
+
+        let action = try #require(MRHumanAction(row: .init(item: item, latestJob: nil, intents: [intent]), assistantReady: true))
+
+        #expect(action.explanation == "Feedback follow-up stopped")
+        #expect(action.retryIntent?.id == intent.id)
+        #expect(action.detail == intent.error)
+        #expect(action.feedbackEvidence(for: item) == .rawNotes([42]))
+    }
+
     @Test func aNewerDeferredReviewCannotReplaceThePipelineTaskDescribedOnTheCard() throws {
         let request = try MRDependencyPresentationTests().request(2, project: 1, draft: true)
         let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "author7", projectID: 1, iid: 2)
