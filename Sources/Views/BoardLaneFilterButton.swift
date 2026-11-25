@@ -1,41 +1,32 @@
 import SwiftUI
+import MergeTetherRemote
 
-struct MRBoardLaneFilter: Equatable {
-    enum Card: Hashable {
-        case needsAttention, new, pinned
+typealias MRBoardLaneFilter = RemoteBoardLaneFilter
 
-        var title: LocalizedStringResource {
-            switch self {
-            case .needsAttention: .CommandCenter.commandCenterStatusAttention
-            case .new: .Board.boardReviewAssignmentNew
-            case .pinned: .Board.boardFiltersPinned
-            }
+extension RemoteBoardLaneFilter.Card {
+    var title: LocalizedStringResource {
+        switch self {
+        case .needsAttention: .CommandCenter.commandCenterStatusAttention
+        case .new: .Board.boardReviewAssignmentNew
+        case .pinned: .Board.boardFiltersPinned
         }
     }
+}
 
-    enum Section: CaseIterable, Hashable {
-        case regular, inactive
-
-        var title: LocalizedStringResource {
-            switch self {
-            case .regular: .Board.boardFiltersRegular
-            case .inactive: .Board.boardFiltersInactive
-            }
+extension RemoteBoardLaneFilter.Section {
+    var title: LocalizedStringResource {
+        switch self {
+        case .regular: .Board.boardFiltersRegular
+        case .inactive: .Board.boardFiltersInactive
         }
     }
+}
 
-    var cards: Set<Card> = []
-    var sections: Set<Section> = []
-
-    var isActive: Bool { !cards.isEmpty || !sections.isEmpty }
-
+extension RemoteBoardLaneFilter {
     func matches(_ row: MergeRequestBoardSnapshot.Row, activity: @autoclosure () -> MRBoardActivity.Group,
-                 isPinned: @autoclosure () -> Bool) -> Bool {
-        let matchesCard = cards.isEmpty
-            || (cards.contains(.needsAttention) && row.needsAttention)
-            || (cards.contains(.new) && row.newReviewAssignedAt != nil)
-            || (cards.contains(.pinned) && isPinned())
-        return matchesCard && (sections.isEmpty || sections.contains(activity() == .inactive ? .inactive : .regular))
+                 isPinned: @autoclosure () -> Bool, isNew: Bool? = nil) -> Bool {
+        matches(needsAttention: row.needsAttention, isNew: isNew ?? (row.newReviewAssignedAt != nil),
+            isPinned: isPinned(), isInactive: activity() == .inactive)
     }
 }
 

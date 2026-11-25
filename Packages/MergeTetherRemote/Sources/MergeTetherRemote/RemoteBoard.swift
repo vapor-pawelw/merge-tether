@@ -19,6 +19,8 @@ public enum RemoteActionKind: String, Codable, Sendable { case publish, approve,
 }
 
 public struct RemoteAction: Codable, Equatable, Identifiable, Sendable {
+    public static let reviewSeenID = "reviewSeen"
+    public static let restoreHiddenReviewID = "restoreHiddenReview"
     public var id: String
     public var kind: RemoteActionKind
     public var token: String
@@ -250,6 +252,7 @@ public struct RemoteCard: Codable, Equatable, Identifiable, Sendable {
     public var automation: RemoteCardAutomation?
     public var canRemoveFromBoard: Bool?
     public var canAcknowledgeFinished: Bool?
+    public var boardTraits: RemoteBoardCardTraits?
     public init(id: String, title: String, project: String, url: URL?, head: String? = nil,
                 detail: String = "", drafts: [RemoteDraft] = [], actions: [RemoteAction] = [],
                 needsAttention: Bool? = nil, mergeRequestIID: Int? = nil, primaryCTA: RemoteCardCTA? = nil,
@@ -285,6 +288,8 @@ public struct RemoteBoard: Codable, Equatable, Sendable {
     public var inboxReadAction: RemoteAction?
     public var cardAssistants: [RemoteCardAssistant]?
     public var issueTagsOmitted: Bool?
+    /// Hidden review assignments are separate from Inbox notices and board lanes.
+    public var hiddenReviews: [RemoteCard]?
     public init(hostSession: UUID, account: String, updatedAt: Date? = nil, partial: Bool = false, lanes: [RemoteLane],
                 automationPaused: Bool? = nil, draftRegeneration: RemoteDraftRegenerationControl? = nil) {
         self.hostSession = hostSession; self.account = account; self.updatedAt = updatedAt
@@ -296,7 +301,7 @@ public struct RemoteBoard: Codable, Equatable, Sendable {
               action.kind == .markDone else { return nil }
         return .init(id: Self.inboxReadCardID, title: "", project: "", url: nil, actions: [action])
     }
-    public var commandCards: [RemoteCard] { cards + [draftRegeneration?.card, inboxReadCard].compactMap { $0 } }
+    public var commandCards: [RemoteCard] { cards + (hiddenReviews ?? []) + [draftRegeneration?.card, inboxReadCard].compactMap { $0 } }
     public var cards: [RemoteCard] { lanes.flatMap(\.cards) }
 
     public var avatarThumbnailURLs: [URL] {
@@ -401,6 +406,7 @@ public struct RemoteMessage: Codable, Sendable {
     public static let detailAvatarsCapability = "detail-avatars-v1"
     public static let boardOrderCapability = "board-order-v1"
     public static let cardActionsCapability = "card-actions-v1"
+    public static let reviewBoardCapability = "review-board-v1"
     public enum Kind: String, Codable, Sendable { case hello, snapshot, command, accepted, result, receipt, receiptResult = "receipt-result", unavailable, hostReady = "host-ready", detailRequest = "detail-request", details, cancelDetails = "cancel-details"
         case draftRegenerationRequest = "draft-regeneration-request", draftRegenerationPage = "draft-regeneration-page"
         case avatarThumbnails = "avatar-thumbnails"
@@ -454,46 +460,74 @@ public struct RemoteMessage: Codable, Sendable {
 }
 
 extension RemoteMessage {
-    /// Leave room for the board itself when optional issue metadata would exceed the transport limit.
+    /// Leave room for the board itself when optional metadata would exceed the transport limit.
     public func fittingIssueTags() -> Self {
-        guard type == .snapshot, let board, board.lanes.contains(where: { $0.cards.contains { $0.issues != nil } }),
+        guard type == .snapshot, let board else { return self }
+        let hasIssueTags = board.lanes.contains { $0.cards.contains { $0.issues != nil } }
+        let hasReviewTraits = board.lanes.contains { $0.cards.contains { $0.boardTraits != nil } }
+        guard hasIssueTags || hasReviewTraits || board.hiddenReviews != nil,
               let size = try? JSONEncoder().encode(self).count, size > RemoteCipher.maximumPayloadBytes else { return self }
         var result = self
         var shortened = board
-        for lane in shortened.lanes.indices {
-            for card in shortened.lanes[lane].cards.indices {
-                shortened.lanes[lane].cards[card].issues = shortened.lanes[lane].cards[card].issues?.map {
-                    .init(reference: $0.reference, url: $0.url)
+        if shortened.hiddenReviews != nil {
+            shortened.hiddenReviews = nil
+            result.board = shortened
+            if let size = try? JSONEncoder().encode(result).count, size <= RemoteCipher.maximumPayloadBytes { return result }
+        }
+        if hasIssueTags {
+            for lane in shortened.lanes.indices {
+                for card in shortened.lanes[lane].cards.indices {
+                    shortened.lanes[lane].cards[card].issues = shortened.lanes[lane].cards[card].issues?.map {
+                        .init(reference: $0.reference, url: $0.url)
+                    }
                 }
             }
+            result.board = shortened
+            if let size = try? JSONEncoder().encode(result).count, size <= RemoteCipher.maximumPayloadBytes { return result }
+            for lane in shortened.lanes.indices {
+                for card in shortened.lanes[lane].cards.indices { shortened.lanes[lane].cards[card].issues = nil }
+            }
+            shortened.issueTagsOmitted = true
+            result.board = shortened
+            if let size = try? JSONEncoder().encode(result).count, size <= RemoteCipher.maximumPayloadBytes { return result }
         }
-        result.board = shortened
-        if let size = try? JSONEncoder().encode(result).count, size <= RemoteCipher.maximumPayloadBytes { return result }
-        for lane in shortened.lanes.indices {
-            for card in shortened.lanes[lane].cards.indices { shortened.lanes[lane].cards[card].issues = nil }
+        if hasReviewTraits {
+            shortened.removeReviewBoardTraits()
+            result.board = shortened
+            if let size = try? JSONEncoder().encode(result).count, size <= RemoteCipher.maximumPayloadBytes { return result }
         }
-        shortened.issueTagsOmitted = true
-        result.board = shortened
-        if let size = try? JSONEncoder().encode(result).count, size <= RemoteCipher.maximumPayloadBytes { return result }
         // An otherwise valid legacy-size snapshot may have no bytes left even for the omission flag.
-        result.board?.issueTagsOmitted = nil
+        shortened.issueTagsOmitted = nil
+        result.board = shortened
         return result
     }
 }
 
 extension RemoteBoard {
+    fileprivate mutating func removeReviewBoardTraits() {
+        hiddenReviews = nil
+        for lane in lanes.indices {
+            for card in lanes[lane].cards.indices {
+                lanes[lane].cards[card].boardTraits = nil
+                lanes[lane].cards[card].actions.removeAll { $0.id == RemoteAction.reviewSeenID }
+            }
+        }
+    }
+
     public func forClient(supportsCommentReview: Bool, supportsMergeActions: Bool = false, supportsMRControls: Bool = false,
                           supportsCommentOrigins: Bool = false, supportsMarkReady: Bool = false,
                           supportsDraftRegeneration: Bool = false, supportsPersonalApproval: Bool = false,
-                          supportsReviewerEditing: Bool = false, supportsCardActions: Bool = false) -> Self {
+                          supportsReviewerEditing: Bool = false, supportsCardActions: Bool = false,
+                          supportsReviewBoard: Bool = false) -> Self {
         var compatible = self
         if !supportsDraftRegeneration { compatible.draftRegeneration = nil }
         if !supportsCardActions { compatible.cardAssistants = nil }
+        if !supportsReviewBoard { compatible.removeReviewBoardTraits() }
         for lane in compatible.lanes.indices {
             for card in compatible.lanes[lane].cards.indices {
                 if !supportsCardActions {
                     compatible.lanes[lane].cards[card].actions.removeAll { $0.kind == .editCard }
-                    compatible.lanes[lane].cards[card].pinned = nil
+                    if !supportsReviewBoard { compatible.lanes[lane].cards[card].pinned = nil }
                     compatible.lanes[lane].cards[card].automation = nil
                     compatible.lanes[lane].cards[card].canRemoveFromBoard = nil
                     compatible.lanes[lane].cards[card].canAcknowledgeFinished = nil

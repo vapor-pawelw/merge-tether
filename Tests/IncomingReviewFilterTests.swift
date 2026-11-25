@@ -1,4 +1,5 @@
 import Foundation
+import MergeTetherRemote
 import Testing
 @testable import MergeTether
 
@@ -164,6 +165,63 @@ struct IncomingReviewFilterTests {
             from: Data(#"{"enabled":true,"criteria":"Review only migrations"}"#.utf8))
         #expect(preferences.showHiddenReviewsInInbox)
         #expect(preferences.activeCriteria == "Review only migrations")
+    }
+
+    @Test func phoneHiddenListSurvivesNoticeDismissalAndRejectsAnOlderHide() async throws {
+        let suite = "IncomingReviewFilter.PhoneRestore.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        let manual = try request(2)
+        let filtered = try request(3)
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        gitlab.handler = { request in
+            if request.arguments.first == "config" { return InMemoryGitLab.output(self.host) }
+            if request.arguments.first == "auth" {
+                return InMemoryGitLab.output(error: "Logged in to \(self.host) as \(self.username)")
+            }
+            return InMemoryGitLab.output("[]")
+        }
+        let glab = gitlab.service(host: host, username: username)
+        settings.glabPath = glab.glabPath
+        settings.resolvedHost = host
+        let original = TodoMonitorService(settings: settings, glab: glab)
+        defer { original.stopTimer() }
+        await original.bootstrap()
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: manual.title, url: manual.webURL)
+        item.mergeRequest = manual
+        let snapshot = MergeRequestBoardSnapshot(own: [], reviewed: [item], todos: [], attention: [], handoffs: [],
+            host: host, username: username)
+        let context = try #require(RemoteCardActionContext(card: RemoteBoardAdapter.card(item, account: "\(username)@\(host)"),
+            board: snapshot, monitor: original))
+        #expect(await context.execute(.remove) == .completed)
+        #expect(!settings.intakeFilterHolds(target(2)))
+        #expect(settings.hideFilteredReviews([.init(target: target(3), title: filtered.title, url: filtered.webURL)]))
+        let notice = try #require(settings.filteredHiddenReviewDetails[target(3)]?.inboxNotification)
+        #expect(original.acknowledgeHiddenReviewNotifications([notice.id]))
+
+        let reloaded = SettingsManager(defaults: defaults)
+        let monitor = TodoMonitorService(settings: reloaded, glab: glab)
+        defer { monitor.stopTimer() }
+        await monitor.bootstrap()
+        let account = "\(username)@\(host)"
+        func board() -> RemoteBoard {
+            RemoteBoardAdapter.board(monitor: monitor, session: UUID(), account: account, includesReviewBoard: true)
+        }
+        let hidden = try #require(board().hiddenReviews)
+        #expect(Set(hidden.map(\.mergeRequestIID)) == [2, 3])
+        #expect(board().cards.allSatisfy { !$0.id.hasPrefix("completion:") })
+        let card = try #require(hidden.first { $0.mergeRequestIID == 2 })
+        let restore = try #require(card.actions.first)
+        #expect(RemoteBoardAdapter.restoreHiddenReview(card, action: restore, monitor: monitor, account: "another@\(host)") == .changed)
+        #expect(RemoteBoardAdapter.restoreHiddenReview(card, action: restore, monitor: monitor, account: account) == .completed)
+        #expect(monitor.removeReviewedMergeRequest(item))
+        #expect(RemoteBoardAdapter.restoreHiddenReview(card, action: restore, monitor: monitor, account: account) == .changed)
+        let filteredCard = try #require(board().hiddenReviews?.first { $0.mergeRequestIID == 3 })
+        let filteredRestore = try #require(filteredCard.actions.first)
+        #expect(RemoteBoardAdapter.restoreHiddenReview(filteredCard, action: filteredRestore, monitor: monitor, account: account) == .completed)
+        #expect(SettingsManager(defaults: defaults).ignoredMergeRequests == [target(2)])
     }
 
     @Test func inboxNoticeSurvivesRestartAndAcknowledgingItKeepsTheMergeRequestHidden() throws {

@@ -239,10 +239,7 @@ struct CommandCenterBoardView: View {
     }
 
     private func activity(_ row: MergeRequestBoardSnapshot.Row) -> MRBoardActivity.Group {
-        if let entry = row.manualOrderEntry { return entry.group.automationEnabled || entry.isNew ? .regular : .inactive }
-        return monitor.boardActivity(projectID: row.id.projectID, iid: row.id.iid, url: row.item.url,
-            isDraft: row.item.section == .draftMergeRequests,
-            isFinished: MergeRequestFinishedState(row.item.mergeRequest) != nil).group
+        monitor.boardActivityGroup(for: row)
     }
 
     private func isPinned(_ row: MergeRequestBoardSnapshot.Row) -> Bool {
@@ -279,7 +276,8 @@ struct CommandCenterBoardView: View {
         let selection = filter.wrappedValue
         let allRows = reviewing ? board.reviewed : board.own
         let rows = selection.isActive ? allRows.filter { row in
-            selection.matches(row, activity: activity(row), isPinned: isPinned(row))
+            selection.matches(row, activity: activity(row), isPinned: isPinned(row),
+                              isNew: reviewing && monitor.isNewReviewAssignment(row))
         } : allRows
         let cardIDs = rows.map(\.id)
         let settings = monitor.settings

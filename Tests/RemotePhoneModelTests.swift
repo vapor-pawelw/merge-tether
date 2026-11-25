@@ -3,6 +3,66 @@ import Testing
 import MergeTetherRemote
 
 @MainActor @Suite struct RemotePhoneModelTests {
+    @Test(arguments: [false, true])
+    func openingANewReviewRequestsSeenOnlyForAWritableSnapshot(_ partial: Bool) async throws {
+        let f = try PhoneFixture(), model = f.model
+        let seen = RemoteAction(id: RemoteAction.reviewSeenID, kind: .markDone, token: String(repeating: "a", count: 64))
+        var card = f.board.cards[0]
+        card.id = "mr:1:2"
+        card.boardTraits = .init(needsAttention: false, isNew: true, isInactive: false)
+        card.actions = [seen]
+        var board = f.board
+        board.lanes = [.init(id: .reviewed, cards: [card])]
+        board.partial = partial
+        model.connect()
+        await model.refresh()
+        await f.reply(board: board, capabilities: [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability,
+            RemoteMessage.cachedDetailsCapability, RemoteMessage.reviewBoardCapability])
+        let transport = f.transports[0]
+        #expect(transport.sent.first?.capabilities?.contains(RemoteMessage.reviewBoardCapability) == true)
+        await model.requestDetails(card: card, acknowledgingReview: seen)
+        let request = try #require(transport.sent.last?.detailRequest)
+        #expect(request.reviewSeenToken == (partial ? nil : seen.token))
+        #expect(request.cachedOnly == true)
+        await model.requestDetails(card: card, force: true)
+        #expect(transport.sent.last?.detailRequest?.reviewSeenToken == nil)
+    }
+
+    @Test func changedDetailsRetryAcknowledgesTheNewReviewUsingTheRefreshedCard() async throws {
+        let f = try PhoneFixture(), model = f.model
+        let capabilities = [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability,
+            RemoteMessage.cachedDetailsCapability, RemoteMessage.reviewBoardCapability]
+        var board = f.board
+        var card = board.cards[0]
+        card.id = "mr:1:2"
+        card.boardTraits = .init(needsAttention: false, isNew: true, isInactive: false)
+        let first = RemoteAction(id: RemoteAction.reviewSeenID, kind: .markDone, token: String(repeating: "a", count: 64))
+        card.actions = [first]
+        board.lanes = [.init(id: .reviewed, cards: [card])]
+        model.connect()
+        await model.refresh()
+        await f.reply(board: board, capabilities: capabilities)
+        await model.requestDetails(card: card, acknowledgingReview: first)
+        let transport = f.transports[0]
+        let request = try #require(transport.sent.last?.detailRequest)
+        #expect(request.reviewSeenToken == first.token)
+
+        await transport.onMessage?(.init(type: .details, detailResponse: .init(request: request, status: .changed)))
+        let current = RemoteAction(id: RemoteAction.reviewSeenID, kind: .markDone, token: String(repeating: "b", count: 64))
+        card.actions = [current]
+        card.contextRevision = "advanced"
+        board.lanes[0].cards = [card]
+        await f.reply(board: board, capabilities: capabilities)
+        let retry = try #require(transport.sent.last?.detailRequest)
+        #expect(retry.id != request.id)
+        #expect(retry.reviewSeenToken == current.token)
+
+        await transport.onMessage?(.init(type: .details,
+            detailResponse: .init(request: retry, status: .current, details: .init(checkedAt: .now))))
+        await model.requestDetails(card: card, force: true)
+        #expect(transport.sent.last?.detailRequest?.reviewSeenToken == nil)
+    }
+
     @Test(arguments: [true, false])
     func droppingACardUsesOneChallengeAndOnlyAcceptsTheCurrentMacOrder(_ moveAccepted: Bool) async throws {
         let f = try PhoneFixture(), model = f.model

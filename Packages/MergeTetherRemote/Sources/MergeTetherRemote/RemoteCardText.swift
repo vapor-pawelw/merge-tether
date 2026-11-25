@@ -28,6 +28,11 @@ public struct RemoteCardSelection: Identifiable, Equatable, Sendable {
 /// The phone shows each sentence once, like the Mac card: a status or next step that repeats
 /// the card's explanation adds nothing, and older hosts may still send such repeats.
 public extension RemoteCard {
+    var reviewSeenAction: RemoteAction? {
+        guard boardTraits?.isNew == true else { return nil }
+        return actions.first { $0.id == RemoteAction.reviewSeenID && $0.kind == .markDone }
+    }
+
     func hasSameActionContext(as other: RemoteCard) -> Bool {
         guard id == other.id, title == other.title, project == other.project, url == other.url else { return false }
         return head == other.head && contextRevision == other.contextRevision && drafts == other.drafts
@@ -44,7 +49,8 @@ public extension RemoteCard {
         content.automation = nil
         content.canRemoveFromBoard = nil
         content.canAcknowledgeFinished = nil
-        content.actions.removeAll { $0.kind == .editCard }
+        content.boardTraits = nil
+        content.actions.removeAll { $0.kind == .editCard || $0.id == RemoteAction.reviewSeenID }
         content.issues = nil
         return try? RemoteDigest.token(content)
     }

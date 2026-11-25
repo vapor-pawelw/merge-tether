@@ -60,13 +60,14 @@ extension RemoteConnection: RemoteHostTransport {}
     private var phoneSupportsDraftRegeneration = false
     private var phoneSupportsBoardOrder = false
     private var phoneSupportsCardActions = false
+    private var phoneSupportsReviewBoard = false
     private static let boardCapabilities = [
         RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability, RemoteMessage.detailOriginsCapability,
         RemoteMessage.mrControlsCapability, RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability,
         RemoteMessage.detailPreviewCapability, RemoteMessage.cachedDetailsCapability, RemoteMessage.draftRegenerationCapability,
         RemoteMessage.boardOrderCapability, RemoteMessage.personalApprovalCapability, RemoteMessage.reviewerEditingCapability,
         RemoteMessage.reviewerBatchCapability, RemoteMessage.cardActionsCapability,
-        RemoteMessage.draftRegenerationStylesCapability
+        RemoteMessage.draftRegenerationStylesCapability, RemoteMessage.reviewBoardCapability
     ]
     private let readAvatarThumbnail: @Sendable (URL) async -> Data?
     @ObservationIgnored private(set) var avatarTask: Task<Void, Never>?
@@ -219,6 +220,7 @@ extension RemoteConnection: RemoteHostTransport {}
         phoneSupportsMarkReady = false
         phoneSupportsDraftRegeneration = false
         phoneSupportsBoardOrder = false
+        phoneSupportsReviewBoard = false
         regenerationPreview = nil
         clearOriginSubscription()
         detailTask?.cancel(); detailTask = nil; activeDetailRequest = nil
@@ -323,6 +325,7 @@ extension RemoteConnection: RemoteHostTransport {}
             phoneSupportsDraftRegeneration = message.capabilities?.contains(RemoteMessage.draftRegenerationCapability) == true
             phoneSupportsBoardOrder = message.capabilities?.contains(RemoteMessage.boardOrderCapability) == true
             phoneSupportsCardActions = message.capabilities?.contains(RemoteMessage.cardActionsCapability) == true
+            phoneSupportsReviewBoard = message.capabilities?.contains(RemoteMessage.reviewBoardCapability) == true
             phoneSupportsCommentOrigins = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.commentOriginCapability) == true
             phoneSupportsOriginUpdates = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.detailOriginsCapability) == true
             if !phoneSupportsOriginUpdates { clearOriginSubscription() }
@@ -393,7 +396,9 @@ extension RemoteConnection: RemoteHostTransport {}
             case .pin, .refresh: true
             default: false
             }
-            let fresh = if handlesInboxUpdate || command.isFeedbackSuggestionDecision || command.isDraftRegeneration || refreshesItself { true } else {
+            let handlesReviewAssignment = command.actionID == RemoteAction.reviewSeenID || command.actionID == RemoteAction.restoreHiddenReviewID
+            let fresh = if handlesReviewAssignment { monitor.lastRefresh != nil }
+            else if handlesInboxUpdate || command.isFeedbackSuggestionDecision || command.isDraftRegeneration || refreshesItself { true } else {
                 await refreshSource(deadline: .now + .seconds(35))
             }
             var board = snapshot()
@@ -532,6 +537,9 @@ extension RemoteConnection: RemoteHostTransport {}
               card.contextRevision == RemoteBoardAdapter.contextRevision(source) else {
             Task { try? await active.send(.init(type: .details, detailResponse: .init(request: request, status: .changed))) }
             return
+        }
+        if phoneSupportsReviewBoard, monitor.lastRefresh != nil, let action = request.reviewSeenAction(in: board) {
+            _ = RemoteBoardAdapter.acknowledgeReviewAssignment(card, action: action, monitor: monitor, account: board.account)
         }
         cancelDetailAvatars()
         clearOriginSubscription()
@@ -739,7 +747,8 @@ extension RemoteConnection: RemoteHostTransport {}
             regenerationPreview = nil
         }
         var board = RemoteBoardAdapter.board(monitor: monitor, session: hostSession, account: account,
-            includesBoardOrder: phoneSupportsBoardOrder, includesCardActions: phoneSupportsCardActions)
+            includesBoardOrder: phoneSupportsBoardOrder, includesCardActions: phoneSupportsCardActions,
+            includesReviewBoard: phoneSupportsReviewBoard)
         if phoneSupportsCardActions {
             let preferred = monitor.settings.conversationDestination
             let available = AssistantContextLauncher.availableDestinations()
@@ -765,7 +774,7 @@ extension RemoteConnection: RemoteHostTransport {}
             supportsMRControls: phoneSupportsMRControls, supportsCommentOrigins: phoneSupportsCommentOrigins,
             supportsMarkReady: phoneSupportsMarkReady, supportsDraftRegeneration: phoneSupportsDraftRegeneration,
             supportsPersonalApproval: phoneSupportsPersonalApproval, supportsReviewerEditing: phoneSupportsReviewerEditing,
-            supportsCardActions: phoneSupportsCardActions)
+            supportsCardActions: phoneSupportsCardActions, supportsReviewBoard: phoneSupportsReviewBoard)
     }
 
     private func applyBoardOrderMove(_ move: RemoteBoardOrderMove) -> Bool {
@@ -857,6 +866,13 @@ extension RemoteConnection: RemoteHostTransport {}
     }
 
     private func execute(_ card: RemoteCard, action: RemoteAction, argument: String? = nil) async -> RemoteCommandResult.Status {
+        if action.id == RemoteAction.reviewSeenID || action.id == RemoteAction.restoreHiddenReviewID {
+            guard phoneSupportsReviewBoard, action.kind == .markDone, argument == nil else { return .changed }
+            if action.id == RemoteAction.reviewSeenID {
+                return RemoteBoardAdapter.acknowledgeReviewAssignment(card, action: action, monitor: monitor, account: account)
+            }
+            return RemoteBoardAdapter.restoreHiddenReview(card, action: action, monitor: monitor, account: account)
+        }
         if action.kind == .editCard {
             guard phoneSupportsCardActions, let change = RemoteCardChange(argument: argument),
                   let context = RemoteCardActionContext(card: card, board: monitor.boardSnapshot, monitor: monitor)

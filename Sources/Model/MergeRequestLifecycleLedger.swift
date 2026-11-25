@@ -267,6 +267,8 @@ struct HiddenReview: Codable, Identifiable, Sendable {
     let title: String
     let url: URL
     var inboxNotification: InboxNotification? = nil
+    var hideID: UUID? = nil
+    var manuallyHidden: Bool? = nil
     var id: MRAutomationScope.Target { target }
 }
 
