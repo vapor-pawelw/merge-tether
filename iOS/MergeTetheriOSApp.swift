@@ -14,7 +14,11 @@ import SwiftUI
                 .environment(\.remoteAvatarThumbnails, model.avatarThumbnails)
                 .onOpenURL { model.offerPairing($0.absoluteString) }
                 .onChange(of: phase, initial: true) {
-                    if phase == .active { model.connect() } else { model.disconnect() }
+                    switch phase {
+                    case .active: model.sceneChanged(.active)
+                    case .background: model.sceneChanged(.background)
+                    default: model.sceneChanged(.inactive)
+                    }
                 }
                 .task(id: phase) {
                     guard phase == .active else { return }

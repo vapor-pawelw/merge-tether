@@ -78,7 +78,7 @@ enum ProcessRunner {
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Output, Error>) in
                 process.terminationHandler = { finished in
-                    guard let reason = state.finish() else { return }
+                    guard let requestedReason = state.finish() else { return }
                     finished.terminationHandler = nil
                     tree.finish()
 
@@ -91,6 +91,10 @@ enum ProcessRunner {
                     }
                     if case .success(let output) = captured { onOutput?(output) }
 
+                    // The timeout can wake after the command has exited but before
+                    // Foundation delivers this callback. A normal exit wins that race.
+                    let reason: ProcessRunState.Reason = requestedReason == .timedOut && finished.terminationReason == .exit
+                        ? .completed : requestedReason
                     switch reason {
                     case .completed:
                         do {
@@ -111,33 +115,25 @@ enum ProcessRunner {
                             nanoseconds: UInt64(max(0, timeout) * 1_000_000_000)
                         )
                         guard !Task.isCancelled else { return }
-                        if state.request(.timedOut) {
-                            stop(process, tree: tree)
-                        }
+                        if state.request(.timedOut) { tree.terminate() }
                     }
                     state.setTimeoutTask(timeoutTask)
                 }
                 @Sendable func launch(authorized: Bool) {
                     do {
-                        if authorizeLaunch != nil {
-                            guard authorized else { throw CancellationError() }
-                            try state.launch { try process.run(); onStarted?() }
-                        } else { try process.run(); onStarted?() }
-                        tree.start(process.processIdentifier)
-                        if authorizeLaunch == nil { startTimeout() }
-                        if Task.isCancelled || (authorizeLaunch != nil && !state.permitsLaunch) {
-                            _ = state.request(.cancelled)
-                            stop(process, tree: tree)
+                        guard authorized else { throw CancellationError() }
+                        try state.launch {
+                            try process.run()
+                            tree.start(process.processIdentifier)
+                            onStarted?()
                         }
+                        if authorizeLaunch == nil { startTimeout() }
                     } catch {
                         process.terminationHandler = nil
-                        if authorizeLaunch == nil {
-                            if state.failLaunch() { cont.resume(throwing: RunError.launchFailed(error.localizedDescription)) }
-                        } else if let reason = state.finish() {
-                            if reason == .timedOut { cont.resume(throwing: RunError.timedOut) }
-                            else if reason == .cancelled || error is CancellationError { cont.resume(throwing: CancellationError()) }
-                            else { cont.resume(throwing: RunError.launchFailed(error.localizedDescription)) }
-                        }
+                        guard let reason = state.finish() else { return }
+                        if reason == .timedOut { cont.resume(throwing: RunError.timedOut) }
+                        else if reason == .cancelled || error is CancellationError { cont.resume(throwing: CancellationError()) }
+                        else { cont.resume(throwing: RunError.launchFailed(error.localizedDescription)) }
                     }
                 }
                 if let authorizeLaunch {
@@ -147,19 +143,9 @@ enum ProcessRunner {
                 } else { launch(authorized: true) }
             }
         } onCancel: {
-            if state.request(.cancelled) {
-                stop(process, tree: tree)
-            }
+            if state.request(.cancelled) { tree.terminate() }
         }
     }
-
-    private static func stop(_ process: Process, tree: OwnedProcessTree) {
-        tree.terminate()
-        // A process that exited before the tracker could read its identity has
-        // no live tracked root; Foundation still owns its unreaped child here.
-        if process.isRunning { _ = Darwin.kill(process.processIdentifier, SIGKILL) }
-    }
-
 }
 
 private final class ProcessRunState: @unchecked Sendable {
@@ -224,21 +210,6 @@ private final class ProcessRunState: @unchecked Sendable {
 
         task?.cancel()
         return result
-    }
-
-    func failLaunch() -> Bool {
-        lock.lock()
-        guard !isFinished else {
-            lock.unlock()
-            return false
-        }
-        isFinished = true
-        let task = timeoutTask
-        timeoutTask = nil
-        lock.unlock()
-
-        task?.cancel()
-        return true
     }
 }
 

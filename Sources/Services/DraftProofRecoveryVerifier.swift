@@ -191,9 +191,6 @@ enum DraftProofRecoveryVerifier {
         })
     }
     @MainActor private static var processEnvironment: [String: String] {
-        var environment = AssistantCLI.environment
-        for (key, value) in GlabService.shellEnvironment { environment[key] = value }
-        environment["PATH"] = AssistantCLI.environment["PATH"]
-        return environment
+        AgentProcessEnvironment.verifier
     }
 }

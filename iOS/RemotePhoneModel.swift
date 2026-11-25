@@ -27,6 +27,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     private var supportsCachedDetails = false
     private(set) var supportsOriginUpdates = false
     private(set) var supportsDraftRegeneration = false
+    /// The Mac accepts structured style presets. Free-form instructions are never sent from the phone.
+    private(set) var supportsDraftRegenerationStyles = false
     private(set) var supportsReviewerBatches = false
     var boardOrderMoveRejected = false
     private(set) var draftRegenerationLoadFailed = false
@@ -169,6 +171,19 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         guard paired, connectionStatus(now: now()) != .connecting else { return }
         disconnect(); connect()
     }
+    /// App visibility, independent of SwiftUI so the policy can be tested on the host.
+    enum ScenePresence { case active, inactive, background }
+
+    /// `.inactive` also covers Control Center, Notification Center, system alerts and the app switcher.
+    /// Keep the connection (and any command in flight) until the app really moves to the background.
+    func sceneChanged(_ presence: ScenePresence) {
+        switch presence {
+        case .active: connect()
+        case .background: disconnect()
+        case .inactive: break
+        }
+    }
+
     func connect() {
         guard connection == nil, let pairing, relayConfiguration.accepts(origin: pairing.origin) else { return }
         connectingUntil = now().addingTimeInterval(45); connectionFailed = false; error = false
@@ -300,6 +315,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                         self.resetDraftRegenerationConnection()
                     }
                     self.supportsDraftRegeneration = message.capabilities?.contains(RemoteMessage.draftRegenerationCapability) == true
+                    self.supportsDraftRegenerationStyles = self.supportsDraftRegeneration
+                        && message.capabilities?.contains(RemoteMessage.draftRegenerationStylesCapability) == true
                     self.supportsReviewerBatches = message.capabilities?.contains(RemoteMessage.reviewerBatchCapability) == true
                     await self.synchronizeDraftRegeneration()
                     if let board = self.state.board { self.detailState.update(board: board) }
@@ -679,10 +696,11 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         })
     }
 
-    func startDraftRegeneration(_ scope: DraftRegenerationScope, instructions: String?) async -> Bool {
+    func startDraftRegeneration(_ scope: DraftRegenerationScope, style: DraftRegenerationStyle?) async -> Bool {
         let count = draftRegenerationCount(for: scope)
-        guard count > 0, (instructions?.utf8.count ?? 0) <= DraftRegenerationScope.maximumInstructionsBytes else { return false }
-        return await performDraftRegeneration(.start(scope: scope, count: count, instructions: instructions),
+        // A Mac that predates style presets would ignore the field, so never send one it did not announce.
+        guard count > 0, style == nil || supportsDraftRegenerationStyles else { return false }
+        return await performDraftRegeneration(.start(scope: scope, count: count, instructions: nil, style: style),
                                               kind: .startDraftRegeneration) == .completed
     }
 
@@ -850,6 +868,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
 
     private func resetDraftRegenerationConnection() {
         supportsDraftRegeneration = false
+        supportsDraftRegenerationStyles = false
         suspendDraftRegenerationReads()
         resetDraftRegenerationPreview()
     }

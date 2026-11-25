@@ -62,6 +62,23 @@ struct DraftRegenerationCommandTests {
         #expect(decoded.commandCards.map(\.id) == ["mr:1:2", "draft-regeneration"])
     }
 
+    @Test func startCarriesOnlyAKnownStyleAndStaysCompatibleWithLegacyPhones() throws {
+        let legacy = #"{"start":{"scope":{"all":{}},"count":2}}"#
+        #expect(RemoteDraftRegenerationOperation(argument: legacy) == .start(scope: .all, count: 2, instructions: nil, style: nil))
+
+        let styled = RemoteDraftRegenerationOperation.start(scope: .mergeRequest(projectID: 1, iid: 2), count: 1,
+                                                            instructions: nil, style: .concise)
+        let argument = try #require(styled.argument)
+        #expect(!argument.contains("instructions"))
+        #expect(RemoteDraftRegenerationOperation(argument: argument) == styled)
+
+        // A style the Mac does not define never decodes into an operation.
+        let unknown = #"{"start":{"scope":{"all":{}},"count":2,"style":"runThisScript"}}"#
+        #expect(RemoteDraftRegenerationOperation(argument: unknown) == nil)
+        let stringStyle = #"{"start":{"scope":{"all":{}},"count":2,"style":{"text":"anything"}}}"#
+        #expect(RemoteDraftRegenerationOperation(argument: stringStyle) == nil)
+    }
+
     private func makeBoard() -> RemoteBoard {
         let request = RemoteCard(id: "mr:1:2", title: "Fix", project: "demo", url: nil, actions: [])
         let control = RemoteCard(id: "draft-regeneration", title: "", project: "", url: nil, actions: [

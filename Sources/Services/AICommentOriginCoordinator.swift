@@ -21,6 +21,10 @@ final class AICommentOriginCoordinator {
                 .joined(separator: "/")
         }
     }
+    private static var evaluations: [MRAutomationScope.Target: Int] = [:]
+
+    static func isEvaluating(_ target: MRAutomationScope.Target) -> Bool { evaluations[target] != nil }
+
     private let directory: URL
     private let overrideDirectory: URL
     private let purpose: AICommentAssessment.Purpose?
@@ -95,8 +99,15 @@ final class AICommentOriginCoordinator {
             }
             if AICommentOriginOverrideStore.override(for: note, host: target.host, projectID: target.projectID,
                 iid: target.iid!, in: overrideDirectory) != nil { return false }
-            if let record = AICommentAssessmentStore.result(for: note, host: target.host, projectID: target.projectID, iid: target.iid!, in: candidate.directory) {
-                if record.qualifiesAsAI && (purpose == .display || record.purpose != .display) { return false }
+            if purpose != .display,
+               AICommentAssessmentStore.reusable(note, target: target, in: candidate.directory)?.purpose == .publication { return false }
+            if let (record, sealed) = AICommentAssessmentStore.stored(for: note, host: target.host,
+                projectID: target.projectID, iid: target.iid!, in: candidate.directory) {
+                // An unsealed publication record, such as one a worker wrote, is re-assessed by the app.
+                guard purpose == .display || sealed else { return true }
+                if record.qualifiesAsAI && (purpose == .display || record.purpose != .display)
+                    && (record.username == nil || record.username == target.username)
+                    && (record.criteriaVersion == nil || record.criteriaVersion == AICommentOriginAssessor.criteriaVersion) { return false }
                 if record.provider == assistant.rawValue && record.model == model
                     && record.criteriaVersion == AICommentOriginAssessor.criteriaVersion
                     && record.username == target.username && record.authorID == note.author?.id
@@ -158,13 +169,19 @@ final class AICommentOriginCoordinator {
         while running.count < 2, let (target, request) = pending.first(where: { running[$0.key] == nil }) {
             pending.removeValue(forKey: target)
             guard requestIsCurrent(request) else { continue }
+            Self.evaluations[target, default: 0] += 1
             let task = Task { [weak self] in
+                defer {
+                    let remaining = Self.evaluations[target, default: 1] - 1
+                    Self.evaluations[target] = remaining > 0 ? remaining : nil
+                }
                 guard let self else { return }
                 defer {
                     if running[target]?.0.id == request.id { running.removeValue(forKey: target) }
                     updateChecking(); startNext(); onChange?()
                 }
                 do {
+                    if self.purpose != .display { _ = await AssistantJobJournal.loadKey() }
                     let persisted = try await ReadOnlyAssessmentRetry.run(isCurrent: {
                         self.requestIsCurrent(request)
                     }, wait: retryWait) {

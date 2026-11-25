@@ -233,7 +233,7 @@ enum MRIssueAssessor {
                 .init(host: $0.target.host, username: $0.target.username, projectID: $0.request.projectID,
                       iid: $0.request.iid, title: $0.request.title, url: $0.request.webURL.absoluteString)
             } : nil)
-        let environment = AssistantCLI.environment
+        let environment = AgentProcessEnvironment.readOnly(AssistantCLI.environment)
         let result: Response
         if assistant == .codex {
             let schemaURL = folder.appending(path: "schema.json"), resultURL = folder.appending(path: "result.json")

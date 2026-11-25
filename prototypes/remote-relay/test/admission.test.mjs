@@ -32,26 +32,54 @@ function connect(runtime, ip, token = 'z'.repeat(43), extra = {}) {
   } });
 }
 
+// Miniflare clears its counters at fixed wall-clock boundaries. Exercise
+// the production bindings with one window's worth of requests.
+async function inOneAdmissionWindow(t, exercise) {
+  const windowIDs = () => {
+    const now = Date.now();
+    return Object.values(admissionLimits).map(({ simple }) => Math.floor(now / (simple.period * 1000))).join(',');
+  };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const runtime = await runtimeFor(t);
+    const before = windowIDs();
+    const result = await exercise(runtime);
+    if (windowIDs() === before) return result;
+  }
+  assert.fail('The admission test did not complete within a rate-limit window');
+}
+
 test('admission: failed authentication attempts are limited before room access', async t => {
-  const runtime = await runtimeFor(t);
-  for (let i = 0; i < 30; i++) assert.equal((await connect(runtime, '192.0.2.1')).status, 401);
-  const limited = await connect(runtime, '192.0.2.1', 'a'.repeat(43));
+  const { attempts, limited, other } = await inOneAdmissionWindow(t, async runtime => {
+    const attempts = [];
+    for (let i = 0; i < 30; i++) attempts.push((await connect(runtime, '192.0.2.1')).status);
+    const limited = await connect(runtime, '192.0.2.1', 'a'.repeat(43));
+    const other = await connect(runtime, '192.0.2.2');
+    return { attempts, limited, other };
+  });
+  assert.deepEqual(attempts, Array(30).fill(401));
   assert.equal(limited.status, 429);
   assert.equal(limited.headers.get('Retry-After'), '60');
   assert.equal(limited.headers.get('Cache-Control'), 'no-store');
-  assert.equal((await connect(runtime, '192.0.2.2')).status, 401);
+  assert.equal(other.status, 401);
 });
 
 test('admission: forwarded headers cannot reset the trusted client budget', async t => {
-  const runtime = await runtimeFor(t);
-  for (let i = 0; i < 30; i++) await connect(runtime, '192.0.2.3', undefined, { 'X-Forwarded-For': `198.51.100.${i}` });
-  assert.equal((await connect(runtime, '192.0.2.3', undefined, { 'X-Forwarded-For': 'different' })).status, 429);
+  const limited = await inOneAdmissionWindow(t, async runtime => {
+    for (let i = 0; i < 30; i++) await connect(runtime, '192.0.2.3', undefined, { 'X-Forwarded-For': `198.51.100.${i}` });
+    return connect(runtime, '192.0.2.3', undefined, { 'X-Forwarded-For': 'different' });
+  });
+  assert.equal(limited.status, 429);
 });
 
 test('admission: rotating client addresses does not reset the deployment limiter', async t => {
-  const runtime = await runtimeFor(t);
-  for (let i = 0; i < 120; i++) assert.equal((await connect(runtime, `192.0.2.${i}`)).status, 401);
-  assert.equal((await connect(runtime, '198.51.100.1')).status, 429);
+  const { attempts, limited } = await inOneAdmissionWindow(t, async runtime => {
+    const attempts = [];
+    for (let i = 0; i < 120; i++) attempts.push((await connect(runtime, `192.0.2.${i}`)).status);
+    const limited = await connect(runtime, '198.51.100.1');
+    return { attempts, limited };
+  });
+  assert.deepEqual(attempts, Array(120).fill(401));
+  assert.equal(limited.status, 429);
 });
 
 test('admission: missing limiter configuration fails closed without accepting a socket', async t => {

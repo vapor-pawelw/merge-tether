@@ -153,6 +153,35 @@ struct DraftRegenerationTests {
         #expect(fixture.inputs.isEmpty && fixture.writes.isEmpty)
     }
 
+    @Test func aRemoteRequestCannotSupplyFreeFormInstructions() throws {
+        let fixture = try Fixture()
+        defer { fixture.close() }
+        let coordinator = fixture.makeCoordinator()
+        let scope = DraftRegenerationScope.mergeRequest(projectID: 34, iid: 2)
+        let token = try #require(coordinator.scopeToken(for: scope))
+
+        #expect(!coordinator.startRemote(scope, instructions: "Synthetic remote text", style: nil, expectedToken: token))
+        #expect(!coordinator.startRemote(scope, instructions: "Synthetic remote text", style: .concise, expectedToken: token))
+        #expect(coordinator.batch == nil)
+        #expect(fixture.inputs.isEmpty && fixture.writes.isEmpty)
+    }
+
+    @Test(arguments: [nil] + DraftRegenerationStyle.allCases.map(Optional.some))
+    func aRemoteStyleUsesOnlyTheMacDefinedWording(_ style: DraftRegenerationStyle?) async throws {
+        let fixture = try Fixture()
+        defer { fixture.close() }
+        let coordinator = fixture.makeCoordinator()
+        let scope = DraftRegenerationScope.mergeRequest(projectID: 34, iid: 2)
+        let token = try #require(coordinator.scopeToken(for: scope))
+
+        #expect(coordinator.startRemote(scope, instructions: nil, style: style, expectedToken: token))
+        _ = try await fixture.waitForPreview(coordinator)
+        let expected = style.map(DraftRegenerationCoordinator.instructions(for:))
+        #expect(!fixture.inputs.isEmpty)
+        #expect(fixture.inputs.allSatisfy { $0.instructions == expected })
+        #expect(fixture.writes.isEmpty)
+    }
+
     @Test func savingAcrossMergeRequestsReportsTheSuccessfulAndFailedDraftsIndividually() async throws {
         let fixture = try Fixture()
         defer { fixture.close() }

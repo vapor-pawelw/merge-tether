@@ -57,11 +57,19 @@ enum AICommentOriginOverrideStore {
         return record
     }
 
+    nonisolated static func sealContext(_ key: Key) -> String {
+        "ai-origin-override:\(key.host):\(key.projectID):\(key.iid):\(key.noteID)"
+    }
+
+    /// An unsealed record, such as an older override or one written outside the app, can only narrow
+    /// automatic publication. An unsealed AI override is ignored, so the comment returns to assessment.
     nonisolated static func stored(_ key: Key, in assessmentDirectory: URL) -> AICommentOriginOverride? {
-        guard let data = try? Data(contentsOf: fileURL(key, in: assessmentDirectory)), data.count < 4096,
-              let record = try? decoder.decode(AICommentOriginOverride.self, from: data),
+        guard let data = try? Data(contentsOf: fileURL(key, in: assessmentDirectory)), data.count < 4096 else { return nil }
+        let payload = EvidenceSeal.open(data, context: sealContext(key))
+        guard let record = try? decoder.decode(AICommentOriginOverride.self, from: payload ?? data),
               record.version == 1, record.host == key.host, record.projectID == key.projectID,
-              record.iid == key.iid, record.noteID == key.noteID, !record.username.isEmpty else { return nil }
+              record.iid == key.iid, record.noteID == key.noteID, !record.username.isEmpty,
+              payload != nil || record.classification != .ai else { return nil }
         return record
     }
 
@@ -70,7 +78,16 @@ enum AICommentOriginOverrideStore {
                            in: assessmentDirectory)
         try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
-        try encoder.encode(record).write(to: path, options: .atomic)
+        let key = Key(host: record.host, projectID: record.projectID, iid: record.iid, noteID: record.noteID)
+        let encoded = try encoder.encode(record)
+        let stored: Data
+        do { stored = try EvidenceSeal.seal(encoded, context: sealContext(key)) }
+        catch {
+            // A narrowing override stays effective without the key; widening requires a seal.
+            guard record.classification != .ai else { throw error }
+            stored = encoded
+        }
+        try stored.write(to: path, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
     }
 

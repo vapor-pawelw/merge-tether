@@ -535,6 +535,33 @@ import MergeTetherRemote
         #expect(fixture.transports[1].sent.isEmpty)
     }
 
+    @Test func briefInactivityKeepsTheConnectionAndCommandInFlightWhileBackgroundDisconnects() async throws {
+        let fixture = try PhoneFixture(), model = fixture.model
+        model.sceneChanged(.active); await model.refresh(); await fixture.reply()
+        let transport = fixture.transports[0], card = try #require(model.state.board?.cards.first)
+        transport.suspendSend = true
+        let sending = Task { await model.perform(card: card, action: card.actions[0]) }
+        while transport.sendBarrier == nil { await Task.yield() }
+        let pending = try #require(model.state.pending)
+
+        // Control Center or a system alert: inactive, then active again.
+        model.sceneChanged(.inactive)
+        model.sceneChanged(.active)
+        #expect(fixture.transports.count == 1 && !transport.stopped)
+        #expect(model.state.pending == pending)
+        #expect(model.state.result == nil)
+
+        transport.suspendSend = false
+        transport.sendBarrier?.resume()
+        await transport.onMessage?(.init(type: .result, result: .init(id: pending.id, status: .completed)))
+        await sending.value
+        #expect(model.state.result?.status != .uncertain)
+
+        model.sceneChanged(.background)
+        #expect(transport.stopped)
+        #expect(model.connectionStatus(now: fixture.date) == .offline)
+    }
+
     @Test func foregroundRestartsAfterBackgroundAndOldSendFailureOnSameTransportIsIgnored() async throws {
         // given
         let fixture = try PhoneFixture(), model = fixture.model

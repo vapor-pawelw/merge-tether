@@ -12,11 +12,18 @@
 #
 # Args:
 #   --version X.Y.Z  Skip the interactive prompt.
-#   --yes, -y        Non-interactive; assume yes to confirmations.
+#   --yes, -y        Non-interactive; assume yes to confirmations. Still
+#                    requires a clean 'main' that matches origin.
 #   --platform all|macos  Required release inventory (default: all).
+#
+# Before any commit, tag or push, HEAD must match the remote branch and have a
+# passing full verification report (scripts/run-tests.py --full) in
+# .test-results; when none exists, the full suite runs automatically.
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 RELEASE_WORKFLOW_NAME="Release"
 DEFAULT_RELEASE_REPO="vapor-pawelw/merge-tether"
 CHANGELOG_FILE="CHANGELOG.md"
@@ -237,6 +244,43 @@ confirm() {
     [Yy]|[Yy][Ee][Ss]) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+# Succeeds when a retained report proves a passing, clean, full run for the commit.
+has_full_verification() {
+  local commit="$1"
+  python3 - "${REPO_ROOT}/.test-results" "$commit" <<'PYTHON'
+import json, pathlib, sys
+root, commit = pathlib.Path(sys.argv[1]), sys.argv[2]
+for report_path in sorted(root.glob('run-*/report.json'), reverse=True):
+    try:
+        report = json.loads(report_path.read_text())
+    except (OSError, ValueError):
+        continue
+    if (report.get('commit') == commit and report.get('dirty') is False and report.get('exit_code') == 0
+            and isinstance(report.get('selection'), dict) and report['selection'].get('mode') == 'full'):
+        print(report_path.parent)
+        sys.exit(0)
+sys.exit(1)
+PYTHON
+}
+
+require_full_verification() {
+  local commit="$1" evidence
+  if evidence="$(has_full_verification "$commit")"; then
+    echo "Verification: passing full run for ${commit} (${evidence})"
+    return 0
+  fi
+  echo "No passing full verification for ${commit}; running scripts/run-tests.py --full..."
+  if ! python3 "${REPO_ROOT}/scripts/run-tests.py" --full; then
+    echo "Full verification failed; nothing was committed, tagged or pushed." >&2
+    return 1
+  fi
+  if ! evidence="$(has_full_verification "$commit")"; then
+    echo "Full verification did not produce a passing clean report for ${commit}; refusing to release." >&2
+    return 1
+  fi
+  echo "Verification: passing full run for ${commit} (${evidence})"
 }
 
 wait_for_release_run_id() {
@@ -479,7 +523,12 @@ main() {
 
   tag="v${version}"
 
+  # Noninteractive publication never overrides branch or clean-tree guards.
   if [[ "$branch" != "main" ]]; then
+    if [[ "$NON_INTERACTIVE" -eq 1 ]]; then
+      echo "Noninteractive releases must run from 'main' (current: ${branch})." >&2
+      exit 1
+    fi
     echo "Warning: you are not on 'main' (current: ${branch:-detached})."
     if ! confirm "Continue anyway"; then
       echo "Aborted."
@@ -488,11 +537,34 @@ main() {
   fi
 
   if [[ -n "$(git status --porcelain)" ]]; then
+    if [[ "$NON_INTERACTIVE" -eq 1 ]]; then
+      echo "Noninteractive releases require a clean working tree; commit or remove local changes first." >&2
+      exit 1
+    fi
     echo "Warning: working tree has uncommitted changes."
     if ! confirm "Continue anyway"; then
       echo "Aborted."
       exit 0
     fi
+  fi
+
+  # The release commit must contain only the promoted notes, never local edits.
+  if [[ -n "$(git status --porcelain -- "$CHANGELOG_FILE")" ]]; then
+    echo "${CHANGELOG_FILE} has uncommitted changes; commit or discard them before releasing." >&2
+    exit 1
+  fi
+
+  local start_commit remote_head
+  start_commit="$(git rev-parse HEAD)"
+  if ! remote_head="$(git ls-remote origin "refs/heads/${branch}")"; then
+    echo "Could not read origin/${branch}; nothing was changed." >&2
+    exit 1
+  fi
+  remote_head="${remote_head%%[[:space:]]*}"
+  if [[ "$remote_head" != "$start_commit" ]]; then
+    echo "Local '${branch}' (${start_commit}) does not match origin/${branch} (${remote_head:-missing})." >&2
+    echo "Pull or push first so the release is built from the published commit." >&2
+    exit 1
   fi
 
   if git rev-parse "$tag" >/dev/null 2>&1; then
@@ -537,7 +609,8 @@ main() {
   echo "- Promote ${CHANGELOG_FILE} '## Unreleased' notes into '## ${version} - ${release_date}'"
   echo "- Create and push changelog commit on branch '${branch}'"
   echo "- Create and push annotated tag: $tag"
-  echo "- Current source commit: $commit"
+  echo "- Current source commit: $commit (must match origin/${branch})"
+  echo "- Require a passing full verification for this commit (runs scripts/run-tests.py --full if missing)"
   echo "- Watch workflow in ${source_repo}: $RELEASE_WORKFLOW_NAME"
   echo "- Verify published release in ${release_repo} contains macOS .dmg/.zip (platform: ${platform})"
   [[ "$platform" != all ]] || echo "- Verify separate MergeTetheriOS-${version}.ipa distribution artifact"
@@ -549,6 +622,10 @@ main() {
   if ! confirm "Proceed with this release"; then
     echo "Aborted."
     exit 0
+  fi
+
+  if ! require_full_verification "$start_commit"; then
+    exit 1
   fi
 
   if ! promote_unreleased_changelog "$CHANGELOG_FILE" "$version" "$release_date" "$release_notes_file"; then
@@ -567,7 +644,9 @@ main() {
   changelog_commit="$(git rev-parse --short HEAD)"
 
   if ! git push origin "$branch"; then
-    echo "Failed to push branch '${branch}'. Tag was not created." >&2
+    # Drop the unpublished changelog commit; --keep preserves unrelated local edits.
+    git reset --keep "$start_commit" >/dev/null 2>&1 || true
+    echo "Failed to push branch '${branch}'. Tag was not created; the local changelog commit was removed." >&2
     exit 1
   fi
 

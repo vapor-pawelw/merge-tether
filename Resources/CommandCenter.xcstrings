@@ -324,6 +324,13 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Uruchamianie przeglądu…"}}
       }
     },
+    "commandCenter.inboxActionFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "GitLab action failed" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Nie udało się wykonać akcji w GitLabie" } }
+      }
+    },
     "commandCenter.close": {
       "extractionState": "manual",
       "localizations": {

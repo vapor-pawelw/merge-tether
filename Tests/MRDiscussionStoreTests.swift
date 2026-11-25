@@ -570,7 +570,7 @@ struct MRDiscussionStoreTests {
     private func save(_ record: AICommentAssessment, in directory: URL) throws {
         let path = AICommentAssessmentStore.fileURL(host: target.host, projectID: 1, iid: 2, noteID: 3, in: directory)
         try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(record).write(to: path)
+        try SealedAssessmentFile.write(record, to: path)
     }
 
     @Test func provenAppReplyCompletesAnAIThreadWithoutClassifyingManualPostsFromTheSameAccount() async throws {

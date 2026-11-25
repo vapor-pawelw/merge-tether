@@ -35,6 +35,9 @@ fi
 [[ "$target" == /* ]] || target="$PWD/$target"
 [[ "$target" == *.app && ! -L "$target" ]] || fail "select a local .app directory, not a symlink"
 for tool in mise xcodebuildmcp swift codesign; do
+  if [[ "$tool" == xcodebuildmcp ]]; then
+    command -v "$tool" >/dev/null || fail "missing xcodebuildmcp: install the XcodeBuildMCP CLI separately (mise.toml pins only Tuist)"
+  fi
   command -v "$tool" >/dev/null || fail "missing $tool"
 done
 

@@ -33,6 +33,7 @@ struct AssistantJobExecution: Codable, Equatable, Sendable {
     var blocker: String? = nil
     var cancellationOrigin: CancellationOrigin? = nil
     var remoteEffects: [RemoteEffect]? = nil
+    var pendingWorkerAudit: AssistantWorkerAudit.Pending? = nil
 
     var errorExplanation: String? {
         error.map { GlabService.redactWorkflowEvidence(AssistantJobExecutor.ExecutionError.displayMessage(for: $0)) }
@@ -108,12 +109,21 @@ struct AssistantJobResult: Codable, Equatable, Sendable {
         var proposedSolution: Bool? = nil
     }
 
+    struct SourceAssessment: Codable, Equatable, Sendable {
+        let noteID: Int
+        let bodySHA256: String
+        let classification: AICommentOriginAssessment.Classification
+        let confidence: AICommentOriginAssessment.Confidence
+        let evidence: String
+    }
+
     let status: Status
     let summary: String
     var blocker: String? = nil
     var generatedDrafts: [GeneratedDraft]? = nil
+    var sourceAssessments: [SourceAssessment]? = nil
 
-    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"status":{"type":"string","enum":["succeeded","blocked"]},"summary":{"type":"string"},"blocker":{"type":["string","null"],"maxLength":240},"generatedDrafts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"integer","minimum":1},"bodySHA256":{"type":"string","pattern":"^[0-9a-f]{64}$"},"extraContext":{"type":["string","null"],"maxLength":4000},"proposedSolution":{"type":"boolean"}},"required":["id","bodySHA256","extraContext","proposedSolution"]}}},"required":["status","summary","blocker","generatedDrafts"]}"#
+    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"status":{"type":"string","enum":["succeeded","blocked"]},"summary":{"type":"string"},"blocker":{"type":["string","null"],"maxLength":240},"generatedDrafts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"integer","minimum":1},"bodySHA256":{"type":"string","pattern":"^[0-9a-f]{64}$"},"extraContext":{"type":["string","null"],"maxLength":4000},"proposedSolution":{"type":"boolean"}},"required":["id","bodySHA256","extraContext","proposedSolution"]}},"sourceAssessments":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer","minimum":1},"bodySHA256":{"type":"string","pattern":"^[0-9a-f]{64}$"},"classification":{"type":"string","enum":["ai_assisted","manual_likely","uncertain"]},"confidence":{"type":"string","enum":["very_high","high","uncertain"]},"evidence":{"type":"string","maxLength":600}},"required":["noteID","bodySHA256","classification","confidence","evidence"]}}},"required":["status","summary","blocker","generatedDrafts","sourceAssessments"]}"#
 
     static let extraContextInstructions = """
         extraContext is optional app-only Markdown shown to the MergeTether user beside that draft, and later beside

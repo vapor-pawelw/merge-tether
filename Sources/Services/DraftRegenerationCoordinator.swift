@@ -122,6 +122,24 @@ final class DraftRegenerationCoordinator {
         }.sorted { ($0.id.projectID, $0.id.iid) < ($1.id.projectID, $1.id.iid) }
     }
 
+    /// Starts a run requested by a paired phone. Remote clients cannot supply prompt text:
+    /// they may only choose a style whose wording is defined here on the Mac.
+    @discardableResult
+    func startRemote(_ scope: DraftRegenerationScope, instructions: String?, style: DraftRegenerationStyle?,
+                     expectedToken: String) -> Bool {
+        guard instructions == nil else { return false }
+        return start(scope, instructions: style.map(Self.instructions(for:)), expectedToken: expectedToken)
+    }
+
+    static func instructions(for style: DraftRegenerationStyle) -> String {
+        switch style {
+        case .concise: "Make each comment shorter and more concise while keeping its substantiated point."
+        case .friendlier: "Make each comment friendlier and more collaborative while keeping its substantiated point."
+        case .moreDetailed: "Explain the reasoning behind each comment more clearly, using only verified context."
+        case .moreDirect: "Make each comment more direct and actionable while staying polite."
+        }
+    }
+
     @discardableResult
     func start(_ scope: DraftRegenerationScope, instructions: String?, expectedToken: String? = nil) -> Bool {
         guard !terminating, let account, let settings, batch == nil,

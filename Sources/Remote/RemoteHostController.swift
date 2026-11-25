@@ -22,6 +22,15 @@ extension RemoteConnection: RemoteHostTransport {}
     var invitation = ""
     private(set) var failed = false
     private(set) var connected = false
+    /// Set by the first authenticated (decrypted) phone message on the current socket.
+    private(set) var phoneSeenAt: Date?
+
+    enum PhoneLink: Equatable { case reconnecting, waitingForPhone, phoneConnected }
+    /// `connected` only means the socket was opened; only a decrypted message proves the phone is reachable.
+    var phoneLink: PhoneLink {
+        guard connected else { return .reconnecting }
+        return phoneSeenAt == nil ? .waitingForPhone : .phoneConnected
+    }
     private let monitor: TodoMonitorService
     private let store: RemotePairingStore
     private let savePairing: (RemotePairing) throws -> Void
@@ -56,7 +65,8 @@ extension RemoteConnection: RemoteHostTransport {}
         RemoteMessage.mrControlsCapability, RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability,
         RemoteMessage.detailPreviewCapability, RemoteMessage.cachedDetailsCapability, RemoteMessage.draftRegenerationCapability,
         RemoteMessage.boardOrderCapability, RemoteMessage.personalApprovalCapability, RemoteMessage.reviewerEditingCapability,
-        RemoteMessage.reviewerBatchCapability, RemoteMessage.cardActionsCapability
+        RemoteMessage.reviewerBatchCapability, RemoteMessage.cardActionsCapability,
+        RemoteMessage.draftRegenerationStylesCapability
     ]
     private let readAvatarThumbnail: @Sendable (URL) async -> Data?
     @ObservationIgnored private(set) var avatarTask: Task<Void, Never>?
@@ -185,6 +195,7 @@ extension RemoteConnection: RemoteHostTransport {}
         cancelDetailAvatars()
         phoneSupportsDetailAvatars = false
         hostSession = UUID()
+        phoneSeenAt = nil
         resolutionPreviews.removeAll()
         phoneSupportsCommentReview = false
         phoneSupportsMergeActions = false
@@ -286,6 +297,7 @@ extension RemoteConnection: RemoteHostTransport {}
     }
     private func receive(_ message: RemoteMessage) async {
         guard let active = connection else { return }
+        if phoneSeenAt == nil { phoneSeenAt = now() }
         switch message.type {
         case .hello:
             guard let challenge = message.challenge else { return }
@@ -774,12 +786,13 @@ extension RemoteConnection: RemoteHostTransport {}
         guard phoneSupportsDraftRegeneration, let operation = RemoteDraftRegenerationOperation(argument: argument) else { return .changed }
         let coordinator = monitor.draftRegeneration
         switch (action.kind, operation) {
-        case (.startDraftRegeneration, .start(let scope, let count, let instructions)):
-            guard count > 0, count == coordinator.count(for: scope),
-                  (instructions?.utf8.count ?? 0) <= DraftRegenerationScope.maximumInstructionsBytes,
+        case (.startDraftRegeneration, .start(let scope, let count, let instructions, let style)):
+            // Free-form text from the phone would become assistant instructions; only Mac-defined styles are accepted.
+            guard instructions == nil, count > 0, count == coordinator.count(for: scope),
                   coordinator.scopeToken(for: .all) == action.token,
                   let scopeToken = coordinator.scopeToken(for: scope) else { return .changed }
-            return coordinator.start(scope, instructions: instructions, expectedToken: scopeToken) ? .completed : .changed
+            return coordinator.startRemote(scope, instructions: nil, style: style, expectedToken: scopeToken)
+                ? .completed : .changed
         case (.applyDraftRegeneration, .apply(let batchID, let proposalIDs)):
             let ids = Set(proposalIDs)
             guard ids.count == proposalIDs.count, !ids.isEmpty, let batch = coordinator.batch,
@@ -815,8 +828,11 @@ extension RemoteConnection: RemoteHostTransport {}
             return monitor.currentMRTodoIntents.first(where: { $0.id == id })?.state == .failed ? .failed : .completed
         }
         if action.kind == .retryJob, let id = UUID(uuidString: String(action.id.dropFirst(4))) {
-            await monitor.retryAssistantJob(id)
-            return monitor.assistantJobActionError == nil ? .completed : .failed
+            switch await monitor.retryAssistantJob(id) {
+            case .queued, .obsolete: return .completed
+            case .unavailable: return .changed
+            case .failed: return .failed
+            }
         }
         if card.id.hasPrefix("todo:"), let todo = monitor.currentAccountTodos.first(where: { "todo:\($0.id)" == card.id }) {
             switch action.kind {
@@ -994,8 +1010,7 @@ extension RemoteConnection: RemoteHostTransport {}
             return .completed
         case .runReview:
             guard action.id == "runReview", monitor.canRunReview(for: item) else { return .changed }
-            await monitor.runReview(for: item, confirmed: monitor.manualReviewConsent(for: item))
-            return monitor.assistantJobActionError == nil ? .completed : .failed
+            return await monitor.runReview(for: item, confirmed: monitor.manualReviewConsent(for: item)) ? .completed : .failed
         case .publishDraft:
             guard let id = suffix("publishDraft:").flatMap(Int.init),
                   let draft = item.drafts.first(where: { $0.id == id }), DraftPublicationRisk(draft: draft) == nil,

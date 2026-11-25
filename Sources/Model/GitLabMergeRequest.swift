@@ -177,6 +177,8 @@ struct GitLabMergeRequest: Codable, Sendable {
     let headPipeline: Pipeline?
     let reviewers: [Todo.Author]?
     private let user: UserPermissions?
+    /// Present on single-MR reads only. Approval proof binds the reviewed diff to its base.
+    var diffRefs: DiffRefs? = nil
     // Derived live evidence is deliberately excluded from the persisted REST payload.
     var mergeTrainConflict: MergeTrainPreparationConflict? = nil
     var mergeTrainEvidenceUnavailable = false
@@ -187,6 +189,18 @@ struct GitLabMergeRequest: Codable, Sendable {
     var semanticContextFingerprint: String {
         let body = description ?? ""
         return UserAttentionSnapshot.digest("\(title.utf8.count):\(title)\(body.utf8.count):\(body)")
+    }
+
+    struct DiffRefs: Codable, Equatable, Sendable {
+        let baseSHA: String?
+        let headSHA: String?
+        let startSHA: String?
+
+        enum CodingKeys: String, CodingKey {
+            case baseSHA = "base_sha"
+            case headSHA = "head_sha"
+            case startSHA = "start_sha"
+        }
     }
 
     struct Pipeline: Codable, Sendable {
@@ -226,6 +240,7 @@ struct GitLabMergeRequest: Codable, Sendable {
         case mergeWhenPipelineSucceeds = "merge_when_pipeline_succeeds"
         case headPipeline = "head_pipeline"
         case user, reviewers
+        case diffRefs = "diff_refs"
     }
 }
 

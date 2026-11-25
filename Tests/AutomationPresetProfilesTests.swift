@@ -241,6 +241,34 @@ struct AutomationPresetProfilesTests {
         #expect(restarted.automation.matchingPreset == .trusted)
     }
 
+    @Test func automaticApprovalDefaultsAreSafeAndUpgradesPreserveExplicitValues() throws {
+        // Fresh settings and legacy blobs without the key never approve on their own.
+        #expect(!AutomationSettings().autoApproveEnabled && AutomationSettings().autoApprovalThreshold == .noMajorIssues)
+        var recommended = AutomationSettings()
+        recommended.applyRecommended(for: .codex)
+        #expect(!recommended.autoApproveEnabled)
+        func load(_ json: String) throws -> AutomationSettings {
+            try JSONDecoder().decode(AutomationSettings.self, from: Data(json.utf8))
+        }
+        #expect(try !load("{}").autoApproveEnabled)
+        #expect(try !load(#"{"packageDecision":"enabled"}"#).autoApproveEnabled)
+        #expect(try !load(#"{"packageDecision":"enabled","selectedPreset":"safe"}"#).autoApproveEnabled)
+        // A missing permission inherits only an explicitly stored delivering profile.
+        #expect(try load(#"{"packageDecision":"enabled","selectedPreset":"trusted"}"#).autoApproveEnabled)
+        #expect(try load(#"{"packageDecision":"enabled","selectedPreset":"full"}"#).autoApproveEnabled)
+        #expect(try !load(#"{"packageDecision":"disabled","selectedPreset":"trusted"}"#).autoApproveEnabled)
+        // Explicit values, including the former permissive defaults, are preserved.
+        let explicit = try load(#"{"packageDecision":"enabled","autoApproveEnabled":true,"autoApprovalThreshold":"noMajorIssues"}"#)
+        #expect(explicit.autoApproveEnabled && explicit.autoApprovalThreshold == .noMajorIssues)
+        #expect(try !load(#"{"packageDecision":"enabled","selectedPreset":"trusted","autoApproveEnabled":false}"#).autoApproveEnabled)
+        let roundTrip = try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(explicit))
+        #expect(roundTrip.autoApproveEnabled && roundTrip.autoApprovalThreshold == .noMajorIssues)
+        // Delivering profiles still grant the permission explicitly.
+        var trusted = AutomationSettings()
+        trusted.applyPreset(.trusted, for: .codex)
+        #expect(trusted.autoApproveEnabled && trusted.matchingPreset == .trusted)
+    }
+
     @Test func changingPermissionsMarksAChosenProfileCustomizedWithoutReapplyingIt() {
         var settings = AutomationSettings()
         settings.applyPreset(.trusted, for: .codex)

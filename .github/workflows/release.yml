@@ -13,8 +13,15 @@ permissions:
   contents: write
 
 jobs:
+  # The tagged commit must pass full verification before any distribution secret is used.
+  verify:
+    uses: ./.github/workflows/verify.yml
+
   build:
+    needs: verify
     runs-on: macos-15
+    outputs:
+      dmg_sha256: ${{ steps.inventory.outputs.dmg_sha256 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -128,6 +135,7 @@ jobs:
             --relay-config "$RUNNER_TEMP/relay-build.json"
 
       - name: Verify distribution inventory and retain stable macOS names
+        id: inventory
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
           RELEASE_BUILD_NUMBER: ${{ github.run_number }}
@@ -155,6 +163,9 @@ jobs:
           PYTHON
           cp "release/${APP_NAME}-${RELEASE_VERSION}.dmg" "${APP_NAME}.dmg"
           cp "release/${APP_NAME}-${RELEASE_VERSION}.zip" "${APP_NAME}.zip"
+          DMG_SHA256="$(awk '{print $1}' release/MergeTether.dmg.sha256)"
+          [[ "$DMG_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          echo "dmg_sha256=${DMG_SHA256}" >> "${GITHUB_OUTPUT:-/dev/null}"
 
       - name: Create GitHub Release
         env:
@@ -238,9 +249,8 @@ jobs:
           fi
           rm -f "$RUNNER_TEMP/distribution.p12" "$RUNNER_TEMP/distribution.mobileprovision" "$RUNNER_TEMP/profile.plist" "$RUNNER_TEMP/notary-key.p8" "$RUNNER_TEMP/ExportOptions.plist" "$RUNNER_TEMP/relay-build.json"
 
-  # Updates the Homebrew tap only if HOMEBREW_TAP_TOKEN is configured.
-  # Without the token this job fails on checkout, so guard on the secret being
-  # present by checking a dummy env var that the repo owner sets alongside it.
+  # Updates the Homebrew tap when the repository variable HOMEBREW_TAP_ENABLED is
+  # 'true'; it then requires the HOMEBREW_TAP_TOKEN secret (push access to the tap).
   update-cask:
     needs: build
     runs-on: ubuntu-latest
@@ -248,9 +258,6 @@ jobs:
     steps:
       - name: Checkout cask template
         uses: actions/checkout@v4
-
-      - name: Wait for release assets
-        run: sleep 10
 
       - name: Get release info
         id: release
@@ -262,11 +269,19 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "asset_url=$ASSET_URL" >> "$GITHUB_OUTPUT"
 
-      - name: Download release asset and compute SHA256
+      - name: Download release asset and verify SHA256
         id: sha
+        env:
+          ASSET_URL: ${{ steps.release.outputs.asset_url }}
+          EXPECTED_SHA256: ${{ needs.build.outputs.dmg_sha256 }}
         run: |
-          curl -sSL "${{ steps.release.outputs.asset_url }}" -o MergeTether.dmg
+          curl --fail --silent --show-error --location --retry 5 --retry-all-errors --retry-delay 5 \
+            "$ASSET_URL" -o MergeTether.dmg
           SHA=$(sha256sum MergeTether.dmg | awk '{print $1}')
+          if [[ ! "$EXPECTED_SHA256" =~ ^[a-f0-9]{64}$ || "$SHA" != "$EXPECTED_SHA256" ]]; then
+            echo "::error::Downloaded MergeTether.dmg does not match the digest built by this workflow."
+            exit 1
+          fi
           echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
           echo "SHA256: $SHA"
 

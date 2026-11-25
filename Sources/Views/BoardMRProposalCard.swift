@@ -145,7 +145,8 @@ struct BoardMRProposalCard: View {
         .controlSize(.small)
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.12), lineWidth: 0.5))
-        .boardCardInteraction { showingDetails = true }
+        .boardCardInteraction(title: proposal.title, repositoryPath: proposal.url.gitLabProjectPath,
+            iid: proposal.target.iid) { showingDetails = true }
         .contextMenu { menuItems }
         .task(id: authorTaskID) { await authorLoader.load(proposal, displayMetadata: true) }
         .sheet(isPresented: $showingDetails) {

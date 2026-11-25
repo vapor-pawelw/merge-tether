@@ -67,10 +67,11 @@ struct AssistantJobInvocationTests {
         let cli = folder.appending(path: "cli")
         try Data("""
             #!/usr/bin/python3
-            import json,pathlib,sys
+            import json,os,pathlib,sys
             args=sys.argv[1:]
             pathlib.Path(__file__+'.capture').write_text(sys.stdin.read())
             pathlib.Path(__file__+'.args').write_text(json.dumps(args))
+            pathlib.Path(__file__+'.env').write_text(json.dumps({k:v for k,v in os.environ.items() if k.startswith('GIT_CONFIG')}))
             result={'status':'succeeded','summary':'Synthetic task; no external effects.','blocker':None}
             if args[0]=='exec':
                 json.dump(result,open(args[args.index('--output-last-message')+1],'w'))
@@ -129,6 +130,13 @@ struct AssistantJobInvocationTests {
         #expect(instructions.contains("does not authorize replaying GitLab writes or expanding task permissions"))
         #expect(instructions.contains("Informational acknowledgements are performed by MergeTether"))
         #expect(instructions.contains("Do not add reactions or resolve purely informational threads in this worker"))
+        #expect(instructions.contains("Never read, print, copy or send credentials"))
+        #expect(instructions.contains("Do not run `glab auth token` or `glab config get token`"))
+        // Only the authored follow-up carries push permission; the review run gets the Git push guard.
+        #expect(instructions.contains(AssistantJobExecutor.pushGuardInstructions) == !authored)
+        let gitConfig = try JSONDecoder().decode([String: String].self,
+            from: Data(contentsOf: URL(fileURLWithPath: cli.path + ".env")))
+        #expect(gitConfig.values.contains("url.\(AgentProcessEnvironment.pushGuardScheme).pushInsteadOf") == !authored)
         let arguments = try JSONDecoder().decode([String].self, from: Data(contentsOf: URL(fileURLWithPath: cli.path + ".args")))
         if assistant == .codex {
             #expect(arguments.contains("--dangerously-bypass-approvals-and-sandbox"))
@@ -180,6 +188,7 @@ struct AssistantJobInvocationTests {
           'api /user '*) printf '%s' '{"id":1,"username":"me"}' ;;
           'api /projects/7/merge_requests/11 '*)
             printf '%s' '{"project_id":7,"iid":11,"author":{"id":1,"username":"me","name":"Me"},"title":"Fixture","web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened","draft":false,"sha":"\(head)","source_branch":"feature","target_branch":"main","labels":[]}' ;;
+          'api /projects/7/merge_requests/11/approvals'*) printf '%s' '{"approved_by":[]}' ;;
           'api /projects/7/merge_requests/11/discussions'*)
             printf x >> "$0-discussions-read"
             if test '\(scenario)' = read-failure; then printf '%s' 'Discussion read failed' >&2; exit 31; fi

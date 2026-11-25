@@ -213,12 +213,22 @@ extension SettingsManager {
                      aiCommentCriteriaOverride: automation.aiCommentCriteriaOverride)
     }
 
+    /// A pending audit affects automatic execution for this account and MR until its reads recover.
+    var effectiveAutomationScope: MRAutomationScope {
+        assistantHandoffs.reduce(into: automation.scope) { scope, handoff in
+            if handoff.execution?.pendingWorkerAudit != nil {
+                scope[handoff.key.automationTarget] = .paused
+            }
+        }
+    }
+
     /// Policy admission only. Action executors retain their current fresh evidence checks.
     /// Presentation passes `ignoringGlobalSuspension` so the killswitch does not change how MRs look.
     func permitsAutomaticAction(_ action: MRAutomaticAction, for request: GitLabMergeRequest,
                                 target: MRAutomationScope.Target, ignoringGlobalSuspension: Bool = false) -> Bool {
         let automation = ignoringGlobalSuspension ? configuredAutomation : automation
-        guard automaticActionsAllowed, automation.hasAutomaticPublicActionConsent else { return false }
+        guard automaticActionsAllowed, automation.hasAutomaticPublicActionConsent,
+              effectiveAutomationScope[target] != .paused else { return false }
         if action != .commentPublication, pendingCommentReviews.contains(target) { return false }
         guard request.projectID == target.projectID, request.iid == target.iid,
               request.webURL.isGitLabMergeRequest(host: target.host, iid: request.iid),

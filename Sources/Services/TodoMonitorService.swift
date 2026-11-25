@@ -63,6 +63,12 @@ final class TodoMonitorService {
         boardAttentionPresenter.userAttention(account: attentionPresentationAccount)
     }
 
+    var menuBarGitLabStatus: GitLabMenuBarStatus {
+        .init(setupComplete: settings.onboardingCompleted, username: glab.currentUsername,
+              authStatus: glab.authStatus, refresh: boardRefreshState, error: lastError,
+              catalogFailed: attention.hasError || authoredMergeRequests.hasError)
+    }
+
     private func attentionKey(_ item: MergeRequestAttentionMonitor.Item) -> String? {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return nil }
         return "\(host)/\(username)/mr/\(item.id.projectID)/\(item.id.iid)"
@@ -110,6 +116,10 @@ final class TodoMonitorService {
         get { todoStore.lastError }
         set { todoStore.lastError = newValue }
     }
+    var lastInboxActionError: GlabError? { todoStore.lastActionError }
+
+    func dismissInboxActionFailure() { todoStore.dismissActionFailure() }
+
     private(set) var failedAutomationTodoID: Int?
     var lastRefresh: Date? { todoStore.lastRefresh }
     var isLoading: Bool { todoStore.isLoading }
@@ -144,7 +154,6 @@ final class TodoMonitorService {
     private var inboxAccountRevision: UInt64? { todoStore.accountRevision }
     @ObservationIgnored private let attentionNotificationScheduler: AttentionNotificationScheduler
     @ObservationIgnored private var manualAdoptions: [MRAutomationScope.Target: Int] = [:]
-    private var isAutomating = false
     private(set) var assessingMentionNoteIDs: Set<Int> = []
 
     func isAssessingNotice(_ todo: Todo) -> Bool {
@@ -494,6 +503,15 @@ final class TodoMonitorService {
         }
     }
 
+    func refreshRuntimeAssistantAvailability(force: Bool = false) {
+        // Explicit retries still use the historical job's provider after the selection changes.
+        var assistants = Set(settings.assistantHandoffs.lazy
+            .filter { $0.operationalExecution.map { $0.state != .succeeded } == true }
+            .map(\.key.assistant))
+        if let assistant = settings.automation.selectedAssistant { assistants.insert(assistant) }
+        assistantDependencies.refresh(assistants, force: force)
+    }
+
     var boardRefreshState: BoardRefreshState {
         settings.onboardingCompleted ? inboxRefreshState : .current
     }
@@ -512,7 +530,7 @@ final class TodoMonitorService {
     }
 
     func bootstrap() async {
-        refreshAvailableAssistants()
+        refreshRuntimeAssistantAvailability()
         if glab.glabPath == nil {
             glab.glabPath = await OnboardingDetector.findGlabExecutable()
             settings.glabPath = glab.glabPath
@@ -755,7 +773,8 @@ final class TodoMonitorService {
     /// Review requests go straight to Reviewing when the user chose so. This is independent of
     /// automation consent; whether work starts is decided by `startsNewReviewsAutomatically`.
     private func addNewReviewCandidates(host: String, username: String) async {
-        guard settings.addNewReviewsToReviewed, settings.automaticActionsAllowed else { return }
+        guard settings.addNewReviewsToReviewed, settings.automaticActionsAllowed,
+              settings.automation.reviewRequested.runner == .assistant else { return }
         let revision = glab.accountRevision
         var requests: [MRAutomationScope.Target: GitLabMergeRequest] = [:]
         var added = false
@@ -777,6 +796,7 @@ final class TodoMonitorService {
             }
             guard !Task.isCancelled, glab.resolvedHost == host, glab.currentUsername == username,
                   glab.accountRevision == revision, settings.addNewReviewsToReviewed,
+                  settings.automation.reviewRequested.runner == .assistant,
                   request.projectID == target.projectID, request.iid == iid, request.state == "opened",
                   request.author.username != username, request.webURL.isGitLabMergeRequest(host: host, iid: iid),
                   !settings.ignoredMergeRequests.contains(target) else { continue }
@@ -960,6 +980,7 @@ final class TodoMonitorService {
 
     func ignoreMergeRequestProposal(projectID: Int, iid: Int, url: URL) async {
         guard projectID > 0, iid > 0, let target = scopeTarget(projectID: projectID, iid: iid, url: url) else { return }
+        let accountRevision = glab.accountRevision
         do {
             async let user = glab.fetchAuthenticatedUser(host: target.host, expectedUsername: target.username)
             async let request = glab.fetchMergeRequest(projectID: projectID, iid: iid, host: target.host)
@@ -967,9 +988,10 @@ final class TodoMonitorService {
             guard glab.resolvedHost == target.host, glab.currentUsername == target.username,
                   currentRequest.projectID == projectID, currentRequest.iid == iid,
                   currentRequest.webURL.isGitLabMergeRequest(host: target.host, iid: iid),
-                  currentRequest.author.id != currentUser.id else { return }
+                  currentRequest.author.id != currentUser.id, glab.accountRevision == accountRevision else { return }
         } catch {
-            lastError = error as? GlabError ?? .unknown(String(describing: error))
+            guard !(error is CancellationError), glab.accountRevision == accountRevision else { return }
+            todoStore.reportActionFailure(error as? GlabError ?? .unknown(String(describing: error)))
             return
         }
         settings.ignoredMergeRequests.insert(target)
@@ -981,7 +1003,8 @@ final class TodoMonitorService {
         }
         for todo in visibleTodos where todo.targetType == .mergeRequest && todo.project.id == projectID
             && todo.target.iid == iid && todo.targetURL.gitLabTodoMergeRequestURL(host: target.host, iid: iid) != nil {
-            guard glab.resolvedHost == target.host, glab.currentUsername == target.username else { return }
+            guard glab.resolvedHost == target.host, glab.currentUsername == target.username,
+                  glab.accountRevision == accountRevision else { return }
             await markDone(todo)
         }
     }
@@ -1178,7 +1201,6 @@ final class TodoMonitorService {
     }
 
     private func refreshInbox() async {
-        refreshAvailableAssistants()
         refreshAssistantRelay()
         defer {
             todoStore.finishRefresh()
@@ -1208,7 +1230,7 @@ final class TodoMonitorService {
                 self.failedAutomationTodoID = nil
             }
 
-            if let host, let username, !isAutomating {
+            if let host, let username {
                 automation.prune(fetchedIDs: fetchedIDs, host: host, username: username, settings: settings)
             }
 
@@ -1222,11 +1244,10 @@ final class TodoMonitorService {
                 }
                 await routeMRTodos(host: host, username: username)
                 await acknowledgeHandledTodos(host: host, username: username)
-                scheduleAutomation(host: host, username: username)
             }
 
         case .failure(let err):
-            Log.monitor.error("Refresh failed: \(String(describing: err), privacy: .public)")
+            Log.monitor.error("Refresh failed: \(String(describing: err), privacy: .private)")
             lastError = err
             if settings.onboardingCompleted, let host, let username {
                 attention.refresh(host: host, username: username, todos: currentAccountTodos)
@@ -1267,29 +1288,6 @@ final class TodoMonitorService {
         let details = currentPipelineEvidence.first { $0.projectID == job.key.work.projectID && $0.iid == job.key.work.iid }
         return PipelineJobReconciliation.matchingDetails(catalog ?? details, details: details,
             checkedAt: currentPipelineEvidenceDate, job: job) ?? catalog
-    }
-
-    private func scheduleAutomation(host: String, username: String) {
-        guard settings.automaticWritesAllowed, !isAutomating,
-              settings.onboardingCompleted,
-              settings.automation.reviewRequested.isEnabled || settings.automation.authorFeedback.isEnabled
-        else { return }
-
-        let candidates = visibleTodos.reversed().compactMap { todo in
-            // MR events are classified exclusively by the durable router. Unknown
-            // mentions must not fall through to the former broad automation path.
-            guard todo.targetType != .mergeRequest else { return Optional<(Todo, TodoAutomationEvent)>.none }
-            return TodoAutomationEvent(todo: todo, username: username).map { (todo, $0) }
-        }
-        guard !candidates.isEmpty else { return }
-
-        isAutomating = true
-        Task {
-            defer { isAutomating = false }
-            for (todo, event) in candidates {
-                await runAutomation(todo, event: event, host: host, username: username, manual: false)
-            }
-        }
     }
 
     func automationAction(for todo: Todo) -> TodoAutomationService.ActionState? {
@@ -1427,7 +1425,7 @@ final class TodoMonitorService {
         }
         attention.automationConfigurationChanged(outsideScope: scopeOnly ? cancellationScope : nil)
         mergeRequestIssues?.cancelAssessments()
-        assistantDependencies.refresh(force: !scopeOnly)
+        refreshRuntimeAssistantAvailability(force: previous.selectedAssistant != current.selectedAssistant)
         authoredMergeRequests.automationConfigurationChanged(outsideScope: scopeOnly ? cancellationScope : nil)
         authoredMergeRequests.workflow.synchronizeAssistantJobs()
         wakeAutomaticRetries()
@@ -1562,11 +1560,23 @@ final class TodoMonitorService {
 
     func refreshAssistantRelay() {
         FollowUpVerificationStore.synchronizeRuns(settings: settings)
-        assistantDependencies.refresh()
+        refreshRuntimeAssistantAvailability()
+        AssistantAutomationRunner.resumePendingJobs()
     }
 
-    func retryAssistantJob(_ id: UUID) async {
-        guard let job = assistantHandoffs.first(where: { $0.id == id }), !job.isObsoleteReminder else { return }
+    /// The result of one retry request. Callers that report the outcome elsewhere (such as to a paired phone)
+    /// must use this value: `assistantJobActionError` is shared UI state that concurrent actions overwrite.
+    enum AssistantJobRetryOutcome: Equatable {
+        case queued(UUID)
+        /// The retry was not needed any more; a notice explains why.
+        case obsolete
+        case unavailable
+        case failed
+    }
+
+    @discardableResult
+    func retryAssistantJob(_ id: UUID) async -> AssistantJobRetryOutcome {
+        guard let job = assistantHandoffs.first(where: { $0.id == id }), !job.isObsoleteReminder else { return .unavailable }
         let target = MRAutomationScope.Target(host: job.key.work.host, username: job.key.username,
             projectID: job.key.work.projectID, iid: job.key.work.iid)
         settings.recordAutomationEvent(target: target, action: .retry, origin: .manual, state: .requested, jobID: id)
@@ -1578,13 +1588,14 @@ final class TodoMonitorService {
             authoredMergeRequests.workflow.synchronizeAssistantJobs()
             settings.recordAutomationEvent(target: target, action: .retry, origin: .manual, state: .queued,
                 jobID: replacement.id, relatedJobID: id)
+            return .queued(replacement.id)
         } catch {
             if let pipelineError = error as? AssistantAutomationRunner.HandoffError, pipelineError.isObsoletePipelineRetry {
                 assistantJobActionNotices[id] = pipelineError.localizedDescription
                 settings.recordAutomationEvent(target: target, action: .retry, origin: .manual, state: .completed,
                     message: pipelineError.localizedDescription, jobID: id)
                 await forceRefreshFromGitLab()
-                return
+                return .obsolete
             } else if let known = error as? AssistantAutomationRunner.HandoffError {
                 assistantJobActionError = known.localizedDescription
             } else if error as? AssistantJobExecutor.ExecutionError == .cliUnavailable {
@@ -1602,6 +1613,7 @@ final class TodoMonitorService {
             settings.recordAutomationEvent(target: target, action: .retry, origin: .manual, state: .failed,
                 message: String(describing: error), jobID: id)
             Log.monitor.error("Could not retry assistant job: \(String(describing: error), privacy: .private)")
+            return .failed
         }
     }
 

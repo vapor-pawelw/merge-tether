@@ -437,8 +437,24 @@ struct TodoAutomationTests {
         #expect(try await run(repeatRequest))
         #expect(Set(settings.automationReceipts.map(\.todoID)) == [42, 43])
 
-        automation.prune(fetchedIDs: [43], host: "gitlab.example.org", username: "me", settings: settings)
+        let acknowledgement = TodoActionAcknowledgement(host: "gitlab.example.org", username: "me", todo: todo.feedbackIdentity)
+        settings.pendingTodoAcknowledgements.insert(acknowledgement)
+        func prune(_ ids: Set<Int>) {
+            automation.prune(fetchedIDs: ids, host: "gitlab.example.org", username: "me", settings: settings)
+        }
+
+        prune([43])
+        #expect(Set(settings.automationReceipts.map(\.todoID)) == [42, 43])
+        #expect(Set(settings.automationAttemptReceipts.map(\.todoID)) == [42, 43])
+        #expect(settings.pendingTodoAcknowledgements.contains(acknowledgement))
+        prune([42, 43])
+        prune([43])
+        #expect(settings.pendingTodoAcknowledgements.contains(acknowledgement))
+        #expect(try await run(todo))
+        prune([43])
         #expect(Set(settings.automationReceipts.map(\.todoID)) == [43])
+        #expect(Set(settings.automationAttemptReceipts.map(\.todoID)) == [43])
+        #expect(!settings.pendingTodoAcknowledgements.contains(acknowledgement))
         settings.automation.reviewRequested.command = "exit 17"
         #expect(try await run(repeatRequest))
         await #expect(throws: (any Error).self) { try await run(todo) }

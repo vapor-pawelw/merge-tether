@@ -2899,6 +2899,7 @@ struct DraftProofRecoveryTests {
                 switch command.endpoint {
                 case "/user": return try output(live.user)
                 case "/projects/1/merge_requests/2": return try output(live.request)
+                case "/projects/1/merge_requests/2/approvals": return InMemoryGitLab.output(#"{"approved_by":[]}"#)
                 case let path where path.contains("/discussions?"): return try output(live.discussions)
                 case let path where path.contains("/draft_notes?"): return try output(live.drafts)
                 case let path where path.contains("/repository/branches/"):

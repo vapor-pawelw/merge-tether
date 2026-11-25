@@ -379,6 +379,8 @@ public struct RemoteMessage: Codable, Sendable {
     public static let commentOriginCapability = "comment-origin-v1"
     public static let markReadyCapability = "mark-ready-v1"
     public static let draftRegenerationCapability = "draft-regeneration-v1"
+    /// Host accepts `DraftRegenerationStyle` presets and rejects free-form remote instructions.
+    public static let draftRegenerationStylesCapability = "draft-regeneration-styles-v1"
     public static let boardAvatarsCapability = "board-avatars-v1"
     public static let detailAvatarsCapability = "detail-avatars-v1"
     public static let boardOrderCapability = "board-order-v1"

@@ -175,26 +175,22 @@ struct AssistantDependenciesTests {
         #expect(await task.value == false)
         #expect(!setup.canCommit)
     }
-    @MainActor @Test func failedInstallationAndMissingCLIKeepSelectionUncommitted() async {
-        let setup = AssistantSetupSession(assistant: .codex,
-            probe: { _ in .missingCLI }, install: { _ in throw AssistantCLI.SetupError.installationFailed })
-        #expect(await setup.verify() == false)
-        #expect(await setup.installAndVerify() == false)
-        #expect(!setup.canCommit)
+    @Test(arguments: AutomationAssistant.allCases)
+    func installationGuidesUseOfficialDocumentation(_ assistant: AutomationAssistant) {
+        let guide = AssistantCLI.installationGuide(for: assistant)
+        #expect(guide.scheme == "https")
+        #expect(guide.host == (assistant == .codex ? "learn.chatgpt.com" : "code.claude.com"))
+        #expect(guide.path == (assistant == .codex ? "/docs/codex/cli" : "/docs/en/setup"))
     }
 
-    @MainActor @Test func cancellingInstallationRejectsLateInstallerSuccess() async {
-        var resume: CheckedContinuation<Void, Error>?
-        let setup = AssistantSetupSession(assistant: .claude,
-            probe: { _ in .ready(URL(fileURLWithPath: "/example/cli")) },
-            install: { _ in try await withCheckedThrowingContinuation { resume = $0 } })
-        let task = Task { await setup.installAndVerify() }
-        for _ in 0..<1000 where resume == nil { await Task.yield() }
-        guard let resume else { Issue.record("Installation must be awaited"); return }
-        setup.cancel()
-        resume.resume()
-        #expect(await task.value == false)
+    @MainActor @Test func recheckingAfterExternalInstallationUpdatesReadiness() async {
+        var state: AssistantDependencyStatus = .missingCLI
+        let setup = AssistantSetupSession(assistant: .codex, probe: { _ in state })
+        #expect(await setup.verify() == false)
         #expect(!setup.canCommit)
+        state = .ready(URL(fileURLWithPath: "/example/cli"))
+        #expect(await setup.verify())
+        #expect(setup.canCommit)
     }
 
     @MainActor @Test func olderSuccessfulCheckCannotOverrideANewerFailedCheck() async {
@@ -212,6 +208,33 @@ struct AssistantDependenciesTests {
         completions[0].resume(returning: .ready(URL(fileURLWithPath: "/example/cli")))
         #expect(await first.value == false)
         #expect(setup.status == .missingCLI && !setup.canCommit)
+    }
+
+    @MainActor @Test func frequentRefreshesCoalesceAndOnlyProbeRequestedAssistants() async throws {
+        var probes: [AutomationAssistant] = []
+        let monitor = AssistantDependencyMonitor(probe: { assistant in
+            probes.append(assistant)
+            return .ready(URL(fileURLWithPath: "/example/cli"))
+        })
+        func finish() async throws {
+            for _ in 0..<1000 where monitor.isChecking { await Task.yield() }
+            try #require(!monitor.isChecking)
+        }
+
+        for _ in 0..<10 { monitor.refresh([.codex]) }
+        try await finish()
+        for _ in 0..<10 { monitor.refresh([.codex]) }
+        #expect(!monitor.isChecking)
+        #expect(probes == [.codex])
+
+        monitor.refresh([.claude])
+        try await finish()
+        #expect(probes == [.codex, .claude])
+        #expect(monitor.available == [.codex, .claude])
+
+        monitor.refresh([.codex], force: true)
+        try await finish()
+        #expect(probes == [.codex, .claude, .codex])
     }
 
     @MainActor @Test func initialReadinessIsSeparateFromReadOnlyFailureRecovery() async throws {

@@ -217,7 +217,26 @@ struct InboxTodoStoreTests {
             await store.markDone(todo, automatically: false)
             #expect(changed.withLock { $0 })
             #expect(store.visibleTodos.map(\.id) == [401])
-            #expect(store.lastError != nil)
+            #expect(store.lastError == nil)
+            #expect(store.lastActionError == .network("network unavailable"))
+            store.dismissActionFailure()
+            #expect(store.lastActionError == nil)
+        }
+    }
+
+    @Test func anAlreadyAbsentTodoCompletesTheAcknowledgement() async throws {
+        try await fixture { store, gitlab, settings in
+            try await fetch(store)
+            let todo = try #require(store.visibleTodos.first)
+            let pending = TodoActionAcknowledgement(host: host, username: "alice", todo: todo.feedbackIdentity)
+            settings.pendingTodoAcknowledgements.insert(pending)
+            gitlab.handler = { _ in InMemoryGitLab.output(error: "404 Not Found", code: 1) }
+
+            await store.markDone(todo, automatically: false)
+
+            #expect(store.visibleTodos.isEmpty)
+            #expect(!settings.pendingTodoAcknowledgements.contains(pending))
+            #expect(store.lastError == nil && store.lastActionError == nil)
         }
     }
 
@@ -331,7 +350,8 @@ struct InboxTodoStoreTests {
 
             await monitor.markInboxNotificationsRead([selected, second], accountRevision: revision)
             #expect(Set(monitor.currentAccountTodos.map(\.id)) == [401, 403])
-            #expect(monitor.lastError != nil)
+            #expect(monitor.lastError == nil)
+            #expect(monitor.lastInboxActionError == .network("network unavailable"))
 
             gitlab.write("acknowledgement-available")
             store.glab.currentUsername = "bob"

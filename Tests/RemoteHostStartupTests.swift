@@ -292,6 +292,18 @@ struct RemoteHostSessionTests {
         #expect(f.transport.messages.last?.board?.lanes.first?.cards.map(\.id) == saved.lanes.first?.cards.map(\.id))
     }
 
+    @Test func theMacReportsThePhoneOnlyAfterAnAuthenticatedMessage() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        await f.host.startupLoadTask?.value
+        #expect(f.host.phoneLink == .waitingForPhone)
+        await f.transport.onMessage?(.init(type: .hello, challenge: UUID()))
+        #expect(f.host.phoneLink == .phoneConnected)
+        f.transport.onStatus?(false, false)
+        #expect(f.host.phoneLink == .reconnecting)
+        f.transport.onStatus?(true, false)
+        #expect(f.host.phoneLink == .waitingForPhone)
+    }
+
     @Test(arguments: [nil, false] as [Bool?])
     func aSnapshotHelloDoesNotStartTheInitialGitLabRefresh(_ refresh: Bool?) async throws {
         let f = try Fixture(); defer { f.clean() }

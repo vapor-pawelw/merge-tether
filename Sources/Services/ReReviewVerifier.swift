@@ -707,9 +707,6 @@ enum ReReviewVerifier {
     }
 
     @MainActor private static var verificationEnvironment: [String: String] {
-        var environment = AssistantCLI.environment
-        for (key, value) in GlabService.shellEnvironment { environment[key] = value }
-        environment["PATH"] = AssistantCLI.environment["PATH"]
-        return environment
+        AgentProcessEnvironment.verifier
     }
 }

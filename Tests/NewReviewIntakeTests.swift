@@ -25,6 +25,9 @@ struct NewReviewIntakeTests {
             if request.arguments.first == "config" { return InMemoryGitLab.output(host) }
             if request.arguments.first == "auth" { return InMemoryGitLab.output(error: "Logged in to \(host) as alice") }
             if request.arguments.contains(where: { $0.hasPrefix("/todos?") }) { return try gitlab.response("todos") }
+            if !addDirectly, request.endpoint.hasPrefix("/merge_requests?scope=all&state=opened&reviewer_id=7") {
+                return InMemoryGitLab.output("[\(mergeRequestJSON)]")
+            }
             if request.endpoint == "/user" { return InMemoryGitLab.output(#"{"id":7,"username":"alice"}"#) }
             if request.endpoint == "/projects/1/merge_requests/42" { return InMemoryGitLab.output(mergeRequestJSON) }
             if request.method == "POST" { return InMemoryGitLab.output("{}") }
@@ -38,6 +41,14 @@ struct NewReviewIntakeTests {
             notifications: NotificationService(authorization: { .denied }, post: { _ in }))
         defer { monitor.stopTimer() }
         await monitor.bootstrap()
+        if !addDirectly {
+            // This fixture keeps onboarding off to avoid the periodic timer. Explicitly
+            // load the assignment catalog before exercising the Inbox preference.
+            await monitor.refreshNow()
+            monitor.attention.refresh(host: host, username: "alice", todos: monitor.visibleTodos)
+            await monitor.refreshManually()
+            try #require(settings.reviewAssignments.entries(host: host, username: "alice")?.map(\.request.iid) == [42])
+        }
         try await body(monitor, settings)
     }
 
@@ -68,6 +79,7 @@ struct NewReviewIntakeTests {
         try await fixture(preset: .trusted, addDirectly: false) { monitor, settings in
             await monitor.refreshNow()
             #expect(!settings.automation.scope.isManaged(target) && settings.newReviewTargets.isEmpty)
+            #expect(monitor.boardSnapshot.reviewed.isEmpty)
             #expect(monitor.boardSnapshot.proposals.map(\.target) == [target])
         }
     }
@@ -79,6 +91,7 @@ struct NewReviewIntakeTests {
             await monitor.addReviewCandidate(proposal)
             #expect(settings.automation.scope.isManaged(target) && settings.newReviewTargets.isEmpty)
             #expect(settings.automation.scope[target] == .paused && settings.mrActionIntents.isEmpty)
+            #expect(monitor.boardSnapshot.reviewed.map(\.id.iid) == [42])
         }
     }
 
@@ -108,5 +121,10 @@ struct NewReviewIntakeTests {
         let disabled = try JSONDecoder().decode(AutomationSettings.self,
             from: Data(#"{"packageDecision":"disabled","baselinePreset":"manual"}"#.utf8))
         #expect(enabled.startNewReviewsAutomatically && !disabled.startNewReviewsAutomatically)
+        let confirmation = try JSONDecoder().decode(AutomationSettings.self,
+            from: Data(#"{"packageDecision":"enabled","requireReviewStartConfirmation":true}"#.utf8))
+        #expect(!confirmation.startNewReviewsAutomatically)
+        let roundTrip = try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(confirmation))
+        #expect(roundTrip.requireReviewStartConfirmation)
     }
 }

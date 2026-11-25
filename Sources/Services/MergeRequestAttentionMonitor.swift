@@ -367,6 +367,7 @@ final class MergeRequestAttentionMonitor {
     private var verifiedRemoteFiles: [String: [FollowUpVerification.FileEvidence]] = [:]
     private var isRefreshingDrafts = false
     @ObservationIgnored private let pendingDraftPolling = PendingDraftPolling()
+    private var workerAuditRetry: Task<Void, Never>?
     private let reReviewCoordinator: ReReviewCoordinator?
     private let canAutomate: @MainActor (AutomationAssistant) async -> Bool
     private let approvalReadClock: ReadOnlyAssessmentRetry.Clock
@@ -458,9 +459,13 @@ final class MergeRequestAttentionMonitor {
                 return model == configured && settings.automation.verificationThinking == thinking
             }, criteriaOverride: { settings?.automation.aiCommentCriteriaOverride })
         self.aiOriginCoordinator = publicationOrigins
-        self.displayAIOriginCoordinator = settings.map {
-            AICommentDisplayCoordinator(glab: glab, settings: $0, assessmentDirectory: aiAssessmentDirectory,
-                canAutomate: canAutomate, publicationIsChecking: { publicationOrigins.isChecking(work: $0) }, assess: assessAIOrigin)
+        self.displayAIOriginCoordinator = settings.map { settings in
+            AICommentDisplayCoordinator(glab: glab, settings: settings, assessmentDirectory: aiAssessmentDirectory,
+                canAutomate: canAutomate, publicationIsChecking: { work in
+                    publicationOrigins.isChecking(work: work) || settings.assistantHandoffs.contains {
+                        $0.key.work == work && $0.key.username == glab.currentUsername && $0.execution?.state.isActive == true
+                    }
+                }, assess: assessAIOrigin)
         }
         self.draftProofRecoveryCoordinator = settings.map { settings in
             DraftProofRecoveryCoordinator(settings: settings, directory: followUpDirectory, verdictDirectory: verdictDirectory, canAutomate: canAutomate,
@@ -835,6 +840,13 @@ final class MergeRequestAttentionMonitor {
         let host = account.host
         let user = try await glab.fetchAuthenticatedUser(host: host, expectedUsername: account.username)
         guard isCurrent(account), revision == glab.accountRevision else { return }
+        if let settings, feedbackDecision == nil, workerAuditRetry == nil,
+           settings.assistantHandoffs.contains(where: { $0.execution?.pendingWorkerAudit != nil }) {
+            workerAuditRetry = Task { [weak self, glab] in
+                defer { self?.workerAuditRetry = nil }
+                await AssistantWorkerAudit.retryPending(host: host, user: user, glab: glab, settings: settings)
+            }
+        }
         self.user = user
         let agentWorks = assistantWorks(username: user.username)
         let verdictDirectory = verdictDirectory
@@ -1125,6 +1137,9 @@ final class MergeRequestAttentionMonitor {
                         host: host, username: user.username)
                     let authenticatedVerdict = ReviewVerdictStore.authenticatedVerdict(host: host,
                         projectID: item.id.projectID, iid: item.id.iid, user: user, settings: settings, in: verdictDirectory)
+                    let reviewedTarget = authenticatedVerdict.flatMap {
+                        ReviewVerdictStore.authenticatedTarget(for: $0, settings: settings)
+                    }
                     group.addTask { [glab] in
                         var updated = item
                         var contextDraftIDs: Set<Int> = []
@@ -1155,7 +1170,8 @@ final class MergeRequestAttentionMonitor {
                                host: host, projectID: request.projectID, iid: request.iid, user: user, in: verdictDirectory
                            )?.headSHA == head {
                             let check = await Self.approvalCheck(request, user: user, host: host,
-                                glab: glab, verdict: authenticatedVerdict)
+                                glab: glab, verdict: authenticatedVerdict,
+                                automaticGate: autoApproves && authenticatedVerdict != nil ? (head, reviewedTarget) : nil)
                             let currentVerdict = check.discussions.map {
                                 ReviewVerdictStore.verdict(host: host, projectID: request.projectID, iid: request.iid, user: user, in: verdictDirectory)?
                                     .approves(head: head, discussions: $0, reviewerID: user.id,
@@ -1171,7 +1187,7 @@ final class MergeRequestAttentionMonitor {
                                     legacyDuoThreadsVerified: check.discussionsReady, in: verdictDirectory)
                             } else { automaticContext = false }
                             // After GitLab refused an automatic approval, offer the button instead of retrying.
-                            let automatic = autoApproves && head != failedHead && automaticContext
+                            let automatic = autoApproves && head != failedHead && automaticContext && check.automaticGatePassed
                                 && authenticatedVerdict == ReviewVerdictStore.verdict(host: host, projectID: request.projectID,
                                     iid: request.iid, user: user, in: verdictDirectory)
                             let classifiedReviewAllowsApproval = authenticatedVerdict?.verdict == .classifiedFindings && automaticContext
@@ -1828,14 +1844,18 @@ final class MergeRequestAttentionMonitor {
         /// The user is a reviewer, has not approved yet and has no unresolved thread of their own.
         var ownReady = false
         var discussionsReady = false
+        /// The deterministic automatic-approval gate passed on a fresh single-MR read.
+        var automaticGatePassed = false
     }
 
     private nonisolated static func approvalCheck(
         _ request: GitLabMergeRequest, user: GitLabAuthenticatedUser, host: String, glab: GlabService,
-        verdict: ReviewVerdict?
+        verdict: ReviewVerdict?, automaticGate: (head: String, reviewed: ReviewTargetBinding?)? = nil
     ) async -> ApprovalCheck {
         async let reviewers = try? glab.fetchMergeRequestReviewers(projectID: request.projectID, iid: request.iid, host: host)
         async let discussions = try? glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
+        // List reads may omit diff refs, so check the target on a single-MR read.
+        async let gatePassed = automaticApprovalGatePasses(request, gate: automaticGate, host: host, glab: glab)
         guard let reviewers = await reviewers, let discussions = await discussions,
               let me = reviewers.first(where: { $0.user.id == user.id }), me.state != "approved" else { return ApprovalCheck() }
         let ownOpen = discussions.contains { discussion in
@@ -1843,7 +1863,17 @@ final class MergeRequestAttentionMonitor {
             return first.author?.id == user.id && first.resolvable == true && first.resolved == false
         }
         let ready = try? await approvalDiscussionsReady(discussions, verdict: verdict, user: user, host: host, glab: glab)
-        return ApprovalCheck(discussions: discussions, ownReady: !ownOpen, discussionsReady: ready == true)
+        return ApprovalCheck(discussions: discussions, ownReady: !ownOpen, discussionsReady: ready == true,
+            automaticGatePassed: await gatePassed)
+    }
+
+    private nonisolated static func automaticApprovalGatePasses(
+        _ request: GitLabMergeRequest, gate: (head: String, reviewed: ReviewTargetBinding?)?, host: String, glab: GlabService
+    ) async -> Bool {
+        guard let gate, gate.reviewed != nil,
+              let live = try? await glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
+        else { return false }
+        return AutomaticApprovalGate.permits(live, head: gate.head, reviewed: gate.reviewed)
     }
 
     private nonisolated static func approvalDiscussionsReady(
@@ -2520,11 +2550,11 @@ final class MergeRequestAttentionMonitor {
             // The user's verdict also outranks a verified assistant identity.
             if AICommentOriginOverrideStore.override(for: note, host: host, projectID: projectID, iid: iid, in: directory) != nil {
                 return AICommentAssessmentStore.isAI(note, host: host, projectID: projectID, iid: iid,
-                    criteriaOverride: policy.aiCommentCriteriaOverride, in: directory, now: now) ? id : nil
+                    username: username, criteriaOverride: policy.aiCommentCriteriaOverride, in: directory, now: now) ? id : nil
             }
             return verifiedIdentities.contains(note.author?.id ?? 0)
                 || AICommentAssessmentStore.isAI(note, host: host, projectID: projectID, iid: iid,
-                    criteriaOverride: policy.aiCommentCriteriaOverride, in: directory, now: now) ? id : nil
+                    username: username, criteriaOverride: policy.aiCommentCriteriaOverride, in: directory, now: now) ? id : nil
         })
         return (aiIDs, botIDs)
     }
@@ -2537,7 +2567,10 @@ final class MergeRequestAttentionMonitor {
         let configuration = settings.automation
         let target = commentReviewTarget(.init(projectID: request.projectID, iid: request.iid), account: account)
         let policy = settings.publicationPolicy(for: target)
-        guard configuration.hasAutomaticActionConsent, policy.mode != .manual, policy.requiresAI,
+        let work = AssistantAutomationRunner.MergeRequestWork(host: target.host, projectID: request.projectID, iid: request.iid)
+        guard !hasActiveWorker(for: .init(projectID: request.projectID, iid: request.iid), account: account),
+              displayAIOriginCoordinator?.isChecking(work: work) != true,
+              configuration.hasAutomaticActionConsent, policy.mode != .manual, policy.requiresAI,
               configuration.scope.permits(request, host: account.host, username: account.username) else { return }
         var sources: [Int: GitLabMergeRequestDiscussion.Note] = [:]
         for draft in drafts where policy.couldAllow(draft, request: request, userID: user.id, host: account.host) {
@@ -2554,7 +2587,9 @@ final class MergeRequestAttentionMonitor {
             projectID: request.projectID, iid: request.iid)
         let unknown = sources.filter { !known.ai.contains($0.key) && !known.bots.contains($0.key) }.sorted { $0.key < $1.key }.map(\.value)
         guard !unknown.isEmpty, await permitsAssistantAutomation(for: account), isCurrent(account),
-              settings.automation == configuration, !Task.isCancelled else { return }
+              settings.automation == configuration, !Task.isCancelled,
+              !hasActiveWorker(for: .init(projectID: request.projectID, iid: request.iid), account: account),
+              displayAIOriginCoordinator?.isChecking(work: work) != true else { return }
         let model = configuration.assistant == .codex ? configuration.codexVerificationModel.rawValue
             : configuration.claudeVerificationModel.rawValue
         aiOriginCoordinator.schedule(target: .init(host: account.host, username: account.username,
@@ -3003,6 +3038,9 @@ final class MergeRequestAttentionMonitor {
                 && current.sha == head && current.author.id != user.id && evidence.drafts.isEmpty
                 && covered
                 && (!automatic || self.autoApproveApplies(to: current, host: account.host, username: account.username))
+                // App-owned, model-independent proof re-checked against this fresh read, including the final one.
+                && (!automatic || AutomaticApprovalGate.permits(current, head: head,
+                    reviewed: evidence.checkedVerdict.flatMap { ReviewVerdictStore.authenticatedTarget(for: $0, settings: self.settings) }))
         }
         @MainActor func confirmed(_ progress: MergeRequestApprovalProgress?, for request: GitLabMergeRequest) -> Bool {
             if submitted {

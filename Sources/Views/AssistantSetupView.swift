@@ -25,7 +25,9 @@ struct AssistantSetupView: View {
                 switch status {
                 case .missingCLI, .invalidCLI:
                     Text(.Settings.settingsAssistantSetupInstallHelp).font(.caption).foregroundStyle(.secondary)
-                    Button { perform(install: true) } label: { Text(.Settings.settingsAssistantSetupInstall) }
+                    Link(destination: AssistantCLI.installationGuide(for: setup.assistant)) {
+                        Text(.Settings.settingsAssistantSetupInstall)
+                    }
                 case .loginRequired(let executable):
                     Button {
                         Task {
@@ -37,7 +39,7 @@ struct AssistantSetupView: View {
                 case .ready: EmptyView()
                 }
             }
-            if setup.failed || loginFailed {
+            if loginFailed {
                 Text(.Settings.settingsAssistantSetupFailed).font(.caption).foregroundStyle(.red)
             }
             HStack {
@@ -60,10 +62,10 @@ struct AssistantSetupView: View {
         .onDisappear { operation?.cancel(); setup.cancel() }
     }
 
-    private func perform(install: Bool = false) {
+    private func perform() {
         operation?.cancel()
         operation = Task {
-            let ready = install ? await setup.installAndVerify() : await setup.verify()
+            let ready = await setup.verify()
             guard ready, setup.canCommit, !Task.isCancelled else { return }
             onReady()
             dismiss()

@@ -4,15 +4,23 @@ MergeTether is a local MR command center. Manual GitLab management works without
 
 Worker output is written to private files throughout execution. Validated complete results receive an account/run/head-bound completion checkpoint authenticated with a Keychain-held signing key and stored outside the worker directory, recoverable at startup. Ordinary Quit cancels worker process trees and waits for cleanup and persistence. Incomplete work remains Interrupted with retained files; raw partial output never establishes success or authorizes a remote write. CLI session persistence is disabled. Retry starts a fresh task, inspects the previous run and re-fetches current GitLab commits, discussions and drafts before continuing; existing work must not be duplicated. Force Quit bypasses that shutdown sequence.
 
+## Product rules
+
+| Situation | Expected behavior |
+| --- | --- |
+| Trusted or Max reviews an MR within its configured scope. | The preset enables automatic approval. The selected findings threshold and a review of the current diff decide eligibility. CI and diff size belong to separate checks. See [Automatic approval](#automatic-approval). |
+| GitLab fails to respond while checking a completed worker run. | Only that MR waits for the audit. The app retries the read, and other MRs can continue. Confirmed unexpected changes require resuming the affected MR. See [CLI setup and execution](#cli-setup-and-execution). |
+| A reply needs a source comment’s AI assessment. | Reuse its current sealed action assessment for the same account, content and criteria. A reply worker can supply the first assessment. See [Message authorship in Details](#message-authorship-in-details). |
+
 ## How a merge request moves through MergeTether
 
 **When you are the reviewer**
 
 1. A review request arrives. Draft MRs are tracked in Reviewing; their automatic work waits by default, while normal manual actions remain available. The selected CLI reviews ready MRs and saves warranted findings as private GitLab drafts.
 2. Drafts wait on the relevant MR card. Open **Review and confirm** to read the complete discussion and private drafts, then publish the reviewed set or edit it in GitLab. Publication can also run automatically under the selected profile and publication mode.
-3. New commits or author replies trigger a new re-review task. The first poll establishes a baseline; later events are deduplicated across restarts.
+3. New commits, a changed target or author replies can trigger a new re-review task. The first poll establishes a baseline; later events are deduplicated across restarts.
 4. The agent checks each concern against the current remote head and records open or uncertain findings in the review verdict. It drafts a follow-up in your thread only when there is a substantive incoming reply that warrants an answer. With **Resolve my verified findings during re-review** enabled, it can resolve verified findings in threads whose first non-system note belongs to you. Turning the option off leaves resolution to you.
-5. Automatic approval requires a current review that meets your selected approval threshold, completed comment review, and no pending drafts, in addition to your automation scope and CLI readiness.
+5. Automatic approval requires a current review of the same target branch and diff base that meets your selected approval threshold, completed comment review and no pending drafts, in addition to your automation scope and CLI readiness.
 
 In a thread started by someone else, the review worker drafts a reply only when direct evidence shows that a proposed solution, argument or factual claim is wrong in a way that could materially affect a technical or review decision. Acknowledgements, confirmations of fixes, minor corrections and uncertain disagreements stay in the review verdict or run result. The same rule applies to bot threads.
 
@@ -38,7 +46,7 @@ When an automatically requested review process succeeds but its result cannot be
 
 Each private draft has a **Delete draft** action with confirmation. Deletion applies only to the exact displayed draft after fresh account, MR and draft checks; an edited draft must be reviewed again. Other drafts are preserved. Deleting a draft never approves the MR, resolves a discussion or changes the recorded review verdict.
 
-Use **Regenerate…** on a draft, in an MR's draft section, or in the board toolbar. The Mac runs the configured assistant with the current local skills and any additional instructions supplied for this run. You can close the sheet while the assistant works and reopen it from the toolbar. Review the original and proposed text, then save the proposals you choose. Drafts without an exact MergeTether authorship record start unselected in a batch.
+Use **Regenerate…** on a draft, in an MR's draft section, or in the board toolbar. The Mac runs the configured assistant with the current local skills and any additional instructions typed on the Mac for this run; they only shape the wording and never extend the task's read-only limits. A paired iPhone can choose only a fixed rewriting style. You can close the sheet while the assistant works and reopen it from the toolbar. Review the original and proposed text, then save the proposals you choose. Drafts without an exact MergeTether authorship record start unselected in a batch.
 
 Regeneration keeps the existing draft ID and anchor. Before replacing a body, the Mac checks the current GitLab account, MR, commit, discussion context and exact draft. Changed drafts require a fresh proposal. The assistant returns proposed text, and the app performs the draft update after confirmation. Regenerated bodies require deliberate publication even if the MR normally publishes automatically.
 
@@ -64,7 +72,7 @@ When all feedback is verified, required replies are published and the existing a
 
 ## CLI setup and execution
 
-Choose **No coding agent**, **Codex CLI**, or **Claude CLI** in **Settings → Agent**. A verified provider change saves immediately and applies to manual agent actions and automation. Setup verifies the executable, supported headless options and sign-in before accepting a selection. A missing or incompatible CLI can be installed through the provider’s official installer; sign-in opens Terminal. Cancelling or failing setup keeps the previous selection.
+Choose **No coding agent**, **Codex CLI**, or **Claude CLI** in **Settings → Agent**. A verified provider change saves immediately and applies to manual agent actions and automation. Setup verifies the executable, supported headless options and sign-in before accepting a selection. For a missing or incompatible CLI, setup opens the provider’s installation guide. Follow the guide and choose **Check again** when the CLI is available. Sign-in opens Terminal. Cancelling or failing setup keeps the previous selection.
 
 The CLI requirement applies even when automatic re-review verification is off. Desktop installation does not establish CLI readiness. Dependency checks run independently of GitLab polling. An action that needs an agent offers to open the agent settings when the CLI is unavailable. Affected merge requests show a hold with a setup and resume action. Manual publication and other GitLab actions that do not require an agent remain available.
 
@@ -88,7 +96,9 @@ Failed merge-train pipelines can enter the ordinary pipeline-repair workflow whe
 
 These task permissions are not an operating-system or credential sandbox. Workers retain the signed-in account's tools and credentials, so app-side checks do not technically mediate arbitrary direct commands issued by a worker. Authenticated evidence detects substituted app records; it does not prove the semantic correctness of a review or defend against arbitrary same-user execution.
 
-For executable MR jobs, MergeTether compares the current source head, public discussions and approvals around the worker process. Task history flags unexpected changes when comparable evidence is available. The same account can make changes by hand or through another client during a run, and a source change alone does not identify who pushed. These observations support investigation and preserve the worker's recorded outcome.
+MergeTether narrows ambient authority without removing tools. Runs without a checked push permission (anything other than an enabled author follow-up push or conflict push) receive Git configuration in their environment that rewrites HTTPS, SSH and `git@` push URLs to an unsupported scheme, so an ordinary `git push` fails; fetches and local or `file://` remotes are unchanged. Lightweight verifiers, classifiers and draft generators also run without the forwarded SSH agent and read GitLab through `glab`. Workers are told never to read or send credentials. These are guardrails, not isolation: a worker can still read the user's glab configuration and on-disk keys, override its environment, or call the GitLab API directly with the signed-in token.
+
+For executable MR jobs, MergeTether compares the current source head, public discussions and approvals around the worker process. The same account can make changes by hand or through another client during a run, and a source change alone does not identify who pushed. An unattended worker requires a pre-launch snapshot. When a post-run read fails, MergeTether retries the read and holds automatic actions for that MR while waiting for evidence. Further refreshes retry the comparison, including after a restart. A clean result lifts the hold and restores a saved outcome. Changes outside the run's permissions pause automation on that MR until you resume it from the MR controls. The run shows the observed changes. Other MRs keep their configured automation. A user-started run keeps its outcome if the evidence is unavailable; confirmed unexpected effects also pause automation locally for those runs. Stopped and cancelled runs are not audited. The comparison covers the MR's own source head, the account's published notes, its resolutions and its approval; it does not detect merges, labels, other MRs or other projects.
 
 Provider configuration is currently explicit but different. Codex tasks ignore user `config.toml` and execution-policy `.rules` files and disable the app/plugin/memory integrations named in their invocation. `--ignore-rules` is not a promise that Markdown instructions or manually loaded skills are ignored. Claude coding tasks retain their normal settings sources, while supplying app settings and an empty strict MCP configuration; read-only verifiers explicitly suppress settings sources. Applicable skills remain part of the instructed workflow. Changing personal hooks or skill loading is a separate execution-policy decision.
 
@@ -441,6 +451,10 @@ A successful Mac or phone Details discussion read can schedule missing authorshi
 
 These assessments have display purpose and separate storage. They do not satisfy automatic publication eligibility, even if a display file is passed to an action reader. Strictly attributed legacy records can be read for display without being imported into the installation's current action evidence. Ordinary refresh or reopening on iPhone retrieves completed classifications; no recurring full-Details polling is added.
 
+Action-relevant trust records are sealed by the app with the Keychain-held checkpoint key and bound to the exact host, MR and note: AI-authorship assessments that can permit automatic publication, manual authorship overrides, and the list of your own drafts that published comments may match. Workers share your macOS account but not that key. A worker preparing a reply can include its source assessment in the structured result. The app checks the signed-in account, the generated private draft, the live source note and exact body, and the current criteria before sealing the result. Automatic publication and Details reuse a current sealed action assessment, including a Human or Uncertain result. When a reply has no reusable action assessment, the app can run a separate assessor. Older plain or relocated files are display hints. An unsealed older AI override is ignored, while an unsealed Human or Uncertain override still narrows publication. Unsealed older draft lists are ignored, so your earlier published comments may require a fresh review. Records written before the key is available are display-only until the app assesses them again.
+
+These seals do not protect automation settings in the app's preferences. A process running as your macOS user can change them, and the change takes effect after restart. Review **Settings → Automation** if you suspect that a worker modified local state.
+
 ## Extra context for generated comments
 
 Review and follow-up workers may attach optional app-only Markdown (`extraContext`) to each draft they declare in `generatedDrafts`. It is meant for the MergeTether user: simpler explanations, background on the code involved, why the comment matters and its trade-offs, so the GitLab comment can stay concise or follow the user's guidelines. Workers leave it null by default. MergeTether stores it beside the local authorship record for that exact draft ID and body, shows it from an **Extra context** button in Mac and iOS Details while the draft text is unchanged, and keeps showing it beside the comment once that draft's publication is recorded or reconciled. It is never part of a draft body, a publication request, a quick action or any other GitLab write, and it grants no permission. It is removed with the MR's other display records.
@@ -449,7 +463,7 @@ Workers can set `proposedSolution` when the draft recommends a concrete solution
 
 ## Automatic approval
 
-**Approve merge requests automatically** is enabled by Trusted and Max and disabled by Safe and Manual. Set **Automatically approve when** in **Settings → Automation → Profile & permissions**. Changing presets keeps your selected threshold.
+**Approve merge requests automatically** is enabled by Trusted and Max and disabled by Safe and Manual. It is off in new or recommended settings until you choose a delivering profile or turn it on. Set **Automatically approve when** in **Settings → Automation → Profile & permissions**. Changing presets keeps your selected threshold. Upgrades keep a saved permission and threshold; older settings without the permission inherit it only from an explicitly saved Trusted or Max profile.
 
 | Threshold | Remaining issues allowed |
 | --- | --- |
@@ -467,8 +481,11 @@ Automatic approval also has these requirements.
 - No pending drafts and a completed comment-review checkpoint when one is pending.
 - An open MR you review, within the effective Draft and automation policy, which you have yet to approve.
 - The selected CLI is ready for automation.
+- The same target project, target branch and diff base the app captured during review, confirmed by its own live single-MR reads including the final check before approval. An earlier verdict without a recorded target requires a fresh review for automatic approval.
 
-Approval is pinned to the checked source SHA. A new or edited comment invalidates the verdict; resolution-only changes preserve it. If GitLab refuses automatic approval, the app stops retrying that commit and retains the manual **Approve** action. Disable approval for an individual reviewed MR in its detail controls or automation scope settings. On someone else's MR, resolution remains limited to your own verified review findings; accepted-feedback resolution applies only when you own the MR.
+An MR with a qualifying review can receive automatic approval regardless of the presence or status of a pipeline and the number of changed files. Merge readiness follows its own rules.
+
+Approval is pinned to the checked source SHA, target branch and diff base. Retargeting an MR or a new diff base without a new commit withholds automatic approval until a fresh review. If the MR’s review-update rule runs automatically, it can schedule a fresh review of the current diff. A new or edited comment invalidates the verdict; resolution-only changes preserve it. If GitLab refuses automatic approval, the app stops retrying that commit and retains the manual **Approve** action. Disable approval for an individual reviewed MR in its detail controls or automation scope settings. On someone else's MR, resolution remains limited to your own verified review findings; accepted-feedback resolution applies only when you own the MR.
 
 To make your own decision, open the approvals badge on an MR you review and choose **Approve** or **Remove approval**. Manual approval uses the displayed revision and the signed-in GitLab account. Removing approval sets **Approval → Off** for that MR and shows a confirmation. The orange Mac bolt marks this customization. The setting persists across commits and restarts. Set **Approval** back to **Default** or **On** from the Mac bolt to resume automatic approval under the current rules. Manual approval and removal leave the MR’s other automation settings in place.
 
@@ -476,7 +493,7 @@ The reviewer checks factual claims against the current commit and full changed-f
 
 Publishing an unchanged draft captured in that authenticated review completion can preserve the verdict. The app confirms the exact newly published notes and unchanged existing discussion text before authenticating the resulting fingerprint. Later or edited drafts, direct comments and unsigned draft-history caches cannot extend automatic approval under an older review.
 
-Old verdict files without an authenticated account or evidence of the reviewed title and description require a current app-managed review. An older objections verdict or unclassified active feedback requires a fresh review before the thresholds can apply. A verified GitLab Duo false positive from an authenticated earlier review can still qualify when the review covers the current title and description, and live bot identity and exact thread evidence match. This authenticates the origin of the review result. The app relies on the review worker's judgment.
+Old verdict files without an authenticated account or evidence of the reviewed title and description require a current app-managed review. An older objections verdict or unclassified active feedback requires a fresh review before the thresholds can apply. A verified GitLab Duo false positive from an authenticated earlier review can still qualify when the review covers the current title and description, and live bot identity and exact thread evidence match. This authenticates the origin of the review result. The app relies on the review worker's judgment for the findings themselves; the app verifies that the judgment still applies to the live diff. GitLab checks the source SHA at approval time. A target change between the app’s final read and the write can still race the approval.
 
 ## What each action may do
 

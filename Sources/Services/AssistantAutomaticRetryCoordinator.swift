@@ -214,7 +214,8 @@ final class AssistantAutomaticRetryCoordinator {
             state: job.execution?.state ?? .blocked, finishedAt: job.execution?.finishedAt,
             cancellationOrigin: job.execution?.cancellationOrigin,
             automaticRetryIdentity: job.automaticRetryIdentity, retryOf: job.retryOf,
-            isExecutable: job.taskPrompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false && job.mergeRequestURL != nil,
+            isExecutable: job.taskPrompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false && job.mergeRequestURL != nil
+                && job.execution?.pendingWorkerAudit == nil && job.execution?.remoteEffects?.isEmpty != false,
             delegatesRecovery: job.draftRepair != nil || job.workflow == .followUp && !(job.feedbackNoteIDs ?? []).isEmpty,
             isObsolete: job.isObsoleteReminder)
     }

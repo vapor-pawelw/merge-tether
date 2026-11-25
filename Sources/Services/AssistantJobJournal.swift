@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import LocalAuthentication
 import Security
+import os
 
 /// Only authenticated, app-validated completions can restore execution state.
 @MainActor
@@ -15,19 +16,21 @@ enum AssistantJobJournal {
         let finishedAt: Date
         var reviewVerdict: ReviewVerdict? = nil
         var reviewDrafts: [GitLabDraftNote]? = nil
+        /// Captured by the app from its own live read; older checkpoints have none and need a fresh review.
+        var reviewTarget: ReviewTargetBinding? = nil
+        var reviewLaunchTarget: ReviewTargetBinding? = nil
+        var awaitingWorkerAudit: Bool? = nil
     }
     private struct Sealed: Codable { let payload: Data; let signature: Data }
-    private static let testing = Bundle.allBundles.contains { $0.bundleURL.pathExtension == "xctest" }
-        || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    private static let testing = EvidenceSeal.testing
     private static let directory = testing
         ? FileManager.default.temporaryDirectory.appendingPathComponent("MergeTether-CheckpointTests-\(UUID())")
         : InstallationStorage.current.checkpoints
     private static let keyLoader: AssistantCheckpointKeyLoader = {
-        if testing {
-            let bytes = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
+        if let bytes = EvidenceSeal.testingKey {
             return AssistantCheckpointKeyLoader(initial: bytes) { bytes }
         }
-        return AssistantCheckpointKeyLoader { try? AssistantJobJournal.readKey() }
+        return AssistantCheckpointKeyLoader(publish: EvidenceSeal.install) { try? AssistantJobJournal.readKey() }
     }()
     static var isKeyReady: Bool { keyLoader.cached != nil }
     static func hasCheckpoint(_ id: UUID) -> Bool {
@@ -47,41 +50,75 @@ enum AssistantJobJournal {
     }
 
     static func save(_ outcome: AssistantJobCoordinator.Outcome, for handoff: AssistantAutomationRunner.Handoff,
-                     reviewVerdict: ReviewVerdict? = nil, reviewDrafts: [GitLabDraftNote]? = nil) async throws {
+                     reviewVerdict: ReviewVerdict? = nil, reviewDrafts: [GitLabDraftNote]? = nil,
+                     reviewTarget: ReviewTargetBinding? = nil, reviewLaunchTarget: ReviewTargetBinding? = nil,
+                     awaitingWorkerAudit: Bool = false) async throws {
         guard await loadKey() else { throw KeyError(status: errSecInteractionNotAllowed) }
-        try saveWithLoadedKey(outcome, for: handoff, reviewVerdict: reviewVerdict, reviewDrafts: reviewDrafts)
+        try saveWithLoadedKey(outcome, for: handoff, reviewVerdict: reviewVerdict, reviewDrafts: reviewDrafts,
+            reviewTarget: reviewTarget, reviewLaunchTarget: reviewLaunchTarget, awaitingWorkerAudit: awaitingWorkerAudit)
     }
 
     static func saveWithLoadedKey(_ outcome: AssistantJobCoordinator.Outcome, for handoff: AssistantAutomationRunner.Handoff,
-                                  reviewVerdict: ReviewVerdict? = nil, reviewDrafts: [GitLabDraftNote]? = nil) throws {
+                                  reviewVerdict: ReviewVerdict? = nil, reviewDrafts: [GitLabDraftNote]? = nil,
+                                  reviewTarget: ReviewTargetBinding? = nil, reviewLaunchTarget: ReviewTargetBinding? = nil,
+                                  awaitingWorkerAudit: Bool = false) throws {
         guard let bytes = keyLoader.cached else { throw KeyError(status: errSecInteractionNotAllowed) }
-        let signingKey = SymmetricKey(data: bytes)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700])
         let checkpoint = Checkpoint(runID: handoff.id, key: handoff.key, head: handoff.expectedHeadSHA,
             result: .init(status: outcome.result.status,
                 summary: String(GlabService.redactWorkflowEvidence(outcome.result.summary).prefix(32_000)),
                 blocker: outcome.result.blocker.map { String(GlabService.redactWorkflowEvidence($0).prefix(300)) }),
             output: String(GlabService.redactWorkflowEvidence(outcome.output).prefix(262_144)), finishedAt: Date(),
-            reviewVerdict: reviewVerdict, reviewDrafts: reviewDrafts)
+            reviewVerdict: reviewVerdict, reviewDrafts: reviewDrafts,
+            reviewTarget: reviewVerdict == nil ? nil : reviewTarget,
+            reviewLaunchTarget: reviewVerdict == nil ? nil : reviewLaunchTarget,
+            awaitingWorkerAudit: awaitingWorkerAudit ? true : nil)
+        try write(checkpoint, key: bytes)
+    }
+
+    static func completeAuditedRun(_ handoff: AssistantAutomationRunner.Handoff) throws -> AssistantJobExecution? {
+        guard let bytes = keyLoader.cached, var checkpoint = checkpoint(for: handoff) else { return nil }
+        if checkpoint.awaitingWorkerAudit == true {
+            checkpoint.awaitingWorkerAudit = nil
+            try write(checkpoint, key: bytes)
+        }
+        return recover(handoff)
+    }
+
+    private static func write(_ checkpoint: Checkpoint, key: Data) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
         let payload = try JSONEncoder().encode(checkpoint)
-        let sealed = Sealed(payload: payload, signature: Data(HMAC<SHA256>.authenticationCode(for: payload, using: signingKey)))
-        let file = checkpointURL(for: handoff.id)
+        let sealed = Sealed(payload: payload, signature: Data(HMAC<SHA256>.authenticationCode(for: payload, using: SymmetricKey(data: key))))
+        let file = checkpointURL(for: checkpoint.runID)
         try JSONEncoder().encode(sealed).write(to: file, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
-        savedInThisProcess.insert(handoff.id)
+        savedInThisProcess.insert(checkpoint.runID)
     }
 
     /// Authentication proves which validated completion captured these bytes, not review correctness.
     static func reviewVerdict(for handoff: AssistantAutomationRunner.Handoff) -> ReviewVerdict? {
         guard AssistantAutomationRunner.recordsReviewVerdict(for: handoff),
-              let checkpoint = checkpoint(for: handoff), checkpoint.result.status == .succeeded,
+              let checkpoint = checkpoint(for: handoff), checkpoint.awaitingWorkerAudit != true, checkpoint.result.status == .succeeded,
               let verdict = checkpoint.reviewVerdict, verdict.runID == handoff.id,
               verdict.host == handoff.key.work.host, verdict.projectID == handoff.key.work.projectID,
               verdict.iid == handoff.key.work.iid, verdict.username == handoff.key.username,
               verdict.userID.map({ $0 > 0 }) == true, verdict.headSHA == handoff.expectedHeadSHA,
               verdict.discussionFingerprint != nil else { return nil }
         return verdict
+    }
+
+    /// The target the app observed when it sealed this review; nil for legacy or unbound completions.
+    static func reviewTarget(for handoff: AssistantAutomationRunner.Handoff) -> ReviewTargetBinding? {
+        guard let verdict = reviewVerdict(for: handoff), let target = checkpoint(for: handoff)?.reviewTarget,
+              target.headSHA == verdict.headSHA else { return nil }
+        return target
+    }
+
+    static func targetForReviewUpdates(for handoff: AssistantAutomationRunner.Handoff) -> ReviewTargetBinding? {
+        guard let verdict = reviewVerdict(for: handoff), let checkpoint = checkpoint(for: handoff),
+              let target = checkpoint.reviewTarget ?? checkpoint.reviewLaunchTarget,
+              target.headSHA == verdict.headSHA else { return nil }
+        return target
     }
 
     static func reviewDrafts(for handoff: AssistantAutomationRunner.Handoff) -> [GitLabDraftNote]? {
@@ -125,7 +162,7 @@ enum AssistantJobJournal {
 
     static func recover(_ handoff: AssistantAutomationRunner.Handoff, allowCompletion: Bool = true) -> AssistantJobExecution? {
         guard var execution = handoff.execution else { return nil }
-        if allowCompletion, let checkpoint = checkpoint(for: handoff) {
+        if allowCompletion, let checkpoint = checkpoint(for: handoff), checkpoint.awaitingWorkerAudit != true {
             execution.state = checkpoint.result.status == .succeeded ? .succeeded : .blocked
             execution.summary = checkpoint.result.summary
             execution.blocker = checkpoint.result.blocker
@@ -185,10 +222,14 @@ enum AssistantJobJournal {
 /// Keychain consent must never block startup, result capture, or Quit on the main actor.
 @MainActor
 final class AssistantCheckpointKeyLoader {
-    private(set) var cached: Data?
+    private(set) var cached: Data? { didSet { publish?(cached) } }
     private var loading = false
     private let load: @Sendable () -> Data?
-    init(initial: Data? = nil, load: @escaping @Sendable () -> Data?) { cached = initial; self.load = load }
+    private let publish: (@Sendable (Data?) -> Void)?
+    init(initial: Data? = nil, publish: (@Sendable (Data?) -> Void)? = nil, load: @escaping @Sendable () -> Data?) {
+        cached = initial; self.load = load; self.publish = publish
+        publish?(initial)
+    }
 
     func key(timeout: Duration) async -> Data? {
         if let cached { return cached }
@@ -207,5 +248,41 @@ final class AssistantCheckpointKeyLoader {
             try? await Task.sleep(for: .milliseconds(10))
         }
         return cached
+    }
+}
+
+/// Seals trust records written off the main actor with the checkpoint signing key once the app has loaded it.
+/// Workers share the user account but not this Keychain-held key, so they cannot forge a sealed record.
+/// Until the key is available, sealing fails and reads treat records as unauthenticated.
+enum EvidenceSeal {
+    private struct Sealed: Codable { let payload: Data; let signature: Data }
+    nonisolated static let testing = Bundle.allBundles.contains { $0.bundleURL.pathExtension == "xctest" }
+        || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    nonisolated static let testingKey: Data? = testing ? SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) } : nil
+    private nonisolated static let key = OSAllocatedUnfairLock<Data?>(initialState: testingKey)
+
+    nonisolated static func install(_ bytes: Data?) {
+        guard let bytes, bytes.count == 32 else { return }
+        key.withLock { $0 = bytes }
+    }
+
+    nonisolated static var isReady: Bool { key.withLock { $0 != nil } }
+
+    struct Unavailable: Error {}
+
+    nonisolated static func seal(_ payload: Data, context: String) throws -> Data {
+        guard let bytes = key.withLock({ $0 }) else { throw Unavailable() }
+        let authenticated = Data((context + "\0").utf8) + payload
+        return try JSONEncoder().encode(Sealed(payload: payload,
+            signature: Data(HMAC<SHA256>.authenticationCode(for: authenticated, using: SymmetricKey(data: bytes)))))
+    }
+
+    /// The authenticated payload, or nil for a plain, forged, re-contexted or unverifiable record.
+    nonisolated static func open(_ data: Data, context: String) -> Data? {
+        guard data.count < 1_500_000, let bytes = key.withLock({ $0 }),
+              let sealed = try? JSONDecoder().decode(Sealed.self, from: data),
+              HMAC<SHA256>.isValidAuthenticationCode(sealed.signature,
+                authenticating: Data((context + "\0").utf8) + sealed.payload, using: SymmetricKey(data: bytes)) else { return nil }
+        return sealed.payload
     }
 }

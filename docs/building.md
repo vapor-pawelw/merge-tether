@@ -30,6 +30,8 @@ Manual GitLab management requires authenticated `glab`. Agent automation additio
 The companion requires an operator-owned relay. Its origin-only build configuration
 must live outside source control; see [Bring your own relay](byo-relay.md).
 Run `./scripts/setup-relay.sh` once for your macOS user before generating the project.
+It accepts only an HTTPS origin without credentials, path, query or fragment (the
+same rules project generation enforces) and keeps the existing configuration otherwise.
 Run generation through `mise exec` to load the saved URL for both local app targets.
 For a per-checkout or distribution override, create an ignored
 `.mise.local.toml` in the checkout.
@@ -75,7 +77,8 @@ For a local installation paired with iOS, also keep a consistent certificate-bac
 
 ### Rebuild and relaunch macOS
 
-The local build scripts use the `xcodebuildmcp` CLI and the repository's pinned Tuist.
+The local build scripts use the `xcodebuildmcp` CLI (XcodeBuildMCP) and the repository's pinned Tuist.
+`mise.toml` pins only Tuist; install `xcodebuildmcp` separately and keep it on `PATH`.
 
 ```bash
 ./scripts/rebuild-and-relaunch.sh
@@ -145,6 +148,7 @@ single-instance lock regardless of bundle identifier.
 
 ```bash
 mise exec -- tuist generate --no-open
+npm ci --prefix prototypes/remote-relay  # relay Worker test dependencies (Node.js 22+)
 python3 scripts/run-tests.py
 ```
 
@@ -162,7 +166,7 @@ Passing an additional result-bundle argument to that wrapper does not fix this.
 ```bash
 python3 scripts/run-tests.py --plan  # inspect paths, reasons, suites and extra tasks
 python3 scripts/run-tests.py         # run those checks
-python3 scripts/run-tests.py --full  # all app and standalone repository tests
+python3 scripts/run-tests.py --full  # all app, standalone and relay tests plus the iOS build
 ```
 
 Default selection uses the merge base with local `main`, including committed
@@ -176,17 +180,22 @@ fall back to full verification. The runner prints its decision and retains it in
 
 | Change | Checks |
 | --- | --- |
-| Search, usage accounting, mapped presentation types/views | Feature suites and their mapped consumers |
-| Author-feedback policy, verifier or router | Feedback, publication, merge, routing and presentation consumer suites |
-| Existing top-level Swift test only | Changed suite |
+| Usage accounting, mapped presentation types/views | Feature suites and their mapped consumers |
+| Author-feedback policy, verifier or router | Feedback, verdict, readiness, publication, merge, routing and presentation consumer suites |
+| Existing top-level Swift test file only | Every suite declared in that file, plus suites using its shared top-level fixtures |
 | Test tooling or helper tests only | Corresponding Python tests, without Xcode |
 | Remote package tests only | Swift package tests, without the app host |
+| Relay Worker (`Services/RemoteRelay`) or relay prototype/tests | Node relay tests, without Xcode |
+| `CHANGELOG.md` | Changelog structure checks (bundled What's New resource and release input) |
+| iOS sources, resources or shared files listed for `MergeTetheriOS` in `Project.swift` | Also builds the iOS app (`MergeTetheriOS`, simulator, unsigned) |
 | Documentation only | No executable checks |
 | Shared models/settings, GitLab/process transport, test support, project graph, resources or unknown paths | Full verification |
 
 Mappings live in `scripts/test_selection.py`. They are a reviewed allowlist,
 not a Swift dependency analysis: add narrow mappings only after checking callers
-and their failure/concurrency coverage. An unknown view is not automatically a
+and their failure/concurrency coverage. A tooling test requires every suite that
+names a type declared only in a mapped file to belong to that mapping's group;
+record deliberate exceptions in its explicit allowlist. An unknown view is not automatically a
 visual-only change, because views can dispatch remote actions. For a confirmed
 layout/color/wording-only edit, explicitly use `--build-only` and inspect the UI.
 For TDD or focused investigation, repeat `--only-testing` for the regression and
@@ -198,10 +207,15 @@ suite after every small edit. A selected run establishes only its recorded scope
 Xcode startup and compilation still cost seconds even when test bodies are fast.
 
 Full verification includes the app suite, `Tests/TestTools`,
-`Tests/AutomationHelpers` and `Packages/MergeTetherRemote`.
+`Tests/AutomationHelpers`, `Packages/MergeTetherRemote`, the relay Worker tests
+in `prototypes/remote-relay` and an unsigned simulator build of `MergeTetheriOS`.
+Missing relay dependencies or an older Node.js fail the run with an install hint;
+they are never skipped. Before any Xcode phase the runner checks that every Swift
+file under `Sources/`, `Tests/`, `iOS/` and the remote package sources appears in
+the generated project, and stops with a regeneration hint when it does not.
 Standalone phases retain their own compressed logs and exit codes.
-The Swift package uses an owned scratch build directory, cleaned with Derived
-Data unless `--reuse-build` was requested.
+The Swift package and iOS build use owned scratch build directories, cleaned with
+Derived Data unless `--reuse-build` was requested.
 Pairing-store tests inject an in-memory Security client and exercise the real
 encoding, replacement/removal rules, Keychain query policy and failure handling.
 They do not access the login Keychain or require interactive authorization.
@@ -319,7 +333,7 @@ identifier to keep that installation's preferences and permissions.
 
 ## Release builds
 
-`Project.swift` supplies shared `MARKETING_VERSION` (`1.2.0`) and `CURRENT_PROJECT_VERSION` (`1`) defaults. Both app targets bind their Info.plist version fields to these settings. The release script passes the selected version and build number to every build/archive without rewriting source files or signed bundles. Regenerate the project deliberately when integrating this project configuration. The local `sync-version-from-tag.sh` helper updates these shared defaults while preserving both plist bindings; it does not commit or tag.
+`Project.swift` supplies shared `MARKETING_VERSION` (`1.2.0`) and `CURRENT_PROJECT_VERSION` (`1`) defaults. Both app targets bind their Info.plist version fields to these settings. The release script passes the selected version and build number to every build/archive without rewriting source files or signed bundles. Regenerate the project deliberately when integrating this project configuration. The local `sync-version-from-tag.sh vX.Y.Z` helper updates the shared `MARKETING_VERSION` while preserving both plist bindings; it changes `CURRENT_PROJECT_VERSION` only with an explicit `--build-number N`. Distribution build numbers come from the Release workflow run number. The helper does not touch `CHANGELOG.md`, commit or tag; `release-interactive.sh` owns changelog promotion and the annotated tag.
 
 `scripts/build-release.sh --help` lists the options. Run it through the pinned toolchain. Its default is a signed, notarized **macOS** release; `--platform all` additionally exports a separate iOS distribution IPA. Distribution credentials must already be installed and valid. The script does not issue certificates or create a notary credential profile.
 
@@ -333,6 +347,8 @@ mise exec -- bash scripts/build-release.sh 1.2.0 --build-number 1 --platform all
 ```
 
 The signed macOS path **uploads the ZIP and DMG to Apple for notarization**. Run it only after that upload is authorized. It checks the available Developer ID identity and notary credentials before building, enables hardened runtime and a secure timestamp, verifies bundle metadata and signatures, requires an Accepted notarization result, staples and validates tickets, and checks Gatekeeper. A local Apple Development identity supports development and stable pairing; it cannot replace Developer ID distribution signing. Missing identities, rejected notarization, invalid signatures or Gatekeeper failures exit nonzero before new artifacts are copied to the release directory.
+
+Signed builds require a relay origin source: `--relay-config FILE` (or a nonempty `TUIST_MERGETETHER_RELAY_CONFIG_FILE`), or an explicit `--no-relay` for a macOS-only build without iPhone pairing. The script then checks that `MergeTetherRelayOrigin` in the Mac app, the iOS archive and the exported IPA equals the normalized configured origin (or is empty with `--no-relay`) without printing it. An unsigned build without either option leaves the generation environment untouched, so the saved user relay or an explicit origin-only override still applies.
 
 The iOS path requires an existing Apple Distribution identity and installed distribution provisioning profile for `com.vaporpw.MergeTether.iOS`. Supply a real `ExportOptions.plist` with matching `teamID`, `signingStyle=manual`, a `provisioningProfiles` entry for that bundle, and an explicit method: `app-store-connect`, `release-testing`, or `enterprise`. These methods require the corresponding Apple program and provisioning eligibility; an App Store Connect IPA is for upload, and release-testing/enterprise eligibility determines who can install the export. The script checks metadata in both the archive and exported IPA, verifies their team and distribution signature, and rejects zero or multiple exported IPAs. Xcode export supplies the provisioning validation; the script never downloads or creates profiles automatically.
 
@@ -362,6 +378,8 @@ Releases are tag-driven: pushing a `v*` tag triggers the Release workflow. Confi
 - `IOS_PROFILE_BASE64`: the existing distribution `.mobileprovision` for the iOS bundle.
 - `NOTARY_API_PRIVATE_KEY`, `NOTARY_KEY_ID`, `NOTARY_ISSUER_ID`: an eligible App Store Connect notarization API key and its identifiers.
 
-Configure repository variables `APPLE_TEAM_ID`, `MACOS_RELEASE_IDENTITY`, `IOS_RELEASE_IDENTITY` (exact certificate names or SHA-1 fingerprints), and `IOS_EXPORT_METHOD` (one of the supported distribution methods). The workflow fails with the missing configuration name without printing its value. It imports only into its temporary runner keychain, derives export options from the configured profile, injects the tag version and workflow run number through build settings, verifies the three-artifact inventory and hashes, and removes temporary credential files/keychain on exit. It publishes `MergeTether.dmg` and `MergeTether.zip` on GitHub with matching names in the manifest and checksums. The Homebrew workflow publishes the `mergetether` cask and registers the previous token as an upgrade alias. The iOS IPA remains a separate versioned asset. Relay deployment is separate from both app artifacts.
+Configure repository variables `APPLE_TEAM_ID`, `MACOS_RELEASE_IDENTITY`, `IOS_RELEASE_IDENTITY` (exact certificate names or SHA-1 fingerprints), and `IOS_EXPORT_METHOD` (one of the supported distribution methods). The workflow fails with the missing configuration name without printing its value. It imports only into its temporary runner keychain, derives export options from the configured profile, injects the tag version and workflow run number through build settings, verifies the three-artifact inventory and hashes, and removes temporary credential files/keychain on exit. It publishes `MergeTether.dmg` and `MergeTether.zip` on GitHub with matching names in the manifest and checksums. Before the build job touches any secret, the Release workflow runs the reusable Verify workflow (`.github/workflows/verify.yml`) on the tagged commit: it installs the pinned toolchain, Node.js from the relay package's `engines` field and the locked relay dependencies, generates the project without a relay origin, and runs `python3 scripts/run-tests.py --full`. The same workflow runs on pull requests and pushes to `main`.
 
-`scripts/release-interactive.sh` is a **publication command**: it promotes Unreleased notes, commits and pushes them, and pushes an annotated tag. Run it only when publication is explicitly requested. Noninteractive invocation requires both `--version X.Y.Z` and `--yes`; `--platform all` is the default release inventory, while `--platform macos` supports an explicitly macOS-only release. It waits for the workflow and verifies a matching, published release record, its repository/tag URL, exactly one nonempty required asset per platform, and a matching distributable `release-manifest.json` with the selected version, successful workflow run number, artifact inventory and SHA-256 evidence. A draft release, missing IPA, missing release or pushed tag alone is incomplete and exits nonzero with a release URL and inspection command. Inspect the existing tag/run before retrying; do not restart publication by pushing the tag again. Optional Homebrew verification remains controlled by `MERGETETHER_HOMEBREW_TAP_REPO`.
+The `update-cask` job of the Release workflow publishes the `mergetether` cask and registers the previous token as an upgrade alias. It runs only when the repository variable `HOMEBREW_TAP_ENABLED` is `true` and then needs the `HOMEBREW_TAP_TOKEN` secret with push access to the tap. It downloads the published DMG with HTTP failure detection and retries, and refuses to update the cask unless its SHA-256 matches the digest recorded by the build job. The iOS IPA remains a separate versioned asset. Relay deployment is separate from both app artifacts.
+
+`scripts/release-interactive.sh` is a **publication command**: it promotes Unreleased notes, commits and pushes them, and pushes an annotated tag. Run it only when publication is explicitly requested. Before any commit, tag or push, HEAD must equal the remote branch head, `CHANGELOG.md` must have no local edits, and `.test-results` must hold a passing, clean `--full` report for HEAD; when none exists the script runs `python3 scripts/run-tests.py --full` and stops on failure. With `--yes`, a branch other than `main` or any uncommitted change is a hard failure rather than a confirmation. If the changelog push fails, the local changelog commit is removed. Noninteractive invocation requires both `--version X.Y.Z` and `--yes`; `--platform all` is the default release inventory, while `--platform macos` supports an explicitly macOS-only release. It waits for the workflow and verifies a matching, published release record, its repository/tag URL, exactly one nonempty required asset per platform, and a matching distributable `release-manifest.json` with the selected version, successful workflow run number, artifact inventory and SHA-256 evidence. A draft release, missing IPA, missing release or pushed tag alone is incomplete and exits nonzero with a release URL and inspection command. Inspect the existing tag/run before retrying; do not restart publication by pushing the tag again. Optional Homebrew verification remains controlled by `MERGETETHER_HOMEBREW_TAP_REPO`.

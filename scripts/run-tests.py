@@ -212,6 +212,71 @@ def run_phase(command, environment, log, timeout):
     return dict(seconds=time.monotonic() - start, exit_code=code, command=command, error=error)
 
 
+PROJECT_SOURCE_ROOTS = ("Sources/", "Tests/", "iOS/", "Packages/MergeTetherRemote/Sources/")
+GENERATE_HINT = "run `mise exec -- tuist generate --no-open`"
+RELAY_PACKAGE = Path("prototypes/remote-relay")
+MINIMUM_NODE_MAJOR = 22
+
+
+def task_commands(repo, root):
+    """Standalone phases: (command, PYTHONPATH relative to the repository)."""
+    return {
+        "tools": ([sys.executable, "-m", "unittest", "discover", "-s", "Tests/TestTools"], ""),
+        "helpers": ([sys.executable, "-m", "unittest", "discover", "-s", "Tests/AutomationHelpers"], "Helpers/Automation"),
+        "remote": (["swift", "test", "--package-path", "Packages/MergeTetherRemote",
+                    "--scratch-path", str(root / "RemoteBuild")], ""),
+        "relay": (["npm", "test", "--prefix", str(RELAY_PACKAGE)], ""),
+        # Compile-only: the iOS app has no test target, but shares sources and resources with macOS.
+        "ios": (["xcodebuild", "-project", str(repo / "MergeTether.xcodeproj"), "-scheme", "MergeTetheriOS",
+                 "-configuration", "Debug", "-destination", "generic/platform=iOS Simulator",
+                 "-derivedDataPath", str(root / "iOSBuild"), "CODE_SIGNING_ALLOWED=NO", "build"], ""),
+    }
+
+
+def stale_project_sources(repo):
+    """Swift files present in the checkout but absent from the generated project.
+
+    Tuist expands source globs only during generation, so a new file can otherwise be
+    silently left out of the build. Returns None when the generated project is missing.
+    """
+    project = repo / "MergeTether.xcodeproj" / "project.pbxproj"
+    if not project.is_file():
+        return None
+    listed = subprocess.check_output(["git", "-C", str(repo), "ls-files", "-co", "--exclude-standard", "-z", "--",
+                                      *(root + "*.swift" for root in PROJECT_SOURCE_ROOTS)], timeout=30)
+    references = project.read_text(errors="replace")
+    missing = []
+    for name in sorted({os.fsdecode(path) for path in listed.split(b"\0") if path}):
+        if name.startswith(PROJECT_SOURCE_ROOTS) and (repo / name).is_file() \
+                and f"/* {Path(name).name} */" not in references:
+            missing.append(name)
+    return missing
+
+
+def project_problem(repo):
+    missing = stale_project_sources(repo)
+    if missing is None:
+        return f"Generated MergeTether.xcodeproj is missing; {GENERATE_HINT}"
+    if missing:
+        shown = ", ".join(missing[:5]) + (f" and {len(missing) - 5} more" if len(missing) > 5 else "")
+        return f"Generated project is stale (missing {shown}); {GENERATE_HINT}"
+    return None
+
+
+def relay_problem(repo, environment):
+    package = repo / RELAY_PACKAGE
+    if not (package / "node_modules").is_dir():
+        return f"Relay test dependencies are missing; run `npm ci --prefix {RELAY_PACKAGE}`"
+    try:
+        version = subprocess.check_output(["node", "--version"], env=environment, text=True, timeout=30).strip()
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return f"Node.js {MINIMUM_NODE_MAJOR}+ is required for relay tests (see {RELAY_PACKAGE}/package.json)"
+    match = re.match(r"v(\d+)\.", version)
+    if not match or int(match.group(1)) < MINIMUM_NODE_MAJOR:
+        return f"Relay tests require Node.js {MINIMUM_NODE_MAJOR}+ (found {version or 'unknown'})"
+    return None
+
+
 def main():
     from test_selection import full_plan, plan_changes
 
@@ -221,7 +286,8 @@ def main():
     scope = parser.add_mutually_exclusive_group()
     scope.add_argument("--only-testing", action="append", default=[], metavar="TEST_ID",
                         help="Xcode test identifier; repeat for multiple suites/cases")
-    scope.add_argument("--full", action="store_true", help="Run all app, helper, tooling and remote-package tests")
+    scope.add_argument("--full", action="store_true",
+                       help="Run all app, helper, tooling, remote-package and relay tests and build the iOS app")
     scope.add_argument("--build-only", action="store_true", help="Build the app only; for verified presentation-only changes")
     parser.add_argument("--base", help="Compare against the merge base with this Git ref (default: main, or HEAD^ on main)")
     parser.add_argument("--plan", action="store_true", help="Print the selected checks as JSON without building or creating results")
@@ -299,24 +365,37 @@ def run_tests(args, root):
         project = repo / "MergeTether.xcodeproj/project.pbxproj"
         metadata["generated_project_sha256"] = hashlib.sha256(project.read_bytes()).hexdigest() if project.exists() else None
         metadata["tuist_requirement"] = (repo / "mise.toml").read_text().strip()
-        if args.selection["mode"] != "none" or "remote" in args.selection["tasks"]:
+        uses_xcode_project = args.selection["mode"] != "none" or "ios" in args.selection["tasks"]
+        if uses_xcode_project or "remote" in args.selection["tasks"]:
             metadata["xcode"] = subprocess.check_output(["xcodebuild", "-version"], text=True, timeout=30).strip()
         with tempfile.TemporaryDirectory(prefix="test-home-", dir=root) as home:
             (Path(home) / ".mergetether-test-home").write_text("MergeTether test home\n")
             environment = dict(os.environ, TEST_RUNNER_HOME=home, TEST_RUNNER_CFFIXED_USER_HOME=home,
                                TEST_RUNNER_MERGETETHER_TEST_FIXTURE_HOME=home)
             helper_environment = dict(os.environ, HOME=home, CFFIXED_USER_HOME=home, PYTHONDONTWRITEBYTECODE="1")
-            task_commands = {
-                "tools": ([sys.executable, "-m", "unittest", "discover", "-s", "Tests/TestTools"], ""),
-                "helpers": ([sys.executable, "-m", "unittest", "discover", "-s", "Tests/AutomationHelpers"], "Helpers/Automation"),
-                "remote": (["swift", "test", "--package-path", "Packages/MergeTetherRemote",
-                            "--scratch-path", str(root / "RemoteBuild")], ""),
-            }
+            commands = task_commands(repo, root)
             code = 0
+            if uses_xcode_project:
+                problem = project_problem(repo)
+                if problem:
+                    metadata["error"] = problem
+                    print(problem, file=sys.stderr, flush=True)
+                    code = 1
+                    return code
             for task in args.selection["tasks"]:
-                command, python_path = task_commands[task]
+                command, python_path = commands[task]
                 task_environment = dict(helper_environment, PYTHONPATH=str(repo / python_path))
-                metadata["phases"][task] = run_phase(command, task_environment, run / f"{task}.log", args.test_timeout)
+                if task == "ios":
+                    task_environment = environment
+                if task == "relay":
+                    problem = relay_problem(repo, task_environment)
+                    if problem:
+                        metadata["error"] = problem
+                        print(problem, file=sys.stderr, flush=True)
+                        code = 1
+                        break
+                timeout = args.build_timeout if task == "ios" else args.test_timeout
+                metadata["phases"][task] = run_phase(command, task_environment, run / f"{task}.log", timeout)
                 code = metadata["phases"][task]["exit_code"]
                 if metadata["phases"][task]["error"]:
                     metadata["error"] = metadata["phases"][task]["error"]
@@ -378,8 +457,9 @@ def run_tests(args, root):
             prune_results(root, args.keep_reports, args.keep_bundles)
             if not args.reuse_build and derived.exists():
                 shutil.rmtree(derived)
-            if not args.reuse_build and (root / "RemoteBuild").exists():
-                shutil.rmtree(root / "RemoteBuild")
+            for scratch in ("RemoteBuild", "iOSBuild"):
+                if not args.reuse_build and (root / scratch).exists():
+                    shutil.rmtree(root / scratch)
             print(f"Reports: {run}\nWall time (including export): {metadata['wall_seconds']:.3f}s", flush=True)
     return code
 

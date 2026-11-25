@@ -61,7 +61,8 @@ struct BoardCompactJobCard: View {
         }
         .padding(12).controlSize(.small)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .boardCardInteraction { showingDetails = true }
+        .boardCardInteraction(title: handoff.title, repositoryPath: repositoryPath,
+            iid: handoff.key.work.iid) { showingDetails = true }
         .contextMenu { menuItems }
         .sheet(isPresented: $showingDetails) {
             BoardItemDetailSheet {

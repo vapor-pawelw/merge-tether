@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Use the selected preset and approval threshold for automatic approval. Refresh the review when the MR target or diff base changes.
+
+- Authenticate locally stored AI comment assessments, overrides and review evidence. Reuse a reply worker’s verified source assessment for automatic publication.
+
+- Cancel queued agent jobs that lose permission to run so they release the merge request.
+
+- Open the official coding CLI installation instructions from setup.
+
+- Require full verification before release, including an iOS simulator build and production relay tests.
+
+- Hold automatic actions for the affected MR while retrying an unavailable agent audit. Pause that MR when the audit detects unexpected changes.
+
+- Offer fixed reply styles for remote draft regeneration. Keep temporary iPhone interruptions connected and show the paired phone's connection status on the Mac.
+
+- Report GitLab action failures separately from inbox sync. Acknowledging an already absent to-do clears it locally.
+
+- Identify Mac board cards by title and repository in VoiceOver.
+
+- Keep to-do automation receipts when one GitLab refresh temporarily omits a pending item.
+
+- Check coding agent availability less often during background GitLab refreshes.
+
+- Show GitLab setup, sign-in and synchronization problems in the Mac menu bar, with an action to recover.
+
+- Preserve a command's result when it exits just as the timeout fires, and prevent an already cancelled command from starting.
+
 - Skip author feedback follow-ups when GitLab confirms every selected thread is resolved, including when the queue resumes after a CLI limit or a run is retried. The MR action can also complete without a configured coding agent.
 
 - Add new review requests straight to Reviewing, marked **New**, instead of the inbox (Settings → General, on by default). Turn it off to keep them in the inbox, where **Add** tracks one and **Ignore this MR** discards it; automation does not pick up inbox candidates.

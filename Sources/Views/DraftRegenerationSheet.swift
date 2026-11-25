@@ -7,6 +7,21 @@ struct DraftRegenerationPresentation: Identifiable {
     let scope: DraftRegenerationScope?
 }
 
+/// What the user adds to the configured skills for one run.
+enum DraftRegenerationGuidance: Equatable {
+    /// Free-form text typed on the Mac. Never accepted from a remote client.
+    case instructions(String)
+    /// A fixed preset whose wording the Mac defines.
+    case style(DraftRegenerationStyle)
+}
+
+/// Which kinds of guidance the compose step offers.
+enum DraftRegenerationGuidanceChoices {
+    case instructions
+    case styles
+    case none
+}
+
 struct DraftRegenerationSheet: View {
     let presentation: DraftRegenerationPresentation
     let isAvailable: () -> Bool
@@ -16,16 +31,20 @@ struct DraftRegenerationSheet: View {
     var isLoading: () -> Bool = { false }
     var loadFailed: () -> Bool = { false }
     var reload: (() async -> Void)? = nil
-    let start: (DraftRegenerationScope, String?) async -> Bool
+    var guidanceChoices: DraftRegenerationGuidanceChoices = .instructions
+    let start: (DraftRegenerationScope, DraftRegenerationGuidance?) async -> Bool
     let apply: (Set<String>, UUID) async -> RemoteCommandResult.Status
     let discard: (UUID) async -> Bool
 
     @Environment(\.dismiss) private var dismiss
-    @State private var addInstructions = false
+    @State private var choice = Choice.current
     @State private var instructions = ""
     @State private var pending = false
     @State private var error: LocalizedStringResource?
     @State private var confirmDiscard: DraftRegenerationBatch?
+
+    private enum Choice: Equatable { case current, instructions, style(DraftRegenerationStyle) }
+    private var addInstructions: Bool { choice == .instructions }
 
     private var additionalInstructions: String { instructions.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var instructionsTooLong: Bool {
@@ -116,8 +135,19 @@ struct DraftRegenerationSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Text(.DraftRegeneration.draftRegenerationComposeHelp).foregroundStyle(.secondary)
-                    instructionOption(.DraftRegeneration.draftRegenerationUseCurrent, addsInstructions: false)
-                    instructionOption(.DraftRegeneration.draftRegenerationAddExtra, addsInstructions: true)
+                    instructionOption(.DraftRegeneration.draftRegenerationUseCurrent, choice: .current)
+                    switch guidanceChoices {
+                    case .instructions:
+                        instructionOption(.DraftRegeneration.draftRegenerationAddExtra, choice: .instructions)
+                    case .styles:
+                        ForEach(DraftRegenerationStyle.allCases, id: \.self) { style in
+                            instructionOption(style.title, choice: .style(style))
+                        }
+                        Text(.DraftRegeneration.draftRegenerationStylesHelp)
+                            .font(.callout).foregroundStyle(.secondary)
+                    case .none:
+                        EmptyView()
+                    }
                     if addInstructions {
                         TextField(text: $instructions, axis: .vertical) {
                             Text(.DraftRegeneration.draftRegenerationInstructions)
@@ -156,10 +186,10 @@ struct DraftRegenerationSheet: View {
         .disabled(pending)
     }
 
-    private func instructionOption(_ title: LocalizedStringResource, addsInstructions: Bool) -> some View {
-        let selected = addInstructions == addsInstructions
+    private func instructionOption(_ title: LocalizedStringResource, choice option: Choice) -> some View {
+        let selected = choice == option
         return Button {
-            addInstructions = addsInstructions
+            choice = option
         } label: {
             Label {
                 Text(title).foregroundStyle(.primary)
@@ -177,7 +207,11 @@ struct DraftRegenerationSheet: View {
     private func generate(_ scope: DraftRegenerationScope) {
         pending = true
         error = nil
-        let prompt = addInstructions ? additionalInstructions : nil
+        let prompt: DraftRegenerationGuidance? = switch choice {
+        case .current: nil
+        case .instructions: .instructions(additionalInstructions)
+        case .style(let style): .style(style)
+        }
         Task {
             defer { pending = false }
             if await start(scope, prompt) {
@@ -511,4 +545,15 @@ private extension DraftRegenerationProposal.Issue {
     DraftRegenerationSheet(presentation: .init(scope: nil), isAvailable: { true }, batch: { batch },
         count: { _ in 3 }, mergeRequestCount: { 2 }, start: { _, _ in true }, apply: { _, _ in .completed },
         discard: { _ in true })
+}
+
+extension DraftRegenerationStyle {
+    var title: LocalizedStringResource {
+        switch self {
+        case .concise: .DraftRegeneration.draftRegenerationStyleConcise
+        case .friendlier: .DraftRegeneration.draftRegenerationStyleFriendlier
+        case .moreDetailed: .DraftRegeneration.draftRegenerationStyleMoreDetailed
+        case .moreDirect: .DraftRegeneration.draftRegenerationStyleMoreDirect
+        }
+    }
 }

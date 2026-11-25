@@ -396,6 +396,30 @@
         },
         "pl": {"stringUnit": {"state": "translated", "value": "Bieżący stan merge requestu lub commit źródłowy są niedostępne. Automatyczna praca poczeka na kompletne dane z GitLaba."}}
       }
+    },
+    "assistant.jobs.error.auditUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MergeTether could not verify this automatic run against GitLab. If the agent ran, automatic actions for this merge request wait for the next successful check."
+          }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "MergeTether nie mógł zweryfikować tego automatycznego przebiegu w GitLabie. Jeśli agent się uruchomił, automatyczne działania dla tego merge requesta czekają na udaną weryfikację."}}
+      }
+    },
+    "assistant.jobs.error.unexpectedRemoteEffects": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitLab changed outside this run’s permissions while the agent was working. Review the listed changes before resuming automation on this merge request."
+          }
+        },
+        "pl": {"stringUnit": {"state": "translated", "value": "W trakcie pracy agenta GitLab zmienił się poza uprawnieniami tego przebiegu. Przejrzyj wymienione zmiany przed wznowieniem automatyzacji tego merge requesta."}}
+      }
     }
   },
   "version": "1.0"

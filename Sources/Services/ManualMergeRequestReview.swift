@@ -48,14 +48,17 @@ extension TodoMonitorService {
     }
 
     /// `fromScratch` is the emergency reset: it ignores earlier review passes and reviews the whole current MR.
+    /// Returns whether this request started the review. `assistantJobActionError` is shared UI state;
+    /// remote callers use the return value so a concurrent action cannot change their reported result.
+    @discardableResult
     func runReview(for item: MergeRequestAttentionMonitor.Item, fromScratch: Bool = false,
-                   confirmed: ManualReviewConsent? = nil, readOnly: Bool = false) async {
+                   confirmed: ManualReviewConsent? = nil, readOnly: Bool = false) async -> Bool {
         assistantJobActionError = nil
         let consent = confirmed ?? manualReviewConsent(for: item)
         guard consent == manualReviewConsent(for: item), canRunReview(for: item), selectedAssistantReady,
               let target = manualReviewTarget(for: item) else {
             assistantJobActionError = String(localized: .AssistantJobs.assistantJobsActionFailed)
-            return
+            return false
         }
         let assistant = settings.automation.assistant
         do {
@@ -98,8 +101,10 @@ extension TodoMonitorService {
             if !readOnly {
                 releaseNewReview(.init(host: target.host, username: target.username, projectID: target.projectID, iid: target.iid))
             }
+            return true
         } catch {
             assistantJobActionError = String(localized: .AssistantJobs.assistantJobsActionFailed)
+            return false
         }
     }
 

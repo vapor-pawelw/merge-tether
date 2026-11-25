@@ -702,7 +702,7 @@ struct AutomationPackageTests {
         var settings = AutomationSettings()
         settings.autoResolveOwnReviewThreads = false
         #expect(try !JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(settings)).autoResolveOwnReviewThreads)
-        #expect(settings.autoApproveEnabled)
+        #expect(!settings.autoApproveEnabled, "Automatic approval needs an explicit delivering profile or choice")
         settings.disableAssistantPackage()
         #expect(!settings.autoResolveOwnReviewThreads)
         settings.autoResolveOwnReviewThreads = true
@@ -762,7 +762,7 @@ struct AutomationPackageTests {
         #expect(!handoff.prompt.contains("Otherwise leave drafts in this chat"))
         #expect(handoff.prompt.contains("authenticated local `glab`"))
         #expect(handoff.prompt.contains("private `draft_notes` endpoint"))
-        #expect(handoff.prompt.contains("Never classify your own reply as the source comment"))
+        #expect(handoff.prompt.contains("MergeTether may publish eligible replies to feedback assessed as AI-assisted"))
         #expect(handoff.prompt.contains("On a merge request authored by the authenticated user, keep repair reports in the run result"))
         #expect(handoff.prompt.contains("load and follow the applicable installed MR skills"))
         #expect(handoff.prompt.contains("Do not publish directly yourself"))

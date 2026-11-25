@@ -16,6 +16,7 @@ final class TodoAutomationService {
 
     private var running: Set<TodoAutomationReceipt> = []
     private var ineligible: Set<TodoAutomationReceipt> = []
+    private var unconfirmedMissingReceipts: Set<TodoAutomationReceipt> = []
     private struct RunningScript {
         let task: Task<ProcessRunner.Output, Error>
         let work: AssistantAutomationRunner.MergeRequestWork
@@ -60,16 +61,26 @@ final class TodoAutomationService {
     }
 
     func prune(fetchedIDs: Set<Int>, host: String, username: String, settings: SettingsManager) {
-        func isPending(_ key: TodoAutomationReceipt) -> Bool {
-            key.host != host || key.username != username || fetchedIDs.contains(key.todoID) || running.contains(key)
+        func receipt(for acknowledgement: TodoActionAcknowledgement) -> TodoAutomationReceipt {
+            .init(host: acknowledgement.host, username: acknowledgement.username, todoID: acknowledgement.todo.id)
         }
 
-        settings.automationReceipts = settings.automationReceipts.filter(isPending)
-        settings.automationAttemptReceipts = settings.automationAttemptReceipts.filter(isPending)
-        settings.pendingTodoAcknowledgements = settings.pendingTodoAcknowledgements.filter {
-            $0.host != host || $0.username != username || fetchedIDs.contains($0.todo.id)
+        let tracked = settings.automationReceipts.union(settings.automationAttemptReceipts)
+            .union(settings.pendingTodoAcknowledgements.map(receipt(for:))).union(ineligible)
+        let missing = tracked.filter { key in
+            key.host == host && key.username == username && !fetchedIDs.contains(key.todoID) && !running.contains(key)
         }
-        ineligible = ineligible.filter(isPending)
+        // GitLab's offset pagination can skip an item when an earlier page changes.
+        let confirmed = missing.intersection(unconfirmedMissingReceipts)
+        unconfirmedMissingReceipts = missing.subtracting(confirmed)
+        guard !confirmed.isEmpty else { return }
+
+        settings.automationReceipts.subtract(confirmed)
+        settings.automationAttemptReceipts.subtract(confirmed)
+        settings.pendingTodoAcknowledgements = settings.pendingTodoAcknowledgements.filter {
+            !confirmed.contains(receipt(for: $0))
+        }
+        ineligible.subtract(confirmed)
     }
 
     func actionState(
@@ -371,7 +382,7 @@ final class TodoAutomationService {
         let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
         let decisionContext = AssistantAutomationRunner.feedbackDecisionRevision(work: work, username: username, settings: settings)
         guard let residual, settings.automation.allowFollowUpPush, settings.automation.hasAutomaticActionConsent,
-              settings.automation.scope.permits(request, host: work.host, username: username),
+              settings.effectiveAutomationScope.permits(request, host: work.host, username: username),
               !settings.ignoredMergeRequests.contains(target), request.author.username == username else { return nil }
         let allAttempts = settings.assistantHandoffs.filter { $0.key.work == work && $0.key.username == username && !$0.isObsoleteReminder }
         let attempts = allAttempts.filter { $0.feedbackDecisionRevision == decisionContext }

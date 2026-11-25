@@ -142,9 +142,6 @@ enum MRNoticeClassifier {
     }
 
     @MainActor private static var verificationEnvironment: [String: String] {
-        var value = AssistantCLI.environment
-        for (key, entry) in GlabService.shellEnvironment { value[key] = entry }
-        value["PATH"] = AssistantCLI.environment["PATH"]
-        return value
+        AgentProcessEnvironment.verifier
     }
 }

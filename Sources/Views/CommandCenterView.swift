@@ -121,12 +121,12 @@ struct CommandCenterView: View {
         .task { await prepareWindow() }
         .task {
             while !Task.isCancelled {
-                monitor.assistantDependencies.refresh()
-                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+                monitor.refreshRuntimeAssistantAvailability()
+                do { try await Task.sleep(for: .seconds(600), tolerance: .seconds(30)) } catch { return }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            monitor.refreshAvailableAssistants()
+            monitor.refreshRuntimeAssistantAvailability()
         }
         .onAppear {
             MainWindowPresentation.openWindow = { openWindow(id: "main") }
@@ -240,6 +240,20 @@ struct CommandCenterView: View {
             }
             .font(.caption).padding(10)
         }
+        if let error = monitor.lastInboxActionError {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).accessibilityHidden(true)
+                Text(.CommandCenter.commandCenterInboxActionFailed)
+                Text(GlabErrorPresentation(error: error, authStatus: monitor.glab.authStatus).title)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Button { monitor.dismissInboxActionFailure() } label: {
+                    Image(systemName: "xmark").accessibilityLabel(Text(.CommandCenter.commandCenterClose))
+                }
+                .buttonStyle(.borderless)
+            }
+            .font(.caption).padding(10)
+        }
         if monitor.settings.onboardingCompleted {
             AssistantCLIHealthBanner(monitor: monitor)
         }
@@ -308,7 +322,7 @@ struct CommandCenterView: View {
     }
 
     private func prepareWindow() async {
-        monitor.refreshAvailableAssistants()
+        monitor.refreshRuntimeAssistantAvailability()
         if !monitor.settings.onboardingCompleted {
             NSApplication.shared.activate(ignoringOtherApps: true)
             openWindow(id: "onboarding")
@@ -328,7 +342,14 @@ extension TodoMonitorService {
         return DraftRegenerationSheet(presentation: presentation, isAvailable: { coordinator.isAvailable },
             batch: { coordinator.batch }, count: { coordinator.count(for: $0) },
             mergeRequestCount: { coordinator.mergeRequestCount },
-            start: { requireCodingAssistant(self) && coordinator.start($0, instructions: $1) },
+            start: { scope, guidance in
+                let instructions: String? = switch guidance {
+                case nil: nil
+                case .instructions(let text)?: text
+                case .style(let style)?: DraftRegenerationCoordinator.instructions(for: style)
+                }
+                return requireCodingAssistant(self) && coordinator.start(scope, instructions: instructions)
+            },
             apply: { await coordinator.apply($0, batchID: $1) },
             discard: { coordinator.discard($0) })
     }

@@ -37,6 +37,27 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Brak działań wymagających Twojej uwagi"}}
       }
     },
+    "menuBar.setupRequired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "GitLab setup required"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Wymagana konfiguracja GitLaba"}}
+      }
+    },
+    "menuBar.syncing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Syncing with GitLab…"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Synchronizowanie z GitLabem…"}}
+      }
+    },
+    "menuBar.syncFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "GitLab sync failed"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Synchronizacja z GitLabem nie powiodła się"}}
+      }
+    },
     "menuBar.quit": {
       "extractionState": "manual",
       "localizations": {

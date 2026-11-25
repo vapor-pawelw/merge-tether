@@ -12,6 +12,22 @@ enum BoardRefreshState: Equatable {
     }
 }
 
+enum GitLabMenuBarStatus: Equatable {
+    case setup, signedOut, hostConfiguration, syncing, failed, current
+
+    init(setupComplete: Bool, username: String?, authStatus: GlabService.AuthStatus,
+         refresh: BoardRefreshState, error: GlabError?, catalogFailed: Bool) {
+        if !setupComplete || error == .glabNotInstalled { self = .setup }
+        else if case .wrongDefaultHost = authStatus { self = .hostConfiguration }
+        else if authStatus == .notAuthenticated || error == .notAuthenticated { self = .signedOut }
+        else if error != nil || catalogFailed || refresh == .unavailable { self = .failed }
+        else if username == nil || refresh == .syncing { self = .syncing }
+        else { self = .current }
+    }
+
+    var hasWarning: Bool { self != .current && self != .syncing }
+}
+
 enum RefreshProgressScope: Hashable {
     case global
     case mergeRequest(MergeRequestAttentionMonitor.Item.ID)

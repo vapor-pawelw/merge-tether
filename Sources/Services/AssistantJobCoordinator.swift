@@ -49,7 +49,7 @@ final class AssistantJobCoordinator {
 
     @discardableResult
     func schedule(_ handoff: Handoff, settings: SettingsManager) -> Bool {
-        guard settings.automaticActionsAllowed, handoff.manual == true || settings.automaticWritesAllowed,
+        guard permitsExecution(handoff, settings: settings),
               !terminating, !handoff.isObsoleteReminder, handoff.execution?.state == .queued,
               !isWorking(on: handoff.key.work), tasks[handoff.id] == nil else { return false }
         work[handoff.id] = handoff.key.work
@@ -59,11 +59,17 @@ final class AssistantJobCoordinator {
         return true
     }
 
+    private func permitsExecution(_ handoff: Handoff, settings: SettingsManager) -> Bool {
+        settings.automaticActionsAllowed && (handoff.manual == true || settings.automaticWritesAllowed)
+    }
+
     private func startPendingJobs() {
+        guard !terminating else { return }
+        let revoked = pending.filter { !permitsExecution($0.handoff, settings: $0.settings) }
+        for entry in revoked { cancel(entry.handoff.id, origin: .policy) }
         while !terminating, tasks.count < maximumConcurrentJobs, !pending.isEmpty {
             guard let index = pending.firstIndex(where: {
-                $0.settings.automaticActionsAllowed && ($0.handoff.manual == true || $0.settings.automaticWritesAllowed)
-                    && $0.settings.automation.selectedAssistant != nil
+                permitsExecution($0.handoff, settings: $0.settings) && $0.settings.automation.selectedAssistant != nil
                     && healthStore.hold(for: $0.handoff.key.assistant) == nil
             }) else { break }
             let next = pending.remove(at: index)

@@ -54,22 +54,58 @@ struct AICommentPublicationTests {
             from: Data(draftJSON.replacingOccurrences(of: "\"abc\"", with: "null").utf8))
         #expect(try !eligible(note, draft: general))
     }
-    @Test func assessmentInstructionsUseDirectContentBoundEvidenceWithoutPluginTools() {
-        let instructions = AICommentAssessmentStore.recordingInstructions(host: "gitlab.example.org", projectID: 1, iid: 2)
-        #expect(instructions.contains("exact UTF-8 source body"))
-        #expect(instructions.contains("atomically write"))
-        #expect(instructions.contains("1-2-<noteID>.json"))
-        #expect(!instructions.contains("record_ai_comment_assessment"))
-        #expect(!instructions.contains("read_merge_request"))
-
+    @Test func workerAssessmentInstructionsRequestAnExactSourceAndReusePriorResults() {
         let custom = "Look for the team review format."
-        let customInstructions = AICommentAssessmentStore.recordingInstructions(host: "gitlab.example.org", projectID: 1,
-            iid: 2, criteriaOverride: custom)
-        let customDirectory = AICommentAssessmentStore.scopedDirectory(AICommentAssessmentStore.directory, criteriaOverride: custom)
-        #expect(customInstructions.contains(custom))
-        #expect(!customInstructions.contains(AICommentOriginAssessor.criteriaInstructions))
-        #expect(customInstructions.contains(customDirectory.appending(path: "gitlab.example.org/1-2-<noteID>.json").path))
-        #expect(customInstructions.contains("exact UTF-8 source body"))
+        let instructions = AICommentAssessmentStore.workerInstructions(criteriaOverride: custom,
+            existing: ["40:abcdef"])
+        #expect(instructions.contains(custom))
+        #expect(!instructions.contains(AICommentOriginAssessor.criteriaInstructions))
+        #expect(instructions.contains("exact UTF-8 source body"))
+        #expect(instructions.contains("sourceAssessments"))
+        #expect(instructions.contains("40:abcdef"))
+        #expect(!instructions.contains(".json"))
+    }
+
+    @MainActor @Test(arguments: ["same source", "likely human", "edited source", "unrelated source", "old draft"])
+    func aWorkerAssessmentCountsOnlyForTheLiveSourceOfANewReply(_ scenario: String) async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let target = MRAutomationScope.Target(host: "example.org", username: "me", projectID: 1, iid: 2)
+        let original = #"[{"id":"abc","notes":[{"id":40,"author":{"id":8},"system":false,"body":"AI finding"}]}]"#
+        let live = switch scenario {
+        case "edited source": original.replacingOccurrences(of: "AI finding", with: "New text")
+        case "unrelated source": original.replacingOccurrences(of: "abc", with: "different-discussion")
+        default: original
+        }
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(live.utf8))
+        let note = try #require(discussions.first?.notes.first)
+        let draft = GitLabDraftNote(id: 72, authorID: 3, note: "Fixed", discussionID: "abc", position: nil)
+        let claims: [AssistantJobResult.SourceAssessment] = [
+            .init(noteID: 40, bodySHA256: AICommentAssessmentStore.digest("AI finding"),
+                classification: scenario == "likely human" ? .manualLikely : .aiAssisted,
+                confidence: .high, evidence: "Specific cross-file reasoning."),
+        ]
+        let replyClaims: [AssistantJobResult.GeneratedDraft] = [
+            .init(id: 72, bodySHA256: AICommentAssessmentStore.digest("Fixed")),
+        ]
+        _ = await AssistantJobJournal.loadKey()
+        try AICommentAssessmentStore.persistWorkerAssessments(claims, draftClaims: replyClaims,
+            baseline: scenario == "old draft" ? [draft] : [], current: [draft], discussions: discussions, userID: 3,
+            target: target, assistant: .codex, model: "test", in: folder)
+        #expect(AICommentAssessmentStore.isAI(note, host: target.host, projectID: 1, iid: 2, in: folder)
+            == (scenario == "same source"))
+        if scenario == "same source" || scenario == "likely human" {
+            // A new coordinator after app restart must use the same saved result, even with another model.
+            let reopened = AICommentOriginCoordinator(directory: folder, assess: { _, _, _, _, _, _ in
+                Issue.record("The source was already evaluated by the reply worker")
+                throw AICommentOriginAssessor.AssessmentError.failed
+            }, fetchCurrent: { _ in [note] }, isCurrent: { _, _, _, _ in true })
+            reopened.schedule(target: target, notes: [note], assistant: .claude, model: "other model")
+            let work = AssistantAutomationRunner.MergeRequestWork(host: target.host, projectID: 1, iid: 2)
+            #expect(!reopened.isChecking(work: work))
+            #expect(AICommentAssessmentStore.displayResult(for: note, host: target.host, projectID: 1, iid: 2,
+                username: target.username, in: folder)?.classification == claims[0].classification.rawValue)
+        }
     }
 
     @Test func slashCommandsEvenInsideCodeFencesAreNotAutomaticallyPublished() throws {
