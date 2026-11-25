@@ -66,7 +66,9 @@ import MergeTetherRemote
     }
 
     static func card(_ item: MergeRequestAttentionMonitor.Item, account: String,
-                     extraActions: [RemoteActionKind] = [], context: [String] = []) -> RemoteCard {
+                     extraActions: [RemoteActionKind] = [], context: [String] = [],
+                     failedFollowUp: MRHumanAction.FailedFollowUp? = nil,
+                     followUpInProgress: Bool = false) -> RemoteCard {
         let drafts = item.drafts.enumerated().map { index, draft in
             let context: String?
             if case let .line(location) = draft.kind { context = location }
@@ -120,10 +122,18 @@ import MergeTetherRemote
                 }
                 return RemoteAction(id: raw, kind: kind, token: token)
             }
-            for retry in MRVerificationRetry.allCases where retry.isAvailable(for: item) {
-                guard let retryToken = try? RemoteDigest.token([token, retry.rawValue]) else { continue }
+            for retry in MRVerificationRetry.allCases where retry.isAvailable(for: item, failedFollowUp: failedFollowUp) {
+                guard retry != .authorFeedback || !followUpInProgress else { continue }
+                let recovery = retry == .authorFeedback ? failedFollowUp : nil
+                var identity = [token, retry.rawValue]
+                if let recovery {
+                    guard let evidence = try? followUpEvidenceToken(recovery, item: item) else { continue }
+                    identity.append(evidence)
+                }
+                guard let retryToken = try? RemoteDigest.token(identity) else { continue }
+                let label: LocalizedStringResource = recovery == nil ? retry.label : .AuthorFeedback.authorFeedbackRecheck
                 card.actions.append(.init(id: retry.rawValue, kind: .verify, token: retryToken,
-                    confirmationText: retry.effect.help, label: String(localized: retry.label)))
+                    confirmationText: retry.effect.help, label: String(localized: label)))
             }
             card.actions += item.drafts.compactMap { draft in
                 guard let id = draft.id, id > 0 else { return nil }
@@ -189,11 +199,13 @@ import MergeTetherRemote
                     }
                     let presentation = MRCardPresentation(row: row, monitor: monitor, allowsRemoval: result.lanes[lane].id == .reviewed)
                     let humanAction = presentation.humanAction
+                    let followUp = failedFollowUp(in: row, monitor: monitor, presentation: presentation)
                     let feedbackIDs = item.authorFeedbackStatus?.followUpNoteIDs.sorted().map(String.init) ?? []
                     if humanAction?.action == .handleFeedback, !feedbackIDs.isEmpty { extras.append(.prepare) }
                     let context = handoffs.map(\.id).sorted() + [(try? RemoteDigest.token(monitor.settings.automation)) ?? "",
                         item.authorFeedbackStatus?.fingerprint ?? ""] + feedbackIDs
-                    card = self.card(item, account: account, extraActions: extras, context: context)
+                    card = self.card(item, account: account, extraActions: extras, context: context,
+                        failedFollowUp: followUp, followUpInProgress: row.hasFollowUpInProgress)
                     card = self.presentation(card, model: presentation)
                     let issues = monitor.issueTags(for: row.displayRequest)
                     if !issues.isEmpty { card.issues = issues }
@@ -231,14 +243,23 @@ import MergeTetherRemote
                         let jobPublication = monitor.manualReviewConsent(for: item).publicationMode
                         card = mergeActions(card, item: item, status: mergeStatus, monitor: monitor, account: account,
                             evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext)
-                        let intent = humanAction?.retryIntent
-                            ?? row.attentionIntents.first { $0.state == .failed && !row.isReconciling($0) }
-                            ?? row.attentionIntents.first { $0.state == .pending && !$0.isDeferredReview }
+                        let followUpInProgress = row.hasFollowUpInProgress
+                        let workerRetryIntentID = followUp?.retriesWorker == true ? followUp?.intent.id : nil
+                        let eligibleIntents = row.attentionIntents.filter { intent in
+                            let canRetry = intent.state == .failed && !row.isReconciling(intent)
+                            let canStart = intent.state == .pending && !intent.isDeferredReview
+                            return (canRetry || canStart) && intent.id != workerRetryIntentID
+                                && (intent.kind != .followUp || !followUpInProgress)
+                        }
+                        let intent = humanAction?.retryIntent.flatMap { selected in eligibleIntents.first { $0.id == selected.id } }
+                            ?? eligibleIntents.first { $0.state == .failed }
+                            ?? eligibleIntents.first
                         if let intent,
                            intent.kind == .refresh || monitor.selectedAssistantReady,
                            let configuration = try? RemoteDigest.token(monitor.settings.automation) {
                             let publication = monitor.manualReviewConsent(for: monitor.reviewRequest(for: intent)).publicationMode
-                            if let token = try? RemoteDigest.token([account, try RemoteDigest.token(intent), configuration, publication.rawValue]) {
+                            if let token = intentActionToken(intent, item: item, account: account, configuration: configuration,
+                                publication: publication.rawValue, failedFollowUp: followUp) {
                                 let label = String(localized: MRHumanAction.intentLabel(intent))
                                 let effect = MRActionCTA(intent: intent.kind) ?? .refreshFromGitLab
                                 let variant = intent.state == .failed ? "retry" : "start"
@@ -251,9 +272,11 @@ import MergeTetherRemote
                             }
                         }
                         if let job = humanAction?.retryJob ?? row.latestJob, row.stoppedJobNeedsAttention,
+                           !followUpInProgress || job.selectedFollowUpNotes.isEmpty,
                            job.taskPrompt != nil, job.mergeRequestURL != nil,
-                           let token = try? RemoteDigest.token([account, try RemoteDigest.token(job),
-                               try RemoteDigest.token(monitor.settings.automation), jobPublication.rawValue]) {
+                           let token = try? jobRetryToken(job, item: item, account: account,
+                               configuration: monitor.settings.automation, publication: jobPublication.rawValue,
+                               failedFollowUp: followUp) {
                             let label = String(localized: MRHumanAction.retryLabel(job))
                             let reviewMode = job.workflow == .review ? jobPublication.rawValue : nil
                             let confirmation = MRActionCTA.retryRun.help + (job.workflow == .review
@@ -297,6 +320,58 @@ import MergeTetherRemote
             for lane in result.lanes.indices { for card in result.lanes[lane].cards.indices { result.lanes[lane].cards[card].actions = [] } }
         }
         return result
+    }
+
+    static func failedFollowUp(in row: MergeRequestBoardSnapshot.Row, monitor: TodoMonitorService,
+                               presentation: MRCardPresentation) -> MRHumanAction.FailedFollowUp? {
+        guard !presentation.actionsBlocked,
+              let recovery = presentation.humanAction?.failedFollowUp(in: row, jobs: monitor.assistantHandoffs),
+              recovery.intent.target.host == monitor.glab.resolvedHost,
+              recovery.intent.target.username == monitor.glab.currentUsername else { return nil }
+        return recovery
+    }
+
+    static func intentActionToken(_ intent: MRTodoIntent, item: MergeRequestAttentionMonitor.Item,
+                                  account: String, configuration: String, publication: String,
+                                  failedFollowUp: MRHumanAction.FailedFollowUp?) -> String? {
+        let identity = if let recovery = failedFollowUp, recovery.intent.id == intent.id {
+            try? followUpEvidenceToken(recovery, item: item)
+        } else {
+            try? RemoteDigest.token(intent)
+        }
+        guard let identity else { return nil }
+        return try? RemoteDigest.token([account, identity, configuration, publication])
+    }
+
+    private static func jobRetryToken(_ job: AssistantAutomationRunner.Handoff, item: MergeRequestAttentionMonitor.Item,
+                                      account: String, configuration: AutomationSettings, publication: String,
+                                      failedFollowUp: MRHumanAction.FailedFollowUp?) throws -> String {
+        var parts = [account, try RemoteDigest.token(job), try RemoteDigest.token(configuration), publication]
+        if let recovery = failedFollowUp, recovery.retriesWorker, recovery.job?.id == job.id {
+            parts.append(try followUpEvidenceToken(recovery, item: item))
+        }
+        return try RemoteDigest.token(parts)
+    }
+
+    private static func followUpEvidenceToken(_ recovery: MRHumanAction.FailedFollowUp,
+                                              item: MergeRequestAttentionMonitor.Item) throws -> String {
+        let intent = recovery.intent
+        let job = recovery.job
+        let feedback = recovery.feedback
+        // Reconciliation refreshes the intent timestamp even when a stopped attempt's evidence is unchanged.
+        let intentEvidence = [intent.id.uuidString, try RemoteDigest.token(intent.target), intent.headSHA,
+            intent.request.semanticContextFingerprint, try RemoteDigest.token(intent.noteIDs.sorted()),
+            try RemoteDigest.token(intent.todoIDs.sorted()), try RemoteDigest.token(intent.sourceEvents),
+            intent.jobID?.uuidString ?? "", intent.state.rawValue, intent.error ?? ""]
+        let jobEvidence = [job?.operationalExecution?.state.rawValue ?? "", job?.expectedHeadSHA ?? "",
+            recovery.retryActionID, recovery.diagnostics ?? "", try RemoteDigest.token(job?.operationalExecution?.finishedAt),
+            try RemoteDigest.token((job?.verifiedFeedbackNotes ?? [:]).sorted { $0.key < $1.key }
+                .map { "\($0.key):\($0.value)" })]
+        let reviewEvidence = [item.mergeRequest.flatMap(contextRevision) ?? "", recovery.discussionFingerprint ?? "",
+            feedback?.head ?? "", feedback?.semanticContextFingerprint ?? "", feedback?.fingerprint ?? "",
+            feedback?.phase.rawValue ?? "", feedback?.completedFollowUpJobID?.uuidString ?? "",
+            feedback?.feedbackDecisionRevision ?? "", feedback?.reviewParticipationRevision ?? ""]
+        return try RemoteDigest.token(intentEvidence + jobEvidence + reviewEvidence)
     }
 
     static func matchingMergeStatus(for row: MergeRequestBoardSnapshot.Row,

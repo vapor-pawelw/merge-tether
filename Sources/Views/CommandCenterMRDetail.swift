@@ -166,10 +166,7 @@ private struct CommandCenterMRDetailContent: View {
         let row = presentationRow
         let presentation = MRCardPresentation(row: row, monitor: monitor, allowsRemoval: isReviewed)
         let humanAction = presentation.humanAction
-        let failedFollowUp: MRTodoIntent? = if showsDecisions, let intent = humanAction?.retryIntent,
-            intent.kind == .followUp, intent.state == .failed {
-            BoardMRIntentActions.visibleIntents(row.attentionIntents).first { $0.id == intent.id && $0.state == .failed }
-        } else { nil }
+        let failedFollowUp = showsDecisions ? humanAction?.failedFollowUp(in: row, jobs: jobs) : nil
         ScrollViewReader { proxy in
             let scrollView = ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -551,13 +548,13 @@ private struct CommandCenterMRDetailContent: View {
 
     private func nextStep(proxy: ScrollViewProxy, citationContext: MRCommentCitation.Context?,
                           discussions: MRDiscussionSnapshot, humanAction: MRHumanAction?,
-                          failedFollowUp: MRTodoIntent?) -> some View {
+                          failedFollowUp: MRHumanAction.FailedFollowUp?) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(.CommandCenter.commandCenterNextStep).font(.headline)
             VStack(alignment: .leading, spacing: 12) {
-                if let action = humanAction, let failedFollowUp {
-                    failedFollowUpStep(action, intent: failedFollowUp, citationContext: citationContext, proxy: proxy)
-                        .id(failedFollowUp.id)
+                if let failedFollowUp {
+                    failedFollowUpStep(failedFollowUp, citationContext: citationContext, proxy: proxy)
+                        .id(failedFollowUp.intent.id)
                 } else if let action = humanAction {
                     if !item.needsConfirmation || (action.kind != .publication && action.kind != .approval) {
                         Text(verbatim: action.explanation).font(.body.weight(.medium)).foregroundStyle(.primary)
@@ -570,24 +567,7 @@ private struct CommandCenterMRDetailContent: View {
                     attentionSourceEvidence(for: action, citationContext: citationContext)
                     if action.action == .retryRun, let job = jobs.first {
                         HStack {
-                            Button {
-                                guard !isRetrying,
-                                      confirmAssistantRetry(job, for: item, monitor: monitor, title: action.actionLabel) else { return }
-                                isRetrying = true
-                                retryError = nil
-                                Task {
-                                    defer { isRetrying = false }
-                                    guard monitor.assistantHandoffs.contains(where: { $0.id == job.id }) else { return }
-                                    await monitor.retryAssistantJob(job.id)
-                                    retryError = monitor.assistantJobActionError
-                                }
-                            } label: {
-                                MRActionLabel(title: action.actionLabel, cta: .retryRun, working: isRetrying)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .mrActionHelp(.retryRun)
-                            .disabled(isRetrying || job.execution?.state.isActive != false
-                                      || AssistantAutomationRunner.isWorking(on: job.key.work))
+                            retryStoppedRun(job, title: action.actionLabel).buttonStyle(.borderedProminent)
                             Button { openHistory(proxy: proxy) } label: {
                                 Text(.MRHumanAction.mrHumanActionActionReviewRun)
                             }
@@ -638,7 +618,7 @@ private struct CommandCenterMRDetailContent: View {
                     draftRegenerationButton
                     publicationThreads(discussions)
                 }
-                decisionActions(excludingIntentID: failedFollowUp?.id)
+                decisionActions(excludingIntentID: failedFollowUp?.intent.id)
                 FollowUpAutomationHoldView(row: presentationRow, monitor: monitor, showsRetryRequired: failedFollowUp == nil)
                 if showsFeedbackDetails {
                     VStack(alignment: .leading, spacing: 8) {
@@ -663,50 +643,77 @@ private struct CommandCenterMRDetailContent: View {
         }
     }
 
-    private func failedFollowUpStep(_ action: MRHumanAction, intent: MRTodoIntent,
+    private func retryStoppedRun(_ job: AssistantAutomationRunner.Handoff, title: LocalizedStringResource) -> some View {
+        Button {
+            guard !isRetrying, confirmAssistantRetry(job, for: item, monitor: monitor, title: title) else { return }
+            isRetrying = true
+            retryError = nil
+            Task {
+                defer { isRetrying = false }
+                guard monitor.assistantHandoffs.contains(where: { $0.id == job.id }) else { return }
+                await monitor.retryAssistantJob(job.id)
+                retryError = monitor.assistantJobActionError
+            }
+        } label: {
+            MRActionLabel(title: title, cta: .retryRun, working: isRetrying)
+        }
+        .mrActionHelp(.retryRun)
+        .disabled(isRetrying || job.execution?.state.isActive != false
+                  || AssistantAutomationRunner.isWorking(on: job.key.work))
+    }
+
+    private func failedFollowUpStep(_ recovery: MRHumanAction.FailedFollowUp,
                                     citationContext: MRCommentCitation.Context?, proxy: ScrollViewProxy) -> some View {
-        let job = jobs.first { $0.id == intent.jobID && $0.workflow == .followUp }
-        let workerFinished = job?.operationalExecution?.state == .succeeded
-        let feedback = presentationItem.authorFeedbackStatus
-        let retry = MRIntentActionButton(intent: intent, title: action.actionLabel, monitor: monitor)
-        let detailsTitle: LocalizedStringResource = if case .rawNotes(let ids) = action.feedbackEvidence(for: item) {
+        let retry = MRIntentActionButton(intent: recovery.intent, title: MRHumanAction.intentLabel(recovery.intent), monitor: monitor)
+        let detailsTitle: LocalizedStringResource = if case .rawNotes(let ids) = recovery.evidence {
             .CommandCenter.commandCenterFollowUpDetailsWithCount(ids.count)
         } else { .CommandCenter.commandCenterFollowUpDetails }
 
         return VStack(alignment: .leading, spacing: 8) {
             Text(.CommandCenter.commandCenterFollowUpStage).font(.caption).foregroundStyle(.secondary)
             Label {
-                Text(workerFinished ? .CommandCenter.commandCenterFollowUpNeedsVerification : action.message)
+                Text(recovery.title)
                     .fontWeight(.semibold).fixedSize(horizontal: false, vertical: true)
             } icon: {
                 Image(systemName: "exclamationmark.circle").foregroundStyle(.orange)
             }
-            if workerFinished {
-                Text(.CommandCenter.commandCenterFollowUpVerificationReason).font(.callout).foregroundStyle(.secondary)
-            } else if let reason = AgentExplanation.summary(action.detail), reason != action.explanation {
+            if let reason = recovery.reason {
                 Text(verbatim: reason).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
             }
             HStack(spacing: 8) {
-                if workerFinished, let feedback {
+                if recovery.retriesWorker, let job = recovery.job {
+                    retryStoppedRun(job, title: MRHumanAction.retryLabel(job)).buttonStyle(.borderedProminent)
+                    if let feedback = recovery.feedback { feedbackRecheckButton(feedback).buttonStyle(.bordered) }
+                } else if recovery.prefersVerification, let feedback = recovery.feedback {
                     feedbackRecheckButton(feedback).buttonStyle(.borderedProminent)
                     retry.buttonStyle(.bordered)
                 } else {
                     retry.buttonStyle(.borderedProminent)
-                    if let feedback { feedbackRecheckButton(feedback).buttonStyle(.bordered) }
+                    if let feedback = recovery.feedback { feedbackRecheckButton(feedback).buttonStyle(.bordered) }
                 }
             }
             DisclosureGroup {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(.CommandCenter.commandCenterFollowUpComments)
                         .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    attentionSourceEvidence(for: action, citationContext: citationContext)
-                    if let detail = action.detail, !detail.isEmpty {
+                    if case .rawNotes(let ids) = recovery.evidence {
+                        ForEach(ids, id: \.self) { id in
+                            if let source = citationContext?.comment(id, fingerprint: recovery.discussionFingerprint),
+                               let author = source.note.author, let body = source.note.body,
+                               recovery.matchesOriginalNote(id, authorID: author.id, body: body) {
+                                MRCommentCitationView(citation: source, relation: .FeedbackSuggestions.feedbackSuggestionsSourceRequest)
+                            } else { unavailableSource(id) }
+                        }
+                    } else if case .unavailable(let id) = recovery.evidence {
+                        unavailableSource(id)
+                    }
+                    if let detail = recovery.diagnostics, !detail.isEmpty {
                         Divider()
                         Text(.AgentExplanation.agentExplanationDiagnostics)
                             .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                         Text(verbatim: detail).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     }
-                    if let job {
+                    if let job = recovery.job {
                         Button { openHistory(proxy: proxy, jobID: job.id) } label: {
                             Text(.MRHumanAction.mrHumanActionActionReviewRun)
                         }

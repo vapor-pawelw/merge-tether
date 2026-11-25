@@ -53,6 +53,9 @@ struct MergeRequestBoardSnapshot {
                 && intent.state == .failed && intent.target.projectID == id.projectID && intent.target.iid == id.iid
                 && intent.target.username == item.mergeRequest?.author.username
         }
+        var hasFollowUpInProgress: Bool {
+            attentionIntents.contains { $0.kind == .followUp && ($0.state == .running || $0.state == .verifying) }
+        }
         var attentionIntents: [MRTodoIntent] {
             intents.filter { intent in
                 !(intent.kind == .pipeline && intent.jobID == latestJob?.id

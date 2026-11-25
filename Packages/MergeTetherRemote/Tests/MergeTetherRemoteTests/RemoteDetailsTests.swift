@@ -100,6 +100,50 @@ import Testing
         #expect(state.displayedDetails(for: card, board: board)?.description == "Mac snapshot")
     }
 
+    @MainActor @Test func followUpRecoveryUsesOnlyCurrentActionsAndDoesNotOutliveItsEvidence() throws {
+        var board = board()
+        let retry = RemoteAction(id: "intent:follow-up", kind: .prepare, token: "retry")
+        let verify = RemoteAction(id: "verifyAuthorFeedback", kind: .verify, token: "verify")
+        let other = RemoteAction(id: "verifyDrafts", kind: .verify, token: "drafts")
+        board.lanes[0].cards[0].actions = [other, retry, verify]
+        let card = board.cards[0]
+        let state = RemoteDetailState()
+        let request = try #require(state.begin(card: card, board: board, now: date, presentationIndependent: true))
+        var details = RemoteMRDetails(checkedAt: date, description: "Cached description")
+        let comments = [RemoteFollowUpRecovery.Comment(id: 10, body: String(repeating: "x", count: 6_000))]
+        let stopped = RemoteFollowUpRecovery(stage: .stopped, reason: "The worker stopped.", diagnostics: nil,
+            comments: comments, commentCount: 1, retryActionID: retry.id)
+        let finished = RemoteFollowUpRecovery(stage: .needsVerification, reason: "Check the result.", diagnostics: nil,
+            comments: comments, commentCount: 1, retryActionID: retry.id)
+        #expect(stopped.orderedActions(in: card.actions) == [retry, verify])
+        #expect(finished.orderedActions(in: card.actions) == [verify, retry])
+        #expect(finished.orderedActions(in: [other, retry]) == [retry])
+        let worker = RemoteAction(id: "job:follow-up", kind: .retryJob, token: "worker")
+        let workerRecovery = RemoteFollowUpRecovery(stage: .stopped, reason: nil, diagnostics: nil,
+            comments: [], commentCount: nil, retryActionID: worker.id)
+        #expect(workerRecovery.orderedActions(in: [other, verify, retry, worker]) == [worker, verify])
+
+        let legacy = try JSONEncoder().encode(details)
+        #expect(try JSONDecoder().decode(RemoteMRDetails.self, from: legacy).followUpRecovery == nil)
+        details.followUpRecovery = finished
+        let response = RemoteDetailResponse(request: request, status: .current, details: details).bounded()
+        #expect(response.details?.followUpRecovery?.comments.first?.body?.count == 4_000)
+        #expect(response.details?.truncated == true)
+        let decoded = try JSONDecoder().decode(RemoteDetailResponse.self, from: JSONEncoder().encode(response))
+        state.receive(decoded, board: board)
+        #expect(state.displayedDetails(for: card, board: board)?.followUpRecovery == response.details?.followUpRecovery)
+
+        board.lanes[0].cards[0].actions[2].token = "new-evidence"
+        state.update(board: board)
+        #expect(state.displayedDetails(for: board.cards[0], board: board)?.followUpRecovery == nil)
+
+        board.lanes[0].cards[0].actions = [other]
+        state.update(board: board)
+        let checking = board.cards[0]
+        #expect(state.displayedDetails(for: checking, board: board)?.followUpRecovery == nil)
+        #expect(state.displayedDetails(for: checking, board: board)?.description == "Cached description")
+    }
+
     @MainActor @Test func previewsKeepTheReadPendingAndPreserveCachedDiscussionsThroughFailures() throws {
         var board = board()
         let card = board.cards[0], state = RemoteDetailState()

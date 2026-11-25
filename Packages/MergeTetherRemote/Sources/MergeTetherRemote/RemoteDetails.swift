@@ -273,6 +273,41 @@ public struct RemoteDetailActivity: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public struct RemoteFollowUpRecovery: Codable, Equatable, Sendable {
+    public enum Stage: String, Codable, Sendable { case needsVerification, stopped }
+
+    public struct Comment: Codable, Equatable, Identifiable, Sendable {
+        public let id: Int
+        public var author: String?
+        public var body: String?
+        public let url: URL?
+
+        public init(id: Int, author: String? = nil, body: String? = nil, url: URL? = nil) {
+            self.id = id; self.author = author; self.body = body; self.url = url
+        }
+    }
+
+    public let stage: Stage
+    public var reason: String?
+    public var diagnostics: String?
+    public var comments: [Comment]
+    public let commentCount: Int?
+    public let retryActionID: String
+
+    public init(stage: Stage, reason: String?, diagnostics: String?, comments: [Comment],
+                commentCount: Int?, retryActionID: String) {
+        self.stage = stage; self.reason = reason; self.diagnostics = diagnostics; self.comments = comments
+        self.commentCount = commentCount; self.retryActionID = retryActionID
+    }
+
+    public func orderedActions(in actions: [RemoteAction]) -> [RemoteAction] {
+        let verify = actions.first(where: \.isAuthorFeedbackVerification)
+        let retryKind: RemoteActionKind = retryActionID.hasPrefix("job:") ? .retryJob : .prepare
+        let retry = actions.first { $0.kind == retryKind && $0.id == retryActionID }
+        return (stage == .needsVerification ? [verify, retry] : [retry, verify]).compactMap { $0 }
+    }
+}
+
 public struct RemoteMRDetails: Codable, Equatable, Sendable {
     public let checkedAt: Date
     public var metadata: [RemoteDetailField]
@@ -299,6 +334,7 @@ public struct RemoteMRDetails: Codable, Equatable, Sendable {
     /// Additive; older hosts send none and older phones ignore it.
     public var automation: RemoteAutomationStatus?
     public var issues: [RemoteMRIssue]?
+    public var followUpRecovery: RemoteFollowUpRecovery?
 
     public var avatarThumbnailURLs: [URL] {
         let fields = metadata + feedback + (usage ?? [])
@@ -361,6 +397,17 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
                 return .init(label: text(field.label, 256), value: text(field.value, 4_000), url: field.url,
                              person: field.person?.clipped(text), peopleMessage: message,
                              supportingText: field.supportingText.map { text($0, 4_000) })
+            }
+            if var recovery = details.followUpRecovery {
+                recovery.reason = recovery.reason.map { text($0, 2_000) }
+                recovery.diagnostics = recovery.diagnostics.map { text($0, 4_000) }
+                recovery.comments = list(recovery.comments, 30).map { original in
+                    var comment = original
+                    comment.author = comment.author.map { text($0, 512) }
+                    comment.body = comment.body.map { text($0, 4_000) }
+                    return comment
+                }
+                details.followUpRecovery = recovery
             }
             details.policy = list(details.policy, 20).map { text($0, 2_000) }
             details.rules = details.rules.map { list($0, 20).map { text($0, 2_000) } }
@@ -470,6 +517,13 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
             else if !details.reasons.isEmpty { details.reasons = Array(details.reasons.prefix(details.reasons.count / 2)) }
             else if let usage = details.usage, !usage.isEmpty { details.usage = Array(usage.prefix(usage.count / 2)) }
             else if !details.metadata.isEmpty { details.metadata = Array(details.metadata.prefix(details.metadata.count / 2)) }
+            else if let recovery = details.followUpRecovery {
+                if !recovery.comments.isEmpty {
+                    details.followUpRecovery?.comments = Array(recovery.comments.prefix(recovery.comments.count / 2))
+                } else if recovery.diagnostics != nil {
+                    details.followUpRecovery?.diagnostics = nil
+                } else { details.followUpRecovery = nil }
+            }
             else { result.status = .unavailable; result.details = nil; break }
             result.details = details
         }
@@ -581,10 +635,12 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
         guard let cached = displayCache[card.id],
               cached.request.hostSession == board.hostSession, cached.request.account == board.account,
               var details = cached.details else { return nil }
-        if (details.draftContexts != nil || details.originResume != nil), !cached.request.matches(board) {
+        if (details.draftContexts != nil || details.originResume != nil || details.followUpRecovery != nil),
+           !cached.request.matches(board) {
             details.draftContexts = nil
             details.proposedSolutionDraftIDs = nil
             details.originResume = nil
+            details.followUpRecovery = nil
         }
         return details
     }
