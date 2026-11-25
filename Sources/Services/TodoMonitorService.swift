@@ -105,6 +105,7 @@ final class TodoMonitorService {
     }
 
     private let todoStore: InboxTodoStore
+    let incomingReviewFilter: IncomingReviewFilterCoordinator
     var allTodos: [Todo] { todoStore.allTodos }
     private(set) var lastError: GlabError? {
         get { todoStore.lastError }
@@ -287,6 +288,8 @@ final class TodoMonitorService {
         self.todoStore = InboxTodoStore(settings: settings, glab: glab)
         self.notifications = notifications
         self.assistantDependencies = assistantDependencies
+        self.incomingReviewFilter = IncomingReviewFilterCoordinator(settings: settings, glab: glab,
+            dependencies: assistantDependencies, health: .shared)
         self.reviewJobCoordinator = reviewJobCoordinator
         self.attentionNotificationScheduler = AttentionNotificationScheduler(notifications: notifications)
         self.automation = automation
@@ -301,6 +304,13 @@ final class TodoMonitorService {
         if isApplication { self.mergeRequestIssues = makeIssueCoordinator() }
         todoStore.onAcknowledged = { [weak self] id in
             if self?.failedAutomationTodoID == id { self?.failedAutomationTodoID = nil }
+        }
+        incomingReviewFilter.onReleased = { [weak self] in self?.resumeIncomingReviews() }
+        incomingReviewFilter.onHidden = { [weak self] reviews in self?.announceHiddenReviews(reviews, automatic: true) }
+        attention.onReviewAssignmentsObserved = { [weak self] ledger, host, username in
+            guard let self else { return }
+            incomingReviewFilter.observeAssignments(ledger, host: host, username: username,
+                excluding: existingReviewTargets(host: host, username: username))
         }
         attention.onRefreshed = { [weak self] in
             guard let self else { return }
@@ -535,10 +545,24 @@ final class TodoMonitorService {
 
     // MARK: - Derived state
 
-    var visibleTodos: [Todo] { todoStore.visibleTodos }
+    var visibleTodos: [Todo] {
+        guard let host = todoStore.host, let username = todoStore.username else {
+            return todoStore.hasCompletedFirstFetch ? todoStore.visibleTodos : currentAccountTodos
+        }
+        return todoStore.visibleTodos.filter { !isSuppressedByIncomingReviewFilter($0, host: host, username: username) }
+    }
 
-    /// Display only the inbox fetched for this exact authenticated account epoch.
-    var currentAccountTodos: [Todo] { todoStore.currentAccountTodos }
+    /// The last live inbox remains authoritative. On a cold launch, recover only
+    /// the undecided review requests durably held before the interruption.
+    var currentAccountTodos: [Todo] {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return [] }
+        let todos = if todoStore.host == host, todoStore.username == username, todoStore.accountRevision == glab.accountRevision {
+            todoStore.currentAccountTodos
+        } else {
+            settings.reviewAssignments.incomingReviewFilter.recoveredTodos(host: host, username: username)
+        }
+        return todos.filter { !isSuppressedByIncomingReviewFilter($0, host: host, username: username) }
+    }
 
     var pipelineHandoffs: [MergeWorkflowActivityEntry] {
         authoredMergeRequests.workflow.pendingPipelineHandoffs
@@ -673,6 +697,7 @@ final class TodoMonitorService {
             if remaining == 0 { manualAdoptions.removeValue(forKey: target) }
             else { manualAdoptions[target] = remaining }
         }
+        incomingReviewFilter.releaseForManualAdd(target)
         settings.ignoredMergeRequests.remove(target)
         settings.mrLifecycleLedger.restore(target)
         settings.automation.scope[target] = .active
@@ -700,6 +725,38 @@ final class TodoMonitorService {
             }
     }
 
+    private func existingReviewTargets(host: String, username: String) -> Set<MRAutomationScope.Target> {
+        guard incomingReviewFilter.isEnabled else { return [] }
+        let scope = settings.automation.scope
+        var targets = settings.mrLifecycleLedger.targets(host: host, username: username)
+        targets.formUnion(scope.individualTargets(host: host, username: username).filter(scope.isManaged))
+        targets.formUnion(settings.mrActionIntents.lazy.filter(\.grantsManagement).map(\.target))
+        targets.formUnion(settings.pendingCommentReviews)
+        targets.formUnion(settings.ignoredMergeRequests)
+        targets.formUnion(settings.assistantHandoffs.map { job in
+            .init(host: job.key.work.host, username: job.key.username, projectID: job.key.work.projectID, iid: job.key.work.iid)
+        })
+        return targets
+    }
+
+    private func isSuppressedByIncomingReviewFilter(_ todo: Todo, host: String, username: String) -> Bool {
+        guard let target = IncomingReviewFilterLedger.target(for: todo, host: host, username: username) else { return false }
+        return settings.intakeFilterHolds(target)
+    }
+
+    private func resumeIncomingReviews() {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return }
+        if settings.onboardingCompleted {
+            attention.refresh(host: host, username: username, todos: currentAccountTodos)
+        }
+        authoredMergeRequests.workflow.startNext()
+        let revision = glab.accountRevision
+        Task {
+            guard glab.accountRevision == revision else { return }
+            await routeMRTodos(host: host, username: username)
+        }
+    }
+
     private func routeMRTodos(host: String, username: String, manuallyAdopting target: MRAutomationScope.Target? = nil) async {
         let automatically = target == nil
         guard !automatically || settings.automaticWritesAllowed else { return }
@@ -712,7 +769,7 @@ final class TodoMonitorService {
                     && todo.targetURL.gitLabTodoMergeRequestURL(host: host, iid: iid) != nil
             }
         } else {
-            todos = allTodos
+            todos = allTodos.filter { !isSuppressedByIncomingReviewFilter($0, host: host, username: username) }
         }
         let catalog = boardProjector?.browser.reviewed ?? []
         let managed = Set(catalog.compactMap { item -> MRAutomationScope.Target? in
@@ -800,27 +857,37 @@ final class TodoMonitorService {
 
     struct ReviewRemoval: Identifiable {
         let id = UUID()
-        let request: GitLabMergeRequest
-        let target: MRAutomationScope.Target
+        let reviews: [HiddenReview]
+        let automatic: Bool
         let accountRevision: UInt64
     }
 
-    private(set) var reviewRemoval: ReviewRemoval?
-    var undoableReviewRemoval: ReviewRemoval? {
-        guard let reviewRemoval, reviewRemoval.accountRevision == glab.accountRevision else { return nil }
-        return reviewRemoval
+    private var reviewRemoval: ReviewRemoval?
+    private var automaticReviewRemoval: ReviewRemoval?
+    var undoableReviewRemovals: [ReviewRemoval] {
+        [reviewRemoval, automaticReviewRemoval].compactMap { $0 }.filter { $0.accountRevision == glab.accountRevision }
     }
 
     func dismissReviewRemoval(_ id: UUID) {
         if reviewRemoval?.id == id { reviewRemoval = nil }
+        if automaticReviewRemoval?.id == id { automaticReviewRemoval = nil }
+    }
+
+    private func announceHiddenReviews(_ reviews: [HiddenReview], automatic: Bool) {
+        let revision = glab.accountRevision
+        if automatic {
+            let previous = automaticReviewRemoval.flatMap { $0.accountRevision == revision ? $0.reviews : nil } ?? []
+            let newTargets = Set(reviews.map(\.target))
+            automaticReviewRemoval = .init(reviews: previous.filter { !newTargets.contains($0.target) } + reviews,
+                automatic: true, accountRevision: revision)
+        } else {
+            reviewRemoval = .init(reviews: reviews, automatic: false, accountRevision: revision)
+        }
     }
 
     func undoReviewRemoval(_ removal: ReviewRemoval) {
-        guard undoableReviewRemoval?.id == removal.id,
-              scopeTarget(projectID: removal.request.projectID, iid: removal.request.iid,
-                  url: removal.request.webURL) == removal.target else { return }
-        restoreReviewedMergeRequest(removal.request)
-        dismissReviewRemoval(removal.id)
+        guard undoableReviewRemovals.contains(where: { $0.id == removal.id }) else { return }
+        if restoreReviewedMergeRequests(removal.reviews) { dismissReviewRemoval(removal.id) }
     }
 
     func markReviewAssignmentSeen(_ item: MergeRequestAttentionMonitor.Item) {
@@ -829,20 +896,34 @@ final class TodoMonitorService {
         settings.save()
     }
 
-    var hiddenReviewAssignments: [GitLabMergeRequest] {
+    var hiddenReviewAssignments: [HiddenReview] {
         guard let account = boardDisplayAccount else { return [] }
-        let assignments = settings.reviewAssignments.entries(host: account.host, username: account.username) ?? []
-        return assignments.map(\.request).filter {
-            guard let target = scopeTarget(projectID: $0.projectID, iid: $0.iid, url: $0.webURL) else { return false }
-            return settings.ignoredMergeRequests.contains(target)
-        }.sorted { ($0.webURL.gitLabProjectPath, $0.iid) < ($1.webURL.gitLabProjectPath, $1.iid) }
+        var hidden = settings.filteredHiddenReviewDetails.filter {
+            $0.key.host == account.host && $0.key.username == account.username
+        }
+        for assignment in settings.reviewAssignments.entries(host: account.host, username: account.username) ?? [] {
+            let request = assignment.request
+            guard let target = scopeTarget(projectID: request.projectID, iid: request.iid, url: request.webURL),
+                  settings.ignoredMergeRequests.contains(target) else { continue }
+            hidden[target] = .init(target: target, title: request.title, url: request.webURL)
+        }
+        return hidden.values.sorted {
+            ($0.url.gitLabProjectPath, $0.target.iid ?? 0) < ($1.url.gitLabProjectPath, $1.target.iid ?? 0)
+        }
     }
 
-    func restoreReviewedMergeRequest(_ request: GitLabMergeRequest) {
-        guard let target = scopeTarget(projectID: request.projectID, iid: request.iid, url: request.webURL),
-              settings.ignoredMergeRequests.remove(target) != nil else { return }
-        settings.reviewAssignments.markSeen(target)
+    @discardableResult
+    func restoreReviewedMergeRequests(_ reviews: [HiddenReview]) -> Bool {
+        let targets = Set(reviews.compactMap { review -> MRAutomationScope.Target? in
+            guard let iid = review.target.iid,
+                  scopeTarget(projectID: review.target.projectID, iid: iid, url: review.url) == review.target else { return nil }
+            return review.target
+        })
+        guard settings.restoreHiddenReviews(targets) else { return false }
+        for target in targets { settings.reviewAssignments.markSeen(target) }
         settings.save()
+        resumeIncomingReviews()
+        return true
     }
 
     /// Both board removal and the inline Hide action use the same account-specific exclusion.
@@ -854,7 +935,7 @@ final class TodoMonitorService {
         guard settings.ignoredMergeRequests.insert(target).inserted else { return true }
         settings.reviewAssignments.markSeen(target)
         guard settings.save() else { return false }
-        reviewRemoval = .init(request: request, target: target, accountRevision: glab.accountRevision)
+        announceHiddenReviews([.init(target: target, title: request.title, url: request.webURL)], automatic: false)
         return true
     }
 
@@ -910,6 +991,7 @@ final class TodoMonitorService {
     }
 
     private func enableAutomationTarget(_ target: MRAutomationScope.Target, projectPath: String) {
+        incomingReviewFilter.releaseForManualAdd(target)
         settings.ignoredMergeRequests.remove(target)
         settings.mrLifecycleLedger.restore(target)
         settings.automation.scope[target] = .active
@@ -1115,10 +1197,14 @@ final class TodoMonitorService {
             settings.lastSeenTodoIDs = fetchedIDs
             settings.save()
 
+            if let host, let username {
+                incomingReviewFilter.observeInbox(fetchedFiltered, host: host, username: username,
+                    excluding: existingReviewTargets(host: host, username: username))
+            }
             todoStore.accept(fetchedFiltered)
             if let host, let username {
                 if settings.onboardingCompleted {
-                    attention.refresh(host: host, username: username, todos: fetchedFiltered)
+                    attention.refresh(host: host, username: username, todos: currentAccountTodos)
                 }
                 await routeMRTodos(host: host, username: username)
                 await acknowledgeHandledTodos(host: host, username: username)
@@ -1273,6 +1359,7 @@ final class TodoMonitorService {
     }
 
     func prepareForTermination() {
+        incomingReviewFilter.stop()
         stopTimer()
         attention.automationConfigurationChanged()
         automation.cancelRunningScripts()
@@ -1283,6 +1370,13 @@ final class TodoMonitorService {
     func automationConfigurationChanged(previous: AutomationSettings) {
         let current = settings.automation
         guard previous != current else { return }
+        if previous.selectedAssistant != current.selectedAssistant
+            || previous.isGloballySuspended != current.isGloballySuspended
+            || previous.codexVerificationModel != current.codexVerificationModel
+            || previous.claudeVerificationModel != current.claudeVerificationModel
+            || previous.verificationThinking != current.verificationThinking {
+            incomingReviewFilter.configurationChanged()
+        }
         if settings.boardOrderingMethod == .automatic {
             boardPolicyOrder.policyChanged(from: previous.ignoringGlobalSuspension, to: current.ignoringGlobalSuspension,
                 grouping: settings.boardGrouping)
@@ -1352,7 +1446,9 @@ final class TodoMonitorService {
 
     var hiddenBoardTargets: Set<MRAutomationScope.Target> {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return settings.ignoredMergeRequests }
-        return settings.ignoredMergeRequests.union(settings.mrLifecycleLedger.targets(host: host, username: username)
+        let filter = settings.reviewAssignments.incomingReviewFilter
+        let suppressed = filter.entries.keys.filter { $0.host == host && $0.username == username && filter.suppresses($0) }
+        return settings.ignoredMergeRequests.union(suppressed).union(settings.mrLifecycleLedger.targets(host: host, username: username)
             .filter { target in
                 let state = settings.mrLifecycleLedger.request(for: target)?.state
                 return state == "merged" || state == "closed"

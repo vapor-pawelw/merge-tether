@@ -72,6 +72,7 @@ final class MergeRequestTodoRouter {
             guard !Task.isCancelled, isCurrentPass(), todo.targetType == .mergeRequest, let iid = todo.target.iid,
                   todo.targetURL.gitLabTodoMergeRequestURL(host: host, iid: iid) != nil else { continue }
             let target = MRAutomationScope.Target(host: host, username: username, projectID: todo.project.id, iid: iid)
+            guard !settings.intakeFilterHolds(target) else { continue }
             let priorReceipt = settings.routedMRTodoReceipts.first { $0.target == target && $0.event == todo.feedbackIdentity }
             let persistedIntent = settings.mrActionIntents.first { $0.target == target && $0.sourceEvents.contains(todo.feedbackIdentity) }
             if priorReceipt != nil || persistedIntent != nil || settings.ignoredMergeRequests.contains(target) {
@@ -94,7 +95,7 @@ final class MergeRequestTodoRouter {
                 guard let result = try await classify(todo, request: request, user: user, host: host) else { continue }
                 classification = result
             } catch { continue }
-            guard isCurrentPass() else { continue }
+            guard isCurrentPass(), !settings.intakeFilterHolds(target) else { continue }
             guard settings.automaticActionsAllowed else { return acknowledged }
             let kind = classification.0
             let explicitlyPaused = settings.automation.scope[target] == .paused
@@ -107,6 +108,7 @@ final class MergeRequestTodoRouter {
             if shouldAdoptAutomatically(kind, request: request, target: target) {
                 autoAdopt = await canAutomate()
                 guard isCurrentPass() else { return acknowledged }
+                guard !settings.intakeFilterHolds(target) else { continue }
                 autoAdopt = autoAdopt && shouldAdoptAutomatically(kind, request: request, target: target)
             }
             // A content-verified notice records receipt only. It never grants

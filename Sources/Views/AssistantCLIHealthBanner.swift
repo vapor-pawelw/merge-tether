@@ -2,6 +2,8 @@ import SwiftUI
 
 struct AssistantCLIHealthBanner: View {
     let monitor: TodoMonitorService
+    @Environment(\.openSettings) private var openSettings
+
     var body: some View {
         ForEach(AutomationAssistant.allCases.filter { provider in
             provider == monitor.settings.automation.selectedAssistant || (monitor.cliHealth.hold(for: provider) != nil
@@ -11,6 +13,21 @@ struct AssistantCLIHealthBanner: View {
                 })
         }, id: \.rawValue) { provider in
             AssistantCLIProviderHealthBanner(monitor: monitor, assistant: provider)
+        }
+        if monitor.settings.incomingReviewFilterSettings.activeCriteria != nil,
+           monitor.settings.automationGloballyEnabled, !monitor.checkingSelectedAssistant,
+           !monitor.selectedAssistantReady {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "line.3.horizontal.decrease.circle").foregroundStyle(.orange).accessibilityHidden(true)
+                Text(.ReviewIntake.reviewIntakeUnavailable)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Button(.ReviewIntake.reviewIntakeAgentSettings) {
+                    SettingsNavigation.shared.showCodingAgent(openSettings: { openSettings() })
+                }
+            }
+            .font(.caption).padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            .background(.orange.opacity(0.1))
         }
     }
 }

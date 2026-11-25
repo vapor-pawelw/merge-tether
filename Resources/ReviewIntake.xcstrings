@@ -1,0 +1,399 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "reviewIntakeTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Incoming review filter"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filtr nowych MR-ów do przeglądu"
+          }
+        }
+      }
+    },
+    "reviewIntakeToggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filter new review requests with an agent"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filtruj nowe MR-y do przeglądu za pomocą agenta"
+          }
+        }
+      }
+    },
+    "reviewIntakeCriteria": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review criteria"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kryteria przeglądu"
+          }
+        }
+      }
+    },
+    "reviewIntakeSave": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save filter"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zapisz filtr"
+          }
+        }
+      }
+    },
+    "reviewIntakeSaveFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not save the review filter."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się zapisać filtra MR-ów."
+          }
+        }
+      }
+    },
+    "reviewIntakeHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The filter uses the lightweight verifier configured in Agent settings to assess new requests for Inbox and Reviewing. The verifier needs a working, signed-in CLI. Requests follow the usual workflow if the verifier is unavailable or unsure. Filtered requests can be restored under Hidden merge requests."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filtr używa lekkiego weryfikatora wybranego w ustawieniach agenta do oceny nowych MR-ów trafiających do Inboxa lub Reviewing. Weryfikator wymaga działającego, zalogowanego CLI. Gdy jest niedostępny lub niepewny, MR trafia na zwykłą ścieżkę. Odfiltrowane MR-y możesz przywrócić na liście ukrytych MR-ów."
+          }
+        }
+      }
+    },
+    "reviewIntakeVerifier": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verifier: %1$@ · %2$@"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weryfikator: %1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "reviewIntakePaused": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The filter is paused while automation is off."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filtr jest wstrzymany, gdy automatyzacja jest wyłączona."
+          }
+        }
+      }
+    },
+    "reviewIntakeChecking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking verifier availability…"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sprawdzanie dostępności weryfikatora…"
+          }
+        }
+      }
+    },
+    "reviewIntakeUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review requests follow the usual workflow while the verifier is unavailable."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MR-y trafiają na zwykłą ścieżkę, ponieważ weryfikator jest niedostępny."
+          }
+        }
+      }
+    },
+    "reviewIntakeAgentSettings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent settings"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ustawienia agenta"
+          }
+        }
+      }
+    },
+    "reviewIntakeNoticeUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filter skipped. The verifier was unavailable."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pominięto filtr. Weryfikator był niedostępny."
+          }
+        }
+      }
+    },
+    "reviewIntakeNoticeInterrupted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filter skipped. The assessment was interrupted."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pominięto filtr. Ocena została przerwana."
+          }
+        }
+      }
+    },
+    "reviewIntakeNoticeFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filter skipped. The verifier could not complete the assessment."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pominięto filtr. Weryfikator nie ukończył oceny."
+          }
+        }
+      }
+    },
+    "reviewIntakeNoticeStorage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filter skipped. The assessment could not be saved."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pominięto filtr. Nie udało się zapisać oceny."
+          }
+        }
+      }
+    },
+    "reviewIntakeNoticeConfiguration": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filter skipped. The settings changed during the assessment."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pominięto filtr. Ustawienia zmieniły się w trakcie oceny."
+          }
+        }
+      }
+    },
+    "reviewIntakeNoticeUncertain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The verifier could not classify this merge request confidently."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weryfikator nie mógł jednoznacznie ocenić tego MR-a."
+          }
+        }
+      }
+    },
+    "reviewIntakeNoticeReason": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uncertain assessment. %@"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Niejednoznaczna ocena. %@"
+          }
+        }
+      }
+    },
+    "reviewIntakeAutomaticallyHidden": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The verifier hid “%@”."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weryfikator ukrył MR „%@”."
+          }
+        }
+      }
+    },
+    "reviewIntakeShowHidden": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show merge requests"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pokaż MR-y"
+          }
+        }
+      }
+    },
+    "reviewIntakeAutomaticallyHiddenCount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "The verifier hid %lld merge request."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "The verifier hid %lld merge requests."
+                }
+              }
+            }
+          }
+        },
+        "pl": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Weryfikator ukrył %lld MR."
+                }
+              },
+              "few": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Weryfikator ukrył %lld MR-y."
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Weryfikator ukrył %lld MR-ów."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Weryfikator ukrył %lld MR-a."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Filter incoming review requests with custom criteria and the configured lightweight verifier. Unavailable or uncertain assessments let the merge request through with a note. A banner shows which merge requests were hidden and offers to restore them. They also appear under **Hidden merge requests**.
+
 - Recheck agent access one minute after a reported usage-limit reset and resume eligible work when access returns. Back off to hourly checks and offer manual retry after three unsuccessful hourly checks.
 
 - Recognize agent usage limits and sign-in problems from the CLIs' structured status instead of wording alone: Claude's API status, and Codex's account and rate-limit endpoints when a Codex run fails with an unrecognized message.

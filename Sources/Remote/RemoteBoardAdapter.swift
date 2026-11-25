@@ -135,11 +135,17 @@ import MergeTetherRemote
             }
         }
         let rows = board.own + board.reviewed
+        let proposals = Dictionary(board.proposals.map { (boardOrderCardID($0.target), $0.target) },
+            uniquingKeysWith: { first, _ in first })
         for lane in result.lanes.indices {
             for index in result.lanes[lane].cards.indices {
                 var card = result.lanes[lane].cards[index]
+                var noticeTarget = proposals[card.id]
                 if let row = rows.first(where: { "mr:\($0.id.projectID):\($0.id.iid)" == card.id }) {
                     let item = row.item
+                    if row.newReviewAssignedAt != nil {
+                        noticeTarget = monitor.scopeTarget(projectID: row.id.projectID, iid: row.id.iid, url: row.displayURL)
+                    }
                     var extras: [RemoteActionKind] = []
                     let handoffs = monitor.pipelineHandoffs.filter { $0.event.mergeRequest.projectID == item.id.projectID && $0.event.mergeRequest.iid == item.id.iid }
                     if !handoffs.isEmpty { extras.append(.handoff) }
@@ -236,6 +242,10 @@ import MergeTetherRemote
                     card.presentation = .init(repository: todo.project.pathWithNamespace.split(separator: "/").last.map(String.init) ?? "",
                         status: MRActivity.agentStatus(.AutomationProgress.progressNotice, assistant: monitor.settings.automation.assistant),
                         working: true, statusSymbol: MRActionEffect.aiCheck.symbol)
+                }
+                if let noticeTarget,
+                   let notice = monitor.settings.reviewAssignments.incomingReviewFilter.notice(for: noticeTarget) {
+                    card.detail = [card.detail, String(localized: notice.localizedMessage)].filter { !$0.isEmpty }.joined(separator: "\n\n")
                 }
                 card.orderGroup = orderGroups[card.id]
                 if includesCardActions {

@@ -30,7 +30,9 @@ struct CommandCenterView: View {
                 .padding(.horizontal, 18)
             CommandCenterBoardView(monitor: monitor, board: display.board, refreshState: initialRefresh)
                 .id("\(monitor.glab.resolvedHost ?? "")|\(monitor.glab.currentUsername ?? "")")
-            if let removal = monitor.undoableReviewRemoval { reviewRemovalBanner(removal) }
+            ForEach(monitor.undoableReviewRemovals, id: \.automatic) { removal in
+                ReviewRemovalBanner(removal: removal, monitor: monitor)
+            }
             if let todo = monitor.undoableTodo { undoBanner(todo) }
             accountFooter
         }
@@ -281,20 +283,6 @@ struct CommandCenterView: View {
         }
         .font(.caption).padding(.horizontal, 18).padding(.vertical, 10)
         .background(.bar)
-    }
-
-    private func reviewRemovalBanner(_ removal: TodoMonitorService.ReviewRemoval) -> some View {
-        HStack {
-            Text(.Board.boardReviewAssignmentHidden(removal.request.title)).lineLimit(1)
-            Spacer()
-            Button(.Board.boardReviewAssignmentRestore) { monitor.undoReviewRemoval(removal) }
-        }
-        .font(.caption).padding(12).background(Color.accentColor.opacity(0.08))
-        .task(id: removal.id) {
-            do { try await Task.sleep(for: TodoMonitorService.undoWindow) }
-            catch { return }
-            monitor.dismissReviewRemoval(removal.id)
-        }
     }
 
     private func undoBanner(_ todo: Todo) -> some View {

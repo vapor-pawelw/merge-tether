@@ -373,6 +373,7 @@ final class MergeRequestAttentionMonitor {
     private let approvalReadWait: ReadOnlyAssessmentRetry.Wait
     /// Called after MergeTether approved a merge request on its own.
     var onRefreshed: (() -> Void)?
+    var onReviewAssignmentsObserved: ((ReviewAssignmentLedger, String, String) -> Void)?
     var onIssueCatalogRefreshed: (([GitLabMergeRequest]) -> Void)?
     var onCommentReviewFinished: ((Item.ID) -> Void)?
     var onDisplayMetadataObserved: ((GitLabMergeRequest, MRAutomationScope.Target, UInt64, Date) -> Void)?
@@ -906,13 +907,21 @@ final class MergeRequestAttentionMonitor {
                     return key
                 })
             }
-            settings.reviewAssignments.observe(requests, host: host, username: user.username, at: observedAt,
-                previouslyVisible: previouslyVisible)
-            settings.save()
+            var ledger = settings.reviewAssignments
+            ledger.observe(requests, host: host, username: user.username, at: observedAt, previouslyVisible: previouslyVisible)
+            if let onReviewAssignmentsObserved {
+                onReviewAssignmentsObserved(ledger, host, user.username)
+            } else {
+                settings.reviewAssignments = ledger
+                settings.save()
+            }
+        }
+        func isFiltered(_ target: MRAutomationScope.Target) -> Bool {
+            settings?.intakeFilterHolds(target) == true
         }
         func remember(_ request: GitLabMergeRequest, readStartedAt: Date) {
             let target = target(for: request)
-            guard !isIgnored(target) else { return }
+            guard !isIgnored(target), !isFiltered(target) else { return }
             onDisplayMetadataObserved?(request, target, revision, readStartedAt)
             guard isTracked(request) else { return }
             settings?.mrLifecycleLedger.record(request, for: target, now: readStartedAt,
@@ -1028,7 +1037,7 @@ final class MergeRequestAttentionMonitor {
         guard isCurrent(account), revision == glab.accountRevision else { return }
         // A newer Authored read may have completed while this poll was awaiting
         // GitLab. Its observed state must win over the older list snapshot.
-        let currentListed = (listed + explicit).map { request in
+        let currentListed = (listed + explicit).filter { !isFiltered(target(for: $0)) }.map { request in
             settings?.mrLifecycleLedger.request(for: target(for: request)) ?? request
         }
 
@@ -1091,6 +1100,10 @@ final class MergeRequestAttentionMonitor {
 
         for id in Array(candidates.keys) {
             let target = MRAutomationScope.Target(host: host, username: user.username, projectID: id.projectID, iid: id.iid)
+            if isFiltered(target) {
+                candidates.removeValue(forKey: id)
+                continue
+            }
             if let current = settings?.mrLifecycleLedger.request(for: target) {
                 if current.state != "opened" { candidates.removeValue(forKey: id) }
                 else { candidates[id]?.mergeRequest = current }
