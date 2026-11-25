@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Align Agent Usage cards, filters and cost rows, and let longer dashboard text wrap.
 
+- Filter each Mac board column by attention, pins and activity section. Reviewing also supports new assignments. Combine choices through the filter icon in each column header.
+
 - Keep replies private when draft verification cannot find required files at the current commit. Back off transient evidence reads and avoid repeating the verification agent during those retries.
 - Explain known merge blockers without starting an agent, and retire diagnostic tasks when their blocker clears.
 - Show why verifier requests ran and distinguish incomplete, missing and unpriced agent usage.

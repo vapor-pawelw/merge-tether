@@ -77,55 +77,67 @@
         }
       }
     },
-    "board.reviewAssignments.all": {
+    "board.filters.title": {
       "extractionState": "manual",
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "All"
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Wszystkie"
-          }
-        }
+        "en": {"stringUnit": {"state": "translated", "value": "Filters"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Filtry"}}
       }
     },
-    "board.reviewAssignments.newCount.%lld": {
+    "board.filters.active": {
       "extractionState": "manual",
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New %lld"
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nowe %lld"
-          }
-        }
+        "en": {"stringUnit": {"state": "translated", "value": "Filters active"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Filtry aktywne"}}
       }
     },
-    "board.reviewAssignments.noNew": {
+    "board.filters.all": {
       "extractionState": "manual",
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No new review assignments."
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Brak nowych przypisań do recenzji."
-          }
-        }
+        "en": {"stringUnit": {"state": "translated", "value": "All"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Wszystkie"}}
+      }
+    },
+    "board.filters.cards": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Cards"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Karty"}}
+      }
+    },
+    "board.filters.sections": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Sections"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Sekcje"}}
+      }
+    },
+    "board.filters.pinned": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Pinned"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Przypięte"}}
+      }
+    },
+    "board.filters.regular": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Regular"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Zwykłe"}}
+      }
+    },
+    "board.filters.inactive": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Inactive"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Nieaktywne"}}
+      }
+    },
+    "board.filters.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "No merge requests match these filters."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Żaden MR nie pasuje do wybranych filtrów."}}
       }
     },
     "board.reviewers.done": {
