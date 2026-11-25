@@ -119,6 +119,8 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
     /// Additive marker for active AI work; absent for deterministic reads and older hosts.
     public var statusSymbol: String?
     public var nextStep: String?
+    /// Keep the completed review summary available in Details on the companion.
+    public var reviewCompletionInDetailsOnly: Bool?
     public var working: Bool
     public var chips: [RemoteCardChip]
     public var secondaryCTA: RemoteCardCTA?

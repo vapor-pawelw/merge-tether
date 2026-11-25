@@ -820,6 +820,7 @@ import MergeTetherRemote
             viewerApprovalID: model.row.evidenceMatchesCatalogContext ? original.presentation?.viewerApprovalID : nil,
             assignedReviewerCount: MergeRequestApprovalProgress.assignedReviewerCount(model.row.displayRequest?.reviewers))
         card.presentation?.statusPeopleMessage = model.statusPeopleMessage
+        card.presentation?.reviewCompletionInDetailsOnly = model.reviewCompletionInDetailsOnly ? true : nil
         card.presentation?.pendingDraftsPeopleMessage = pendingDrafts?.peopleMessage
         if model.actionsBlocked { card.actions = [] }
         return card

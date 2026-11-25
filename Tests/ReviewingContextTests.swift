@@ -1,4 +1,5 @@
 import Foundation
+import MergeTetherRemote
 import Testing
 @testable import MergeTether
 
@@ -393,7 +394,35 @@ struct ReviewingContextTests {
         #expect(context.nextStep == .monitoring)
         #expect(!context.isAutomaticProcessing)
         #expect(String(localized: context.nextStepMessage) == "No action needed. Watching for updates.")
-        #expect(String(localized: try #require(context.actionLabel)) == "View discussions")
+        #expect(context.actionLabel == nil)
+    }
+
+    @Test(arguments: [false, true])
+    func completedReviewKeepsItsSummaryInDetailsWithoutACardAction(_ openThread: Bool) throws {
+        var item = try item()
+        item.reviewingProgress = .current
+        item.humanActionRequired = false
+        let discussions: [GitLabMergeRequestDiscussion] = openThread
+            ? [.init(id: "thread", notes: [note(1, user: 3)])] : []
+        item.reviewingActivity = ReviewingActivity(discussions: discussions, reviewerID: 3, authorID: 7)
+        let snapshot = row(item)
+        let model = MRCardPresentation(row: snapshot, reviewingContext: ReviewingContext(row: snapshot),
+            allowsRemoval: true, assistantReady: true)
+
+        #expect(model.status == (openThread ? "Open review thread from @user3" : "Review run completed"))
+        #expect(model.nextStep == (openThread ? "No action needed. Waiting for updates to your review threads."
+            : "No action needed. Watching for updates."))
+        #expect(model.actionLabel.map { String(localized: $0) } == (openThread ? "View discussions" : nil))
+        #expect(model.cardNeutralStatus.map { String(localized: $0) } == (openThread ? model.status : nil))
+        #expect(model.cardNextStep == (openThread ? model.nextStep : nil))
+
+        let projected = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "me@host"), model: model)
+        let phone = try JSONDecoder().decode(RemoteCard.self, from: JSONEncoder().encode(projected))
+        #expect(phone.visibleStatus == model.status)
+        #expect(phone.visibleNextStep == model.nextStep)
+        #expect(phone.boardStatus == (openThread ? model.status : nil))
+        #expect(phone.boardNextStep == model.cardNextStep)
+        #expect(phone.primaryCTA?.destination == (openThread ? .discussions : nil))
     }
 
     @Test func freshWaitingForOtherThreadsSupersedesAnOlderFailedWorkflow() throws {

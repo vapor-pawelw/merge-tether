@@ -491,6 +491,9 @@ private struct CommandCenterMRDetailContent: View {
                             } icon: { Image(systemName: needsHumanAttention ? "exclamationmark.circle" : "arrow.triangle.pull") }
                             .font(.callout.weight(needsHumanAttention ? .medium : .regular))
                             .foregroundStyle(needsHumanAttention ? .orange : .secondary)
+                            if progress.reviewCompletionInDetailsOnly, let nextStep = progress.nextStep {
+                                Text(verbatim: nextStep).font(.callout).foregroundStyle(.secondary)
+                            }
                         }
                         if progress.working, mergeActivity == nil, let status = progress.status,
                            !(isRecheckingFeedback && progress.activityEffect == .aiCheck) {

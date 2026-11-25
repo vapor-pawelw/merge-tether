@@ -241,6 +241,12 @@ struct MRCardPresentation {
         if let generalNeutralStatus { return generalNeutralStatus }
         return reviewingContext.status == .activityUnknown ? reviewingContext.presenceMessage : reviewingContext.statusMessage
     }
+    var reviewCompletionInDetailsOnly: Bool {
+        allowsRemoval && reviewingContext.isMonitoringCompletedReview && !working && !refreshFailed
+            && generalNeutralStatus == nil && humanAction == nil
+    }
+    var cardNeutralStatus: LocalizedStringResource? { reviewCompletionInDetailsOnly ? nil : neutralStatus }
+    var cardNextStep: String? { reviewCompletionInDetailsOnly ? nil : nextStep }
     var statusPeopleMessage: RemotePeopleMessage? {
         guard !working, !refreshFailed, humanAction == nil, generalNeutralStatus == nil else { return nil }
         return reviewingContext.status == .activityUnknown ? reviewingContext.presencePeopleMessage : reviewingContext.statusPeopleMessage

@@ -82,6 +82,7 @@ struct ReviewingContext {
     }
     private(set) var nextStep: NextStep = .viewDiscussions
     var isAutomaticProcessing: Bool { nextStep == .automaticReview || nextStep == .verifying }
+    var isMonitoringCompletedReview: Bool { status == .reviewCompleted && nextStep == .monitoring }
     var nextStepMessage: LocalizedStringResource {
         switch nextStep {
         case .automaticReview: .ReviewingContext.reviewingAutomatic
@@ -101,7 +102,7 @@ struct ReviewingContext {
     var actionLabel: LocalizedStringResource? {
         switch nextStep {
         case .automaticReview, .verifying: nil
-        case .monitoring: status == .waitingForReady ? nil : .ReviewingContext.reviewingViewDiscussions
+        case .monitoring: status == .waitingForReady || isMonitoringCompletedReview ? nil : .ReviewingContext.reviewingViewDiscussions
         case .viewDiscussions: .ReviewingContext.reviewingViewDiscussions
         case .runReview: .CommandCenter.commandCenterReviewRun
         case .reviewComments: .MRHumanAction.mrHumanActionActionReviewDrafts

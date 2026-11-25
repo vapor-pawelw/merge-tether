@@ -68,6 +68,9 @@ public extension RemoteCard {
         return presentation?.nextStep
     }
 
+    var boardStatus: String? { presentation?.reviewCompletionInDetailsOnly == true ? nil : visibleStatus }
+    var boardNextStep: String? { presentation?.reviewCompletionInDetailsOnly == true ? nil : visibleNextStep }
+
     /// Policy lines already stated by the card itself, mirroring the Mac summary's exclusions.
     func visiblePolicy(_ policy: [String]) -> [String] {
         let cardText = [detail, presentation?.status ?? "", presentation?.nextStep ?? ""]

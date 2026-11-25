@@ -245,7 +245,7 @@ private struct CommandCenterMRCardContent: View {
                 }
                 if let chain = presentation.stepChain {
                     BoardStepChain(steps: chain.steps.map { String(localized: $0) }, current: chain.current)
-                } else if let nextStep = presentation.nextStep {
+                } else if let nextStep = presentation.cardNextStep {
                     Text(verbatim: nextStep)
                         .font(.subheadline).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -373,7 +373,7 @@ private struct CommandCenterMRCardContent: View {
     private var neutralStatus: LocalizedStringResource? {
         if presentation.mergeStage != nil { return nil }
         if let state = presentation.confirmedSubmission, state != .none { return nil }
-        return presentation.neutralStatus
+        return presentation.cardNeutralStatus
     }
 
     @ViewBuilder

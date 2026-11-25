@@ -558,10 +558,12 @@ struct RemoteCardView: View {
                 automaticApprovalOff: card.presentation?.automaticApprovalOff == true)
         }
     }
+    private var visibleStatus: String? { expanded ? card.visibleStatus : card.boardStatus }
+    private var visibleNextStep: String? { expanded ? card.visibleNextStep : card.boardNextStep }
     private var hasSupportingInformation: Bool {
-        card.presentation?.requirements?.isEmpty == false || card.visibleStatus != nil
+        card.presentation?.requirements?.isEmpty == false || visibleStatus != nil
             || card.presentation?.pendingDrafts != nil || (expanded && card.dependencies != nil)
-            || card.presentation?.steps?.isEmpty == false || card.visibleNextStep != nil
+            || card.presentation?.steps?.isEmpty == false || visibleNextStep != nil
             || !(card.presentation?.chips.isEmpty ?? card.drafts.isEmpty)
     }
     private var informationRows: some View {
@@ -596,7 +598,7 @@ struct RemoteCardView: View {
                 }
                 .font(.subheadline)
                 .modifier(MRDetailStatusCard(isPresented: expanded))
-            } else if let status = card.visibleStatus {
+            } else if let status = visibleStatus {
                 HStack(spacing: 5) {
                     if card.presentation?.working == true {
                         ProgressView().controlSize(.mini)
@@ -632,7 +634,7 @@ struct RemoteCardView: View {
             if let steps = card.presentation?.steps, !steps.isEmpty {
                 RemoteStepChain(steps: steps, current: card.presentation?.currentStep ?? 0)
                     .font(expanded ? .callout : .caption)
-            } else if let nextStep = card.visibleNextStep {
+            } else if let nextStep = visibleNextStep {
                 Text(verbatim: nextStep).font(expanded ? .callout : .caption).foregroundStyle(.secondary)
             }
             if let chips = card.presentation?.chips {
