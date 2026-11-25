@@ -123,7 +123,8 @@ import MergeTetherRemote
         }
         let failed = try recovery(item)
         let card = RemoteBoardAdapter.card(item, account: account, failedFollowUp: failed)
-        let action = try #require(card.actions.first(where: \.isAuthorFeedbackVerification))
+        let verification = card.actions.first(where: \.isAuthorFeedbackVerification)
+        let action = try #require(verification)
         #expect(action.label == String(localized: .AuthorFeedback.authorFeedbackRecheck))
         #expect(failed.prefersVerification == (workerState == .succeeded))
         #expect(failed.retryActionID == (workerState == .succeeded ? "intent:\(intent.id)" : "job:\(job.id)"))

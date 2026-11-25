@@ -79,17 +79,18 @@ struct NewReviewIntakeTests {
     @Test(arguments: [false, true])
     func phoneSharesTheNewBadgeAndCanAcknowledgeTheSameAssignment(confirmedAssignment: Bool) async throws {
         try await fixture(preset: .manual) { monitor, settings in
+            settings.automation.startNewReviewsAutomatically = false
+            await monitor.refreshManually()
             let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(mergeRequestJSON.utf8))
             settings.mrLifecycleLedger.record(request, for: target)
-            settings.automation.startNewReviewsAutomatically = false
+            settings.newReviewTargets.remove(target)
             monitor.trackReviewCandidate(target, projectPath: request.webURL.gitLabProjectPath, markNew: !confirmedAssignment)
-            if confirmedAssignment {
-                settings.reviewAssignments.observe([], host: host, username: "alice", at: Date())
-                settings.reviewAssignments.observe([request], host: host, username: "alice", at: Date())
-            }
+            settings.reviewAssignments.observe([], host: host, username: "alice", at: Date())
+            settings.reviewAssignments.observe([request], host: host, username: "alice", at: Date())
+            if !confirmedAssignment { settings.reviewAssignments.markSeen(target) }
             let session = UUID()
             let account = "alice@\(host)"
-            func phoneBoard(_ supportsReviewBoard: Bool = true) -> RemoteBoard {
+            @MainActor func phoneBoard(_ supportsReviewBoard: Bool = true) -> RemoteBoard {
                 RemoteBoardAdapter.board(monitor: monitor, session: session, account: account,
                     includesReviewBoard: supportsReviewBoard)
             }
@@ -97,6 +98,8 @@ struct NewReviewIntakeTests {
             #expect(legacy.boardTraits == nil)
             #expect(legacy.actions.allSatisfy { $0.id != RemoteAction.reviewSeenID })
             let board = phoneBoard()
+            let isCurrent = !board.partial
+            try #require(isCurrent)
             let card = try #require(board.cards.first { $0.id == "mr:1:42" })
             #expect(card.boardTraits?.isNew == true)
             let seen = try #require(card.actions.first { $0.id == RemoteAction.reviewSeenID })

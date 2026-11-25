@@ -444,11 +444,12 @@ import MergeTetherRemote
             recovery.retryActionID, recovery.diagnostics ?? "", try RemoteDigest.token(job?.operationalExecution?.finishedAt),
             try RemoteDigest.token((job?.verifiedFeedbackNotes ?? [:]).sorted { $0.key < $1.key }
                 .map { "\($0.key):\($0.value)" })]
-        let reviewEvidence = [item.mergeRequest.flatMap(contextRevision) ?? "", recovery.discussionFingerprint ?? "",
-            feedback?.head ?? "", feedback?.semanticContextFingerprint ?? "", feedback?.fingerprint ?? "",
-            feedback?.phase.rawValue ?? "", feedback?.completedFollowUpJobID?.uuidString ?? "",
-            feedback?.feedbackDecisionRevision ?? "", feedback?.reviewParticipationRevision ?? ""]
-        return try RemoteDigest.token(intentEvidence + jobEvidence + reviewEvidence)
+        let currentContext = item.mergeRequest.flatMap(contextRevision)
+        let reviewEvidence: [String?] = [currentContext, recovery.discussionFingerprint,
+            feedback?.head, feedback?.semanticContextFingerprint, feedback?.fingerprint,
+            feedback?.phase.rawValue, feedback?.completedFollowUpJobID?.uuidString,
+            feedback?.feedbackDecisionRevision, feedback?.reviewParticipationRevision]
+        return try RemoteDigest.token(intentEvidence + jobEvidence + reviewEvidence.map { $0 ?? "" })
     }
 
     static func matchingMergeStatus(for row: MergeRequestBoardSnapshot.Row,
