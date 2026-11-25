@@ -72,6 +72,10 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     private let saveRecovery: (RemoteCommandRecovery) throws -> Void
     private let removeRecovery: () throws -> Void
     private var recovery: RemoteCommandRecovery?
+    var isInboxReadResult: Bool {
+        guard let result = state.result, recovery?.command.id == result.id else { return false }
+        return recovery?.command.isInboxRead == true
+    }
     private var recoveryUnavailable = false
     private var shouldRecoverCommand = false
     private var receiptChallenge: UUID?
@@ -462,8 +466,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
            let kind = RemoteActionKind(rawValue: command.actionID), kind.isPersonalApproval {
             lastPersonalApproval = (result.id, kind)
         }
-        if result.status == .completed, let command = recovery?.command,
-           command.id == result.id, command.isCompletionAcknowledgement {
+        if result.status == .completed, let command = recovery?.command, command.id == result.id,
+           command.isCompletionAcknowledgement || command.isTodoAcknowledgement || command.isInboxRead {
             state.acknowledgeResult()
         }
         if let command = recovery?.command, command.id == result.id, command.isDraftRegeneration,

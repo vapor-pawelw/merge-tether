@@ -1638,8 +1638,7 @@ final class TodoMonitorService {
     func acknowledgeLifecycleCompletion(id: UUID) -> Bool {
         guard let host = glab.resolvedHost, let username = glab.currentUsername,
               lifecycleCompletions.contains(where: { $0.id == id }),
-              settings.mrLifecycleLedger.acknowledgeCompletion(id: id, host: host, username: username) else { return false }
-        settings.save()
+              settings.acknowledgeLifecycleCompletion(id: id, host: host, username: username) else { return false }
         boardAttentionPresenter.updateAttention(pendingUserAttention)
         return true
     }
@@ -1740,6 +1739,11 @@ final class TodoMonitorService {
     }
 
     func markDone(_ todo: Todo) async { await todoStore.markDone(todo, automatically: false) }
+
+    func acknowledgeVisibleTodo(_ todo: Todo,
+                                shouldProceed: @escaping @MainActor @Sendable () -> Bool) async -> InboxTodoStore.AcknowledgementResult {
+        await todoStore.acknowledgeVisibleTodo(todo, shouldProceed: shouldProceed)
+    }
 
     func markInboxNotificationsRead(_ notifications: [BoardCardPin], accountRevision: UInt64) async {
         var hiddenReviews: Set<UUID> = []

@@ -152,6 +152,15 @@ import MergeTetherRemote
         "mr:\(target.projectID):\(target.iid ?? 0)"
     }
 
+    static func card(_ todo: Todo, account: String) -> RemoteCard {
+        var card = RemoteCard(id: "todo:\(todo.id)", title: todo.displayTitle, project: todo.project.nameWithNamespace,
+            url: todo.targetURL, detail: todo.body)
+        if let token = try? RemoteDigest.token([account, try RemoteDigest.token(todo)]) {
+            card.actions = [.init(id: "markDone", kind: .markDone, token: token)]
+        }
+        return card
+    }
+
     static func board(monitor: TodoMonitorService, session: UUID, account: String,
                       includesBoardOrder: Bool = false, includesCardActions: Bool = false) -> RemoteBoard {
         let board = monitor.boardSnapshot
@@ -295,6 +304,8 @@ import MergeTetherRemote
             || monitor.attention.isLoading || monitor.authoredMergeRequests.isLoading
         if result.partial {
             for lane in result.lanes.indices { for card in result.lanes[lane].cards.indices { result.lanes[lane].cards[card].actions = [] } }
+        } else {
+            result.inboxReadAction = RemoteInboxReadSelection(other)?.action(hostSession: session, account: account)
         }
         return result
     }
@@ -556,13 +567,7 @@ import MergeTetherRemote
                 card.actions = []
                 card.detail = String(localized: .Remote.remoteProposal)
                 return jobProgress(card, job: proposal.latestJob, intents: proposal.intents + intents, conflictReceipts: conflictReceipts)
-            case .todo(let todo):
-                var card = RemoteCard(id: "todo:\(todo.id)", title: todo.displayTitle, project: todo.project.nameWithNamespace,
-                    url: todo.targetURL, detail: todo.body)
-                if let token = try? RemoteDigest.token([account, try RemoteDigest.token(todo)]) {
-                    card.actions = [.init(id: "markDone", kind: .markDone, token: token)]
-                }
-                return card
+            case .todo(let todo): return card(todo, account: account)
             case .job(let job):
                 let url = job.mergeRequestURL
                 var card = RemoteCard(id: "job:\(job.id)", title: job.title, project: url?.gitLabProjectPath ?? "", url: url,
@@ -647,7 +652,8 @@ import MergeTetherRemote
         let authorName: String? = author?.person.displayName
         let authorUsername: String? = author?.username
         let authorAvatarURL: URL? = author?.avatarURL
-        let draftBadge = MergeRequestFinishedState(model.row.displayRequest).map { String(localized: $0.badge) }
+        let finished = MergeRequestFinishedState(model.row.displayRequest)
+        let draftBadge = finished.map { String(localized: $0.badge) }
             ?? (model.row.isDraft ? String(localized: .Menu.menuMrDraftBadge) : nil)
         let chips: [RemoteCardChip] = model.chips.map { .init(title: String(localized: $0.title), symbol: $0.symbol) }
         let steps = model.stepChain.map { $0.steps.map { String(localized: $0) } }
@@ -657,7 +663,7 @@ import MergeTetherRemote
             ? .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewRun), destination: .assistantRuns) : nil
         card.presentation = .init(author: authorName,
             repository: String(repository),
-            draftBadge: draftBadge,
+            draftBadge: draftBadge, isDraft: finished == nil && model.row.isDraft,
             status: model.status, nextStep: model.nextStep, working: model.working,
             chips: chips,
             secondaryCTA: retryCTA,

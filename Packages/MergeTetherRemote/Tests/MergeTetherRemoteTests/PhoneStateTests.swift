@@ -3,6 +3,31 @@ import Testing
 @testable import MergeTetherRemote
 
 @MainActor @Suite struct PhoneStateTests {
+    @Test func inboxReadUsesOnlyTheControlFromTheCurrentCompleteSnapshot() throws {
+        let state = RemotePhoneState(), now = Date()
+        var board = CommandGateTests().board()
+        let old = RemoteAction(id: RemoteBoard.inboxReadActionID, kind: .markDone, token: "older")
+        board.inboxReadAction = old
+        let prior = try #require(board.inboxReadCard)
+        #expect(!board.cards.contains(prior))
+
+        let action = RemoteAction(id: RemoteBoard.inboxReadActionID, kind: .markDone, token: "current")
+        board.inboxReadAction = action
+        board.partial = true
+        #expect(board.inboxReadCard == nil)
+
+        board.partial = false
+        board.hostSession = UUID()
+        let decoded = try JSONDecoder().decode(RemoteBoard.self, from: JSONEncoder().encode(board))
+        state.receive(.init(type: .snapshot, challenge: state.challenge(now: now), board: decoded), now: now)
+        #expect(state.command(card: prior, action: old, now: now) == nil)
+        let control = try #require(decoded.inboxReadCard)
+        let command = try #require(state.command(card: control, action: action, now: now))
+        #expect(command.isInboxRead)
+        #expect(command.account == board.account && command.hostSession == board.hostSession)
+        #expect(command.token == action.token)
+    }
+
     @Test func onlyACompleteInboxLaneCanEstablishAnEmptyInbox() {
         let state = RemotePhoneState(), now = Date()
         var board = CommandGateTests().board()

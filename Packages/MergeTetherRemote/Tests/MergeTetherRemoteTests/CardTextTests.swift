@@ -3,6 +3,20 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct CardTextTests {
+    @Test func draftStyleUsesExplicitStateAndReadsLegacyBadges() throws {
+        let polish = try JSONDecoder().decode(RemoteCardText.self, from: Data(
+            #"{"repository":"p","draftBadge":"SZKIC","working":false,"chips":[]}"#.utf8))
+        #expect(polish.isDraft == nil)
+        #expect(polish.showsDraftStyle)
+        #expect(RemoteCardText(repository: "p", draftBadge: "DRAFT").showsDraftStyle)
+        #expect(!RemoteCardText(repository: "p", draftBadge: "MERGED").showsDraftStyle)
+
+        let explicit = RemoteCardText(repository: "p", draftBadge: "Other translation", isDraft: true)
+        let decoded = try JSONDecoder().decode(RemoteCardText.self, from: JSONEncoder().encode(explicit))
+        #expect(decoded.showsDraftStyle)
+        #expect(!RemoteCardText(repository: "p", draftBadge: "SZKIC", isDraft: false).showsDraftStyle)
+    }
+
     private func card(detail: String, status: String?, next: String?) -> RemoteCard {
         var card = RemoteCard(id: "mr:1:2", title: "MR", project: "g/p", url: nil, detail: detail)
         card.presentation = .init(repository: "p", status: status, nextStep: next)

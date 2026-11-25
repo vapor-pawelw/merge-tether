@@ -73,7 +73,15 @@ extension RemoteCommandResult.Status {
 
 extension RemotePhoneModel {
     var resultTitle: LocalizedStringResource {
-        switch completedPersonalApproval {
+        if isInboxReadResult {
+            switch state.result?.status {
+            case .partial: return .Board.boardInboxReadPartial
+            case .changed: return .Board.boardInboxReadChanged
+            case .uncertain: return .Board.boardInboxReadUncertain
+            default: break
+            }
+        }
+        return switch completedPersonalApproval {
         case .removeApproval: .Board.boardApprovalsRemoved
         case .personalApprove: .Board.boardApprovalsApproved
         default: state.result?.status.title ?? .Remote.remoteCompleted

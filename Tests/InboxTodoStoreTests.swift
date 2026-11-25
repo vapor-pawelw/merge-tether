@@ -45,6 +45,24 @@ struct InboxTodoStoreTests {
         }
     }
 
+    @Test func aPhoneAcknowledgementRejectedBeforeLaunchDoesNotReportAGitLabFailure() async throws {
+        try await fixture { store, gitlab, _ in
+            try await fetch(store)
+            let todo = try #require(store.visibleTodos.first)
+            var isCurrent = true
+            gitlab.beforeCommand = { request in
+                if request.method == "POST" { isCurrent = false }
+            }
+
+            let result = await store.acknowledgeVisibleTodo(todo) { isCurrent }
+
+            #expect(result == .notStarted)
+            #expect(gitlab.requests.allSatisfy { $0.method != "POST" })
+            #expect(store.visibleTodos.map(\.id) == [todo.id])
+            #expect(store.lastActionError == nil)
+        }
+    }
+
     private func fixture(_ body: (InboxTodoStore, InMemoryGitLab, SettingsManager) async throws -> Void) async throws {
         let name = "InboxTodoStoreTests-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: name))

@@ -4,6 +4,10 @@ import Observation
 /// Account-scoped inbox state. The monitor coordinates MR routing and automation after a successful read.
 @MainActor @Observable
 final class InboxTodoStore {
+    enum AcknowledgementResult {
+        case acknowledged, notStarted, uncertain
+    }
+
     struct Fetch {
         let host: String?
         let username: String?
@@ -27,6 +31,7 @@ final class InboxTodoStore {
     private(set) var username: String?
     private(set) var accountRevision: UInt64?
     private(set) var optimisticallyDone: Set<Int> = []
+    @ObservationIgnored private var guardedAcknowledgements: Set<Int> = []
     private var pendingMarkDoneTask: Task<Void, Never>?
     private(set) var undoableTodo: Todo?
     static let undoWindow: Duration = .seconds(4)
@@ -99,14 +104,21 @@ final class InboxTodoStore {
     }
 
     func markDone(_ todo: Todo, automatically: Bool) async {
-        guard optimisticallyDone.insert(todo.id).inserted else { return }
-        await performMarkDone(todo, automatically: automatically)
+        guard !guardedAcknowledgements.contains(todo.id), optimisticallyDone.insert(todo.id).inserted else { return }
+        _ = await performMarkDone(todo, automatically: automatically)
+    }
+
+    func acknowledgeVisibleTodo(_ todo: Todo, shouldProceed: @escaping @MainActor @Sendable () -> Bool) async -> AcknowledgementResult {
+        // Keep the card visible while the write is pending so admission can recheck the Inbox.
+        guard !optimisticallyDone.contains(todo.id), guardedAcknowledgements.insert(todo.id).inserted else { return .notStarted }
+        defer { guardedAcknowledgements.remove(todo.id) }
+        return await performMarkDone(todo, automatically: false, shouldProceed: shouldProceed)
     }
 
     /// Preserve the current pending action before replacing the single undo slot.
     func markDoneWithUndo(_ todo: Todo) {
         commitPendingMarkDone()
-        guard optimisticallyDone.insert(todo.id).inserted else { return }
+        guard !guardedAcknowledgements.contains(todo.id), optimisticallyDone.insert(todo.id).inserted else { return }
         undoableTodo = todo
         pendingMarkDoneTask = Task { [weak self] in
             try? await Task.sleep(for: Self.undoWindow)
@@ -128,28 +140,34 @@ final class InboxTodoStore {
         pendingMarkDoneTask?.cancel()
         pendingMarkDoneTask = nil
         undoableTodo = nil
-        Task { await performMarkDone(todo, automatically: false) }
+        Task { _ = await performMarkDone(todo, automatically: false) }
     }
 
-    private func performMarkDone(_ todo: Todo, automatically: Bool) async {
+    private func performMarkDone(_ todo: Todo, automatically: Bool,
+                                 shouldProceed: @escaping @MainActor @Sendable () -> Bool = { true }) async -> AcknowledgementResult {
         guard !automatically || settings.automaticPublicWritesAllowed else {
             optimisticallyDone.remove(todo.id)
-            return
+            return .notStarted
         }
         let host = self.host
         let username = glab.currentUsername
         let revision = glab.accountRevision
+        var authorizationRejected = false
         let result = await glab.markAsDone(id: todo.id, host: host) {
-            !Task.isCancelled && self.host == host && self.username == username
+            let allowed = !Task.isCancelled && self.host == host && self.username == username
                 && self.glab.currentUsername == username && self.accountRevision == revision
                 && self.glab.accountRevision == revision && (!automatically || self.settings.automaticPublicWritesAllowed)
+                && shouldProceed()
+            authorizationRejected = !allowed
+            return allowed
         }
         optimisticallyDone.remove(todo.id)
-        guard self.host == host, glab.currentUsername == username, glab.accountRevision == revision else { return }
+        if authorizationRejected { return .notStarted }
+        guard self.host == host, glab.currentUsername == username, glab.accountRevision == revision else { return .uncertain }
         if case .failure(let error) = result, !error.isNotFound {
             reportActionFailure(error)
             Log.monitor.error("Mark-as-done failed for \(todo.id, privacy: .public): \(String(describing: error), privacy: .private)")
-            return
+            return .uncertain
         }
         if isLoading { acknowledgedDuringFetch.insert(todo.id) }
         allTodos.removeAll { $0.id == todo.id }
@@ -159,5 +177,6 @@ final class InboxTodoStore {
             settings.pendingTodoAcknowledgements.remove(.init(host: host, username: username, todo: todo.feedbackIdentity))
         }
         settings.save()
+        return .acknowledged
     }
 }

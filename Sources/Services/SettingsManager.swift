@@ -180,6 +180,20 @@ final class SettingsManager {
     var reviewAssignments = ReviewAssignmentLedger()
     private(set) var incomingReviewFilterSettings = IncomingReviewFilterSettings()
 
+    func acknowledgeLifecycleCompletion(id: UUID, host: String, username: String) -> Bool {
+        var updated = mrLifecycleLedger
+        guard updated.acknowledgeCompletion(id: id, host: host, username: username) else { return false }
+        persistenceStore.preserveCorruptValues()
+        guard persistenceStore.save(updated, forKey: Key.mrLifecycleLedger) else { return false }
+        guard persistenceStore.synchronize() else {
+            _ = persistenceStore.save(mrLifecycleLedger, forKey: Key.mrLifecycleLedger)
+            _ = persistenceStore.synchronize()
+            return false
+        }
+        mrLifecycleLedger = updated
+        return true
+    }
+
     @discardableResult
     func saveReviewAssignments(_ ledger: ReviewAssignmentLedger) -> Bool {
         persistenceStore.preserveCorruptValues()

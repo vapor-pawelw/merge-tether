@@ -4,6 +4,133 @@ import MergeTetherRemote
 @testable import MergeTether
 
 @MainActor @Suite struct RemoteHostDetailTests {
+    @Test func inboxReadRejectsAnOlderSelectionWhenANewTodoArrives() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        f.setInboxTodos([401])
+        let displayed = try await f.board()
+        let command = try f.inboxReadCommand(from: displayed)
+        f.setInboxTodos([401, 402])
+
+        await f.transport.onMessage?(.init(type: .command, command: command))
+
+        #expect(f.transport.messages.last?.result?.status == .changed)
+        #expect(f.gitlab.requests.allSatisfy { $0.method != "POST" })
+        let current = try await f.board()
+        #expect(Set(current.cards.filter { $0.id.hasPrefix("todo:") }.map(\.id)) == ["todo:401", "todo:402"])
+    }
+
+    @Test func inboxReadSelectionExcludesProposalsAndAssistantJobs() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        f.setInboxTodos([401])
+        let board = try await f.board()
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2)
+        let pin = try #require(BoardCardPin.mergeRequest(host: target.host, username: target.username, projectID: 1, iid: 2))
+        let proposal = MergeRequestBoardSnapshot.OtherCard(id: pin, content: .proposal(
+            .init(target: target, title: "Review proposal", url: f.source.webURL, item: nil, todos: [], intents: [])))
+        let work = AssistantAutomationRunner.MergeRequestWork(host: target.host, projectID: 1, iid: 2)
+        let key = AssistantAutomationRunner.JobKey(assistant: .codex, work: work, username: target.username,
+            workspace: "", access: .gitLabRead)
+        let handoff = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Review job", prompt: "",
+            createdAt: Date(), allowsPush: false)
+        let job = MergeRequestBoardSnapshot.OtherCard(id: pin, content: .job(handoff))
+
+        let selection = RemoteInboxReadSelection(f.monitor.inboxItems + [proposal, job])
+        #expect(board.inboxReadAction != nil)
+        #expect(selection?.action(hostSession: board.hostSession, account: board.account) == board.inboxReadAction)
+        #expect(RemoteInboxReadSelection([proposal, job]) == nil)
+    }
+
+    @Test func inboxReadKeepsFailedTodosAndRecoversThePartialReceiptWithoutReplayingWrites() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        f.setInboxTodos([401, 402])
+        f.gitlab.write("fail-todo-401")
+        let displayed = try await f.board()
+        let command = try f.inboxReadCommand(from: displayed)
+
+        await f.transport.onMessage?(.init(type: .command, command: command))
+
+        #expect(f.transport.messages.last?.result?.status == .partial)
+        #expect(f.monitor.currentAccountTodos.map(\.id) == [401])
+        await f.transport.onMessage?(.init(type: .receipt, challenge: UUID(), command: command))
+        #expect(f.transport.messages.last?.result?.status == .partial)
+        let writes = f.gitlab.requests.filter { $0.method == "POST" }.map(\.endpoint)
+        #expect(writes.sorted() == ["/todos/401/mark_as_done", "/todos/402/mark_as_done"])
+    }
+
+    @Test func inboxReadAcknowledgesLocalUpdatesAndKeepsTheHiddenReviewHidden() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        f.setInboxTodos([401])
+        let settings = f.monitor.settings
+        let finishedTarget = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 6)
+        let finishedURL = try #require(URL(string: "https://gitlab.example.test/g/p/-/merge_requests/6"))
+        let original = f.gitlab.text("request").replacingOccurrences(of: #""iid":2"#, with: #""iid":6"#)
+            .replacingOccurrences(of: f.source.webURL.absoluteString, with: finishedURL.absoluteString)
+        let open = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(original.utf8))
+        let closed = try JSONDecoder().decode(GitLabMergeRequest.self,
+            from: Data(original.replacingOccurrences(of: #""state":"opened""#, with: #""state":"closed""#).utf8))
+        settings.mrLifecycleLedger.record(open, for: finishedTarget)
+        settings.mrLifecycleLedger.record(closed, for: finishedTarget)
+        settings.save()
+        let hidden = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 7)
+        let hiddenURL = try #require(URL(string: "https://gitlab.example.test/g/p/-/merge_requests/7"))
+        try #require(settings.hideFilteredReviews([.init(target: hidden, title: "Hidden review", url: hiddenURL)]))
+
+        let displayed = try await f.board()
+        let command = try f.inboxReadCommand(from: displayed)
+        #expect(displayed.cards.filter { $0.id.hasPrefix("completion:") }.count == 2)
+        await f.transport.onMessage?(.init(type: .command, command: command))
+
+        #expect(f.transport.messages.last?.result?.status == .completed)
+        #expect(f.monitor.lifecycleCompletions.isEmpty)
+        #expect(f.monitor.hiddenReviewNotifications.isEmpty)
+        let persisted = SettingsManager(defaults: f.defaults)
+        #expect(persisted.ignoredMergeRequests.contains(hidden))
+        #expect(persisted.filteredHiddenReviewDetails[hidden]?.inboxNotification == nil)
+        #expect(persisted.mrLifecycleLedger.isSuppressed(finishedTarget))
+        #expect(f.gitlab.requests.filter { $0.method == "POST" }.map(\.endpoint) == ["/todos/401/mark_as_done"])
+    }
+
+    @Test func inboxReadRevokesQueuedTodoWritesAfterTheAccountEpochChanges() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        f.setInboxTodos([401, 402])
+        let command = try f.inboxReadCommand(from: await f.board())
+        f.gitlab.beforeCommand = { request in
+            if request.method == "POST" {
+                f.monitor.glab.currentUsername = "other"
+                f.monitor.glab.currentUsername = "me"
+            }
+        }
+
+        await f.transport.onMessage?(.init(type: .command, command: command))
+
+        #expect(f.transport.messages.last?.result?.status == .uncertain)
+        #expect(f.gitlab.requests.allSatisfy { $0.method != "POST" })
+    }
+
+    @Test func standaloneInboxTodoAcknowledgementOnlyPostsTheDisplayedTodo() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        f.setInboxTodos([401, 402])
+        let displayed = try await f.board()
+        let card = try #require(displayed.cards.first { $0.id == "todo:402" })
+        let action = try #require(card.actions.first { $0.id == "markDone" })
+        let command = RemoteCommand(hostSession: displayed.hostSession, account: displayed.account, cardID: card.id,
+            actionID: action.id, token: action.token)
+
+        await f.transport.onMessage?(.init(type: .command, command: command))
+
+        #expect(f.transport.messages.last?.result?.status == .completed)
+        #expect(f.monitor.currentAccountTodos.map(\.id) == [401])
+        #expect(f.gitlab.requests.filter { $0.method == "POST" }.map(\.endpoint) == ["/todos/402/mark_as_done"])
+    }
+
+    @Test func draftCardAdvertisesDraftStateSeparatelyFromTheBadge() async throws {
+        let f = try Fixture(draft: true); defer { f.clean() }
+        let displayed = try await f.board()
+        let card = try #require(displayed.cards.first { $0.id == "mr:1:2" })
+        let json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(card)) as? [String: Any])
+        #expect((json["presentation"] as? [String: Any])?["isDraft"] as? Bool == true)
+    }
+
     @Test func phonePinSurvivesAutomaticSortingAndRejectsAnOlderPinState() async throws {
         let f = try Fixture(); defer { f.clean() }
         let settings = f.monitor.settings
@@ -657,6 +784,12 @@ import MergeTetherRemote
             settings.mrLifecycleLedger.record(request, for: .init(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2))
             settings.save()
             gitlab.handler = { [gitlab] call in
+                if call.arguments.contains(where: { $0.hasPrefix("/todos?") }), gitlab.has("inbox-todos") {
+                    return try gitlab.response("inbox-todos")
+                }
+                if call.method == "POST", call.endpoint == "/todos/401/mark_as_done", gitlab.has("fail-todo-401") {
+                    return InMemoryGitLab.output(error: "network unavailable", code: 1)
+                }
                 if call.arguments.starts(with: ["mr", "update"]) {
                     gitlab.write("request", gitlab.text("request").replacingOccurrences(of: "\"draft\":true", with: "\"draft\":false"))
                     if gitlab.has("lose-ready-response") { throw GlabError.timedOut }
@@ -673,6 +806,17 @@ import MergeTetherRemote
             }
             monitor = TodoMonitorService(settings: settings, glab: glab)
             pair = try .generate(origin: #require(URL(string: "https://relay.example.test")), access: String(repeating: "a", count: 43))
+        }
+        func setInboxTodos(_ ids: [Int]) {
+            let todo = #"{"id":401,"action_name":"assigned","target_type":"Issue","target_url":"https://gitlab.example.test/g/p/-/issues/42","body":"Unread issue","state":"pending","created_at":"2026-11-06T10:00:00Z","project":{"id":1,"name_with_namespace":"Group / Repo","path_with_namespace":"g/p"},"author":{"id":9,"username":"reviewer","name":"Reviewer"},"target":{"id":42,"iid":42,"title":"Unread issue","state":"opened"}}"#
+            let todos = ids.map { todo.replacingOccurrences(of: #""id":401"#, with: "\"id\":\($0)") }
+            gitlab.write("inbox-todos", "[" + todos.joined(separator: ",") + "]")
+        }
+        func inboxReadCommand(from board: RemoteBoard) throws -> RemoteCommand {
+            let card = try #require(board.inboxReadCard)
+            let action = try #require(card.actions.first)
+            return .init(hostSession: board.hostSession, account: board.account, cardID: card.id,
+                actionID: action.id, token: action.token)
         }
         func board(originUpdates: Bool = false, markReady: Bool = false, detailPreviews: Bool = false,
                    detailAvatars: Bool = false, cardActions: Bool = false) async throws -> RemoteBoard {
