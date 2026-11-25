@@ -338,6 +338,63 @@ import Testing
         #expect(!f.gitlab.has("acks"))
     }
 
+    private func resolveThread(_ fixture: Fixture, resolved: Bool) throws {
+        try (#"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"resolvable":true,"resolved":\#(resolved),"body":"Please fix this."}]}]"#)
+            .store(in: fixture.gitlab, as: "discussions")
+    }
+
+    @Test func queuedFollowUpWithAllThreadsResolvedIsDroppedWithoutRunningTheAgent() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        try resolveThread(f, resolved: true)
+        f.settings.assistantHandoffs[0].execution = .init(state: .queued)
+        var launches = 0
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { _, _ in
+            launches += 1; return UUID()
+        })
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+        #expect(f.settings.assistantHandoffs[0].execution?.state == .feedbackResolved)
+        #expect(f.settings.mrActionIntents[0].state == .completed)
+        #expect(launches == 0)
+    }
+
+    @Test func queuedFollowUpWithAnOpenThreadKeepsWaiting() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        try resolveThread(f, resolved: false)
+        f.settings.assistantHandoffs[0].execution = .init(state: .queued)
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true })
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+        #expect(f.settings.assistantHandoffs[0].execution?.state == .queued)
+        #expect(f.settings.mrActionIntents[0].state == .running)
+    }
+
+    @Test func queuedFollowUpKeepsWaitingWhenTheThreadReadIsIncomplete() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        try "[]".store(in: f.gitlab, as: "discussions")
+        f.settings.assistantHandoffs[0].execution = .init(state: .queued)
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true })
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+        #expect(f.settings.assistantHandoffs[0].execution?.state == .queued)
+        #expect(f.settings.mrActionIntents[0].state == .running)
+    }
+
+    @Test func manualRetryOfResolvedFollowUpCompletesEvenWithoutACodingAgent() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        try resolveThread(f, resolved: true)
+        f.settings.assistantHandoffs[0].execution = .init(state: .failed, error: "Original stopped attempt")
+        f.settings.mrActionIntents[0].state = .failed
+        var launches = 0
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false }, launcher: { _, _ in
+            launches += 1; return UUID()
+        })
+        await router.run(f.settings.mrActionIntents[0].id, manual: true)
+        #expect(f.settings.mrActionIntents[0].state == .completed)
+        #expect(launches == 0)
+    }
+
     @Test func stoppedFollowUpDoesNotCompleteWhileUnpublishedRemoteWorkRemains() async throws {
         let f = try fixture(owned: true); defer { f.cleanup() }
         try completedFollowUp(f)

@@ -19,7 +19,7 @@ struct AssistantJobExecution: Codable, Equatable, Sendable {
     }
 
     enum State: String, Codable, Sendable {
-        case queued, running, succeeded, blocked, failed, cancelled, interrupted
+        case queued, running, succeeded, blocked, failed, cancelled, interrupted, feedbackResolved
         var isActive: Bool { self == .queued || self == .running }
     }
 
@@ -66,11 +66,20 @@ struct AssistantJobExecution: Codable, Equatable, Sendable {
            feedbackStatus.semanticContextFingerprint == currentRequest.semanticContextFingerprint {
             return true
         }
-        let latest = handoffs.filter {
+        let matching = handoffs.filter {
             !$0.isObsoleteReminder && $0.key.work == work && $0.key.username == username
                 && !PipelineJobReconciliation.isObsolete($0, request: currentRequest)
         }
-            .max { $0.createdAt < $1.createdAt }
+        let resolved = matching.filter { $0.execution?.state == .feedbackResolved }
+        let latest = matching.lazy.filter { job in
+            guard let execution = job.execution else { return true }
+            if execution.state == .feedbackResolved { return false }
+            if execution.state == .succeeded || execution.state.isActive { return true }
+            let notes = job.selectedFollowUpNotes
+            return notes.isEmpty || !resolved.contains {
+                $0.createdAt > job.createdAt && notes.isSubset(of: $0.selectedFollowUpNotes)
+            }
+        }.max { $0.createdAt < $1.createdAt }
         guard let latest else { return false }
         if let currentRequest, feedbackStatus?.reconciles(latest, request: currentRequest,
             discussionFingerprint: discussionFingerprint) == true { return false }

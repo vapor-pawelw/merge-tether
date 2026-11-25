@@ -263,6 +263,7 @@ final class TodoAutomationService {
         if verifiedFingerprint != nil {
             let attempts = settings.assistantHandoffs.filter {
                 $0.key.work == work && $0.key.username == username && $0.feedbackDecisionRevision == decisionContext
+                    && $0.execution?.state != .feedbackResolved
             }
             let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
             let attempted = Set(candidates.compactMap { note -> Int? in
@@ -432,6 +433,7 @@ final class TodoAutomationService {
                 return !settings.authorFeedbackAttempts.contains(receipt) && !settings.assistantHandoffs.contains {
                     $0.key.work == work && $0.key.username == username && $0.feedbackRecoveryRootID == rootID
                         && $0.feedbackDecisionRevision == decisionContext
+                        && $0.execution?.state != .feedbackResolved
                         && $0.verifiedFeedbackNotes?[note.noteID] == revision
                 }
             }.sorted { $0.noteID < $1.noteID }

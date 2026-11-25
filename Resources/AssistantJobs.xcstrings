@@ -241,6 +241,13 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Zatrzymano"}}
       }
     },
+    "assistant.jobs.feedbackResolved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Feedback threads already resolved"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Wątki uwag są już rozwiązane"}}
+      }
+    },
     "assistant.jobs.interrupted": {
       "extractionState": "manual",
       "localizations": {

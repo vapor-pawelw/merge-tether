@@ -44,7 +44,7 @@ struct WorkflowExecutionProjectionTests {
         #expect(stored.allSatisfy { $0.state == .waitingForAssistant && $0.summary == "Local admission" })
     }
 
-    @Test(arguments: [AssistantJobExecution.State.queued, .running, .succeeded, .blocked, .failed, .interrupted, .cancelled])
+    @Test(arguments: [AssistantJobExecution.State.queued, .running, .succeeded, .blocked, .failed, .interrupted, .cancelled, .feedbackResolved])
     func anExactlyLinkedExecutionIsProjectedWithoutChangingAdmission(_ state: AssistantJobExecution.State) throws {
         let id = UUID()
         let stored = try entry(id)
@@ -55,7 +55,7 @@ struct WorkflowExecutionProjectionTests {
         case .running: .running
         case .succeeded: .completed
         case .blocked, .failed, .interrupted: .failed
-        case .cancelled: .skipped
+        case .cancelled, .feedbackResolved: .skipped
         }
         #expect(visible.state == expected && visible.summary == "Current run outcome")
         #expect(stored.state == .waitingForAssistant && stored.summary == "Local admission")

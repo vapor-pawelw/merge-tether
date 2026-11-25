@@ -448,6 +448,22 @@ extension GlabService {
         )
     }
 
+    /// Only a fresh, account-bound read can retire a selected follow-up without running an agent.
+    func areFeedbackThreadsResolved(_ noteIDs: Set<Int>, request: GitLabMergeRequest,
+                                    target: MRAutomationScope.Target) async -> Bool {
+        let revision = accountRevision
+        guard !Task.isCancelled, !noteIDs.isEmpty, request.state == "opened",
+              request.author.username == target.username, request.projectID == target.projectID, request.iid == target.iid,
+              request.webURL.isGitLabMergeRequest(host: target.host, iid: request.iid),
+              resolvedHost == target.host, currentUsername == target.username,
+              let discussions = try? await fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: target.host),
+              GitLabMergeRequestDiscussion.allResolved(noteIDs, in: discussions),
+              let user = try? await fetchAuthenticatedUser(host: target.host, expectedUsername: target.username),
+              user.id == request.author.id, !Task.isCancelled, accountRevision == revision,
+              resolvedHost == target.host, currentUsername == target.username else { return false }
+        return true
+    }
+
     func fetchMergeRequestReviewers(projectID: Int, iid: Int, host: String) async throws -> [GitLabMergeRequestReviewer] {
         try await fetchMergeRequestPages(
             "/projects/\(projectID)/merge_requests/\(iid)/reviewers?per_page=100",

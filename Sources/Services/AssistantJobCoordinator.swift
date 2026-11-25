@@ -94,6 +94,8 @@ final class AssistantJobCoordinator {
                     $0.output = String(outcome.output.prefix(262_144))
                     $0.finishedAt = Date()
                 }
+            } catch is AssistantJobExecutor.FeedbackAlreadyResolved where !Task.isCancelled && !terminating {
+                self.recordResolvedFeedback(handoff.id, settings: settings)
             } catch AssistantUsageRunner.AccessError.temporarilyUnavailable {
                 if !terminating && !Task.isCancelled {
                     self.update(handoff.id, settings: settings) { $0.state = .queued; $0.startedAt = nil }
@@ -125,6 +127,46 @@ final class AssistantJobCoordinator {
             settingsByJob[handoff.id] = nil
             if !terminating, let finished = settings.assistantHandoffs.first(where: { $0.id == handoff.id }) { onFinished?(finished) }
             startPendingJobs()
+        }
+    }
+
+    func finishQueuedResolvedFeedback(_ id: UUID, settings: SettingsManager) -> Bool {
+        guard tasks[id] == nil, settings.automaticActionsAllowed,
+              let handoff = settings.assistantHandoffs.first(where: { $0.id == id }),
+              handoff.execution?.state == .queued, !handoff.selectedFollowUpNotes.isEmpty else { return false }
+        pending.removeAll { $0.handoff.id == id }
+        work[id] = nil
+        settingsByJob[id] = nil
+        recordResolvedFeedback(id, settings: settings)
+        if let finished = settings.assistantHandoffs.first(where: { $0.id == id }) { onFinished?(finished) }
+        return true
+    }
+
+    private func recordResolvedFeedback(_ id: UUID, settings: SettingsManager) {
+        guard let handoff = settings.assistantHandoffs.first(where: { $0.id == id }) else { return }
+        let work = handoff.key.work
+        let target = MRAutomationScope.Target(host: work.host, username: handoff.key.username,
+            projectID: work.projectID, iid: work.iid)
+        // A skipped run cannot consume the retry budget if the same feedback is reopened.
+        let attempts = settings.assistantHandoffs.filter {
+            $0.id != id && $0.key.work == work && $0.key.username == target.username
+                && $0.execution?.state != .feedbackResolved
+        }
+        settings.authorFeedbackAttempts = settings.authorFeedbackAttempts.filter { receipt in
+            guard receipt.target == target, handoff.verifiedFeedbackNotes?[receipt.noteID] == receipt.revision,
+                  receipt.decisionRevision == handoff.feedbackDecisionRevision || receipt.decisionRevision == nil,
+                  receipt.recoveryRootID == nil || receipt.recoveryRootID == handoff.feedbackRecoveryRootID else { return true }
+            return attempts.contains {
+                $0.verifiedFeedbackNotes?[receipt.noteID] == receipt.revision
+                    && ($0.feedbackDecisionRevision == receipt.decisionRevision || receipt.decisionRevision == nil)
+                    && (receipt.recoveryRootID == nil || $0.feedbackRecoveryRootID == receipt.recoveryRootID)
+            }
+        }
+        update(id, settings: settings) {
+            $0.state = .feedbackResolved
+            $0.startedAt = nil
+            $0.summary = String(localized: .AssistantJobs.assistantJobsFeedbackResolved)
+            $0.finishedAt = .now
         }
     }
 

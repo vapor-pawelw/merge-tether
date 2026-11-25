@@ -124,7 +124,7 @@ struct AssistantJobRow: View {
                         }
                     } else if PipelineJobReconciliation.isObsolete(handoff, request: monitor.currentRequest(for: handoff)) {
                         Text(.MRFreshness.mrFreshnessHistoricalRun).font(.caption).foregroundStyle(.secondary)
-                    } else if !finished, execution.state != .succeeded && !handoff.isObsoleteReminder {
+                    } else if !finished, execution.state != .succeeded, execution.state != .feedbackResolved, !handoff.isObsoleteReminder {
                         Button {
                             guard requireCodingAssistant(monitor, for: handoff.key.assistant) else { return }
                             isRetrying = true
@@ -166,6 +166,7 @@ struct AssistantJobRow: View {
         case .failed: return .AssistantJobs.assistantJobsFailed
         case .cancelled: return .AssistantJobs.assistantJobsCancelled
         case .interrupted: return .AssistantJobs.assistantJobsInterrupted
+        case .feedbackResolved: return .AssistantJobs.assistantJobsFeedbackResolved
         }
     }
 }

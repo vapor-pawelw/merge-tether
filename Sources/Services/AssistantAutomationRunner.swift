@@ -178,6 +178,11 @@ enum AssistantAutomationRunner {
         // The persisted draftReply role was used only for the removed review-waiting reminders.
         var isObsoleteReminder: Bool { workflow == .draftReply }
         var operationalExecution: AssistantJobExecution? { isObsoleteReminder ? nil : execution }
+        var selectedFollowUpNotes: Set<Int> {
+            guard workflow == .followUp, draftRepair == nil, pipelineReservation == nil,
+                  taskIntent != .pipelineDiagnosis, workflowEventKind != .pipelineFailure else { return [] }
+            return Set(feedbackNoteIDs ?? [])
+        }
         var resolvesOwnThreads: Bool?
         var manual: Bool?
         var environmentRecoveryAttempted: Bool?
@@ -266,11 +271,15 @@ enum AssistantAutomationRunner {
 
     static func resumePendingJobs() { coordinator.resumePendingJobs() }
 
+    static func finishQueuedResolvedFeedback(_ id: UUID, settings: SettingsManager) -> Bool {
+        coordinator.finishQueuedResolvedFeedback(id, settings: settings)
+    }
+
     static func unhandledFeedback(_ ids: [Int], work: MergeRequestWork, username: String, settings: SettingsManager) -> [Int] {
         // Generic event paths must not replay handled notes while a changed decision
         // awaits assessment. Only a fresh verified request opens a new bounded context.
         let handled = Set(settings.assistantHandoffs.lazy.filter {
-            $0.key.work == work && $0.key.username == username
+            $0.key.work == work && $0.key.username == username && $0.execution?.state != .feedbackResolved
         }
             .flatMap { $0.feedbackNoteIDs ?? [] })
         return Array(Set(ids).subtracting(handled)).sorted()
@@ -285,7 +294,7 @@ enum AssistantAutomationRunner {
     static func attachFeedbackTodo(_ todo: Todo.FeedbackIdentity?, noteIDs: [Int], work: MergeRequestWork,
                                    username: String, settings: SettingsManager) -> Bool {
         guard let index = settings.assistantHandoffs.firstIndex(where: {
-            $0.key.work == work && $0.key.username == username
+            $0.key.work == work && $0.key.username == username && $0.execution?.state != .feedbackResolved
                 && Set(noteIDs).isSubset(of: Set($0.feedbackNoteIDs ?? []))
         }) else { return false }
         if let todo, settings.assistantHandoffs[index].feedbackTodos?.contains(todo) != true {
@@ -667,7 +676,7 @@ enum AssistantAutomationRunner {
                       manual: Bool = true, automaticRetryIdentity: AssistantAutomaticRetryIdentity? = nil) async throws -> Handoff {
         guard let handoff = settings.assistantHandoffs.first(where: { $0.id == id }) else { throw HandoffError.jobUnavailable }
         guard !handoff.isObsoleteReminder else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
-        guard let execution = handoff.execution, !execution.state.isActive,
+        guard let execution = handoff.execution, !execution.state.isActive, execution.state != .feedbackResolved,
               let taskPrompt = handoff.taskPrompt, let url = handoff.mergeRequestURL else { throw HandoffError.jobUnavailable }
         guard manual || (settings.automaticWritesAllowed && automaticRetryIdentity != nil && glab != nil
             && execution.cancellationOrigin != .user

@@ -90,6 +90,18 @@ struct GitLabMergeRequestDiscussion: Codable, Sendable {
         }
     }
 
+    /// Positive evidence that no agent work remains for the selected notes: every note exists, sits in a
+    /// resolvable thread and that thread is resolved. A missing, non-resolvable or unknown-state note is
+    /// never treated as settled, so a partial read can only keep work, not drop it.
+    static func allResolved(_ noteIDs: Set<Int>, in discussions: [Self]) -> Bool {
+        guard !noteIDs.isEmpty else { return false }
+        return noteIDs.allSatisfy { id in
+            guard let discussion = discussions.first(where: { $0.notes.contains { $0.id == id } }),
+                  let note = discussion.notes.first(where: { $0.id == id }), note.resolvable == true else { return false }
+            return discussion.isResolvedForReview
+        }
+    }
+
     static func unresolvedFeedback(in discussions: [Self], excluding userID: Int) -> [Note] {
         activeForReview(discussions).flatMap(\.notes).filter {
             guard let id = $0.id, id > 0, let author = $0.author, author.id > 0 else { return false }

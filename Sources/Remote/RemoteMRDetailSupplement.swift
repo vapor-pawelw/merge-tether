@@ -264,6 +264,7 @@ import MergeTetherRemote
         case .failed: .AssistantJobs.assistantJobsFailed
         case .cancelled: .AssistantJobs.assistantJobsCancelled
         case .interrupted: .AssistantJobs.assistantJobsInterrupted
+        case .feedbackResolved: .AssistantJobs.assistantJobsFeedbackResolved
         case nil: .AssistantJobs.assistantJobsStatusUnavailable
         }
         return String(localized: label)

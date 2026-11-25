@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Recognize agent usage limits and sign-in problems from the CLIs' structured status instead of wording alone: Claude's API status, and Codex's account and rate-limit endpoints when a Codex run fails with an unrecognized message.
 
+- Skip author feedback follow-ups when GitLab confirms every selected thread is resolved, including when the queue resumes after a CLI limit or a run is retried. The MR action can also complete without a configured coding agent.
+
 - Add new review requests straight to Reviewing, marked **New**, instead of the inbox (Settings → General, on by default). Turn it off to keep them in the inbox, where **Add** tracks one and **Ignore this MR** discards it; automation does not pick up inbox candidates.
 
 - Add **Start reviewing new merge requests automatically** to the automation profile: on for Safe, Trusted and Max, off for Manual. When off, a new review waits with its automation paused until you start it from its card.

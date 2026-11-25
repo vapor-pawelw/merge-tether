@@ -226,7 +226,12 @@ func runConfirmedIntent(_ intent: MRTodoIntent, monitor: TodoMonitorService,
         await monitor.runMRTodoIntent(id: intent.id, confirmedReview: consent)
     } else {
         let action = MRActionCTA(intent: intent.kind) ?? .refreshFromGitLab
-        guard confirmMRAction(action, title: title, variant: variant, monitor: monitor) else { return }
+        guard confirmMRAction(action, title: title, variant: variant,
+                              monitor: intent.kind == .followUp ? nil : monitor) else { return }
         await monitor.runMRTodoIntent(id: intent.id)
+        if intent.kind == .followUp, !monitor.selectedAssistantReady,
+           monitor.currentMRTodoIntents.contains(where: { $0.id == intent.id && [.pending, .failed].contains($0.state) }) {
+            presentCodingAssistantSetup()
+        }
     }
 }

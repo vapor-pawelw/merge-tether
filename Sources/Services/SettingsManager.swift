@@ -219,7 +219,7 @@ final class SettingsManager {
         }
 
         lastSeenTodoIDs = store.load(Key.lastSeenTodoIDs, fallback: [])
-        for handoff in assistantHandoffs {
+        for handoff in assistantHandoffs where handoff.execution?.state != .feedbackResolved {
             let target = MRAutomationScope.Target(host: handoff.key.work.host, username: handoff.key.username,
                 projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
             for (noteID, revision) in handoff.verifiedFeedbackNotes ?? [:] {

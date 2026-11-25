@@ -4,6 +4,49 @@ import Testing
 
 @MainActor
 struct AssistantWorkerAdmissionTests {
+    @Test(arguments: ["resolved", "late-resolved", "advanced-head", "open", "mixed", "missing", "unavailable"])
+    func resumedFollowUpStartsOnlyWhenGitLabCannotConfirmAllThreadsAreResolved(_ evidence: String) async throws {
+        let f = try Fixture(assistant: .codex, scenario: "follow-up-\(evidence)")
+        defer { f.clean() }
+        let health = AssistantCLIHealthStore(defaults: f.defaults)
+        health.record(.init(kind: .rateLimited), assistant: .codex, executable: f.cli, startedAt: .now)
+        let hold = try #require(health.hold(for: .codex))
+        let queue = AssistantJobCoordinator(healthStore: health) { handoff, settings in
+            try await AssistantJobExecutor.execute(handoff, settings: settings, glab: f.glab,
+                pipelineWorkDetector: f.claims, detectCLI: { _ in .ready(f.cli) })
+        }
+        var queued = f.handoff
+        queued.execution = .init(state: .queued)
+        queued.verifiedFeedbackNotes = [1: "note-revision"]
+        let work = queued.key.work
+        let target = MRAutomationScope.Target(host: work.host, username: queued.key.username, projectID: work.projectID, iid: work.iid)
+        let receipt = AuthorFeedbackAttempt(target: target, noteID: 1, revision: "note-revision")
+        f.settings.authorFeedbackAttempts.insert(receipt)
+        f.settings.assistantHandoffs = [queued]
+        try #require(queue.schedule(queued, settings: f.settings))
+        #expect(f.settings.assistantHandoffs[0].execution?.state == .queued)
+
+        let shouldSkip = ["resolved", "late-resolved", "advanced-head"].contains(evidence)
+        f.threadResolved = ["resolved", "advanced-head", "mixed"].contains(evidence)
+        health.clear(.codex, expectedID: hold.id)
+        queue.resumePendingJobs()
+        await queue.waitForTermination()
+
+        #expect(FileManager.default.fileExists(atPath: f.cli.path + ".started") == !shouldSkip)
+        let restored = SettingsManager(defaults: f.defaults)
+        #expect(restored.assistantHandoffs[0].execution?.state == (shouldSkip ? .feedbackResolved : .blocked))
+        #expect(restored.authorFeedbackAttempts.contains(receipt) == !shouldSkip)
+        if shouldSkip {
+            #expect(AssistantAutomationRunner.unhandledFeedback([1], work: work, username: queued.key.username, settings: restored) == [1])
+            let request = try await f.glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: work.host)
+            restored.mrActionIntents = [.init(id: UUID(), target: target, kind: .followUp, state: .running,
+                todoIDs: [], noteIDs: [1], sourceEvents: [], request: request, headSHA: f.head, jobID: queued.id, updatedAt: .now)]
+            let router = MergeRequestTodoRouter(settings: restored, glab: f.glab, canAutomate: { false })
+            await router.refreshCompletionEvidence(host: work.host, username: target.username)
+            #expect(restored.mrActionIntents[0].state == .completed)
+        }
+    }
+
     @Test(arguments: AutomationAssistant.allCases, ["observed", "failed", "other-account", "changed-account", "allowed-resolution", "allowed-push", "missing-approvals"])
     func recordsGitLabChangesAroundTheWorkerWithoutChangingItsOutcome(_ assistant: AutomationAssistant, _ scenario: String) async throws {
         let f = try Fixture(assistant: assistant, scenario: "audit-\(scenario)")
@@ -72,6 +115,7 @@ struct AssistantWorkerAdmissionTests {
         var targetBranch = "main"
         var pipelineStatus = "failed"
         var pipelineID = 10
+        var threadResolved = false
 
         init(assistant: AutomationAssistant, scenario: String) throws {
             self.scenario = scenario
@@ -111,7 +155,8 @@ struct AssistantWorkerAdmissionTests {
             let id = UUID()
             let pipeline = ["owned-pipeline", "stale-token", "owned-plus-legacy", "confirmed-pipeline", "unconfirmed-pipeline", "wrong-confirmation"].contains(scenario) || scenario.hasPrefix("late-pipeline-")
             let allowedPush = scenario == "audit-allowed-push"
-            let authored = pipeline || allowedPush
+            let feedbackFollowUp = scenario.hasPrefix("follow-up-")
+            let authored = pipeline || allowedPush || feedbackFollowUp
             let key = ExistingPipelineWorkDetector.Key(host: host, projectID: 7, mergeRequestIID: 11, pipelineID: 10)
             var reservation: ExistingPipelineWorkDetector.Key?
             if pipeline {
@@ -130,12 +175,13 @@ struct AssistantWorkerAdmissionTests {
             handoff = .init(id: id, key: .init(assistant: assistant,
                 work: .init(host: host, projectID: 7, iid: 11), username: "me", workspace: "", access: .gitLabRead),
                 title: "Current worker", prompt: "Inspect only the assigned MR.", createdAt: .now, allowsPush: false,
-                pipelineReservation: reservation, followUpPushAllowed: allowedPush ? true : nil,
+                pipelineReservation: reservation, feedbackNoteIDs: feedbackFollowUp ? (scenario == "follow-up-mixed" ? [1, 2] : [1]) : nil,
+                followUpPushAllowed: allowedPush ? true : nil,
                 execution: .init(state: .running), taskPrompt: "Inspect current evidence",
-                mergeRequestURL: URL(string: "https://\(host)/team/repo/-/merge_requests/11"), workflow: pipeline ? nil : (scenario.hasPrefix("new-discussion") || allowedPush ? .followUp : .review),
+                mergeRequestURL: URL(string: "https://\(host)/team/repo/-/merge_requests/11"), workflow: pipeline ? nil : (scenario.hasPrefix("new-discussion") || allowedPush || feedbackFollowUp ? .followUp : .review),
                 resolvesOwnThreads: scenario == "audit-allowed-resolution" ? true : nil,
-                manual: scenario.hasPrefix("manual-") || allowedPush, expectedHeadSHA: head, configurationSnapshot: settings.automation,
-                taskIntent: pipeline ? .pipelineDiagnosis : .review(),
+                manual: scenario.hasPrefix("manual-") || allowedPush || feedbackFollowUp, expectedHeadSHA: head, configurationSnapshot: settings.automation,
+                taskIntent: pipeline ? .pipelineDiagnosis : (feedbackFollowUp ? nil : .review()),
                 workflowEventKind: scenario == "legacy-no-rule" ? nil : (pipeline ? .pipelineFailure : (scenario.hasPrefix("new-discussion") ? .newDiscussion : .reviewUpdate)),
                 workflowOriginKnown: scenario == "legacy-no-rule" ? nil : true,
                 pipelineHandoffConfirmation: ["confirmed-pipeline", "wrong-confirmation"].contains(scenario) ? .init(
@@ -165,10 +211,12 @@ struct AssistantWorkerAdmissionTests {
                         "draft":false,"sha":workerRan && (fullEffectChange || allowedPush) ? String(repeating: "b", count: 40) : head,
                         "source_branch":"feature","target_branch":targetBranch,"labels":labels]
                     if pipeline && pipelineStatus != "missing" { payload["head_pipeline"] = ["id":pipelineID,"project_id":7,"status":pipelineStatus,"sha":head,"ref":"feature"] }
+                    if scenario == "follow-up-advanced-head" && threadResolved { payload["sha"] = String(repeating: "b", count: 40) }
                     return try InMemoryGitLab.json(payload)
                 }
                 if call.endpoint.contains("/draft_notes") {
                     baselineReads += 1
+                    if scenario == "follow-up-late-resolved" { threadResolved = true }
                     if scenario == "late-claim" { try externalClaim() }
                     if scenario == "late-label" { labels = [] }
                     if scenario == "late-target" { targetBranch = "release" }
@@ -190,6 +238,18 @@ struct AssistantWorkerAdmissionTests {
                     return try InMemoryGitLab.json(["approved_by": approvers])
                 }
                 if call.endpoint.contains("/discussions") {
+                    if scenario == "follow-up-unavailable" { throw GlabError.timedOut }
+                    if feedbackFollowUp && scenario != "follow-up-missing" {
+                        var discussions: [[String: Any]] = [["id":"thread", "notes":[
+                            ["id":1, "author":["id":2], "system":false, "resolvable":true, "resolved":threadResolved]
+                        ]]]
+                        if scenario == "follow-up-mixed" {
+                            discussions.append(["id":"other", "notes":[
+                                ["id":2, "author":["id":2], "system":false, "resolvable":true, "resolved":false]
+                            ]])
+                        }
+                        return try InMemoryGitLab.json(discussions)
+                    }
                     guard scenario.hasPrefix("audit-") else { return InMemoryGitLab.output("[]") }
                     let otherAccount = scenario == "audit-other-account"
                     let ownResolution = scenario == "audit-allowed-resolution"

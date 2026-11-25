@@ -326,13 +326,16 @@ final class MergeRequestTodoRouter {
             return
         }
         let invocationConfiguration = settings.automation
-        guard await canAutomate() else {
-            if manual {
+        let originalJob = original.jobID.flatMap { id in settings.assistantHandoffs.first { $0.id == id } }
+        func assistantReady() async -> Bool {
+            if await canAutomate() { return true }
+            if manual && isCurrentRun() {
                 settings.recordAutomationEvent(target: original.target, action: .retry, origin: .manual, state: .blocked,
                     message: String(localized: .TodoRouting.todoRoutingAssistantUnavailable), intentID: id, jobID: original.jobID)
             }
-            return
+            return false
         }
+        if original.kind != .followUp, !(await assistantReady()) { return }
         guard manual || shouldRunAutomatically(original.kind, request: original.request, target: original.target, workflowEventKind: original.workflowEventKind) else { return }
         do {
             let request: GitLabMergeRequest
@@ -356,15 +359,22 @@ final class MergeRequestTodoRouter {
                 }
                 return
             }
-            if original.kind == .followUp,
-               await followUpThreadsResolved(original.noteIDs, request: request, target: original.target) {
-                guard isCurrentRun() else { return }
-                update(id, origin: origin) { $0.request = request; $0.headSHA = head; $0.state = .completed; $0.error = nil }
-                return
+            if original.kind == .followUp {
+                let resolved = await glab.areFeedbackThreadsResolved(original.noteIDs, request: request, target: original.target)
+                guard !Task.isCancelled, isCurrentRun(), settings.automaticActionsAllowed,
+                      matchesCompletionSnapshot(original, job: originalJob) else { return }
+                if resolved {
+                    update(id, origin: origin) { $0.request = request; $0.headSHA = head; $0.state = .completed; $0.error = nil }
+                    return
+                }
+                guard await assistantReady(), !Task.isCancelled, matchesCompletionSnapshot(original, job: originalJob),
+                      !settings.ignoredMergeRequests.contains(original.target),
+                      invocationConfiguration.preservingScope(from: settings.automation) == settings.automation,
+                      manual || shouldRunAutomatically(original.kind, request: request, target: original.target,
+                                                       workflowEventKind: original.workflowEventKind) else { return }
             }
             if original.kind == .pipeline, settings.automaticPublicWritesAllowed {
                 let user = try await glab.fetchAuthenticatedUser(host: original.target.host, expectedUsername: original.target.username)
-                let originalJob = original.jobID.flatMap { id in settings.assistantHandoffs.first { $0.id == id } }
                 if let proof = try await glab.staleFailedPipelineTarget(for: request, host: original.target.host, expectedUser: user) {
                     try await glab.refreshStaleFailedPipeline(proof, for: request, host: original.target.host,
                         expectedUser: user, settings: settings, shouldProceed: {
@@ -604,6 +614,21 @@ final class MergeRequestTodoRouter {
         // rather than the earlier classification snapshot.
         let revision = glab.accountRevision
         var requests: [MRAutomationScope.Target: GitLabMergeRequest] = [:]
+        for job in settings.assistantHandoffs where job.execution?.state == .queued
+            && job.key.work.host == host && job.key.username == username && !job.selectedFollowUpNotes.isEmpty {
+            let work = job.key.work
+            let jobTarget = MRAutomationScope.Target(host: host, username: username, projectID: work.projectID, iid: work.iid)
+            guard target == nil || target == jobTarget else { continue }
+            guard !Task.isCancelled, isCurrent(host, username), glab.accountRevision == revision else { return }
+            if requests[jobTarget] == nil {
+                requests[jobTarget] = try? await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: host)
+            }
+            if let request = requests[jobTarget],
+               await glab.areFeedbackThreadsResolved(job.selectedFollowUpNotes, request: request, target: jobTarget),
+               !Task.isCancelled, glab.accountRevision == revision {
+                _ = AssistantAutomationRunner.finishQueuedResolvedFeedback(job.id, settings: settings)
+            }
+        }
         for original in settings.mrActionIntents where original.target.host == host && original.target.username == username
             && original.state != .completed && (target == nil || original.target == target) {
             guard !Task.isCancelled, isCurrent(host, username), glab.accountRevision == revision,
@@ -658,15 +683,11 @@ final class MergeRequestTodoRouter {
                 update(original.id) { $0.state = .failed; $0.error = String(localized: .TodoRouting.todoRoutingMissingRun) }
                 continue
             }
-            // A follow-up waiting in the queue (for example behind a CLI usage limit) keeps its original note
-            // selection. Resolved threads need no agent, so drop the run instead of waiting to spend it.
-            if original.kind == .followUp, let job, job.execution?.state == .queued {
-                let selected = job.feedbackNoteIDs.map(Set.init) ?? original.noteIDs
-                if await followUpThreadsResolved(selected, request: request, target: original.target),
-                   matchesCompletionSnapshot(original, job: job) {
-                    cancelJob(job.id, settings)
-                    update(original.id) { $0.state = .completed; $0.error = nil }
-                }
+            if original.kind == .followUp, let job, !original.noteIDs.isEmpty,
+               job.key.work.host == host, job.key.work.projectID == original.target.projectID,
+               job.key.work.iid == iid, job.key.username == username,
+               job.execution?.state == .feedbackResolved, original.noteIDs.isSubset(of: job.selectedFollowUpNotes) {
+                update(original.id) { $0.state = .completed; $0.error = nil }
                 continue
             }
             if let execution = job?.execution, execution.state.isActive { continue }
@@ -773,17 +794,6 @@ final class MergeRequestTodoRouter {
                     iid: request.iid, host: job.key.work.host) else { return false }
         return ReviewVerdictStore.contentMatches(verdict, head: request.sha ?? "", discussions: discussions,
             user: user, in: proofDirectory)
-    }
-
-    /// Deterministic no-agent check: every selected thread is already resolved on the live MR.
-    /// Any failed read, account change or empty selection answers false and leaves the work in place.
-    private func followUpThreadsResolved(_ noteIDs: Set<Int>, request: GitLabMergeRequest,
-                                         target: MRAutomationScope.Target) async -> Bool {
-        let revision = glab.accountRevision
-        guard !noteIDs.isEmpty, let iid = target.iid, request.state == "opened",
-              let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: iid, host: target.host),
-              !Task.isCancelled, glab.accountRevision == revision, isCurrent(target.host, target.username) else { return false }
-        return GitLabMergeRequestDiscussion.allResolved(noteIDs, in: discussions)
     }
 
     private func followUpMatches(_ job: AssistantAutomationRunner.Handoff, request: GitLabMergeRequest) -> Bool {

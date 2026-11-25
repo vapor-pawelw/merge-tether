@@ -32,6 +32,7 @@ enum AssistantJobExecutor {
     struct PersistenceUnavailable: Error, CustomStringConvertible {
         var description: String { String(localized: .Settings.settingsPersistenceActionBlocked) }
     }
+    struct FeedbackAlreadyResolved: Error {}
 
     @MainActor static func validatePersistence(_ settings: SettingsManager) throws {
         guard settings.automaticActionsAllowed else { throw PersistenceUnavailable() }
@@ -62,10 +63,22 @@ enum AssistantJobExecutor {
               glab.resolvedHost == handoff.key.work.host, glab.currentUsername == handoff.key.username else {
             throw ExecutionError.wrongAccount
         }
+        let accountRevision = glab.accountRevision
+        let feedbackTarget = MRAutomationScope.Target(host: handoff.key.work.host, username: handoff.key.username,
+            projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
+        let followUpNotes = handoff.selectedFollowUpNotes
+        @MainActor @Sendable func stopIfFeedbackResolved(_ request: GitLabMergeRequest) async throws {
+            guard !followUpNotes.isEmpty else { return }
+            let resolved = await glab.areFeedbackThreadsResolved(followUpNotes, request: request, target: feedbackTarget)
+            try Task.checkCancellation()
+            guard glab.accountRevision == accountRevision else { throw ExecutionError.wrongAccount }
+            if resolved { throw FeedbackAlreadyResolved() }
+        }
         let user = try await glab.fetchAuthenticatedUser(host: handoff.key.work.host, expectedUsername: handoff.key.username)
         let request = try await glab.fetchMergeRequest(projectID: handoff.key.work.projectID,
                                                       iid: handoff.key.work.iid, host: handoff.key.work.host)
         guard request.state == "opened" else { throw ExecutionError.inactiveMergeRequest }
+        if request.sha != handoff.expectedHeadSHA { try await stopIfFeedbackResolved(request) }
         try validateHeadSnapshot(expected: handoff.expectedHeadSHA, actual: request.sha)
         try validateReviewOwnership(isReview: handoff.workflow == .review || handoff.reviewModel != nil,
             authorID: request.author.id, userID: user.id)
@@ -229,7 +242,6 @@ enum AssistantJobExecutor {
             projectID: handoff.key.work.projectID, iid: handoff.key.work.iid, title: request.title,
             url: request.webURL.absoluteString)
         let authorization = WorkerLaunchAuthorization(request: request)
-        let accountRevision = glab.accountRevision
         let beforeLaunch: @Sendable () async throws -> Void = { @MainActor in
             if AssistantWorkerAudit.activeRunIndex(handoff, in: settings) != nil {
                 authorization.auditBaseline = await AssistantWorkerAudit.capture(for: request, host: handoff.key.work.host,
@@ -239,6 +251,7 @@ enum AssistantJobExecutor {
                 let latest = try await glab.fetchMergeRequest(projectID: handoff.key.work.projectID,
                     iid: handoff.key.work.iid, host: handoff.key.work.host)
                 _ = try validateMergeRequestContext(state: latest.state, head: latest.sha)
+                if latest.sha != handoff.expectedHeadSHA { try await stopIfFeedbackResolved(latest) }
                 try validateHeadSnapshot(expected: handoff.expectedHeadSHA, actual: latest.sha)
                 try validateReviewOwnership(isReview: handoff.workflow == .review || handoff.reviewModel != nil,
                     authorID: latest.author.id, userID: user.id)
@@ -256,6 +269,7 @@ enum AssistantJobExecutor {
                     user: user, host: handoff.key.work.host)
             }
             try validateWorkerAdmission(handoff, settings: settings, request: latest, detector: pipelineWorkDetector)
+            try await stopIfFeedbackResolved(latest)
         }
         let authorizeLaunch: @MainActor @Sendable () -> Bool = {
             do {
