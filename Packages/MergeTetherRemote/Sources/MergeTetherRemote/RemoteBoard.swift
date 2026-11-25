@@ -448,10 +448,16 @@ extension RemoteMessage {
     public func fittingIssueTags() -> Self {
         guard type == .snapshot, let board else { return self }
         let hasIssueTags = board.lanes.contains { $0.cards.contains { $0.issues != nil } }
-        guard hasIssueTags || board.hiddenReviews != nil,
+        let hasReviewTraits = board.lanes.contains { $0.cards.contains { $0.boardTraits != nil } }
+        guard hasIssueTags || hasReviewTraits || board.hiddenReviews != nil,
               let size = try? JSONEncoder().encode(self).count, size > RemoteCipher.maximumPayloadBytes else { return self }
         var result = self
         var shortened = board
+        if shortened.hiddenReviews != nil {
+            shortened.hiddenReviews = nil
+            result.board = shortened
+            if let size = try? JSONEncoder().encode(result).count, size <= RemoteCipher.maximumPayloadBytes { return result }
+        }
         if hasIssueTags {
             for lane in shortened.lanes.indices {
                 for card in shortened.lanes[lane].cards.indices {
@@ -469,11 +475,10 @@ extension RemoteMessage {
             result.board = shortened
             if let size = try? JSONEncoder().encode(result).count, size <= RemoteCipher.maximumPayloadBytes { return result }
         }
-        if shortened.hiddenReviews != nil {
-            shortened.hiddenReviews = nil
+        if hasReviewTraits {
+            shortened.removeReviewBoardTraits()
             result.board = shortened
             if let size = try? JSONEncoder().encode(result).count, size <= RemoteCipher.maximumPayloadBytes { return result }
-            shortened.removeReviewBoardTraits()
         }
         // An otherwise valid legacy-size snapshot may have no bytes left even for the omission flag.
         shortened.issueTagsOmitted = nil

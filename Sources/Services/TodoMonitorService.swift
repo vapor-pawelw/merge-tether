@@ -1060,15 +1060,17 @@ final class TodoMonitorService {
         guard let account = boardDisplayAccount else { return [] }
         var hidden = settings.hiddenReviewDetails.filter {
             $0.key.host == account.host && $0.key.username == account.username
+                && MergeRequestFinishedState(settings.mrLifecycleLedger.request(for: $0.key)) == nil
         }
         let assigned = settings.reviewAssignments.entries(host: account.host, username: account.username)?.map(\.request) ?? []
         let retained = settings.ignoredMergeRequests.compactMap { target -> GitLabMergeRequest? in
             guard target.host == account.host, target.username == account.username, hidden[target] == nil else { return nil }
             return settings.mrLifecycleLedger.request(for: target)
         }
-        for request in assigned + retained where request.author.username != account.username {
+        for request in assigned + retained where request.state == "opened" && request.author.username != account.username {
             guard let target = scopeTarget(projectID: request.projectID, iid: request.iid, url: request.webURL),
-                  settings.ignoredMergeRequests.contains(target), hidden[target] == nil else { continue }
+                  settings.ignoredMergeRequests.contains(target), hidden[target] == nil,
+                  MergeRequestFinishedState(settings.mrLifecycleLedger.request(for: target)) == nil else { continue }
             hidden[target] = .init(target: target, title: request.title, url: request.webURL)
         }
         return hidden.values.sorted {
@@ -1107,6 +1109,7 @@ final class TodoMonitorService {
     func ignoreMergeRequestProposal(projectID: Int, iid: Int, url: URL) async {
         guard projectID > 0, iid > 0, let target = scopeTarget(projectID: projectID, iid: iid, url: url) else { return }
         let accountRevision = glab.accountRevision
+        let review: HiddenReview
         do {
             async let user = glab.fetchAuthenticatedUser(host: target.host, expectedUsername: target.username)
             async let request = glab.fetchMergeRequest(projectID: projectID, iid: iid, host: target.host)
@@ -1115,12 +1118,13 @@ final class TodoMonitorService {
                   currentRequest.projectID == projectID, currentRequest.iid == iid,
                   currentRequest.webURL.isGitLabMergeRequest(host: target.host, iid: iid),
                   currentRequest.author.id != currentUser.id, glab.accountRevision == accountRevision else { return }
+            review = .init(target: target, title: currentRequest.title, url: currentRequest.webURL)
         } catch {
             guard !(error is CancellationError), glab.accountRevision == accountRevision else { return }
             todoStore.reportActionFailure(error as? GlabError ?? .unknown(String(describing: error)))
             return
         }
-        settings.ignoredMergeRequests.insert(target)
+        guard settings.hideReviewedMergeRequest(review) else { return }
         settings.automation.scope[target] = .paused
         settings.save()
         let work = AssistantAutomationRunner.MergeRequestWork(host: target.host, projectID: projectID, iid: iid)

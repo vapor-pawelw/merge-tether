@@ -115,6 +115,21 @@ struct NewReviewIntakeTests {
         }
     }
 
+    @Test func knownFinishedHiddenReviewsDoNotAppearInTheRestoreList() async throws {
+        try await fixture(preset: .manual) { monitor, settings in
+            await monitor.refreshNow()
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(mergeRequestJSON.utf8))
+            try #require(settings.hideReviewedMergeRequest(.init(target: target, title: request.title, url: request.webURL)))
+            settings.mrLifecycleLedger.record(request, for: target)
+            #expect(monitor.hiddenReviewAssignments.map(\.target) == [target])
+
+            let closedJSON = mergeRequestJSON.replacingOccurrences(of: #""state":"opened""#, with: #""state":"closed""#)
+            let closed = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(closedJSON.utf8))
+            settings.mrLifecycleLedger.record(closed, for: target)
+            #expect(monitor.hiddenReviewAssignments.isEmpty)
+        }
+    }
+
     @Test func disablingDirectAddingKeepsTheCandidateInTheInbox() async throws {
         try await fixture(preset: .trusted, addDirectly: false) { monitor, settings in
             await monitor.refreshNow()

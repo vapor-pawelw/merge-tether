@@ -71,9 +71,11 @@ struct BoardOrderTests {
         board.hiddenReviews = [RemoteCard(id: "hidden-review:1:2",
             title: String(repeating: "a", count: RemoteCipher.maximumPayloadBytes), project: "group/repo", url: nil)]
         board.lanes[1].cards[0].boardTraits = .init(needsAttention: false, isNew: true, isInactive: false)
+        board.lanes[1].cards[0].issues = [.init(reference: "#4", url: URL(string: "https://gitlab.example.test/g/p/-/issues/4")!)]
         let fitted = RemoteMessage(type: .snapshot, challenge: UUID(), board: board).fittingIssueTags()
         #expect(fitted.board?.hiddenReviews == nil)
         #expect(fitted.board?.lanes == board.lanes)
+        #expect(fitted.board?.issueTagsOmitted != true)
         #expect(try JSONEncoder().encode(fitted).count <= RemoteCipher.maximumPayloadBytes)
     }
 

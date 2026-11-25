@@ -10,7 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Align Agent Usage cards, filters and cost rows, and let longer dashboard text wrap.
 
-- Filter each Mac board column by attention, pins and activity section. Reviewing also supports new assignments. Combine choices through the filter icon in each column header.
+- Filter each board column by attention, pins and activity section on Mac, iPhone and iPad. Reviewing also supports new assignments. Combine choices through the filter icon in each column header.
+
+- See new review assignments and mark them as seen on a paired iPhone or iPad. Restore hidden assignments from the board menu, including after dismissing their Inbox notices.
 
 - Keep automatic review hides in Inbox until you mark them as seen or restore the merge request. Turn off future Inbox updates for autohides in filter settings.
 
