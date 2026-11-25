@@ -35,7 +35,7 @@ private struct CommandCenterMRCardContent: View {
     private var isDraft: Bool { row.isDraft }
     private var finishedState: MergeRequestFinishedState? { .init(row.displayRequest) }
     private var isMuted: Bool {
-        if let entry = row.manualOrderEntry { return !entry.group.automationEnabled }
+        if let entry = row.manualOrderEntry { return !entry.group.automationEnabled && !entry.isNew }
         return monitor.boardActivity(projectID: item.id.projectID, iid: item.id.iid, url: item.url,
             isDraft: isDraft, isFinished: finishedState != nil).isMuted
     }
@@ -47,6 +47,11 @@ private struct CommandCenterMRCardContent: View {
     private var humanAction: MRHumanAction? { presentation.humanAction }
 
     private var contentOpacity: Double { isDraft ? 0.5 : 1 }
+    private var isNewReview: Bool { scopeTarget.map(monitor.settings.newReviewTargets.contains) == true }
+    private func showDetails() {
+        if let scopeTarget { monitor.acknowledgeNewReview(scopeTarget) }
+        onDetails()
+    }
 
     var body: some View {
         Group {
@@ -104,7 +109,7 @@ private struct CommandCenterMRCardContent: View {
         }
         .boardCardInteraction(
             background: colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(white: 0.95),
-            backgroundOpacity: contentOpacity, onDetails: onDetails)
+            backgroundOpacity: contentOpacity, onDetails: showDetails)
         .contextMenu { menuItems }
         .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
             Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
@@ -114,7 +119,7 @@ private struct CommandCenterMRCardContent: View {
 
     @ViewBuilder private var cardHeading: some View {
         cardReference
-        Button(action: onDetails) {
+        Button(action: showDetails) {
             BoardCardTitle(title: row.displayTitle, repositoryPath: row.displayURL.gitLabProjectPath,
                 titleColor: !isDraft && isMuted ? .secondary : .primary)
                 .opacity(contentOpacity)
@@ -284,7 +289,12 @@ private struct CommandCenterMRCardContent: View {
                 MRDependencyBadge(dependencies: dependencies)
             }
             if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
-            else if isDraft { BoardDraftBadge(tint: draftBadgeTint) }
+            else {
+                if isNewReview {
+                    BoardStatusChip(title: .Board.boardCompactNew, symbol: "sparkle", tint: .accentColor)
+                }
+                if isDraft { BoardDraftBadge(tint: draftBadgeTint) }
+            }
         }
         .fixedSize(horizontal: true, vertical: false)
     }
@@ -446,7 +456,7 @@ private struct CommandCenterMRCardContent: View {
 
     private func openAttention(_ section: CommandCenterMRDetailSection) {
         if let onAttention { onAttention(section) }
-        else { onDetails() }
+        else { showDetails() }
     }
 
     @ViewBuilder

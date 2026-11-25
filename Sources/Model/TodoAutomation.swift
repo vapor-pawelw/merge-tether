@@ -263,6 +263,9 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var allowFollowUpPush = true
     /// Claim unreserved failed-pipeline work automatically; independent of push permission.
     var autoClaimPipelineFailures = false
+    /// A review candidate that just arrived in Reviewing starts its review without a click.
+    /// Otherwise it waits, with its automation paused, until the user starts it.
+    var startNewReviewsAutomatically = false
     var conflictPushProjects = ""
     var allowAssistantTools = false
     var assistantToolProjects = ""
@@ -370,6 +373,8 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         allowAssistantTools = try values.decodeIfPresent(Bool.self, forKey: .allowAssistantTools) ?? false
         assistantToolProjects = try values.decodeIfPresent(String.self, forKey: .assistantToolProjects) ?? ""
         packageDecision = try values.decodeIfPresent(AutomationPackageDecision.self, forKey: .packageDecision) ?? .undecided
+        startNewReviewsAutomatically = try values.decodeIfPresent(Bool.self, forKey: .startNewReviewsAutomatically)
+            ?? (packageDecision == .enabled)
         allowAutomaticPublicActions = try values.decodeIfPresent(Bool.self, forKey: .allowAutomaticPublicActions) ?? true
         publishAIRepliesWithoutConfirmation = try values.decodeIfPresent(Bool.self, forKey: .publishAIRepliesWithoutConfirmation)
             ?? (packageDecision != .disabled)
@@ -481,6 +486,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         try values.encodeIfPresent(baselinePreset, forKey: .baselinePreset)
         try values.encodeIfPresent(projectPermissionsVersion, forKey: .projectPermissionsVersion)
         try values.encodeIfPresent(autoClaimPipelineFailures, forKey: .autoClaimPipelineFailures)
+        try values.encodeIfPresent(startNewReviewsAutomatically, forKey: .startNewReviewsAutomatically)
         // Explicit null preserves Custom; an absent key belongs to legacy inference.
         try values.encode(matchingPreset, forKey: .selectedPreset)
     }
@@ -493,7 +499,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         case codexReviewModel, codexReviewThinking, claudeCodingModel, claudeCodingThinking, assistantDefaultsVersion, scope
         case workerExecutionTimeout
         case autoVerifyReReview, codexVerificationModel, claudeVerificationModel, verificationThinking, aiCommentCriteria
-        case autoResolveAcceptedFeedback, publicationRestrictions, publicationPolicyMode, baselinePreset, projectPermissionsVersion, autoClaimPipelineFailures, selectedPreset
+        case autoResolveAcceptedFeedback, publicationRestrictions, publicationPolicyMode, baselinePreset, projectPermissionsVersion, autoClaimPipelineFailures, startNewReviewsAutomatically, selectedPreset
     }
 
     private struct PublicationMigration: Decodable { let allowBotReplies: Bool? }
@@ -523,6 +529,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
             allowAssistantTools = preset != .checkpoints
             allowConflictPush = delivers
             autoClaimPipelineFailures = preset != .checkpoints
+            startNewReviewsAutomatically = true
             workflowRules[.pipelineFailure].retryInfrastructureFailure = delivers
             reviewRequested.isEnabled = true
             authorFeedback.isEnabled = true
@@ -622,6 +629,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         autoResolveAcceptedFeedback = false
         conflictTasksEnabled = false
         autoClaimPipelineFailures = false
+        startNewReviewsAutomatically = false
         autoVerifyReReview = false
         reviewRequested.isEnabled = false
         authorFeedback.isEnabled = false

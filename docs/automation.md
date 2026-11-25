@@ -158,7 +158,14 @@ Opening an external destination is not proof that its work completed. A manual s
 
 To-dos are incoming events. A recognized update for an MR already on the board updates its action state and is acknowledged after that state is persisted. The card shows the resulting action, rather than a separate to-do row. The action and any running or failed agent task remain visible after the GitLab to-do disappears.
 
-A new foreign MR is proposed in **Inbox** with **Add and handle** or **Ignore this MR**. With matching enabled automation, active scope and a ready selected CLI, eligible MRs are adopted and handled automatically. Automatic adoption registers the MR for tracking, and the MR continues to follow the repository and global scope. Explicitly ignored or paused MRs are not silently re-adopted. Manual re-addition restores an ignored MR.
+New review requests follow two independent settings.
+
+- **Add new review requests straight to Reviewing** (Settings → General, on by default) puts a new candidate in the Reviewing column marked **New**. The mark ends when you open the card or start its review. With the setting off, the candidate stays in **Inbox** with **Add** (track it without the New mark) or **Ignore this MR**, and automation never picks it up while it is there. Other events on an MR you do not track, such as a failed pipeline, keep **Add and handle**.
+- **Start reviewing new merge requests automatically** (Settings → Automation, part of the profile) decides whether the review starts by itself once the MR is in Reviewing. It is on for Safe, Trusted and Max, subject to the usual rules, scope and CLI readiness, and off for Manual. When it is off, MergeTether pauses the MR's automation, so nothing starts or resumes until you start the review from its card; starting it lifts that pause.
+
+In the inbox, a review candidate offers **Add and handle** when automation would take it over right after it is added, and **Add** otherwise, because its Reviewing card then carries the action. With manual board ordering, a New card sits at the top of the active block, just below cards that already need attention, even while its automation is paused. Automatic ordering applies its usual rules.
+
+Without the second setting, an MR already in Reviewing is handled automatically only when matching enabled automation, active scope and a ready selected CLI allow it. Automatic adoption registers the MR for tracking, and the MR continues to follow the repository and global scope. Explicitly ignored or paused MRs are not silently re-adopted. Manual re-addition restores an ignored MR.
 
 The final Mac setup screen offers **Import assigned reviews**. It adds open MRs where the signed-in GitLab account is a reviewer to **Reviewing**, including drafts and assignments without a pending GitLab to-do. The import works with the Manual profile and skips MRs you previously ignored. To import later, open **Settings → Integration → Run setup again**.
 

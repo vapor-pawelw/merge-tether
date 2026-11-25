@@ -265,7 +265,7 @@ struct MergeRequestBoardSnapshot {
     }
 
     func applyingManualOrder(_ order: MRBoardManualOrder, host: String, username: String,
-                             pinnedCards: Set<BoardCardPin>) -> Self {
+                             pinnedCards: Set<BoardCardPin>, newReviews: Set<MRAutomationScope.Target> = []) -> Self {
         guard let automation else { return self }
         return .init(reordering: self, own: ordered(own, reviewing: false),
             reviewed: ordered(reviewed, reviewing: true), otherMergeRequests: otherMergeRequests)
@@ -286,7 +286,7 @@ struct MergeRequestBoardSnapshot {
                 let enabled = automation.hasEnabledAutomation && automation.scope.resolve(target, isDraft: isDraft).active
                 row.manualOrderEntry = .init(target: target,
                     group: .init(reviewing: reviewing, automationEnabled: enabled, pinned: pinnedCards.contains(pin)),
-                    needsAttention: row.needsAttention)
+                    needsAttention: row.needsAttention, isNew: reviewing && newReviews.contains(target))
                 movable[target] = row
             }
             let ranks = order.ranked(movable.values.compactMap(\.manualOrderEntry))

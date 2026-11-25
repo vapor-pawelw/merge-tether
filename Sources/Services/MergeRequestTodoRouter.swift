@@ -104,7 +104,9 @@ final class MergeRequestTodoRouter {
                 || settings.mrActionIntents.contains { $0.target == target && $0.grantsManagement }
                 || settings.automation.scope.isManaged(target)
             var autoAdopt = false
-            if shouldAdoptAutomatically(kind, request: request, target: target) {
+            // With direct adding off, a review candidate waits in the inbox until the user adds it.
+            if (kind != .review || settings.addNewReviewsToReviewed)
+                && shouldAdoptAutomatically(kind, request: request, target: target) {
                 autoAdopt = await canAutomate()
                 guard isCurrentPass() else { return acknowledged }
                 autoAdopt = autoAdopt && shouldAdoptAutomatically(kind, request: request, target: target)
@@ -352,6 +354,12 @@ final class MergeRequestTodoRouter {
                     settings.recordAutomationEvent(target: original.target, action: .retry, origin: .manual, state: .blocked,
                         message: String(localized: .TodoRouting.todoRoutingNeedsRecheck), intentID: id, jobID: original.jobID)
                 }
+                return
+            }
+            if original.kind == .followUp,
+               await followUpThreadsResolved(original.noteIDs, request: request, target: original.target) {
+                guard isCurrentRun() else { return }
+                update(id, origin: origin) { $0.request = request; $0.headSHA = head; $0.state = .completed; $0.error = nil }
                 return
             }
             if original.kind == .pipeline, settings.automaticPublicWritesAllowed {
@@ -650,6 +658,17 @@ final class MergeRequestTodoRouter {
                 update(original.id) { $0.state = .failed; $0.error = String(localized: .TodoRouting.todoRoutingMissingRun) }
                 continue
             }
+            // A follow-up waiting in the queue (for example behind a CLI usage limit) keeps its original note
+            // selection. Resolved threads need no agent, so drop the run instead of waiting to spend it.
+            if original.kind == .followUp, let job, job.execution?.state == .queued {
+                let selected = job.feedbackNoteIDs.map(Set.init) ?? original.noteIDs
+                if await followUpThreadsResolved(selected, request: request, target: original.target),
+                   matchesCompletionSnapshot(original, job: job) {
+                    cancelJob(job.id, settings)
+                    update(original.id) { $0.state = .completed; $0.error = nil }
+                }
+                continue
+            }
             if let execution = job?.execution, execution.state.isActive { continue }
             let stoppedFollowUp = original.kind == .followUp && job.map {
                 AuthorFeedbackStatus.canReconcile($0, request: request)
@@ -754,6 +773,17 @@ final class MergeRequestTodoRouter {
                     iid: request.iid, host: job.key.work.host) else { return false }
         return ReviewVerdictStore.contentMatches(verdict, head: request.sha ?? "", discussions: discussions,
             user: user, in: proofDirectory)
+    }
+
+    /// Deterministic no-agent check: every selected thread is already resolved on the live MR.
+    /// Any failed read, account change or empty selection answers false and leaves the work in place.
+    private func followUpThreadsResolved(_ noteIDs: Set<Int>, request: GitLabMergeRequest,
+                                         target: MRAutomationScope.Target) async -> Bool {
+        let revision = glab.accountRevision
+        guard !noteIDs.isEmpty, let iid = target.iid, request.state == "opened",
+              let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: iid, host: target.host),
+              !Task.isCancelled, glab.accountRevision == revision, isCurrent(target.host, target.username) else { return false }
+        return GitLabMergeRequestDiscussion.allResolved(noteIDs, in: discussions)
     }
 
     private func followUpMatches(_ job: AssistantAutomationRunner.Handoff, request: GitLabMergeRequest) -> Bool {

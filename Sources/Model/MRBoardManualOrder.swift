@@ -18,6 +18,8 @@ struct MRBoardManualOrder: Codable, Equatable {
         let target: Target
         let group: Group
         let needsAttention: Bool
+        /// A review that just arrived in Reviewing; it stays in the active block until the user acts on it.
+        var isNew = false
     }
 
     private struct Card: Codable, Equatable {
@@ -31,7 +33,7 @@ struct MRBoardManualOrder: Codable, Equatable {
         let positions = Dictionary(cards.enumerated().map { ($0.element.target, $0.offset) },
             uniquingKeysWith: { first, _ in first })
         func rank(_ entry: Entry) -> (Int, Int, Int, Int, Int) {
-            (entry.group.automationEnabled ? 0 : 1, entry.group.pinned ? 0 : 1,
+            ((entry.group.automationEnabled || entry.isNew) ? 0 : 1, entry.group.pinned ? 0 : 1,
              positions[entry.target] ?? Int.max, entry.target.projectID, entry.target.iid ?? 0)
         }
         return entries.sorted { rank($0) < rank($1) }
@@ -70,11 +72,17 @@ struct MRBoardManualOrder: Codable, Equatable {
         return true
     }
 
+    /// Arrivals go below the cards that already need attention, on top of everything else.
     private mutating func appendNewCards(_ entries: [Entry]) {
         var known = Set(cards.map(\.target))
-        let newCards = entries.compactMap { entry in
-            known.insert(entry.target).inserted ? Card(target: entry.target, needsAttention: entry.needsAttention) : nil
+        var arrivals: [Card] = []
+        var others: [Card] = []
+        for entry in entries where known.insert(entry.target).inserted {
+            let card = Card(target: entry.target, needsAttention: entry.needsAttention)
+            if entry.isNew { arrivals.append(card) } else { others.append(card) }
         }
-        cards.append(contentsOf: newCards)
+        let top = cards.firstIndex { !$0.needsAttention } ?? cards.count
+        cards.insert(contentsOf: arrivals, at: top)
+        cards.append(contentsOf: others)
     }
 }

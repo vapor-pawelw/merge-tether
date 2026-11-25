@@ -40,6 +40,15 @@ struct BoardMRProposalCard: View {
         return item
     }
 
+    /// "Add and handle" when the action follows the add: another event kind, or a review that automation
+    /// takes over. Otherwise "Add" only tracks the MR; its Reviewing card carries the action.
+    private var startsWork: Bool {
+        let username = proposal.target.username
+        let otherAction = proposal.intents.contains { $0.state != .completed && $0.kind != .refresh && $0.kind != .review }
+            || proposal.todos.contains { MRTodoIntent.kind(for: $0, username: username).map { $0 != .review } == true }
+        return otherAction || monitor.automationHandlesNewReview(projectPath: proposal.url.gitLabProjectPath)
+    }
+
     private var context: ProposalMRContext {
         ProposalMRContext(proposal: proposal, fetchedRequest: currentRequest)
     }
@@ -81,29 +90,41 @@ struct BoardMRProposalCard: View {
                 }
                 runResult
                 HStack {
-                    Button {
-                        let needsAgent = proposal.intents.contains { $0.state != .completed && $0.kind != .refresh }
-                            || proposal.todos.contains { MRTodoIntent.kind(for: $0, username: proposal.target.username) != nil }
-                        guard !needsAgent || requireCodingAssistant(monitor) else { return }
-                        guard confirmMRAction(.addAndHandle, title: .Board.boardProposalAddAndHandle) else { return }
-                        isWorking = true
-                        Task {
-                            defer { isWorking = false }
-                            if let todo = proposal.todos.first {
-                                await monitor.adoptMRTodoProposal(todo) { intent in
-                                    confirmManualReview(for: monitor.reviewRequest(for: intent), monitor: monitor)
-                                }
-                            } else {
-                                do {
-                                    _ = try await monitor.addManagedMergeRequest(from: proposal.url.absoluteString)
-                                    for intent in proposal.intents where intent.state == .pending || intent.state == .failed {
-                                        await runConfirmedIntent(intent, monitor: monitor)
+                    if startsWork {
+                        Button {
+                            let needsAgent = proposal.intents.contains { $0.state != .completed && $0.kind != .refresh }
+                                || proposal.todos.contains { MRTodoIntent.kind(for: $0, username: proposal.target.username) != nil }
+                            guard !needsAgent || requireCodingAssistant(monitor) else { return }
+                            guard confirmMRAction(.addAndHandle, title: .Board.boardProposalAddAndHandle) else { return }
+                            isWorking = true
+                            Task {
+                                defer { isWorking = false }
+                                if let todo = proposal.todos.first {
+                                    await monitor.adoptMRTodoProposal(todo) { intent in
+                                        confirmManualReview(for: monitor.reviewRequest(for: intent), monitor: monitor)
                                     }
-                                } catch { failed = true }
+                                } else {
+                                    do {
+                                        _ = try await monitor.addManagedMergeRequest(from: proposal.url.absoluteString)
+                                        for intent in proposal.intents where intent.state == .pending || intent.state == .failed {
+                                            await runConfirmedIntent(intent, monitor: monitor)
+                                        }
+                                    } catch { failed = true }
+                                }
                             }
-                        }
-                    } label: { MRActionLabel(title: .Board.boardProposalAddAndHandle, cta: .addAndHandle) }
-                    .buttonStyle(.bordered).mrActionHelp(.addAndHandle)
+                        } label: { MRActionLabel(title: .Board.boardProposalAddAndHandle, cta: .addAndHandle) }
+                        .buttonStyle(.bordered).mrActionHelp(.addAndHandle)
+                    } else {
+                        // A review request is only tracked here; the review starts from its Reviewing card.
+                        Button {
+                            isWorking = true
+                            Task {
+                                defer { isWorking = false }
+                                await monitor.addReviewCandidate(proposal)
+                            }
+                        } label: { Text(.Board.boardProposalAdd) }
+                        .buttonStyle(.bordered)
+                    }
                     Button { confirmIgnore = true } label: { Text(.Board.boardProposalIgnore) }
                         .buttonStyle(.plain).foregroundStyle(.secondary)
                     if isWorking { ProgressView().controlSize(.small) }

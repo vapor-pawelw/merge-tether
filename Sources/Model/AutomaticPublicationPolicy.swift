@@ -133,7 +133,7 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
 }
 
 enum AutomationCheckpoint: CaseIterable {
-    case approval, followUpPush, pipelineOwnership, ownThreadResolution, acceptedFeedbackResolution
+    case approval, followUpPush, pipelineOwnership, startNewReviews, ownThreadResolution, acceptedFeedbackResolution
 }
 
 extension AutomationSettings {
@@ -192,6 +192,7 @@ extension AutomationSettings {
         case .approval: autoApproveEnabled = defaults.autoApproveEnabled
         case .followUpPush: allowFollowUpPush = defaults.allowFollowUpPush
         case .pipelineOwnership: autoClaimPipelineFailures = defaults.autoClaimPipelineFailures
+        case .startNewReviews: startNewReviewsAutomatically = defaults.startNewReviewsAutomatically
         case .ownThreadResolution: autoResolveOwnReviewThreads = defaults.autoResolveOwnReviewThreads
         case .acceptedFeedbackResolution: autoResolveAcceptedFeedback = defaults.autoResolveAcceptedFeedback
         }

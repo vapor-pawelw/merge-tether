@@ -40,6 +40,21 @@ struct GeneralSettingsTab: View {
             }
 
             Section {
+                Toggle(isOn: Binding(
+                    get: { monitor.settings.addNewReviewsToReviewed },
+                    set: { enabled in
+                        monitor.settings.addNewReviewsToReviewed = enabled
+                        monitor.settings.save()
+                    })) {
+                    Text(.Settings.settingsGeneralNewReviewsToggle)
+                }
+            } header: {
+                Text(.Settings.settingsGeneralNewReviewsSection)
+            } footer: {
+                Text(.Settings.settingsGeneralNewReviewsHelp)
+            }
+
+            Section {
                 Toggle(isOn: $launchAtLogin) {
                     Text(.Settings.settingsGeneralStartupLaunchAtLogin)
                 }

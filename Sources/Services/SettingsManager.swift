@@ -60,6 +60,12 @@ final class SettingsManager {
     private(set) var automationGloballyEnabled: Bool
     var confirmGlobalAutomationChanges: Bool
     var keepMacAwakeDuringAgentTasks: Bool
+    /// New review candidates go straight to Reviewing (marked NEW) instead of waiting in the inbox.
+    var addNewReviewsToReviewed: Bool
+    /// Reviewing cards that arrived directly and have not been acted on yet.
+    var newReviewTargets: Set<MRAutomationScope.Target>
+    /// New reviews whose automation MergeTether paused until the user starts them.
+    var heldNewReviewTargets: Set<MRAutomationScope.Target>
     /// Automation as configured. Presentation reads this so the killswitch only stops execution
     /// and never changes how cards, menus or groupings look.
     var configuredAutomation: AutomationSettings { automation.ignoringGlobalSuspension }
@@ -144,6 +150,9 @@ final class SettingsManager {
         automationGloballyEnabled = globallyEnabled
         confirmGlobalAutomationChanges = defaults.bool(forKey: Key.confirmGlobalAutomationChanges)
         keepMacAwakeDuringAgentTasks = defaults.bool(forKey: Key.keepMacAwakeDuringAgentTasks)
+        addNewReviewsToReviewed = defaults.bool(forKey: Key.addNewReviewsToReviewed)
+        newReviewTargets = store.load(Key.newReviewTargets, fallback: [])
+        heldNewReviewTargets = store.load(Key.heldNewReviewTargets, fallback: [])
         var runtimeAutomation = loadedAutomation
         runtimeAutomation.isGloballySuspended = !globallyEnabled
         automation = runtimeAutomation
@@ -264,6 +273,9 @@ final class SettingsManager {
         defaults.set(autoHandledEventBannersEnabled, forKey: Key.autoHandledEventBannersEnabled)
         defaults.set(confirmGlobalAutomationChanges, forKey: Key.confirmGlobalAutomationChanges)
         defaults.set(keepMacAwakeDuringAgentTasks, forKey: Key.keepMacAwakeDuringAgentTasks)
+        defaults.set(addNewReviewsToReviewed, forKey: Key.addNewReviewsToReviewed)
+        persistenceStore.save(newReviewTargets, forKey: Key.newReviewTargets)
+        persistenceStore.save(heldNewReviewTargets, forKey: Key.heldNewReviewTargets)
         defaults.set(onboardingCompleted, forKey: Key.onboardingCompleted)
         defaults.set(launchAtLoginPreference, forKey: Key.launchAtLoginPreference)
         if let glabPath {
@@ -437,6 +449,7 @@ final class SettingsManager {
             Key.automationGloballyEnabled: true,
             Key.confirmGlobalAutomationChanges: true,
             Key.keepMacAwakeDuringAgentTasks: true,
+            Key.addNewReviewsToReviewed: true,
             Key.boardGrouping: MRBoardGrouping.withoutAutomation.rawValue,
             Key.ownAutomationOffExpanded: true,
             Key.reviewingAutomationOffExpanded: true,
@@ -454,6 +467,9 @@ final class SettingsManager {
         static let automationGloballyEnabled = "automationGloballyEnabled"
         static let confirmGlobalAutomationChanges = "confirmGlobalAutomationChanges"
         static let keepMacAwakeDuringAgentTasks = "keepMacAwakeDuringAgentTasks"
+        static let addNewReviewsToReviewed = "addNewReviewsToReviewed"
+        static let newReviewTargets = "newReviewTargets"
+        static let heldNewReviewTargets = "heldNewReviewTargets"
         static let automationReceipts = "automationReceipts"
         static let automationAttemptReceipts = "automationAttemptReceipts"
         static let authorFeedbackAttempts = "authorFeedbackAttempts"

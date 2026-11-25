@@ -225,7 +225,7 @@ struct CommandCenterBoardView: View {
     }
 
     private func activity(_ row: MergeRequestBoardSnapshot.Row) -> MRBoardActivity.Group {
-        if let entry = row.manualOrderEntry { return entry.group.automationEnabled ? .regular : .inactive }
+        if let entry = row.manualOrderEntry { return entry.group.automationEnabled || entry.isNew ? .regular : .inactive }
         return monitor.boardActivity(projectID: row.id.projectID, iid: row.id.iid, url: row.item.url,
             isDraft: row.item.section == .draftMergeRequests,
             isFinished: MergeRequestFinishedState(row.item.mergeRequest) != nil).group

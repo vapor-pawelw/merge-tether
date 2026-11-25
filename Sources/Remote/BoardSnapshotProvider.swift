@@ -15,7 +15,7 @@ import Foundation
         let baseline = projector.board(humanAttention: attention)
         if settings.boardOrderingMethod == .manual, let host = glab.resolvedHost, let username = glab.currentUsername {
             return baseline.applyingManualOrder(settings.boardManualOrder, host: host, username: username,
-                pinnedCards: settings.boardPins)
+                pinnedCards: settings.boardPins, newReviews: settings.newReviewTargets)
         }
         let positions = boardPolicyOrder.positions(for: boardOrderingEntries(baseline))
         return baseline.preservingOrder(positions, host: glab.resolvedHost, username: glab.currentUsername,

@@ -94,6 +94,10 @@ extension TodoMonitorService {
                 username: target.username, settings: settings, isReview: true, mrWorkflow: .review, manual: true,
                 expectedHeadSHA: head, jobCoordinator: reviewJobCoordinator, taskIntent: .review(fromScratch: fromScratch),
                 readOnlyReview: readOnly)
+            // Starting the review is the go-ahead for a new review that waited for the user.
+            if !readOnly {
+                releaseNewReview(.init(host: target.host, username: target.username, projectID: target.projectID, iid: target.iid))
+            }
         } catch {
             assistantJobActionError = String(localized: .AssistantJobs.assistantJobsActionFailed)
         }

@@ -140,6 +140,23 @@ struct MRBoardManualOrderTests {
         try send(manual(attention, order), expect: [2, 3, 1])
     }
 
+    @Test func aNewReviewArrivesBelowAttentionCardsAndAboveTheRestEvenWithItsAutomationPaused() throws {
+        let reviewed = try items([7, 8, 9], attention: [8], authored: false)
+        var order = MRBoardManualOrder()
+        let initial = board(own: [], reviewed: Array(reviewed[0...1])).applyingManualOrder(order, host: host,
+            username: username, pinnedCards: [])
+        order.observe(initial.manualOrderEntries, promotesAttention: true)
+
+        let arrival = board(own: [], reviewed: reviewed, paused: [9]).applyingManualOrder(order, host: host,
+            username: username, pinnedCards: [], newReviews: [target(9)])
+        order.observe(arrival.manualOrderEntries, promotesAttention: true)
+        #expect(arrival.manualOrderEntries.first { $0.target == target(9) }?.isNew == true)
+
+        let settled = board(own: [], reviewed: reviewed, paused: [9]).applyingManualOrder(order, host: host,
+            username: username, pinnedCards: [], newReviews: [target(9)])
+        #expect(settled.reviewed.map(\.id.iid) == [8, 9, 7])
+    }
+
     private func target(_ iid: Int, username: String = "me") -> MRAutomationScope.Target {
         .init(host: host, username: username, projectID: 1, iid: iid)
     }

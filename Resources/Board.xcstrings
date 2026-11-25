@@ -976,6 +976,20 @@
         },
         "pl": {"stringUnit": {"state": "translated", "value": "–/–"}}
       }
+    },
+    "board.proposal.add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Add" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Dodaj" } }
+      }
+    },
+    "board.compact.new": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "New" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Nowe" } }
+      }
     }
   }
 }

@@ -675,6 +675,101 @@ final class TodoMonitorService {
         await refreshNow()
     }
 
+    // MARK: New review candidates
+
+    /// Whether a review candidate that has just arrived in Reviewing starts its own review.
+    var startsNewReviewsAutomatically: Bool {
+        settings.automation.packageDecision == .enabled && settings.automation.startNewReviewsAutomatically
+    }
+
+    /// Tracks a review candidate in Reviewing without starting any work. Unless the profile starts
+    /// new reviews itself, the MR's automation stays paused until the user starts it.
+    /// `receipts` are the candidate's review to-dos; they stop appearing in the inbox once held.
+    func trackReviewCandidate(_ target: MRAutomationScope.Target, projectPath: String, markNew: Bool,
+                              receipts: [Todo] = []) {
+        settings.automation.scope.adoptAutomatically(target)
+        settings.automation.scope.rememberRepository(projectPath, for: target)
+        if markNew { settings.newReviewTargets.insert(target) }
+        if !startsNewReviewsAutomatically, settings.automation.scope[target] == .inherit {
+            settings.automation.scope[target] = .paused
+            settings.heldNewReviewTargets.insert(target)
+            for todo in receipts {
+                settings.routedMRTodoReceipts.insert(.init(target: target, event: todo.feedbackIdentity, intentID: nil))
+            }
+        }
+        settings.save()
+    }
+
+    /// Whether the review request for `projectPath` would be taken over by automation as soon as it is added.
+    func automationHandlesNewReview(projectPath: String) -> Bool {
+        let rule = settings.automation.reviewRequested
+        return startsNewReviewsAutomatically && rule.isEnabled && rule.runner == .assistant
+            && rule.isConfigured && rule.includes(project: projectPath)
+    }
+
+    /// The user acted on the card: the NEW mark ends and a held review may run automation again.
+    func acknowledgeNewReview(_ target: MRAutomationScope.Target) {
+        guard settings.newReviewTargets.contains(target) || settings.heldNewReviewTargets.contains(target) else { return }
+        settings.newReviewTargets.remove(target)
+        settings.save()
+    }
+
+    /// Starting the review is the user's explicit go-ahead for a held MR.
+    func releaseNewReview(_ target: MRAutomationScope.Target) {
+        acknowledgeNewReview(target)
+        guard settings.heldNewReviewTargets.remove(target) != nil else { return }
+        if settings.automation.scope[target] == .paused { settings.automation.scope[target] = .inherit }
+        settings.save()
+    }
+
+    /// Moves an inbox review candidate to Reviewing ("Add"). It never starts work by itself.
+    func addReviewCandidate(_ proposal: MergeRequestBoardSnapshot.Proposal) async {
+        let target = proposal.target
+        guard target.iid != nil else { return }
+        settings.ignoredMergeRequests.remove(target)
+        settings.mrLifecycleLedger.restore(target)
+        trackReviewCandidate(target, projectPath: proposal.url.gitLabProjectPath, markNew: false,
+                             receipts: proposal.todos)
+        await refreshNow()
+    }
+
+    /// Review requests go straight to Reviewing when the user chose so. This is independent of
+    /// automation consent; whether work starts is decided by `startsNewReviewsAutomatically`.
+    private func addNewReviewCandidates(host: String, username: String) async {
+        guard settings.addNewReviewsToReviewed, settings.automaticActionsAllowed else { return }
+        let revision = glab.accountRevision
+        var requests: [MRAutomationScope.Target: GitLabMergeRequest] = [:]
+        var added = false
+        for todo in currentAccountTodos where MRTodoIntent.kind(for: todo, username: username) == .review {
+            guard let iid = todo.target.iid, todo.targetType == .mergeRequest,
+                  todo.targetURL.gitLabTodoMergeRequestURL(host: host, iid: iid) != nil else { continue }
+            let target = MRAutomationScope.Target(host: host, username: username, projectID: todo.project.id, iid: iid)
+            let paused = settings.automation.scope[target] == .paused
+                || (settings.automation.scope[target] == .inherit && settings.automation.scope[target.repository] == .paused)
+            guard !settings.ignoredMergeRequests.contains(target), !paused, !trackedReviewTarget(target),
+                  !settings.routedMRTodoReceipts.contains(where: { $0.target == target && $0.event == todo.feedbackIdentity })
+            else { continue }
+            let request: GitLabMergeRequest
+            if let cached = requests[target] { request = cached }
+            else {
+                guard let fetched = try? await glab.fetchMergeRequest(projectID: target.projectID, iid: iid, host: host) else { continue }
+                requests[target] = fetched
+                request = fetched
+            }
+            guard !Task.isCancelled, glab.resolvedHost == host, glab.currentUsername == username,
+                  glab.accountRevision == revision, settings.addNewReviewsToReviewed,
+                  request.projectID == target.projectID, request.iid == iid, request.state == "opened",
+                  request.author.username != username, request.webURL.isGitLabMergeRequest(host: host, iid: iid),
+                  !settings.ignoredMergeRequests.contains(target) else { continue }
+            let siblings = currentAccountTodos.filter {
+                MRTodoIntent.kind(for: $0, username: username) == .review && $0.project.id == target.projectID && $0.target.iid == iid
+            }
+            trackReviewCandidate(target, projectPath: request.webURL.gitLabProjectPath, markNew: true, receipts: siblings)
+            added = true
+        }
+        if added { attention.refresh(host: host, username: username, todos: visibleTodos) }
+    }
+
     private func trackedReviewTarget(_ target: MRAutomationScope.Target) -> Bool {
         settings.automation.scope.isManaged(target) || settings.mrLifecycleLedger.request(for: target) != nil
             || settings.mrActionIntents.contains { $0.target == target && $0.grantsManagement }
@@ -686,6 +781,7 @@ final class TodoMonitorService {
 
     private func routeMRTodos(host: String, username: String, manuallyAdopting target: MRAutomationScope.Target? = nil) async {
         let automatically = target == nil
+        if automatically { await addNewReviewCandidates(host: host, username: username) }
         guard !automatically || settings.automaticWritesAllowed else { return }
         let revision = glab.accountRevision
         let todos: [Todo]

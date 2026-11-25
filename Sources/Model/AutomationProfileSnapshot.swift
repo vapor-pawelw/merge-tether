@@ -22,6 +22,7 @@ struct AutomationProfileSnapshot: Codable, Equatable, Sendable {
     let tools: Bool
     let conflictPush: Bool
     let pipelineOwnership: Bool
+    let startNewReviews: Bool?
     let publication: AutomationPublicationMode
     let requireAI: Bool
     let botReplies: Bool?
@@ -44,6 +45,7 @@ struct AutomationProfileSnapshot: Codable, Equatable, Sendable {
         tools = configuration.allowAssistantTools
         conflictPush = configuration.allowConflictPush
         pipelineOwnership = configuration.autoClaimPipelineFailures
+        startNewReviews = configuration.startNewReviewsAutomatically
         publication = configuration.publicationMode
         requireAI = configuration.publicationRestrictions.requireAI
         botReplies = configuration.publicationRestrictions.allowBotReplies
@@ -84,6 +86,7 @@ struct AutomationProfileSnapshot: Codable, Equatable, Sendable {
         configuration.allowAssistantTools = tools
         configuration.allowConflictPush = conflictPush
         configuration.autoClaimPipelineFailures = pipelineOwnership
+        configuration.startNewReviewsAutomatically = startNewReviews ?? true
         configuration.publicationMode = publication
         configuration.publicationRestrictions.requireAI = requireAI
         configuration.publicationRestrictions.allowBotReplies = botReplies ?? false

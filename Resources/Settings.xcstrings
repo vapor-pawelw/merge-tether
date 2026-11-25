@@ -2185,6 +2185,41 @@
         },
         "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzaj istniejące rezerwacje i atomowo rezerwuj obsługę wolnych awarii w Twoich MR. Wyłącz tę opcję, aby potwierdzać każde przekazanie. Dane pipeline’u i uprawnienie do wysyłania zmian są sprawdzane osobno."}}
       }
+    },
+    "settings.general.newReviews.section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "New reviews" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Nowe review" } }
+      }
+    },
+    "settings.general.newReviews.toggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Add new review requests straight to Reviewing" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Dodawaj nowe prośby o review od razu do Reviewing" } }
+      }
+    },
+    "settings.general.newReviews.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "New merge requests you are asked to review appear in Reviewing marked New. Turn this off to keep them in the inbox until you add or ignore each one. Nothing is reviewed until it is started, unless automation is set to start it." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Nowe MR-y, które masz zreviewować, trafiają do Reviewing z oznaczeniem Nowe. Wyłącz, aby zostawały w skrzynce, dopóki nie dodasz lub zignorujesz każdego z nich. Review nie startuje samo, chyba że ustawisz to w automatyzacji." } }
+      }
+    },
+    "settings.automation.startNewReviews": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Start reviewing new merge requests automatically" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Automatycznie rozpoczynaj review nowych MR-ów" } }
+      }
+    },
+    "settings.automation.startNewReviewsHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "A new review request starts its review as soon as it reaches Reviewing, when your rules allow it. Turn off to start each one yourself; its automation stays paused until you do." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Nowa prośba o review rozpoczyna review od razu po trafieniu do Reviewing, jeśli pozwalają na to Twoje reguły. Wyłącz, aby startować każdą samodzielnie; jej automatyzacja pozostaje wstrzymana do tego czasu." } }
+      }
     }
   },
   "version": "1.0"

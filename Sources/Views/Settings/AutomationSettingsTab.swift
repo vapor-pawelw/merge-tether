@@ -183,6 +183,10 @@ struct AutomationSettingsTab: View {
         Section {
             Toggle(isOn: $draft.reviewRequested.isEnabled) { effectLabel(.Settings.settingsAutomationReviewRequested, .agent) }
                 .toggleStyle(.checkbox).disabled(draft.reviewRequested.runner == .shell)
+            checkpointToggle($draft.startNewReviewsAutomatically, .Settings.settingsAutomationStartNewReviews,
+                             help: .Settings.settingsAutomationStartNewReviewsHelp, reset: .startNewReviews, effect: .agent)
+                .disabled(!draft.reviewRequested.isEnabled)
+            Text(.Settings.settingsAutomationStartNewReviewsHelp).font(.caption).foregroundStyle(.secondary)
             Toggle(isOn: $draft.authorFeedback.isEnabled) { effectLabel(.Settings.settingsAutomationAuthorFeedback, .agent) }
                 .toggleStyle(.checkbox).disabled(draft.authorFeedback.runner == .shell)
             Toggle(isOn: Binding(get: { draft.autoVerifyReReview }, set: { enabled in
