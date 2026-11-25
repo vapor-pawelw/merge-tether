@@ -36,6 +36,13 @@
         }
       }
     },
+    "board.reviewAssignment.restore": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Restore"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Przywróć"}}
+      }
+    },
     "board.reviewAssignment.seen": {
       "extractionState": "manual",
       "localizations": {
@@ -59,13 +66,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Hidden %@."
+            "value": "“%@” is now hidden."
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ukryto %@."
+            "value": "Ukryto „%@”."
           }
         }
       }
@@ -639,28 +646,16 @@
         "pl": { "stringUnit": { "state": "translated", "value": "Spróbuj ponownie" } }
       }
     },
-    "board.remove": {
+    "board.reviewAssignment.hideExplanation": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Remove from my list"
+            "value": "Hide this merge request from Reviewing. To restore it on the Mac, open Settings → Merge requests → Hidden merge requests."
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Usuń z mojej listy"}}
-      }
-    },
-    "board.remove.explanation": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hide this merge request from Reviewing. You can restore it from Hidden merge requests in Settings."
-          }
-        },
-        "pl": {"stringUnit": {"state": "translated", "value": "Usuń ten MR z listy Przeglądam, zatrzymaj jego aktywne uruchomienia agentów i wstrzymaj automatyzację. Przypisania w GitLabie i wersje robocze zostaną zachowane. Możesz dodać go ponownie ręcznie."}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Ukryj ten MR w kolumnie Do przeglądu. Aby go przywrócić na Macu, otwórz Ustawienia → Merge requesty → Ukryte MR-y."}}
       }
     },
     "board.intent.review": {

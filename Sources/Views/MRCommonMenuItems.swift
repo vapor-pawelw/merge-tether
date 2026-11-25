@@ -170,7 +170,7 @@ struct MRCommonMenuItems: View {
         if !isFinished, let onRemove {
             Divider()
             Button(role: .destructive, action: onRemove) {
-                Label { Text(.Board.boardRemove) } icon: { Image(systemName: "minus.circle") }
+                Label { Text(.Board.boardReviewAssignmentHide) } icon: { Image(systemName: "eye.slash") }
             }
         }
     }

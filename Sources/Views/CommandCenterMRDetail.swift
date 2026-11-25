@@ -344,9 +344,9 @@ private struct CommandCenterMRDetailContent: View {
             .alert(Text(.MRDiscussions.mrDiscussionsOriginChangeFailed), isPresented: $originChangeFailed) {
                 Button(role: .cancel) {} label: { Text(.MRDiscussions.mrDiscussionsOriginCancel) }
             } message: { Text(.MRDiscussions.mrDiscussionsOriginChangeFailedMessage) }
-            .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
-                Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
-            } message: { Text(.Board.boardRemoveExplanation) }
+            .confirmationDialog(Text(.Board.boardReviewAssignmentHide), isPresented: $confirmRemoval, titleVisibility: .visible) {
+                Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardReviewAssignmentHide) }
+            } message: { Text(.Board.boardReviewAssignmentHideExplanation) }
             .sheet(item: $regenerationPresentation) { monitor.draftRegenerationSheet($0) }
             .environment(\.gitLabPersonSourceURL, item.url)
         }

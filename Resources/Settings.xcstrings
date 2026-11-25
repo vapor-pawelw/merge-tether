@@ -41,30 +41,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No hidden review assignments."
+            "value": "No hidden merge requests."
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Brak ukrytych MR-ów do przeglądu."
-          }
-        }
-      }
-    },
-    "settings.hiddenReviews.restore": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Restore"
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Przywróć"
+            "value": "Brak ukrytych MR-ów."
           }
         }
       }

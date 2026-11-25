@@ -287,7 +287,7 @@ struct CommandCenterView: View {
         HStack {
             Text(.Board.boardReviewAssignmentHidden(removal.request.title)).lineLimit(1)
             Spacer()
-            Button(.Menu.menuUndoAction) { monitor.undoReviewRemoval(removal) }
+            Button(.Board.boardReviewAssignmentRestore) { monitor.undoReviewRemoval(removal) }
         }
         .font(.caption).padding(12).background(Color.accentColor.opacity(0.08))
         .task(id: removal.id) {

@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Use **Hide** and **Restore** consistently for hidden review assignments. Explain which actions start an AI agent or run a read-only AI check when hovering over their controls.
+
 - Combine agent configuration and usage in the **Agent** tab, reorder the settings tabs, and group startup and setup in **General**.
 
 - Highlight new review assignments with a teal badge and card outline. Clear the highlight on opening details or using the card menu. Click the badge or **Mark as seen** at the lower left to clear it directly.

@@ -132,9 +132,9 @@ private struct CommandCenterMRCardContent: View {
             background: colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(white: 0.95),
             backgroundOpacity: contentOpacity, onDetails: openDetails)
         .contextMenu { menuItems }
-        .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
-            Button(role: .destructive) { monitor.removeReviewedMergeRequest(row.displayItem) } label: { Text(.Board.boardRemove) }
-        } message: { Text(.Board.boardRemoveExplanation) }
+        .confirmationDialog(Text(.Board.boardReviewAssignmentHide), isPresented: $confirmRemoval, titleVisibility: .visible) {
+            Button(role: .destructive) { monitor.removeReviewedMergeRequest(row.displayItem) } label: { Text(.Board.boardReviewAssignmentHide) }
+        } message: { Text(.Board.boardReviewAssignmentHideExplanation) }
         .environment(\.gitLabPersonSourceURL, row.displayURL)
     }
 

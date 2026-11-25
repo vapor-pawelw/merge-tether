@@ -11,7 +11,9 @@ struct MRActionLabel: View {
     var body: some View {
         MRActionProgressLabel(working: working) {
             if let symbol = cta.symbol ?? fallbackSymbol {
-                Label { Text(title).lineLimit(1) } icon: { Image(systemName: symbol) }
+                Label { Text(title).lineLimit(1) } icon: {
+                    Image(systemName: symbol).help(cta.help)
+                }
             } else {
                 Text(title).lineLimit(1)
             }
@@ -36,7 +38,7 @@ struct MRActionProgressLabel<Title: View>: View {
     }
 }
 
-/// The same AI marker next to Settings that start agents or AI checks.
+/// Identifies the AI work shown in a status or job history.
 struct MRActionEffectIcon: View {
     let effect: MRActionEffect
 

@@ -49,9 +49,9 @@ struct RemoteCardCornerActions: View {
                 menu(url)
             }
         }
-        .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
-            Button(role: .destructive) { submit(.remove) } label: { Text(.Board.boardRemove) }
-        } message: { Text(.Board.boardRemoveExplanation) }
+        .confirmationDialog(Text(.Board.boardReviewAssignmentHide), isPresented: $confirmRemoval, titleVisibility: .visible) {
+            Button(role: .destructive) { submit(.remove) } label: { Text(.Board.boardReviewAssignmentHide) }
+        } message: { Text(.Board.boardReviewAssignmentHideExplanation) }
         .sheet(item: $panel) { panel in
             if let model {
                 switch panel {
@@ -98,7 +98,7 @@ struct RemoteCardCornerActions: View {
             if card.canRemoveFromBoard == true {
                 Section {
                     Button(role: .destructive) { confirmRemoval = true } label: {
-                        Label(.Board.boardRemove, systemImage: "minus.circle")
+                        Label(.Board.boardReviewAssignmentHide, systemImage: "eye.slash")
                     }
                     .disabled(!canEdit)
                 }

@@ -109,6 +109,20 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Uruchomienie agenta (AI)"}}
       }
     },
+    "startsAgent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Starts an AI agent."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchamia agenta AI."}}
+      }
+    },
+    "runsAICheck": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Runs a read-only AI check."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Uruchamia kontrolę AI tylko do odczytu."}}
+      }
+    },
     "kindGitLab": {
       "extractionState": "manual",
       "localizations": {

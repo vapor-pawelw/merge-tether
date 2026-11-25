@@ -63,7 +63,7 @@ struct MergeRequestSettingsTab: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 12)
-                    Button(.Settings.settingsHiddenReviewsRestore) {
+                    Button(.Board.boardReviewAssignmentRestore) {
                         monitor.restoreReviewedMergeRequest(request)
                     }
                     .fixedSize(horizontal: true, vertical: false)
