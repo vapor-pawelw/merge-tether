@@ -175,10 +175,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Default app"
+            "value": "Open conversations in"
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Domyślna aplikacja"}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwieraj rozmowy w"}}
       }
     },
     "assistant.context.settingsTitle": {
@@ -187,10 +187,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "MR conversations"
+            "value": "Conversations with an agent about changes"
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Rozmowy o MR"}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozmowy z agentem o zmianach"}}
       }
     },
     "assistant.context.settingsHelp": {
@@ -199,10 +199,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Start a separate conversation with the MR’s link. Hold Option when selecting the menu action to choose another app for one conversation."
+            "value": "This app opens when you choose Start conversation on a merge request card."
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Rozpocznij osobną rozmowę z linkiem do MR. Przytrzymaj Option podczas wybierania działania z menu, aby wybrać inną aplikację dla jednej rozmowy."}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Ta aplikacja otworzy się po wybraniu „Rozpocznij rozmowę” na karcie ze zmianami."}}
       }
     },
     "assistant.context.chooseOpen": {

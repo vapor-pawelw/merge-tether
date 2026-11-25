@@ -29,6 +29,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Report GitLab action failures separately from inbox sync. Acknowledging an already absent to-do clears it locally.
 
+- Group the app used for conversations, agent models, task time limits and power settings under Agent. Find the new review placement option under Merge requests.
+
 - Identify Mac board cards by title and repository in VoiceOver.
 
 - Keep to-do automation receipts when one GitLab refresh temporarily omits a pending item.

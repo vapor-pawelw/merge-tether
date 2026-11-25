@@ -30,11 +30,13 @@ final class SettingsNavigation {
     }
     static let shared = SettingsNavigation()
     var selection: Tab = .general
+    var agentPage: CodingAgentSettingsTab.Page = .settings
     @ObservationIgnored var openSettingsWindow: (() -> Void)?
     @ObservationIgnored private var onCodingAgentConfigured: (() -> Void)?
 
     func showCodingAgent(openSettings: (() -> Void)? = nil, onConfigured: (() -> Void)? = nil) {
         selection = .codingAgent
+        agentPage = .settings
         onCodingAgentConfigured = onConfigured
         (openSettings ?? openSettingsWindow)?()
     }
@@ -53,7 +55,9 @@ final class SettingsNavigation {
     func perform(_ action: MREffectivePolicyPresentation.SettingsAction, openSettings: () -> Void) {
         switch action {
         case .chooseAutomationSettings: selection = .automation
-        case .chooseCodingAgent: selection = .codingAgent
+        case .chooseCodingAgent:
+            selection = .codingAgent
+            agentPage = .settings
         }
         openSettings()
     }
@@ -61,10 +65,12 @@ final class SettingsNavigation {
 
 struct SettingsView: View {
     @Bindable var monitor: TodoMonitorService
+    @State private var editor: SettingsPolicyEditor
     @Bindable private var navigation = SettingsNavigation.shared
 
     init(monitor: TodoMonitorService) {
         self.monitor = monitor
+        _editor = State(initialValue: SettingsPolicyEditor(settings: monitor.settings))
     }
 
     var body: some View {
@@ -76,6 +82,8 @@ struct SettingsView: View {
             }
         }
         .frame(minWidth: 680, idealWidth: 760, minHeight: 560, idealHeight: 680)
+        .onChange(of: monitor.settings.automation.scope) { editor.updateScope(from: monitor.settings) }
+        .onChange(of: monitor.settings.automation.selectedAssistant, initial: true) { editor.updateAssistant(from: monitor.settings) }
     }
 
     @ViewBuilder
@@ -85,8 +93,8 @@ struct SettingsView: View {
         case .integration: IntegrationSettingsTab(monitor: monitor)
         case .mergeRequests: MergeRequestSettingsTab(monitor: monitor)
         case .notifications: NotificationsSettingsTab(monitor: monitor)
-        case .codingAgent: CodingAgentSettingsTab(monitor: monitor)
-        case .automation: AutomationSettingsTab(monitor: monitor)
+        case .codingAgent: CodingAgentSettingsTab(monitor: monitor, editor: editor, page: $navigation.agentPage)
+        case .automation: AutomationSettingsTab(monitor: monitor, editor: editor)
         }
     }
 }

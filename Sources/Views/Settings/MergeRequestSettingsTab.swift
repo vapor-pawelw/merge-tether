@@ -6,6 +6,21 @@ struct MergeRequestSettingsTab: View {
     var body: some View {
         Form {
             Section {
+                Toggle(isOn: Binding(
+                    get: { monitor.settings.addNewReviewsToReviewed },
+                    set: { enabled in
+                        monitor.settings.addNewReviewsToReviewed = enabled
+                        monitor.settings.save()
+                    })) {
+                    Text(.Settings.settingsGeneralNewReviewsToggle)
+                }
+            } header: {
+                Text(.Settings.settingsGeneralNewReviewsSection)
+            } footer: {
+                Text(.Settings.settingsGeneralNewReviewsHelp)
+            }
+
+            Section {
                 Picker(selection: Binding(
                     get: { monitor.settings.boardOrderingMethod },
                     set: { monitor.settings.boardOrderingMethod = $0; monitor.settings.save() }
@@ -24,21 +39,6 @@ struct MergeRequestSettingsTab: View {
                 Text(.Board.boardTitle)
             } footer: {
                 Text(.MRLifecycle.completionSettingsHelp).font(.caption).foregroundStyle(.secondary)
-            }
-
-            Section {
-                Picker(selection: Binding(
-                    get: { monitor.settings.conversationDestination },
-                    set: { monitor.settings.conversationDestination = $0; monitor.settings.save() }
-                )) {
-                    ForEach(AssistantContextLauncher.Destination.allCases) { destination in
-                        Text(destination.label).tag(destination)
-                    }
-                } label: { Text(.AssistantContext.assistantContextDefault) }
-            } header: {
-                Text(.AssistantContext.assistantContextSettingsTitle)
-            } footer: {
-                Text(.AssistantContext.assistantContextSettingsHelp)
             }
 
             Section {

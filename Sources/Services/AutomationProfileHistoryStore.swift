@@ -18,7 +18,7 @@ final class AutomationProfileHistoryStore {
             failure = .read
             return
         }
-        lastGood = snapshot
+        lastGood = snapshot.normalizingReviewStart()
     }
 
     func available(for configuration: AutomationSettings) -> AutomationProfileSnapshot? {
@@ -27,6 +27,7 @@ final class AutomationProfileHistoryStore {
 
     @discardableResult
     func save(_ snapshot: AutomationProfileSnapshot) -> Bool {
+        let snapshot = snapshot.normalizingReviewStart()
         guard snapshot.isValid, let encoded = try? JSONEncoder().encode(snapshot) else { failure = .write; return false }
         let previous = defaults.object(forKey: Self.key)
         defaults.set(encoded, forKey: Self.key)

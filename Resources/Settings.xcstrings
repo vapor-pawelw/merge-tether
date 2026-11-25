@@ -1,6 +1,13 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "settings.codingAgentPreferences": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Agent settings"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Ustawienia agenta"}}
+      }
+    },
     "settings.requireReviewStartConfirmation": {
       "extractionState": "manual",
       "localizations": {

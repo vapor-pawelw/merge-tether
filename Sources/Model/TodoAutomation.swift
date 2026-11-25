@@ -469,7 +469,6 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         try values.encodeIfPresent(autoMergeEnabled, forKey: .autoMergeEnabled)
         try values.encodeIfPresent(conflictTasksEnabled, forKey: .conflictTasksEnabled)
         try values.encodeIfPresent(reviewRequested, forKey: .reviewRequested)
-        try values.encode(requireReviewStartConfirmation, forKey: .requireReviewStartConfirmation)
         try values.encodeIfPresent(authorFeedback, forKey: .authorFeedback)
         try values.encodeIfPresent(allowAssistantTools, forKey: .allowAssistantTools)
         try values.encodeIfPresent(assistantToolProjects, forKey: .assistantToolProjects)

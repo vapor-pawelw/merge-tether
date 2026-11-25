@@ -22,11 +22,11 @@ struct AutomationProfileSnapshot: Codable, Equatable, Sendable {
     let tools: Bool
     let conflictPush: Bool
     let pipelineOwnership: Bool
-    let startNewReviews: Bool?
+    private(set) var startNewReviews: Bool?
     let publication: AutomationPublicationMode
     let requireAI: Bool
     let botReplies: Bool?
-    let reviewStartConfirmation: Bool?
+    private var reviewStartConfirmation: Bool?
     let reviewRule: Rule
     let feedbackRule: Rule
     let eventModes: [String: MergeWorkflowMode]
@@ -50,11 +50,19 @@ struct AutomationProfileSnapshot: Codable, Equatable, Sendable {
         publication = configuration.publicationMode
         requireAI = configuration.publicationRestrictions.requireAI
         botReplies = configuration.publicationRestrictions.allowBotReplies
-        reviewStartConfirmation = configuration.requireReviewStartConfirmation
+        reviewStartConfirmation = nil
         reviewRule = Rule(configuration.reviewRequested)
         feedbackRule = Rule(configuration.authorFeedback)
         eventModes = Dictionary(uniqueKeysWithValues: MergeWorkflowTrigger.allCases.map { ($0.rawValue, configuration.workflowRules[$0].mode) })
         infrastructureRetry = configuration.workflowRules[.pipelineFailure].retryInfrastructureFailure
+    }
+
+    func normalizingReviewStart() -> Self {
+        guard let reviewStartConfirmation else { return self }
+        var normalized = self
+        normalized.startNewReviews = startNewReviews ?? !reviewStartConfirmation
+        normalized.reviewStartConfirmation = nil
+        return normalized
     }
 
     var isValid: Bool {

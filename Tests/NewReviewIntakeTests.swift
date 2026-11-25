@@ -124,7 +124,25 @@ struct NewReviewIntakeTests {
         let confirmation = try JSONDecoder().decode(AutomationSettings.self,
             from: Data(#"{"packageDecision":"enabled","requireReviewStartConfirmation":true}"#.utf8))
         #expect(!confirmation.startNewReviewsAutomatically)
-        let roundTrip = try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(confirmation))
+        let saved = try JSONEncoder().encode(confirmation)
+        let settings = try #require(JSONSerialization.jsonObject(with: saved) as? [String: Any])
+        #expect(settings["startNewReviewsAutomatically"] as? Bool == false)
+        #expect(settings["requireReviewStartConfirmation"] == nil)
+        let roundTrip = try JSONDecoder().decode(AutomationSettings.self, from: saved)
         #expect(roundTrip.requireReviewStartConfirmation)
+
+        let profile = AutomationProfileSnapshot(confirmation)
+        let profileJSON = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(profile)) as? [String: Any])
+        #expect(profileJSON["startNewReviews"] as? Bool == false)
+        #expect(profileJSON["reviewStartConfirmation"] == nil)
+
+        var legacyProfile = profileJSON
+        legacyProfile.removeValue(forKey: "startNewReviews")
+        legacyProfile["reviewStartConfirmation"] = true
+        let storedProfile = try JSONDecoder().decode(AutomationProfileSnapshot.self,
+            from: JSONSerialization.data(withJSONObject: legacyProfile))
+        var restored = enabled
+        storedProfile.normalizingReviewStart().apply(to: &restored)
+        #expect(!restored.startNewReviewsAutomatically)
     }
 }

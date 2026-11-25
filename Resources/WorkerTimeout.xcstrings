@@ -1,7 +1,7 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "title": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Worker execution timeout" } }, "pl": {"stringUnit": {"state": "translated", "value": "Limit czasu zadania agenta"}} } },
+    "title": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Agent task time limit" } }, "pl": {"stringUnit": {"state": "translated", "value": "Limit czasu zadania agenta"}} } },
     "defaultLimit": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Default limit" } }, "pl": {"stringUnit": {"state": "translated", "value": "Limit domyślny"}} } },
     "minutes": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "minutes" } }, "pl": {"stringUnit": {"state": "translated", "value": "min"}} } },
     "savedRepository": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Saved repository" } }, "pl": {"stringUnit": {"state": "translated", "value": "Zapisane repozytorium"}} } },
