@@ -8,23 +8,25 @@ struct AssistantUsageMRDetailCost: View {
     @State private var loadedIdentity: String?
     @State private var refreshID = UUID()
     @State private var loadFailed = false
+    private let rowInset: CGFloat = 10
 
     var body: some View {
         Group {
             if let mergeRequest {
                 VStack(alignment: .leading, spacing: 10) {
                     if loadedIdentity == mergeRequest.id, let totals {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(.AssistantUsage.assistantUsageMRLifetimeCost)
-                            Spacer()
-                            AssistantUsageTotalAmount(total: overall(totals), noActivity: true, precise: true)
+                        AssistantUsageCostRow(amount: .init(total: overall(totals), noActivity: true, precise: true)) {
+                            Text(.AssistantUsage.assistantUsageMRLifetimeCost).fontWeight(.semibold)
                         }
+                        .font(.callout)
+                        .padding(.horizontal, rowInset)
                         roleRow(.AssistantUsage.assistantUsageMRVerifier,
                             detail: .AssistantUsage.assistantUsageVerificationDetail, total: totals[.verifier] ?? .init())
                         roleRow(.AssistantUsage.assistantUsageMRReviewer,
                             detail: .AssistantUsage.assistantUsageCodingAgentDetail, total: totals[.codingAgent] ?? .init())
                         Text(.AssistantUsage.assistantUsageByAgentTitle).font(.caption.weight(.medium))
                             .help(Text(.AssistantUsage.assistantUsageByAgentHelp))
+                            .padding(.horizontal, rowInset)
                         ForEach(AutomationAssistant.allCases) { assistant in
                             roleRow(assistant.usageLabel, detail: .AssistantUsage.assistantUsageByAgentCardDetail,
                                 total: agentTotals[assistant] ?? .init())
@@ -38,6 +40,7 @@ struct AssistantUsageMRDetailCost: View {
                     }
                     Text(.AssistantUsage.assistantUsageMRHistoryHelp)
                         .font(.caption).foregroundStyle(.secondary)
+                        .padding(.horizontal, rowInset)
                 }
                 .task(id: "\(mergeRequest.id)/\(refreshID)") {
                     guard !Task.isCancelled else { return }
@@ -59,10 +62,8 @@ struct AssistantUsageMRDetailCost: View {
     private func roleRow(_ title: LocalizedStringResource, detail: LocalizedStringResource,
                          total: AssistantUsageTotal) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline) {
+            AssistantUsageCostRow(amount: .init(total: total, noActivity: true, precise: true)) {
                 Text(title).fontWeight(.medium)
-                Spacer()
-                AssistantUsageTotalAmount(total: total, noActivity: true, precise: true)
             }
             Text(detail).foregroundStyle(.secondary)
             Text(.AssistantUsage.assistantUsageMRAgentRequests(total.runs))
@@ -84,7 +85,7 @@ struct AssistantUsageMRDetailCost: View {
             }
         }
         .font(.caption)
-        .padding(10)
+        .padding(rowInset)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
     }

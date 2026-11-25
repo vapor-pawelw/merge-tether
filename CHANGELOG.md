@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Align Agent Usage cards, filters and cost rows, and let longer dashboard text wrap.
+
 - Use the selected preset and approval threshold for automatic approval. Refresh the review when the MR target or diff base changes.
 
 - Authenticate locally stored AI comment assessments, overrides and review evidence. Reuse a reply worker’s verified source assessment for automatic publication.

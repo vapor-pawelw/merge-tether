@@ -16,15 +16,20 @@ struct AssistantUsageSettingsContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(spacing: 12) {
                 Text(.AssistantUsage.assistantUsageDashboardTitle).font(.title2.weight(.semibold))
-                Spacer()
-                Picker(selection: $period) {
-                    ForEach(AssistantUsagePeriod.allCases) { range in
-                        Text(range.title).tag(range)
-                    }
-                } label: { Text(.AssistantUsage.assistantUsagePeriod) }
-                    .fixedSize()
+                Spacer(minLength: 0)
+                HStack(spacing: 8) {
+                    Text(.AssistantUsage.assistantUsagePeriod).foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    Picker(selection: $period) {
+                        ForEach(AssistantUsagePeriod.allCases) { range in
+                            Text(range.title).tag(range)
+                        }
+                    } label: { Text(.AssistantUsage.assistantUsagePeriod) }
+                        .labelsHidden()
+                }
+                .fixedSize()
             }
 
             if loadFailed {
@@ -58,6 +63,7 @@ struct AssistantUsageSettingsContent: View {
 
             estimateExplanation
         }
+        .lineLimit(nil)
         .task(id: refreshID) { await refresh() }
         .task(id: boundaryRefreshID) { await refreshAtBoundaries() }
         .onChange(of: period) { _, _ in rebuildSummary() }
@@ -77,13 +83,16 @@ struct AssistantUsageSettingsContent: View {
             HStack(alignment: .top, spacing: 12) {
                 AssistantUsageTotalCard(title: .AssistantUsage.assistantUsageOverall,
                     detail: .AssistantUsage.assistantUsageAppOnly, total: summary.overall)
-                VStack(alignment: .leading, spacing: 6) {
+                AssistantUsageCard {
                     Text(.AssistantUsage.assistantUsageAverageDaily).font(.headline)
-                    if let average = summary.averageDailyUSD {
-                        AssistantUsageAmount(value: average).font(.title3.weight(.semibold))
-                    } else {
-                        Text(.AssistantUsage.assistantUsageCostUnavailable).foregroundStyle(.secondary)
+                    Group {
+                        if let average = summary.averageDailyUSD {
+                            AssistantUsageAmount(value: average)
+                        } else {
+                            Text(.AssistantUsage.assistantUsageCostUnavailable).foregroundStyle(.secondary)
+                        }
                     }
+                    .font(.title3.weight(.semibold)).monospacedDigit()
                     Text(.AssistantUsage.assistantUsageCoveredDays(summary.coveredDays))
                         .font(.caption).foregroundStyle(.secondary)
                     Text(.AssistantUsage.assistantUsageAverageHelp).font(.caption).foregroundStyle(.secondary)
@@ -92,9 +101,8 @@ struct AssistantUsageSettingsContent: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading).padding(14)
-                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
             }
+            .fixedSize(horizontal: false, vertical: true)
 
             HStack(alignment: .top, spacing: 12) {
                 AssistantUsageTotalCard(title: .AssistantUsage.assistantUsageCodingAgent,
@@ -102,6 +110,7 @@ struct AssistantUsageSettingsContent: View {
                 AssistantUsageTotalCard(title: .AssistantUsage.assistantUsageVerification,
                     detail: .AssistantUsage.assistantUsageVerificationDetail, total: summary.verifier)
             }
+            .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(.AssistantUsage.assistantUsageByAgentTitle).font(.headline)
@@ -113,6 +122,7 @@ struct AssistantUsageSettingsContent: View {
                             total: summary.byAssistant[assistant] ?? .init())
                     }
                 }
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             if !chartData.buckets.isEmpty {
@@ -207,13 +217,24 @@ struct AssistantUsageSettingsContent: View {
     }
 }
 
+private struct AssistantUsageCard<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6, content: content)
+            .padding(14)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
 private struct AssistantUsageTotalCard: View {
     let title: LocalizedStringResource
     let detail: LocalizedStringResource
     let total: AssistantUsageTotal
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        AssistantUsageCard {
             Text(title).font(.headline)
             AssistantUsageTotalAmount(total: total).font(.title3.weight(.semibold))
             Text(detail).font(.caption).foregroundStyle(.secondary)
@@ -232,8 +253,6 @@ private struct AssistantUsageTotalCard: View {
                 Text(.AssistantUsage.assistantUsageTokensUnavailable).font(.caption).foregroundStyle(.secondary)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading).padding(14)
-        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
         .textSelection(.enabled)
     }
 }
@@ -263,7 +282,7 @@ private struct AssistantUsageProviderChart: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(spacing: 12) {
                 Text(.AssistantUsage.assistantUsageChartTitle).font(.headline)
                 Spacer()
                 Picker(selection: $granularity) {
@@ -272,7 +291,7 @@ private struct AssistantUsageProviderChart: View {
                     Text(.AssistantUsage.assistantUsageWeeks).tag(AssistantUsageGranularity.week)
                     Text(.AssistantUsage.assistantUsageMonths).tag(AssistantUsageGranularity.month)
                 } label: { Text(.AssistantUsage.assistantUsageGranularity) }
-                    .pickerStyle(.segmented).frame(maxWidth: 320)
+                    .pickerStyle(.segmented).labelsHidden().frame(maxWidth: 270)
             }
             chart.frame(height: 220)
             if data.isTruncated {
@@ -358,16 +377,18 @@ private struct AssistantUsageChartHoverOverlay: View {
                             select(nil)
                         }
                     }
-                if let bucket = selectedBucket {
-                    if let anchor = proxy.plotFrame,
-                       let x = proxy.position(forX: bucket.start.addingTimeInterval(bucket.end.timeIntervalSince(bucket.start) / 2)) {
-                        let frame = geometry[anchor]
+                if let bucket = selectedBucket, let anchor = proxy.plotFrame {
+                    let frame = geometry[anchor]
+                    if let x = proxy.position(forX: bucket.start.addingTimeInterval(bucket.end.timeIntervalSince(bucket.start) / 2)) {
                         Rectangle().fill(Color.primary.opacity(0.3)).frame(width: 1, height: frame.height)
                             .position(x: frame.minX + x, y: frame.midY).allowsHitTesting(false)
                     }
                     AssistantUsageBucketTooltip(bucket: bucket)
                         .padding(10).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-                        .shadow(radius: 3).padding(8).allowsHitTesting(false)
+                        .shadow(radius: 3).padding(8)
+                        .padding(.top, max(0, frame.minY))
+                        .padding(.trailing, max(0, geometry.size.width - frame.maxX))
+                        .allowsHitTesting(false)
                 }
             }
         }
@@ -389,14 +410,12 @@ private struct AssistantUsageBucketTooltip: View {
             amountRow(.AssistantUsage.assistantUsageCodexCLI, total: bucket.codex)
             amountRow(.AssistantUsage.assistantUsageClaudeCLI, total: bucket.claude)
         }
-        .frame(maxWidth: 310).textSelection(.enabled)
+        .frame(maxWidth: 310, alignment: .leading).textSelection(.enabled)
     }
     private func amountRow(_ label: LocalizedStringResource, total: AssistantUsageTotal) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline) {
+            AssistantUsageCostRow(amount: .init(total: total, noActivity: true, precise: true)) {
                 Text(label)
-                Spacer(minLength: 12)
-                AssistantUsageTotalAmount(total: total, noActivity: true, precise: true)
             }
             if total.unknownCostRuns > 0 {
                 Text(.AssistantUsage.assistantUsageUnknownRuns(total.unknownCostRuns)).foregroundStyle(.secondary)
@@ -412,24 +431,17 @@ private struct AssistantUsageDailyHistory: View {
     var body: some View {
         DisclosureGroup {
             LazyVStack(spacing: 10) {
-                HStack {
-                    Text(.AssistantUsage.assistantUsageDay).frame(width: 110, alignment: .leading)
-                    Text(.AssistantUsage.assistantUsageCodingAgent).frame(maxWidth: .infinity, alignment: .trailing)
-                    Text(.AssistantUsage.assistantUsageVerification).frame(maxWidth: .infinity, alignment: .trailing)
-                    Text(.AssistantUsage.assistantUsageOverall).frame(maxWidth: .infinity, alignment: .trailing)
-                }
+                row(Text(.AssistantUsage.assistantUsageDay),
+                    Text(.AssistantUsage.assistantUsageCodingAgent),
+                    Text(.AssistantUsage.assistantUsageVerification),
+                    Text(.AssistantUsage.assistantUsageOverall))
                 .font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 ForEach(days.reversed(), id: \.date) { day in
                     VStack(alignment: .leading, spacing: 3) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(verbatim: AssistantUsagePeriod.dateLabel(day.date)).frame(width: 110, alignment: .leading)
-                            AssistantUsageTotalAmount(total: day.codingAgent, noActivity: true)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                            AssistantUsageTotalAmount(total: day.verifier, noActivity: true)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                            AssistantUsageTotalAmount(total: day.overall, noActivity: true)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
+                        row(Text(verbatim: AssistantUsagePeriod.dateLabel(day.date)),
+                            AssistantUsageTotalAmount(total: day.codingAgent, noActivity: true),
+                            AssistantUsageTotalAmount(total: day.verifier, noActivity: true),
+                            AssistantUsageTotalAmount(total: day.overall, noActivity: true))
                         .font(.caption).monospacedDigit()
                         if day.overall.unknownCostRuns > 0 {
                             Text(.AssistantUsage.assistantUsageUnknownRuns(day.overall.unknownCostRuns))
@@ -441,6 +453,30 @@ private struct AssistantUsageDailyHistory: View {
             }
             .padding(.top, 8).textSelection(.enabled)
         } label: { Text(.AssistantUsage.assistantUsageDailyHistory) }
+    }
+
+    private func row(_ day: some View, _ coding: some View, _ verification: some View, _ overall: some View) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            day.multilineTextAlignment(.leading).frame(width: 110, alignment: .leading)
+            coding.frame(maxWidth: .infinity, alignment: .trailing)
+            verification.frame(maxWidth: .infinity, alignment: .trailing)
+            overall.frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .multilineTextAlignment(.trailing)
+    }
+}
+
+struct AssistantUsageCostRow<Title: View>: View {
+    let amount: AssistantUsageTotalAmount
+    @ViewBuilder let title: () -> Title
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            title()
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            amount.fixedSize(horizontal: true, vertical: false)
+        }
     }
 }
 
@@ -498,14 +534,13 @@ private struct AssistantUsageMergeRequestRanking: View {
                         Text(verbatim: "\(index + 1).")
                             .foregroundStyle(.secondary).monospacedDigit().frame(width: 24, alignment: .trailing)
                         VStack(alignment: .leading, spacing: 3) {
-                            if let urlString = row.mergeRequest.url, let url = URL(string: urlString) {
-                                Link(destination: url) {
-                                    Text(verbatim: "!\(row.mergeRequest.iid) · \(row.mergeRequest.title ?? row.mergeRequest.id)")
-                                        .lineLimit(1)
+                            AssistantUsageCostRow(amount: .init(total: row.total, precise: true)) {
+                                let title = Text(verbatim: "!\(row.mergeRequest.iid) · \(row.mergeRequest.title ?? row.mergeRequest.id)")
+                                if let urlString = row.mergeRequest.url, let url = URL(string: urlString) {
+                                    Link(destination: url) { title }
+                                } else {
+                                    title
                                 }
-                            } else {
-                                Text(verbatim: "!\(row.mergeRequest.iid) · \(row.mergeRequest.title ?? row.mergeRequest.id)")
-                                    .lineLimit(1)
                             }
                             AssistantUsageAgentSplit(byAssistant: row.byAssistant)
                             if row.total.unknownCostRuns > 0 {
@@ -513,8 +548,6 @@ private struct AssistantUsageMergeRequestRanking: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         }
-                        Spacer(minLength: 8)
-                        AssistantUsageTotalAmount(total: row.total, precise: true)
                     }
                     .font(.subheadline)
                     if row.id != rows.last?.id { Divider() }
@@ -527,20 +560,24 @@ private struct AssistantUsageMergeRequestRanking: View {
     }
 }
 
-/// One compact line per agent that ran at least one request.
 private struct AssistantUsageAgentSplit: View {
     let byAssistant: [AutomationAssistant: AssistantUsageTotal]
 
     var body: some View {
-        HStack(spacing: 12) {
-            ForEach(AutomationAssistant.allCases.filter { (byAssistant[$0]?.runs ?? 0) > 0 }) { assistant in
-                HStack(spacing: 4) {
-                    Text(assistant.usageLabel)
-                    AssistantUsageTotalAmount(total: byAssistant[assistant] ?? .init(), precise: true)
-                }
-            }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) { amounts }
+            VStack(alignment: .leading, spacing: 3) { amounts }
         }
         .font(.caption).foregroundStyle(.secondary)
+    }
+
+    private var amounts: some View {
+        ForEach(AutomationAssistant.allCases.filter { (byAssistant[$0]?.runs ?? 0) > 0 }) { assistant in
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(assistant.usageLabel)
+                AssistantUsageTotalAmount(total: byAssistant[assistant] ?? .init(), precise: true)
+            }
+        }
     }
 }
 
