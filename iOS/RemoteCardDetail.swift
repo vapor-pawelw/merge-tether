@@ -91,9 +91,13 @@ struct RemoteCardDetail: View {
                         actionSection(followUpRecovery).id(RemoteCardCTA.Destination.actions)
                         if current.id.hasPrefix("mr:") {
                             if let details = shown {
-                                RemoteMRDetailContent(details: details, card: current,
+                                RemoteMRDetailContent(details: details, card: current, account: model.state.board?.account ?? "",
                                     personalApproval: current.personalApprovalControl(model: model),
                                     reviewerEditing: current.reviewerEditing(model: model),
+                                    onRefreshActivity: boardCard == nil || !model.supportsDetails ? nil : refreshActivity,
+                                    activityReadInProgress: activityReadInProgress,
+                                    canRefreshActivity: !activityReadInProgress && model.state.pending == nil
+                                        && model.connectionStatus() == .connected,
                                     onCommentOrigin: hasConfirmedDiscussions && current.actions.contains { $0.kind == .setCommentOrigin } ? { request in
                                         Task { await model.setCommentOrigin(request, card: current) }
                                     } : nil)
@@ -198,6 +202,15 @@ struct RemoteCardDetail: View {
             .onDisappear { model.cancelApproval(); model.cancelDetails() }
             .environment(\.gitLabPersonSourceURL, current.url)
         }
+    }
+
+    private var activityReadInProgress: Bool {
+        model.isManuallyRefreshingContent || model.isSynchronizingDetails || model.detailState.isLoading()
+    }
+
+    private func refreshActivity() {
+        guard !activityReadInProgress, let card = boardCard else { return }
+        Task { await model.refreshDetailsFromGitLab(card: card) }
     }
 
     private var detailLoadingBanner: some View {

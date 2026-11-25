@@ -205,12 +205,14 @@ import MergeTetherRemote
                 return InMemoryGitLab.output(#"{"rules":[{"id":1,"name":"Security","approvals_required":1,"approved":false,"approved_by":[]},{"id":2,"name":"Owners","approvals_required":1,"approved":true,"approved_by":[{"username":"approved"}]}]}"#)
             }
             if request.endpoint.contains("/reviewers?") { return InMemoryGitLab.output("[]") }
+            if request.endpoint.contains("/resource_") { return InMemoryGitLab.output("[]") }
             if request.endpoint.contains("/discussions?") {
                 return InMemoryGitLab.output(#"[{"id":"general","notes":[{"id":10,"author":{"id":8,"username":"assigned"},"system":false,"body":"General note"}]},{"id":"resolved","notes":[{"id":11,"author":{"id":8,"username":"assigned"},"system":false,"resolvable":true,"resolved":true,"body":"Resolved concern"}]},{"id":"open","notes":[{"id":12,"author":{"id":8,"username":"assigned"},"system":false,"resolvable":true,"resolved":false,"body":"Open concern"},{"id":13,"author":{"id":4,"username":"me"},"system":false,"body":"Published reply"}]}]"#)
             }
             return InMemoryGitLab.output(self.raw)
         }
-        let details = try await RemoteMRDetailLoader.load(source: source, drafts: [], glab: glab)
+        let loaded = try await RemoteMRDetailLoader.load(source: source, drafts: [], glab: glab)
+        let details = loaded.details
         #expect(details.description == "Complete MR description")
         #expect(details.branches == .init(source: "feature", target: "main"))
         #expect(details.metadata.contains { $0.value == "feature" })
@@ -226,6 +228,7 @@ import MergeTetherRemote
         #expect(details.threads?.first?.reply == .unknown)
         #expect(details.threads?.first?.showsPublishedReply == false)
         #expect(details.threads?.first?.notes.map(\.body) == ["Open concern", "Published reply"])
+        #expect(!loaded.history.hasMissingSources)
         #expect(f.requests.allSatisfy { $0.method == "GET" })
     }
 
@@ -238,7 +241,8 @@ import MergeTetherRemote
             if request.endpoint.hasSuffix("/2") { return InMemoryGitLab.output(self.raw) }
             return InMemoryGitLab.output("Forbidden", code: 1)
         }
-        let details = try await RemoteMRDetailLoader.load(source: source, drafts: [], glab: glab)
+        let loaded = try await RemoteMRDetailLoader.load(source: source, drafts: [], glab: glab)
+        let details = loaded.details
         #expect(details.description == source.description)
         #expect(details.approvals?.progress == nil)
         #expect(details.approvals?.rules == nil)
@@ -246,6 +250,7 @@ import MergeTetherRemote
         #expect(details.threads == nil)
         #expect(details.approvals?.historyAvailable == false)
         #expect(details.approvals?.people.first?.status == .assigned)
+        #expect(loaded.history.hasMissingSources)
     }
 
     @Test(arguments: ["head", "target", "description", "account", "account-roundtrip"])

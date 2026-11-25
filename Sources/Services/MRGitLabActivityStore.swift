@@ -57,20 +57,27 @@ final class MRGitLabActivityStore {
             return
         }
         guard isCurrent() else { return }
-        async let states = fetch(.state, for: target, glab: glab)
-        async let labels = fetch(.label, for: target, glab: glab)
-        async let milestones = fetch(.milestone, for: target, glab: glab)
+        async let resources = Self.readResources(for: target, glab: glab)
         async let notes = includesDiscussions ? fetchDiscussions(for: target, glab: glab) : []
+        let (results, discussionResult) = await (resources, notes)
+        guard isCurrent() else { return }
+        hasError = discussionResult == nil || results.count != MRGitLabActivity.Resource.allCases.count
+        if let discussionResult { discussionEntries = discussionResult }
+        entries.merge(results, uniquingKeysWith: { _, current in current })
+    }
+
+    /// The caller owns the account and MR checks around this read.
+    static func readResources(for target: MRDiscussionTarget, glab: GlabService, timeout: TimeInterval = 45) async
+        -> [MRGitLabActivity.Resource: [MRGitLabActivity]] {
+        async let states = fetch(.state, for: target, glab: glab, timeout: timeout)
+        async let labels = fetch(.label, for: target, glab: glab, timeout: timeout)
+        async let milestones = fetch(.milestone, for: target, glab: glab, timeout: timeout)
         let results: [(MRGitLabActivity.Resource, [MRGitLabActivity]?)] = await [
             (.state, states), (.label, labels), (.milestone, milestones)
         ]
-        let discussionResult = await notes
-        guard isCurrent() else { return }
-        hasError = discussionResult == nil || results.contains { $0.1 == nil }
-        if let discussionResult { discussionEntries = discussionResult }
-        for (resource, result) in results {
-            if let result { entries[resource] = result }
-        }
+        return Dictionary(uniqueKeysWithValues: results.compactMap { resource, events in
+            events.map { (resource, $0) }
+        })
     }
 
     private func fetchDiscussions(for target: MRDiscussionTarget, glab: GlabService) async -> [MRGitLabActivity]? {
@@ -79,11 +86,11 @@ final class MRGitLabActivityStore {
         return MRGitLabActivity.notes(in: discussions)
     }
 
-    private func fetch(_ resource: MRGitLabActivity.Resource, for target: MRDiscussionTarget,
-                       glab: GlabService) async -> [MRGitLabActivity]? {
+    private static func fetch(_ resource: MRGitLabActivity.Resource, for target: MRDiscussionTarget,
+                              glab: GlabService, timeout: TimeInterval) async -> [MRGitLabActivity]? {
         let endpoint = "/projects/\(target.projectID)/merge_requests/\(target.iid)/resource_\(resource.rawValue)_events?per_page=100"
         let records: [MRGitLabActivity.ResourceEvent]? = try? await glab.mergeRequestAPI(
-            endpoint, host: target.host, arguments: ["--paginate"], timeout: 45,
+            endpoint, host: target.host, arguments: ["--paginate"], timeout: timeout,
             decode: { try GlabPaginatedJSON.decode(MRGitLabActivity.ResourceEvent.self, from: $0) })
         return records?.compactMap { $0.activity(for: resource) }
     }

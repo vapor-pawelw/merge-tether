@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Show GitLab and MergeTether events together in iPhone MR Details. Open the matching discussion from a comment event.
+
 - Mark all read in the iPhone Inbox or acknowledge a standalone GitLab to-do from its card. Draft merge requests keep their draft styling when the paired Mac uses Polish.
 
 - Show the author follow-up stage, the cause that needs attention, and the relevant verification or retry action in Mac and iPhone MR Details. Expand the step to see the original comments and diagnostics, including after a worker stops.

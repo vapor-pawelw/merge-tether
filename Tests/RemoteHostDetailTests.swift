@@ -251,7 +251,7 @@ import MergeTetherRemote
         let handler = try #require(f.gitlab.handler)
         f.gitlab.handler = { call in
             if call.endpoint.contains("/discussions?") {
-                return InMemoryGitLab.output(#"[{"id":"local","notes":[{"id":2,"body":"New Mac comment","system":false}]}]"#)
+                return InMemoryGitLab.output(#"[{"id":"local","notes":[{"id":2,"body":"New Mac comment","system":false,"created_at":"2026-11-24T09:30:00Z"}]}]"#)
             }
             return try await handler(call)
         }
@@ -263,7 +263,94 @@ import MergeTetherRemote
         let result = try #require(f.transport.messages.last?.detailResponse)
         #expect(result.request == request && result.status == .current && result.isPreview != true)
         #expect(result.details?.threads?.first?.notes.first?.body == "New Mac comment")
+        #expect(result.details?.activity.map(\.id) == ["note/2"])
         #expect(f.readerCount == 1 && f.gitlab.requests.count == count)
+    }
+
+    @Test func phoneEventLogInterleavesGitLabAndAppEventsAndKeepsLastKnownEventsOnPartialFailure() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        f.usesLiveDetailReader = true
+        var failLabels = false
+        let handler = try #require(f.gitlab.handler)
+        f.gitlab.handler = { call in
+            switch call.endpoint {
+            case "/projects/1/merge_requests/2/discussions?per_page=100":
+                return InMemoryGitLab.output("""
+                [{"id":"discussion-id","notes":[{"id":7,"created_at":"1970-01-01T00:00:40Z","body":"Published reply"},
+                {"id":8,"created_at":"1970-01-01T00:00:30Z","body":"changed the description","system":true}]}]
+                """)
+            case "/projects/1/merge_requests/2/resource_state_events?per_page=100":
+                return InMemoryGitLab.output(#"[{"id":1,"created_at":"1970-01-01T00:00:10Z","state":"opened"}]"#)
+            case "/projects/1/merge_requests/2/resource_label_events?per_page=100":
+                if failLabels { return InMemoryGitLab.output(error: "HTTP 503", code: 1) }
+                return InMemoryGitLab.output(#"[{"id":2,"created_at":"1970-01-01T00:00:50Z","action":"add","label":{"name":"Ready"}}]"#)
+            case "/projects/1/merge_requests/2/resource_milestone_events?per_page=100":
+                return InMemoryGitLab.output(#"[{"id":3,"created_at":"1970-01-01T00:00:15Z","action":"add","milestone":{"title":"Release"}}]"#)
+            default: return try await handler(call)
+            }
+        }
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2)
+        f.monitor.settings.recordAutomationEvent(target: target, action: .publication, origin: .automatic,
+            state: .completed, publishedNoteID: 7, now: Date(timeIntervalSince1970: 43))
+        f.monitor.settings.recordAutomationEvent(target: target, action: .review, origin: .manual,
+            state: .completed, now: Date(timeIntervalSince1970: 20))
+        let reviewID = "event/\(try #require(f.monitor.settings.automationEvents.first { $0.action == .review }).id)"
+        let board = try await f.board()
+        let card = try #require(board.cards.first { $0.id == "mr:1:2" })
+        let expected = ["label/2", "note/7", "note/8", reviewID, "milestone/3", "state/1"]
+
+        let first = try RemoteDetailRequest(card: card, board: board)
+        await f.transport.onMessage?(.init(type: .detailRequest, detailRequest: first))
+        await f.host.detailTask?.value
+        let details = try #require(f.transport.messages.last?.detailResponse?.details)
+        #expect(details.activity.map(\.id) == expected)
+        #expect(details.activityPartial == nil)
+        #expect(details.activity.first { $0.id == "note/7" }?.note?.matchingThread(in: details.threads)?.id == "discussion/discussion-id")
+        #expect(details.activity.first { $0.id == "note/8" }?.note == .init(id: 8))
+        let activityReads = f.gitlab.requests.filter { $0.endpoint.contains("/resource_") }
+        #expect(activityReads.count == 3)
+        #expect(activityReads.allSatisfy { $0.method == "GET" && $0.arguments.contains("--paginate") })
+
+        failLabels = true
+        f.date += 1
+        let retry = try RemoteDetailRequest(card: card, board: board)
+        await f.transport.onMessage?(.init(type: .detailRequest, detailRequest: retry))
+        await f.host.detailTask?.value
+        let partial = try #require(f.transport.messages.last?.detailResponse?.details)
+        #expect(partial.activity.map(\.id) == expected)
+        #expect(partial.activityPartial == true)
+
+        let count = f.gitlab.requests.count
+        let cached = try RemoteDetailRequest(card: card, board: board, cachedOnly: true)
+        await f.transport.onMessage?(.init(type: .detailRequest, detailRequest: cached))
+        await f.host.detailTask?.value
+        let reopened = try #require(f.transport.messages.last?.detailResponse?.details)
+        #expect(reopened.activity.map(\.id) == expected)
+        #expect(reopened.activityPartial == true)
+        #expect(f.gitlab.requests.count == count)
+    }
+
+    @Test func phoneEventLogCapDoesNotMarkTheDiscussionAsTruncated() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        f.usesLiveDetailReader = true
+        let handler = try #require(f.gitlab.handler)
+        f.gitlab.handler = { call in
+            if call.endpoint == "/projects/1/merge_requests/2/resource_label_events?per_page=100" {
+                return try InMemoryGitLab.json((1...31).map { id in
+                    ["id": id, "created_at": "1970-01-01T00:00:50Z", "action": "add", "label": ["name": "Label \(id)"]] as [String: Any]
+                })
+            }
+            return try await handler(call)
+        }
+        let board = try await f.board()
+        let card = try #require(board.cards.first { $0.id == "mr:1:2" })
+        let request = try RemoteDetailRequest(card: card, board: board)
+        await f.transport.onMessage?(.init(type: .detailRequest, detailRequest: request))
+        await f.host.detailTask?.value
+        let details = try #require(f.transport.messages.last?.detailResponse?.details)
+        #expect(details.activity.count == 30)
+        #expect(details.activityPartial == nil)
+        #expect(!details.truncated)
     }
 
     @Test func phoneReceivesLocalDetailsBeforeGitLabAndCachedDiscussionsOnReopen() async throws {
@@ -286,6 +373,7 @@ import MergeTetherRemote
         let local = f.transport.messages.last { $0.detailResponse?.request == first }?.detailResponse
         #expect(local?.details?.description == "Context")
         #expect(local?.details?.threads?.first?.notes.first?.body == "Already read on the Mac")
+        #expect(local?.details?.activityPartial == nil)
         #expect(local?.isPreview == true)
         f.gitlab.write("release-1")
         await f.host.detailTask?.value
@@ -753,16 +841,20 @@ import MergeTetherRemote
         var heldReads: Set<Int> = []
         var detailsTruncated = false
         var detailNotes: [RemoteDetailNote] = []
+        var usesLiveDetailReader = false
         let source: GitLabMergeRequest
         let readAvatarThumbnail: @Sendable (URL) async -> Data?
         lazy var host = RemoteHostController(monitor: monitor, relayConfiguration: .init(rawOrigin: pair.origin.absoluteString),
             loadPairing: { [pair] in pair }, savePairing: { _ in }, removePairing: {}, commandGate: RemoteCommandGate(store: nil),
-            now: { [unowned self] in date }, detailReader: { [unowned self] _, _, _, _ in
+            now: { [unowned self] in date }, detailReader: { [unowned self] source, drafts, glab, criteria in
                 readerCount += 1; let index = readerCount
                 gitlab.write("detail-entered-\(index)")
                 if heldReads.contains(index) { try await gitlab.waitFor("release-\(index)") }
-                return .init(checkedAt: date, description: "Read \(index)",
-                    threads: detailNotes.isEmpty ? nil : [.init(id: "thread", state: .open, notes: detailNotes)], truncated: detailsTruncated)
+                if usesLiveDetailReader {
+                    return try await RemoteMRDetailLoader.load(source: source, drafts: drafts, glab: glab, criteriaOverride: criteria)
+                }
+                return .init(details: .init(checkedAt: date, description: "Read \(index)",
+                    threads: detailNotes.isEmpty ? nil : [.init(id: "thread", state: .open, notes: detailNotes)], truncated: detailsTruncated))
             }, readAvatarThumbnail: readAvatarThumbnail, makeConnection: { [transport] _ in transport })
 
         init(draft: Bool = false, avatar: URL? = nil, readAvatarThumbnail: @escaping @Sendable (URL) async -> Data? = { _ in nil }) throws {

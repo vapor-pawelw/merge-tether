@@ -1,7 +1,8 @@
 import Foundation
+import MergeTetherRemote
 
 struct MRGitLabActivity: Identifiable, Sendable {
-    enum Resource: String, Sendable {
+    enum Resource: String, CaseIterable, Sendable {
         case state, label, milestone
     }
 
@@ -29,6 +30,34 @@ struct MRGitLabActivity: Identifiable, Sendable {
     var discussionID: String? {
         if case .comment(_, let id) = kind { return id }
         return nil
+    }
+
+    var title: LocalizedStringResource {
+        switch kind {
+        case .comment: .AutomationHistory.automationHistoryComment
+        case .systemNote: .AutomationHistory.automationHistorySystemNote
+        case .state("opened"): .AutomationHistory.automationHistoryOpened
+        case .state("reopened"): .AutomationHistory.automationHistoryReopened
+        case .state("closed"): .AutomationHistory.automationHistoryClosed
+        case .state("merged"): .AutomationHistory.automationHistoryMerged
+        case .state(let state): .AutomationHistory.automationHistoryStateChanged(state)
+        case .label("add", let name): .AutomationHistory.automationHistoryAddedLabel(name ?? "")
+        case .label("remove", let name): .AutomationHistory.automationHistoryRemovedLabel(name ?? "")
+        case .label(_, let name): .AutomationHistory.automationHistoryChangedLabel(name ?? "")
+        case .milestone("add", let title): .AutomationHistory.automationHistoryAddedMilestone(title ?? "")
+        case .milestone("remove", let title): .AutomationHistory.automationHistoryRemovedMilestone(title ?? "")
+        case .milestone(_, let title): .AutomationHistory.automationHistoryChangedMilestone(title ?? "")
+        }
+    }
+
+    var summary: String? {
+        guard let line = body?.prefix(240).split(whereSeparator: \.isNewline).first else { return nil }
+        return SafeInlineMarkdown.render(String(line)).map { String($0.characters) } ?? String(line)
+    }
+
+    var systemHeadline: String? {
+        guard case .systemNote = kind, let summary else { return nil }
+        return [actor, summary].compactMap { $0 }.joined(separator: " ")
     }
 
     static func notes(in discussions: [GitLabMergeRequestDiscussion]) -> [Self] {
