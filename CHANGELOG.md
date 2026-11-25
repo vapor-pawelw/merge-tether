@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Filter each Mac board column by attention, pins and activity section. Reviewing also supports new assignments. Combine choices through the filter icon in each column header.
+
 - Keep automatic review hides in Inbox until you mark them as seen or restore the merge request. Turn off future Inbox updates for autohides in filter settings.
 
 - Filter incoming review requests with custom criteria and the configured lightweight verifier. Unavailable or uncertain assessments let the merge request through with a note. A banner shows which merge requests were hidden and offers to restore them. They also appear under **Hidden merge requests**.

@@ -122,6 +122,28 @@ struct MRBoardGroupingTests {
         #expect(attentionCount == 1)
     }
 
+    @Test func laneFilterCombinesCardChoicesAndNarrowsBySectionWithoutMovingCards() {
+        let rows = (1...5).map { iid in
+            let item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: iid),
+                title: "MR", url: URL(string: "https://\(host)/g/p/-/merge_requests/\(iid)")!,
+                needsDiscussion: iid == 3 || iid == 4)
+            return MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [],
+                newReviewAssignedAt: iid == 1 || iid == 4 ? Date() : nil)
+        }
+        func visible(_ filter: MRBoardLaneFilter) -> [Int] {
+            rows.filter { row in
+                filter.matches(row, activity: row.id.iid >= 3 ? .inactive : .regular,
+                    isPinned: row.id.iid == 2 || row.id.iid == 4)
+            }.map(\.id.iid)
+        }
+
+        #expect(visible(.init(cards: [.new, .pinned])) == [1, 2, 4])
+        #expect(visible(.init(cards: [.needsAttention], sections: [.inactive])) == [3, 4])
+        #expect(visible(.init(cards: [.new, .pinned], sections: [.inactive])) == [4])
+        #expect(visible(.init(sections: [.regular, .inactive])) == [1, 2, 3, 4, 5])
+        #expect(visible(.init()) == [1, 2, 3, 4, 5])
+    }
+
     @Test func changingTheSecondarySectionKeepsFinishedFirstAndPreservedRanksWithinTheirCurrentGroup() throws {
         let requests = try [request(1, draft: true), request(2, draft: false), request(3, draft: false), request(4, draft: true, state: "merged")]
         let items = requests.map { MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: $0.iid),

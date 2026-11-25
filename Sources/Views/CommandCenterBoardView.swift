@@ -16,6 +16,13 @@ struct CommandCenterBoardView: View {
         }
 
         var symbol: String { self == .own ? "arrow.triangle.pull" : "text.magnifyingglass" }
+
+        var cardFilters: [MRBoardLaneFilter.Card] {
+            switch self {
+            case .own: [.needsAttention, .pinned]
+            case .reviewing: [.needsAttention, .new, .pinned]
+            }
+        }
     }
 
     private struct Selection: Identifiable {
@@ -44,7 +51,7 @@ struct CommandCenterBoardView: View {
     }
     @State private var selected: Selection?
     @State private var compactLane: Lane = .own
-    @State private var showingOnlyNewReviews = false
+    @State private var laneFilters: [Lane: MRBoardLaneFilter] = [:]
     @State private var detailPopoverPresented = false
     @State private var dragSession = BoardDragSession<BoardCardDrag>()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -74,6 +81,7 @@ struct CommandCenterBoardView: View {
         .background(Color(white: colorScheme == .dark ? 0.095 : 0.99))
         .onChange(of: account) { _, _ in
             selected = nil
+            laneFilters.removeAll()
             dragSession.finish()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
@@ -166,8 +174,8 @@ struct CommandCenterBoardView: View {
     }
 
     private func laneCards(_ rows: [MergeRequestBoardSnapshot.Row], removable: Bool,
-                           automationOffExpanded: Binding<Bool>, viewportHeight: CGFloat) -> some View {
-        let entries = Self.laneEntries(rows, automationOffExpanded: automationOffExpanded.wrappedValue,
+                           automationOffExpanded: Binding<Bool>?, viewportHeight: CGFloat) -> some View {
+        let entries = Self.laneEntries(rows, automationOffExpanded: automationOffExpanded?.wrappedValue ?? true,
             showsAutomationOn: usesManualOrder, activity: activity) { row in
             MRCardPresentation(row: row, monitor: monitor, allowsRemoval: removable).humanAction != nil
         }
@@ -184,7 +192,7 @@ struct CommandCenterBoardView: View {
         .frame(minHeight: viewportHeight, alignment: .topLeading)
     }
 
-    private func laneEntries(_ entries: [LaneEntry], removable: Bool, automationOffExpanded: Binding<Bool>) -> some View {
+    private func laneEntries(_ entries: [LaneEntry], removable: Bool, automationOffExpanded: Binding<Bool>?) -> some View {
         ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
             switch entry {
             case let .card(row, startsDrafts):
@@ -204,8 +212,13 @@ struct CommandCenterBoardView: View {
                     .padding(.bottom, 5)
                 dropBeforeNextCard(heading, entries: entries, index: index)
             case let .automationOff(count, attentionCount):
-                let heading = MRDetailDisclosureButton(isExpanded: automationOffExpanded) {
-                    sectionHeading(.BoardActivity.inactiveSection, count: count, attentionCount: attentionCount)
+                let title = sectionHeading(.BoardActivity.inactiveSection, count: count, attentionCount: attentionCount)
+                let heading = Group {
+                    if let automationOffExpanded {
+                        MRDetailDisclosureButton(isExpanded: automationOffExpanded) { title }
+                    } else {
+                        title
+                    }
                 }
                 .foregroundStyle(.secondary)
                 .padding(.top, index == 0 ? 2 : 14)
@@ -232,6 +245,12 @@ struct CommandCenterBoardView: View {
             isFinished: MergeRequestFinishedState(row.item.mergeRequest) != nil).group
     }
 
+    private func isPinned(_ row: MergeRequestBoardSnapshot.Row) -> Bool {
+        guard let pin = BoardCardPin.mergeRequest(host: account?.host, username: account?.username,
+            projectID: row.id.projectID, iid: row.id.iid) else { return false }
+        return monitor.settings.boardPins.contains(pin)
+    }
+
     private func sectionHeading(_ title: LocalizedStringResource, count: Int? = nil, attentionCount: Int = 0) -> some View {
         HStack(spacing: 10) {
             Text(title)
@@ -256,8 +275,12 @@ struct CommandCenterBoardView: View {
 
     private func lane(_ lane: Lane, compact: Bool = false) -> some View {
         let reviewing = lane == .reviewing
-        let newReviews = board.reviewed.filter { $0.newReviewAssignedAt != nil }
-        let rows = reviewing ? (showingOnlyNewReviews ? newReviews : board.reviewed) : board.own
+        let filter = Binding(get: { laneFilters[lane] ?? .init() }, set: { laneFilters[lane] = $0 })
+        let selection = filter.wrappedValue
+        let allRows = reviewing ? board.reviewed : board.own
+        let rows = selection.isActive ? allRows.filter { row in
+            selection.matches(row, activity: activity(row), isPinned: isPinned(row))
+        } : allRows
         let cardIDs = rows.map(\.id)
         let settings = monitor.settings
         let expansionKey = reviewing ? \SettingsManager.reviewingAutomationOffExpanded : \SettingsManager.ownAutomationOffExpanded
@@ -285,13 +308,7 @@ struct CommandCenterBoardView: View {
                         .font(.subheadline.weight(.semibold))
                 }
                 Spacer()
-                if reviewing, !newReviews.isEmpty || showingOnlyNewReviews {
-                    Picker(selection: $showingOnlyNewReviews) {
-                        Text(.Board.boardReviewAssignmentsAll).tag(false)
-                        Text(.Board.boardReviewAssignmentsNewCount(newReviews.count)).tag(true)
-                    } label: { Text(.Board.boardLaneReviewing) }
-                    .pickerStyle(.segmented).labelsHidden().fixedSize()
-                }
+                BoardLaneFilterButton(selection: filter, cardChoices: lane.cardFilters)
                 Text(cardIDs.count, format: .number).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 6).padding(.vertical, 10)
@@ -299,15 +316,16 @@ struct CommandCenterBoardView: View {
             GeometryReader { viewport in
                 ScrollView {
                     if rows.isEmpty {
-                        if reviewing, showingOnlyNewReviews {
-                            Text(.Board.boardReviewAssignmentsNoNew).foregroundStyle(.secondary).padding()
+                        if selection.isActive, refreshState == .current {
+                            Text(.Board.boardFiltersEmpty).foregroundStyle(.secondary).padding()
                         } else {
                             empty(reviewing ? .Board.boardEmptyReviewingTitle : .Board.boardEmptyOwnTitle,
                                   message: reviewing ? .Board.boardLaneReviewingEmpty : .Board.boardLaneOwnEmpty,
                                   symbol: lane.symbol)
                         }
                     } else {
-                        laneCards(rows, removable: reviewing, automationOffExpanded: automationOffExpanded,
+                        laneCards(rows, removable: reviewing,
+                            automationOffExpanded: selection.isActive ? nil : automationOffExpanded,
                             viewportHeight: max(0, viewport.size.height - 10))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 5).padding(.horizontal, 1)
