@@ -173,9 +173,13 @@ struct ReviewingContext {
             else if activity.isComplete { status = .noPublishedComments }
         } else if currentReview?.execution?.state == .succeeded { status = .reviewCompleted }
 
+        // A running intent whose worker already finished (latest run is terminal) is stale bookkeeping,
+        // e.g. a run cancelled by policy; it must not keep the card in "Preparing review" forever.
+        let latestRunFinished = row.latestJob?.operationalExecution?.state.isActive == false
         let automaticIntent = row.intents.contains {
             $0.kind == .review && $0.headSHA == item.mergeRequest?.sha
-                && ($0.state == .running || ($0.state == .pending && item.humanActionRequired == false))
+                && (($0.state == .running && !($0.jobID != nil && latestRunFinished))
+                    || ($0.state == .pending && item.humanActionRequired == false))
         }
         let queued = workflowState == .queued || workflowState == .running || workflowState == .waitingForAssistant
             || automaticIntent || item.reviewingProgress == .queued

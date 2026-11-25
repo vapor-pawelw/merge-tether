@@ -278,6 +278,21 @@ struct ReviewingContextTests {
         #expect(String(localized: context.statusMessage) == "1 open review thread")
     }
 
+    @Test func runningReviewIntentOfAFinishedRunDoesNotKeepTheCardPreparing() throws {
+        let request = try request()
+        func intent(_ jobID: UUID?) -> MRTodoIntent {
+            var value = MRTodoIntent(id: UUID(), target: .init(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2),
+                kind: .review, state: .running, todoIDs: [], noteIDs: [], sourceEvents: [], request: request,
+                headSHA: "abc", updatedAt: Date())
+            value.jobID = jobID
+            return value
+        }
+        let stale = intent(UUID())
+        #expect(ReviewingContext(row: row(try item(), job: reviewJob(.succeeded), intents: [stale])).nextStep != .automaticReview)
+        #expect(ReviewingContext(row: row(try item(), job: reviewJob(.running), intents: [stale])).nextStep == .automaticReview)
+        #expect(ReviewingContext(row: row(try item(), intents: [stale])).nextStep == .automaticReview)
+    }
+
     @Test func aKnownEmptyReviewHasAnExplicitManualAction() throws {
         var item = try item()
         item.reviewingActivity = ReviewingActivity(discussions: [], reviewerID: 3, authorID: 7)
