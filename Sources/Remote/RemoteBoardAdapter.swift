@@ -65,6 +65,51 @@ import MergeTetherRemote
         }
     }
 
+    private static func hiddenAssignmentCard(_ review: HiddenReview, account: String) -> RemoteCard {
+        var card = RemoteCard(id: hiddenAssignmentCardID(review),
+            title: review.title, project: review.url.gitLabProjectPath, url: review.url, mergeRequestIID: review.target.iid)
+        if let token = try? RemoteDigest.token([account, card.id, review.title, review.url.absoluteString,
+                                               review.hideID?.uuidString ?? ""]) {
+            card.actions = [.init(id: RemoteAction.restoreHiddenReviewID, kind: .markDone, token: token)]
+        }
+        return card
+    }
+
+    private static func hiddenAssignmentCardID(_ review: HiddenReview) -> String {
+        "hidden-review:\(review.target.projectID):\(review.target.iid ?? 0)"
+    }
+
+    static func restoreHiddenReview(_ card: RemoteCard, action: RemoteAction, monitor: TodoMonitorService,
+                                    account: String) -> RemoteCommandResult.Status {
+        guard let host = monitor.glab.resolvedHost, let username = monitor.glab.currentUsername,
+              account == "\(username)@\(host)",
+              let review = monitor.hiddenReviewAssignments.first(where: { hiddenAssignmentCardID($0) == card.id })
+        else { return .changed }
+        let current = hiddenAssignmentCard(review, account: account)
+        guard current.hasSameActionContext(as: card), current.actions.contains(action) else { return .changed }
+        return monitor.restoreReviewedMergeRequests([review]) ? .completed : .failed
+    }
+
+    private static func reviewAssignmentAction(for row: MergeRequestBoardSnapshot.Row, monitor: TodoMonitorService,
+                                               account: String) -> RemoteAction? {
+        guard monitor.isNewReviewAssignment(row),
+              let target = monitor.scopeTarget(projectID: row.id.projectID, iid: row.id.iid, url: row.displayURL),
+              account == "\(target.username)@\(target.host)",
+              let token = try? RemoteDigest.token([account, boardOrderCardID(target), row.displayURL.absoluteString,
+                  row.displayTitle, row.displayRequest.flatMap(contextRevision) ?? "",
+                  try RemoteDigest.token(row.newReviewAssignedAt), monitor.settings.newReviewGenerations[target]?.uuidString ?? ""])
+        else { return nil }
+        return .init(id: RemoteAction.reviewSeenID, kind: .markDone, token: token)
+    }
+
+    static func acknowledgeReviewAssignment(_ card: RemoteCard, action: RemoteAction, monitor: TodoMonitorService,
+                                            account: String) -> RemoteCommandResult.Status {
+        guard let row = monitor.boardSnapshot.reviewed.first(where: { "mr:\($0.id.projectID):\($0.id.iid)" == card.id }),
+              card.url == row.displayURL, reviewAssignmentAction(for: row, monitor: monitor, account: account) == action
+        else { return .changed }
+        return monitor.markReviewAssignmentSeen(row.displayItem) ? .completed : .failed
+    }
+
     static func card(_ item: MergeRequestAttentionMonitor.Item, account: String,
                      extraActions: [RemoteActionKind] = [], context: [String] = []) -> RemoteCard {
         let drafts = item.drafts.enumerated().map { index, draft in
@@ -153,12 +198,17 @@ import MergeTetherRemote
     }
 
     static func board(monitor: TodoMonitorService, session: UUID, account: String,
-                      includesBoardOrder: Bool = false, includesCardActions: Bool = false) -> RemoteBoard {
+                      includesBoardOrder: Bool = false, includesCardActions: Bool = false,
+                      includesReviewBoard: Bool = false) -> RemoteBoard {
         let board = monitor.boardSnapshot
         let other = board.otherCards(jobs: monitor.assistantHandoffs, host: monitor.glab.resolvedHost,
             username: monitor.glab.currentUsername, pinnedCards: monitor.settings.boardPins)
         var result = project(board: board, other: other, session: session, account: account,
             intents: monitor.settings.mrActionIntents, conflictReceipts: monitor.settings.conflictReceipts)
+        if includesReviewBoard {
+            result.hiddenReviews = monitor.hiddenReviewAssignments.filter { account == "\($0.target.username)@\($0.target.host)" }
+                .map { hiddenAssignmentCard($0, account: account) }
+        }
         var orderGroups: [String: RemoteBoardOrderGroup] = [:]
         if includesBoardOrder {
             for (group, entries) in Dictionary(grouping: board.manualOrderEntries, by: \.group) {
@@ -187,7 +237,8 @@ import MergeTetherRemote
                     case .ready, .failed: extras.append(.prepare)
                     default: break
                     }
-                    let presentation = MRCardPresentation(row: row, monitor: monitor, allowsRemoval: result.lanes[lane].id == .reviewed)
+                    let reviewing = result.lanes[lane].id == .reviewed
+                    let presentation = MRCardPresentation(row: row, monitor: monitor, allowsRemoval: reviewing)
                     let humanAction = presentation.humanAction
                     let feedbackIDs = item.authorFeedbackStatus?.followUpNoteIDs.sorted().map(String.init) ?? []
                     if humanAction?.action == .handleFeedback, !feedbackIDs.isEmpty { extras.append(.prepare) }
@@ -195,6 +246,15 @@ import MergeTetherRemote
                         item.authorFeedbackStatus?.fingerprint ?? ""] + feedbackIDs
                     card = self.card(item, account: account, extraActions: extras, context: context)
                     card = self.presentation(card, model: presentation)
+                    if includesReviewBoard {
+                        card.boardTraits = .init(needsAttention: row.needsAttention,
+                            isNew: reviewing && monitor.isNewReviewAssignment(row),
+                            isInactive: monitor.boardActivityGroup(for: row) == .inactive)
+                        if let pin = BoardCardPin.mergeRequest(host: monitor.glab.resolvedHost, username: monitor.glab.currentUsername,
+                            projectID: row.id.projectID, iid: row.id.iid) {
+                            card.pinned = monitor.settings.boardPins.contains(pin)
+                        }
+                    }
                     let issues = monitor.issueTags(for: row.displayRequest)
                     if !issues.isEmpty { card.issues = issues }
                     if let head = card.head, let host = monitor.glab.resolvedHost,
@@ -268,6 +328,9 @@ import MergeTetherRemote
                     if let control = commentOriginControl(item: item, monitor: monitor, account: account) { card.actions.append(control) }
                     card = bindingPrimaryAction(card, humanAction: humanAction?.action,
                         actionID: humanAction?.executableActionID, nextStep: presentation.reviewingContext.nextStep)
+                    if card.boardTraits?.isNew == true, let action = reviewAssignmentAction(for: row, monitor: monitor, account: account) {
+                        card.actions.append(action)
+                    }
                 } else if let todo = board.otherTodos.first(where: { "todo:\($0.id)" == card.id }),
                           monitor.isAssessingNotice(todo) {
                     card.needsAttention = false
@@ -295,6 +358,11 @@ import MergeTetherRemote
             || monitor.attention.isLoading || monitor.authoredMergeRequests.isLoading
         if result.partial {
             for lane in result.lanes.indices { for card in result.lanes[lane].cards.indices { result.lanes[lane].cards[card].actions = [] } }
+            result.hiddenReviews = result.hiddenReviews?.map { card in
+                var readOnly = card
+                readOnly.actions = []
+                return readOnly
+            }
         }
         return result
     }

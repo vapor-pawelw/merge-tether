@@ -52,10 +52,24 @@ final class SettingsManager {
         get { hiddenMergeRequests.targets }
         set { hiddenMergeRequests.targets = newValue }
     }
-    var filteredHiddenReviewDetails: [MRAutomationScope.Target: HiddenReview] { hiddenMergeRequests.details }
+    var hiddenReviewDetails: [MRAutomationScope.Target: HiddenReview] { hiddenMergeRequests.details }
+    var filteredHiddenReviewDetails: [MRAutomationScope.Target: HiddenReview] {
+        hiddenMergeRequests.details.filter { $0.value.manuallyHidden != true }
+    }
 
     func intakeFilterHolds(_ target: MRAutomationScope.Target) -> Bool {
-        reviewAssignments.incomingReviewFilter.suppresses(target) || hiddenMergeRequests.details[target] != nil
+        reviewAssignments.incomingReviewFilter.suppresses(target)
+            || hiddenMergeRequests.details[target].map { $0.manuallyHidden != true } == true
+    }
+
+    func hideReviewedMergeRequest(_ review: HiddenReview) -> Bool {
+        var updated = hiddenMergeRequests
+        guard updated.targets.insert(review.target).inserted else { return true }
+        var hidden = review
+        hidden.hideID = UUID()
+        hidden.manuallyHidden = true
+        updated.details[review.target] = hidden
+        return saveHiddenMergeRequests(updated)
     }
 
     func hideFilteredReviews(_ reviews: [HiddenReview], reasons: [MRAutomationScope.Target: String] = [:]) -> Bool {
@@ -63,6 +77,7 @@ final class SettingsManager {
         let observedAt = Date()
         for var review in reviews {
             guard updated.targets.insert(review.target).inserted else { continue }
+            review.hideID = UUID()
             review.inboxNotification = incomingReviewFilterSettings.showHiddenReviewsInInbox
                 ? .init(id: UUID(), observedAt: observedAt, reason: reasons[review.target]) : nil
             updated.details[review.target] = review
@@ -115,7 +130,14 @@ final class SettingsManager {
     /// New review candidates go straight to Reviewing (marked NEW) instead of waiting in the inbox.
     var addNewReviewsToReviewed: Bool
     /// Reviewing cards that arrived directly and have not been acted on yet.
-    var newReviewTargets: Set<MRAutomationScope.Target>
+    var newReviewTargets: Set<MRAutomationScope.Target> {
+        didSet {
+            for target in newReviewTargets.subtracting(oldValue) { newReviewGenerations[target] = UUID() }
+            for target in oldValue.subtracting(newReviewTargets) { newReviewGenerations.removeValue(forKey: target) }
+        }
+    }
+    // Invalidate older phone actions when a candidate becomes new again in the same host session.
+    private(set) var newReviewGenerations: [MRAutomationScope.Target: UUID] = [:]
     /// New reviews whose automation MergeTether paused until the user starts them.
     var heldNewReviewTargets: Set<MRAutomationScope.Target>
     /// Automation as configured. Presentation reads this so the killswitch only stops execution

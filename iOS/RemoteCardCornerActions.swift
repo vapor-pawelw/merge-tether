@@ -51,7 +51,10 @@ struct RemoteCardCornerActions: View {
         }
         .confirmationDialog(Text(.Board.boardReviewAssignmentHide), isPresented: $confirmRemoval, titleVisibility: .visible) {
             Button(role: .destructive) { submit(.remove) } label: { Text(.Board.boardReviewAssignmentHide) }
-        } message: { Text(.Board.boardReviewAssignmentHideExplanation) }
+        } message: {
+            Text(model?.state.board?.hiddenReviews != nil
+                ? .RemoteCardActions.remoteCardActionsHideReviewExplanation : .Board.boardReviewAssignmentHideExplanation)
+        }
         .sheet(item: $panel) { panel in
             if let model {
                 switch panel {
@@ -84,6 +87,15 @@ struct RemoteCardCornerActions: View {
                 }
                 if let review = card.actions.first(where: { $0.kind == .runReview }), onOpenAction != nil {
                     actionButton(review, symbol: "sparkle.magnifyingglass")
+                }
+                if let seen = card.reviewSeenAction, let model {
+                    Button {
+                        Task { await model.perform(card: card, action: seen) }
+                    } label: {
+                        Label(.Board.boardReviewAssignmentSeen, systemImage: "checkmark")
+                    }
+                    .disabled(!model.state.canAct())
+                    .accessibilityIdentifier("remote.review.seen.\(card.id)")
                 }
                 if model != nil {
                     Button { panel = .assistant } label: {

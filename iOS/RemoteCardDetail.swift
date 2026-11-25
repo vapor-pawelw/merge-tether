@@ -6,6 +6,7 @@ struct RemoteCardDetail: View {
     let original: RemoteCard
     var initialSelection: RemoteCardSelection? = nil
     @State private var appliedInitialAction = false
+    @State private var openedReview = false
     @State private var initialActionChanged = false
     @State private var scrolledToInitialDestination = false
     @State private var scrollTarget: RemoteCardCTA.Destination?
@@ -126,7 +127,9 @@ struct RemoteCardDetail: View {
                 }
                 .task(id: detailIdentity) {
                     guard current.id.hasPrefix("mr:") else { return }
-                    await model.requestDetails(card: current)
+                    let seen = openedReview ? nil : original.reviewSeenAction
+                    openedReview = true
+                    await model.requestDetails(card: current, acknowledgingReview: seen)
                 }
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
@@ -366,7 +369,7 @@ struct RemoteCardDetail: View {
                     .accessibilityAddTraits(.isHeader)
                 RemoteDetailActionButtons(actions: buttonActions, runningActionID: runningActionID,
                     onAction: { action in
-                        if current.id.hasPrefix("completion:"), action.kind == .markDone {
+                        if action.id == RemoteAction.reviewSeenID || (current.id.hasPrefix("completion:") && action.kind == .markDone) {
                             Task { await model.perform(card: current, action: action) }
                         } else { showConfirmation(action) }
                     })
@@ -500,6 +503,7 @@ private struct RemoteDetailActionButtons: View {
     }
     private func title(_ action: RemoteAction) -> Text {
         if let label = action.label { Text(verbatim: label) }
+        else if action.id == RemoteAction.reviewSeenID { Text(.Board.boardReviewAssignmentSeen) }
         else if action.id == "seen", action.kind == .markDone { Text(.Remote.remoteSeen) }
         else { Text(action.kind.title) }
     }

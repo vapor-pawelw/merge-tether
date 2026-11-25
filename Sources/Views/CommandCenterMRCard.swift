@@ -48,7 +48,7 @@ private struct CommandCenterMRCardContent: View {
 
     private var contentOpacity: Double { isDraft ? 0.5 : 1 }
     private var isNewReview: Bool {
-        row.newReviewAssignedAt != nil || scopeTarget.map(monitor.settings.newReviewTargets.contains) == true
+        monitor.isNewReviewAssignment(row)
     }
     private var showsInlineHide: Bool { isNewReview && row.waitsForReviewStart && reviewingContext.nextStep == .runReview }
     private var newReviewTint: Color {

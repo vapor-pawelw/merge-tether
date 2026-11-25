@@ -964,6 +964,19 @@ final class TodoMonitorService {
               isDraft: isDraft, isFinished: isFinished, grouping: settings.boardGrouping)
     }
 
+    func boardActivityGroup(for row: MergeRequestBoardSnapshot.Row) -> MRBoardActivity.Group {
+        if let entry = row.manualOrderEntry { return entry.group.automationEnabled || entry.isNew ? .regular : .inactive }
+        return boardActivity(projectID: row.id.projectID, iid: row.id.iid, url: row.item.url,
+            isDraft: row.item.section == .draftMergeRequests,
+            isFinished: MergeRequestFinishedState(row.item.mergeRequest) != nil).group
+    }
+
+    func isNewReviewAssignment(_ row: MergeRequestBoardSnapshot.Row) -> Bool {
+        row.newReviewAssignedAt != nil
+            || scopeTarget(projectID: row.id.projectID, iid: row.id.iid, url: row.item.url)
+                .map(settings.newReviewTargets.contains) == true
+    }
+
     func scopeTarget(projectID: Int, iid: Int, url: URL) -> MRAutomationScope.Target? {
         guard projectID > 0, iid > 0, let host = glab.resolvedHost, let username = glab.currentUsername,
               url.isGitLabMergeRequest(host: host, iid: iid) else { return nil }
@@ -1011,11 +1024,17 @@ final class TodoMonitorService {
         if restoreReviewedMergeRequests(removal.reviews) { dismissReviewRemoval(removal.id) }
     }
 
-    func markReviewAssignmentSeen(_ item: MergeRequestAttentionMonitor.Item) {
-        guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) else { return }
+    @discardableResult
+    func markReviewAssignmentSeen(_ item: MergeRequestAttentionMonitor.Item) -> Bool {
+        guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) else { return false }
+        return !clearNewReviewAssignment(target) || settings.save()
+    }
+
+    @discardableResult
+    private func clearNewReviewAssignment(_ target: MRAutomationScope.Target) -> Bool {
         let assignmentSeen = settings.reviewAssignments.markSeen(target)
         let candidateSeen = settings.newReviewTargets.remove(target) != nil
-        if assignmentSeen || candidateSeen { settings.save() }
+        return assignmentSeen || candidateSeen
     }
 
     var hiddenReviewNotifications: [HiddenReview] {
@@ -1039,13 +1058,17 @@ final class TodoMonitorService {
 
     var hiddenReviewAssignments: [HiddenReview] {
         guard let account = boardDisplayAccount else { return [] }
-        var hidden = settings.filteredHiddenReviewDetails.filter {
+        var hidden = settings.hiddenReviewDetails.filter {
             $0.key.host == account.host && $0.key.username == account.username
         }
-        for assignment in settings.reviewAssignments.entries(host: account.host, username: account.username) ?? [] {
-            let request = assignment.request
+        let assigned = settings.reviewAssignments.entries(host: account.host, username: account.username)?.map(\.request) ?? []
+        let retained = settings.ignoredMergeRequests.compactMap { target -> GitLabMergeRequest? in
+            guard target.host == account.host, target.username == account.username, hidden[target] == nil else { return nil }
+            return settings.mrLifecycleLedger.request(for: target)
+        }
+        for request in assigned + retained where request.author.username != account.username {
             guard let target = scopeTarget(projectID: request.projectID, iid: request.iid, url: request.webURL),
-                  settings.ignoredMergeRequests.contains(target) else { continue }
+                  settings.ignoredMergeRequests.contains(target), hidden[target] == nil else { continue }
             hidden[target] = .init(target: target, title: request.title, url: request.webURL)
         }
         return hidden.values.sorted {
@@ -1061,7 +1084,7 @@ final class TodoMonitorService {
             return review.target
         })
         guard settings.restoreHiddenReviews(targets) else { return false }
-        for target in targets { settings.reviewAssignments.markSeen(target) }
+        for target in targets { clearNewReviewAssignment(target) }
         settings.save()
         resumeIncomingReviews()
         return true
@@ -1073,10 +1096,11 @@ final class TodoMonitorService {
         guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
               let request = item.mergeRequest, request.author.username != target.username,
               request.projectID == target.projectID, request.iid == target.iid, request.webURL == item.url else { return false }
-        guard settings.ignoredMergeRequests.insert(target).inserted else { return true }
-        settings.reviewAssignments.markSeen(target)
-        guard settings.save() else { return false }
-        announceHiddenReviews([.init(target: target, title: request.title, url: request.webURL)], automatic: false)
+        guard !settings.ignoredMergeRequests.contains(target) else { return true }
+        let review = HiddenReview(target: target, title: request.title, url: request.webURL)
+        guard settings.hideReviewedMergeRequest(review) else { return false }
+        if clearNewReviewAssignment(target) { settings.save() }
+        announceHiddenReviews([review], automatic: false)
         return true
     }
 

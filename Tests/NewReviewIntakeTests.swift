@@ -1,4 +1,5 @@
 import Foundation
+import MergeTetherRemote
 import Testing
 @testable import MergeTether
 
@@ -72,6 +73,45 @@ struct NewReviewIntakeTests {
             await monitor.refreshNow()
             #expect(settings.newReviewTargets.contains(target))
             #expect(settings.automation.scope[target] == .inherit && settings.heldNewReviewTargets.isEmpty)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func phoneSharesTheNewBadgeAndCanAcknowledgeTheSameAssignment(confirmedAssignment: Bool) async throws {
+        try await fixture(preset: .manual) { monitor, settings in
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(mergeRequestJSON.utf8))
+            settings.mrLifecycleLedger.record(request, for: target)
+            settings.automation.startNewReviewsAutomatically = false
+            monitor.trackReviewCandidate(target, projectPath: request.webURL.gitLabProjectPath, markNew: !confirmedAssignment)
+            if confirmedAssignment {
+                settings.reviewAssignments.observe([], host: host, username: "alice", at: Date())
+                settings.reviewAssignments.observe([request], host: host, username: "alice", at: Date())
+            }
+            let session = UUID()
+            let account = "alice@\(host)"
+            func phoneBoard(_ supportsReviewBoard: Bool = true) -> RemoteBoard {
+                RemoteBoardAdapter.board(monitor: monitor, session: session, account: account,
+                    includesReviewBoard: supportsReviewBoard)
+            }
+            let legacy = try #require(phoneBoard(false).cards.first { $0.id == "mr:1:42" })
+            #expect(legacy.boardTraits == nil)
+            #expect(legacy.actions.allSatisfy { $0.id != RemoteAction.reviewSeenID })
+            let board = phoneBoard()
+            let card = try #require(board.cards.first { $0.id == "mr:1:42" })
+            #expect(card.boardTraits?.isNew == true)
+            let seen = try #require(card.actions.first { $0.id == RemoteAction.reviewSeenID })
+            #expect(RemoteBoardAdapter.acknowledgeReviewAssignment(card, action: seen, monitor: monitor, account: "other@\(host)") == .changed)
+            #expect(phoneBoard().cards.first { $0.id == card.id }?.boardTraits?.isNew == true)
+            #expect(RemoteBoardAdapter.acknowledgeReviewAssignment(card, action: seen, monitor: monitor, account: account) == .completed)
+            #expect(!settings.newReviewTargets.contains(target))
+            #expect(settings.heldNewReviewTargets.contains(target))
+            #expect(phoneBoard().cards.first { $0.id == card.id }?.boardTraits?.isNew == false)
+            #expect(RemoteBoardAdapter.acknowledgeReviewAssignment(card, action: seen, monitor: monitor, account: account) == .changed)
+            if !confirmedAssignment {
+                monitor.trackReviewCandidate(target, projectPath: request.webURL.gitLabProjectPath, markNew: true)
+                #expect(phoneBoard().cards.first { $0.id == card.id }?.boardTraits?.isNew == true)
+                #expect(RemoteBoardAdapter.acknowledgeReviewAssignment(card, action: seen, monitor: monitor, account: account) == .changed)
+            }
         }
     }
 

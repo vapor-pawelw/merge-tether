@@ -1,6 +1,27 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "remoteCardActions.hiddenReviews": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Hidden merge requests"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Ukryte MR-y"}}
+      }
+    },
+    "remoteCardActions.hiddenReviewsEmpty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "No hidden merge requests."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak ukrytych MR-ów."}}
+      }
+    },
+    "remoteCardActions.hideReviewExplanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Hide this merge request from Reviewing. You can restore it from Hidden merge requests in Reviewing."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Ukryj ten MR w kolumnie „Do przeglądu”. Możesz go przywrócić z listy ukrytych MR-ów w tej kolumnie."}}
+      }
+    },
     "remoteCardActions.approval": {
       "extractionState": "manual",
       "localizations": {

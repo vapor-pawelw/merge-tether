@@ -9,12 +9,21 @@ public struct RemoteDetailRequest: Codable, Equatable, Sendable {
     public let cardDigest: String
     public let contentDigest: String?
     public let cachedOnly: Bool?
-    public init(card: RemoteCard, board: RemoteBoard, presentationIndependent: Bool = false, cachedOnly: Bool? = nil) throws {
+    public let reviewSeenToken: String?
+    public init(card: RemoteCard, board: RemoteBoard, presentationIndependent: Bool = false, cachedOnly: Bool? = nil,
+                reviewSeenToken: String? = nil) throws {
         guard card.id.utf8.count <= 128, board.account.utf8.count <= 1_024 else { throw RemoteProtocolError.invalid }
         id = UUID(); hostSession = board.hostSession; account = board.account
         cardID = card.id; cardDigest = try RemoteDigest.token(card)
         contentDigest = presentationIndependent ? card.detailContextDigest : nil
         self.cachedOnly = cachedOnly
+        self.reviewSeenToken = reviewSeenToken
+    }
+    public func reviewSeenAction(in board: RemoteBoard) -> RemoteAction? {
+        guard let reviewSeenToken, contentDigest != nil, !board.partial, matches(board),
+              let card = board.lanes.first(where: { $0.id == .reviewed })?.cards.first(where: { $0.id == cardID }),
+              let action = card.reviewSeenAction, action.token == reviewSeenToken else { return nil }
+        return action
     }
     public func matches(_ board: RemoteBoard) -> Bool {
         isValid && hostSession == board.hostSession && account == board.account
@@ -488,11 +497,12 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
     private var authorKindRevisions: [String: UInt64] = [:]
     public init() {}
     public func begin(card: RemoteCard, board: RemoteBoard, now: Date = Date(), force: Bool = false,
-                      presentationIndependent: Bool = true, cachedOnly: Bool? = nil) -> RemoteDetailRequest? {
+                      presentationIndependent: Bool = true, cachedOnly: Bool? = nil,
+                      reviewSeenToken: String? = nil) -> RemoteDetailRequest? {
         guard board.cards.contains(card), card.id.hasPrefix("mr:"),
               force || pending == nil || !isLoading(now: now),
               let request = try? RemoteDetailRequest(card: card, board: board, presentationIndependent: presentationIndependent,
-                                                     cachedOnly: cachedOnly) else { return nil }
+                                                     cachedOnly: cachedOnly, reviewSeenToken: reviewSeenToken) else { return nil }
         pending = request; openRequest = request; deadline = now.addingTimeInterval(45); failure = nil
         originRevisions = [:]
         authorKindRevisions = [:]

@@ -7,6 +7,7 @@ struct RemoteBoardView: View {
     @State private var pairingSheet = false
     @State private var selected: RemoteCardSelection?
     @State private var showingInbox = false
+    @State private var showingHiddenReviews = false
     @State private var pendingInboxCard: RemoteCardSelection?
     @State private var regenerationPresentation: DraftRegenerationPresentation?
     var body: some View {
@@ -25,7 +26,7 @@ struct RemoteBoardView: View {
                         }
                         RemoteLaneBoard(lanes: board.lanes.filter { $0.id != .other }, onOpen: { selected = .init(card: $0) },
                             onOpenCTA: { selected = .init(card: $0, cta: $1) },
-                            model: model,
+                            model: model, onOpenHiddenReviews: board.hiddenReviews?.isEmpty == false ? { showingHiddenReviews = true } : nil,
                             onRefresh: { await model.refreshContent() })
                         if let updated = board.updatedAt {
                             HStack { Text(.Remote.remoteUpdated); Text(updated, style: .relative) }
@@ -104,11 +105,17 @@ struct RemoteBoardView: View {
                     .presentationDragIndicator(.visible)
             }
             .sheet(item: $regenerationPresentation) { model.draftRegenerationSheet($0) }
+            .sheet(isPresented: $showingHiddenReviews) { RemoteHiddenReviewsView(model: model) }
             .onChange(of: model.pairingRevision) {
                 pairingSheet = false; selected = nil; showingInbox = false; pendingInboxCard = nil
+                showingHiddenReviews = false
                 regenerationPresentation = nil
             }
-            .onChange(of: model.state.board?.account) { _, _ in regenerationPresentation = nil }
+            .onChange(of: model.state.board?.account) { _, _ in
+                selected = nil
+                showingHiddenReviews = false
+                regenerationPresentation = nil
+            }
             .popover(isPresented: $showingInbox, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     let status = model.connectionStatus(now: context.date)
@@ -135,8 +142,8 @@ struct RemoteBoardView: View {
                     .presentationDragIndicator(.visible)
             }
             .alert(Text(model.resultTitle), isPresented: Binding(
-                get: { selected == nil && model.state.result != nil },
-                set: { if !$0, selected == nil { model.state.acknowledgeResult() } }
+                get: { selected == nil && !showingHiddenReviews && model.state.result != nil },
+                set: { if !$0, selected == nil, !showingHiddenReviews { model.state.acknowledgeResult() } }
             )) {
                 Button(.Remote.remoteClose) { model.state.acknowledgeResult() }
             } message: {
@@ -431,6 +438,13 @@ struct RemoteCardView: View {
                     MRDependencyBadge(dependencies: dependencies)
                 }
                 draftBadge
+                if card.boardTraits?.isNew == true {
+                    Text(.Board.boardReviewAssignmentNew)
+                        .font(.caption.weight(.semibold)).foregroundStyle(.teal)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(.teal.opacity(0.14), in: Capsule())
+                        .accessibilityIdentifier("remote.review.new.\(card.id)")
+                }
             }
             .font(.caption).foregroundStyle(.secondary)
             .fixedSize(horizontal: true, vertical: false)

@@ -1,5 +1,44 @@
 import Foundation
 
+public struct RemoteBoardCardTraits: Codable, Equatable, Sendable {
+    public var needsAttention: Bool
+    public var isNew: Bool
+    public var isInactive: Bool
+
+    public init(needsAttention: Bool, isNew: Bool, isInactive: Bool) {
+        self.needsAttention = needsAttention
+        self.isNew = isNew
+        self.isInactive = isInactive
+    }
+}
+
+public struct RemoteBoardLaneFilter: Equatable, Sendable {
+    public enum Card: Hashable, Sendable { case needsAttention, new, pinned }
+    public enum Section: CaseIterable, Hashable, Sendable { case regular, inactive }
+
+    public var cards: Set<Card>
+    public var sections: Set<Section>
+    public var isActive: Bool { !cards.isEmpty || !sections.isEmpty }
+
+    public init(cards: Set<Card> = [], sections: Set<Section> = []) {
+        self.cards = cards
+        self.sections = sections
+    }
+
+    public func matches(_ card: RemoteCard) -> Bool {
+        matches(needsAttention: card.boardTraits?.needsAttention ?? (card.needsAttention == true),
+            isNew: card.boardTraits?.isNew == true, isPinned: card.pinned ?? (card.orderGroup?.pinned == true),
+            isInactive: card.boardTraits?.isInactive == true)
+    }
+
+    public func matches(needsAttention: Bool, isNew: Bool, isPinned: @autoclosure () -> Bool,
+                        isInactive: @autoclosure () -> Bool) -> Bool {
+        let matchesCard = cards.isEmpty || (cards.contains(.needsAttention) && needsAttention)
+            || (cards.contains(.new) && isNew) || (cards.contains(.pinned) && isPinned())
+        return matchesCard && (sections.isEmpty || sections.contains(isInactive() ? .inactive : .regular))
+    }
+}
+
 public enum BoardOrderInsertion: Equatable, Sendable {
     case before, after
 

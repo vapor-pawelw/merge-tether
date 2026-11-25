@@ -3,6 +3,80 @@ import Testing
 @testable import MergeTetherRemote
 
 struct BoardOrderTests {
+    @Test func laneFiltersCombineCardChoicesAndSectionsWithoutChangingOrder() throws {
+        var board = try makeBoard()
+        board.lanes[0].cards[0].boardTraits = .init(needsAttention: false, isNew: true, isInactive: false)
+        board.lanes[0].cards[2].boardTraits = .init(needsAttention: true, isNew: false, isInactive: true)
+        let source = try #require(board.orderSource(for: board.lanes[0].cards[0]))
+        let canonicalOrder = board.lanes[0].cards.map(\.id)
+        let filter = RemoteBoardLaneFilter(cards: [.needsAttention, .new], sections: [.regular])
+        #expect(board.lanes[0].cards.filter(filter.matches).map(\.id) == [canonicalOrder[0]])
+        #expect(board.lanes[0].cards.map(\.id) == canonicalOrder)
+        #expect(board.orderMove(from: source, beside: "second", insertion: .after)?.destinationID == "second")
+    }
+
+    @Test func openingDetailsCanAcknowledgeOnlyTheDisplayedNewAssignment() throws {
+        let seen = RemoteAction(id: RemoteAction.reviewSeenID, kind: .markDone, token: String(repeating: "a", count: 64))
+        var card = RemoteCard(id: "mr:1:2", title: "Review", project: "group/repo", url: nil, actions: [seen])
+        card.boardTraits = .init(needsAttention: false, isNew: true, isInactive: false)
+        var board = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [.init(id: .reviewed, cards: [card])])
+        let request = try RemoteDetailRequest(card: card, board: board, presentationIndependent: true, reviewSeenToken: seen.token)
+        #expect(request.reviewSeenAction(in: board) == seen)
+
+        var unavailable = board
+        unavailable.partial = true
+        #expect(request.matches(unavailable))
+        #expect(request.reviewSeenAction(in: unavailable) == nil)
+        unavailable.hostSession = UUID()
+        #expect(request.reviewSeenAction(in: unavailable) == nil)
+
+        board.lanes[0].cards[0].actions = []
+        board.lanes[0].cards[0].boardTraits?.isNew = false
+        #expect(request.matches(board))
+        #expect(request.reviewSeenAction(in: board) == nil)
+        board.lanes[0].cards[0].actions = [.init(id: seen.id, kind: seen.kind, token: String(repeating: "b", count: 64))]
+        board.lanes[0].cards[0].boardTraits?.isNew = true
+        #expect(request.reviewSeenAction(in: board) == nil)
+        board.account = "other@host"
+        board.lanes[0].cards[0].actions = [seen]
+        #expect(!request.matches(board))
+        #expect(request.reviewSeenAction(in: board) == nil)
+    }
+
+    @MainActor @Test func onlyCurrentCapablePeersCanRestoreAHiddenReview() throws {
+        let restore = RemoteAction(id: RemoteAction.restoreHiddenReviewID, kind: .markDone, token: "hide")
+        let hidden = RemoteCard(id: "hidden-review:1:2", title: "Hidden", project: "group/repo", url: nil, actions: [restore])
+        var board = try makeBoard()
+        board.hiddenReviews = [hidden]
+        board.lanes[1].cards[0].boardTraits = .init(needsAttention: true, isNew: true, isInactive: false)
+        board.lanes[1].cards[0].actions = [.init(id: RemoteAction.reviewSeenID, kind: .markDone, token: "new")]
+        let legacy = board.forClient(supportsCommentReview: true)
+        #expect(legacy.hiddenReviews == nil)
+        #expect(legacy.cards.allSatisfy { $0.boardTraits == nil && $0.actions.isEmpty })
+        #expect(legacy.cards.map(\.detailContextDigest) == board.cards.map(\.detailContextDigest))
+
+        let state = RemotePhoneState()
+        var partial = board
+        partial.partial = true
+        #expect(state.receive(.init(type: .snapshot, challenge: state.challenge(), board: partial)))
+        #expect(state.board?.hiddenReviews == [hidden])
+        #expect(state.command(card: hidden, action: restore) == nil)
+        #expect(state.receive(.init(type: .snapshot, challenge: state.challenge(), board: board)))
+        #expect(state.inboxCards == nil)
+        #expect(state.command(card: hidden, action: restore)?.cardID == hidden.id)
+    }
+
+    @Test func oversizedHiddenHistoryKeepsTheBoardReadable() throws {
+        var board = try makeBoard()
+        board.hiddenReviews = [RemoteCard(id: "hidden-review:1:2",
+            title: String(repeating: "a", count: RemoteCipher.maximumPayloadBytes), project: "group/repo", url: nil)]
+        board.lanes[1].cards[0].boardTraits = .init(needsAttention: false, isNew: true, isInactive: false)
+        let fitted = RemoteMessage(type: .snapshot, challenge: UUID(), board: board).fittingIssueTags()
+        #expect(fitted.board?.hiddenReviews == nil)
+        #expect(fitted.board?.lanes == board.lanes)
+        #expect(try JSONEncoder().encode(fitted).count <= RemoteCipher.maximumPayloadBytes)
+    }
+
     @Test func gapsResolveToTheExistingMoveContractInEitherDirection() {
         let order = ["a", "b", "c", "d"]
         #expect(BoardOrderInsertion.before.destination(moving: "d", beside: "a", in: order) == "a")

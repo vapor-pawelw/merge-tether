@@ -266,6 +266,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                     }
                     self.isSynchronizingDetails = false
                     if response.status == .current { self.detailRecoveryAttempts = 0 }
+                    if response.request.reviewSeenToken != nil, response.request.matches(board) { await self.refresh() }
                     return
                 }
                 if message.type == .draftRegenerationPage {
@@ -361,7 +362,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                            RemoteMessage.draftRegenerationCapability, RemoteMessage.boardAvatarsCapability,
                            RemoteMessage.detailAvatarsCapability, RemoteMessage.boardOrderCapability,
                            RemoteMessage.reviewerEditingCapability, RemoteMessage.reviewerBatchCapability,
-                           RemoteMessage.cardActionsCapability],
+                           RemoteMessage.cardActionsCapability, RemoteMessage.reviewBoardCapability],
             refresh: fromGitLab, cachedAvatarURLs: Array((state.board?.avatarThumbnailURLs ?? [])
                 .filter { avatarThumbnails[$0] != nil }.prefix(64)))) }
         catch {
@@ -463,7 +464,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
             lastPersonalApproval = (result.id, kind)
         }
         if result.status == .completed, let command = recovery?.command,
-           command.id == result.id, command.isCompletionAcknowledgement {
+           command.id == result.id, command.isCompletionAcknowledgement || command.actionID == RemoteAction.reviewSeenID {
             state.acknowledgeResult()
         }
         if let command = recovery?.command, command.id == result.id, command.isDraftRegeneration,
@@ -482,7 +483,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         await requestDetails(card: card, force: needsDetailReload, fromGitLab: needsLiveDetailReload)
     }
 
-    func requestDetails(card: RemoteCard, force: Bool = false, fromGitLab: Bool? = nil) async {
+    func requestDetails(card: RemoteCard, force: Bool = false, fromGitLab: Bool? = nil,
+                        acknowledgingReview action: RemoteAction? = nil) async {
         guard supportsDetails, state.board?.cards.contains(where: { $0.id == card.id }) == true else { return }
         let opening = viewedCardID != card.id
         if opening {
@@ -500,10 +502,17 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         guard live || supportsCachedDetails else {
             needsDetailReload = false; isSynchronizingDetails = false; return
         }
+        let seenToken: String? = if opening, supportsDetailContext, state.canAct(now: now()),
+                                    !recoveryUnavailable, recovery == nil, let action, card.reviewSeenAction == action {
+            action.token
+        } else {
+            nil
+        }
         guard state.isConnected(now: now()), let board = state.board, let connection,
               force || detailState.openRequest == nil,
               let request = detailState.begin(card: card, board: board, now: now(), force: force,
-                  presentationIndependent: supportsDetailContext, cachedOnly: live ? nil : true) else { return }
+                  presentationIndependent: supportsDetailContext, cachedOnly: live ? nil : true,
+                  reviewSeenToken: seenToken) else { return }
         needsDetailReload = false; needsLiveDetailReload = false; isSynchronizingDetails = false
         let revision = connectionRevision
         let refreshIssues = live && issueRefreshCardID == card.id
