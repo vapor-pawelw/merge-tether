@@ -34,6 +34,15 @@ private struct AssistantCLIProviderHealthBanner: View {
         }
     }
 
+    private func help(for kind: AssistantCLIHealthIssue.Kind) -> LocalizedStringResource {
+        if kind == .loginRequired { return .CLIHealth.cliHealthLoginHelp }
+        if hold?.limitRecheck?.exhausted == true { return .CLIHealth.cliHealthLimitChecksStopped }
+        if let nextCheck = hold?.limitCheckAt {
+            return .CLIHealth.cliHealthLimitCheckScheduled(nextCheck.formatted(date: .abbreviated, time: .shortened))
+        }
+        return .CLIHealth.cliHealthLimitHelp
+    }
+
     var body: some View {
         if let kind {
             HStack(alignment: .top, spacing: 12) {
@@ -42,14 +51,17 @@ private struct AssistantCLIProviderHealthBanner: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(kind == .loginRequired ? .CLIHealth.cliHealthLoginTitle(String(localized: assistant.displayName))
                         : .CLIHealth.cliHealthLimitTitle(String(localized: assistant.displayName))).fontWeight(.semibold)
-                    Text(kind == .loginRequired ? .CLIHealth.cliHealthLoginHelp : .CLIHealth.cliHealthLimitHelp)
+                    Text(help(for: kind))
                         .foregroundStyle(.secondary)
-                    if let reset = hold?.issue.resetsAt {
+                    if let reset = hold?.issue.reportedReset {
                         Text(.CLIHealth.cliHealthReset(reset.formatted(date: .abbreviated, time: .shortened)))
                     } else if let hint = hold?.issue.resetHint {
                         Text(.CLIHealth.cliHealthReset(hint))
                     }
-                    if actionFailed { Text(.CLIHealth.cliHealthActionFailed).foregroundStyle(.red) }
+                    if actionFailed {
+                        Text(kind == .rateLimited ? .CLIHealth.cliHealthLimitStillUnavailable : .CLIHealth.cliHealthActionFailed)
+                            .foregroundStyle(.red)
+                    }
                 }
                 .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
@@ -75,17 +87,25 @@ private struct AssistantCLIProviderHealthBanner: View {
 
     private func recheck() {
         let provider = assistant
-        let expectedID = hold?.id
+        let expectedHold = hold
         checking = true
         actionFailed = false
         Task {
             defer { checking = false }
             let result = await AssistantCLI.detect(provider)
-            guard result.isReady else { actionFailed = true; monitor.assistantDependencies.refresh(force: true); return }
-            // Explicit retry releases unstarted queued work. Failed runs are never replayed automatically.
-            if let expectedID { _ = monitor.cliHealth.clear(provider, expectedID: expectedID) }
+            guard case .ready(let executable) = result else {
+                actionFailed = true
+                monitor.assistantDependencies.refresh(force: true)
+                return
+            }
+            if let expectedHold, expectedHold.limitRecheck?.exhausted == true {
+                actionFailed = !(await monitor.assistantLimitRecovery.recheckExhaustedHold(provider,
+                    executable: executable, expectedID: expectedHold.id))
+                return
+            }
             monitor.assistantDependencies.refresh(force: true)
-            AssistantAutomationRunner.resumePendingJobs()
+            if let expectedHold, !monitor.cliHealth.clear(provider, expectedID: expectedHold.id) { return }
+            monitor.assistantCLIHealthDidRecover(provider)
         }
     }
 }

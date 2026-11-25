@@ -83,6 +83,26 @@ enum AssistantCLI {
         return failure
     }
 
+    static func checkUsageLimit(_ assistant: AutomationAssistant, executable: URL) async -> AssistantCLIHealthCheck {
+        if assistant == .codex {
+            return await CodexAccountProbe.check(executable: executable, environment: environment)
+        }
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700])
+            defer { try? FileManager.default.removeItem(at: folder) }
+            let output = try await ProcessRunner.run(executable,
+                arguments: ["-p", "Reply with OK.", "--tools", "", "--setting-sources", "",
+                    "--settings", #"{"disableAllHooks":true}"#, "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
+                    "--no-session-persistence", "--output-format", "json"],
+                environment: environment, currentDirectory: folder, timeout: 30)
+            if let issue = AssistantCLIHealthIssue.parse(output, assistant: assistant) { return .held(issue) }
+            if AssistantCLIHealthIssue.confirmsSuccess(output, assistant: assistant) { return .available }
+        } catch {}
+        return .unavailable
+    }
+
     enum SetupError: Error { case installationFailed }
 
     static func install(_ assistant: AutomationAssistant) async throws {

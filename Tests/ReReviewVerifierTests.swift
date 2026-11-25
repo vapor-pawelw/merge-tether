@@ -105,7 +105,20 @@ struct ReReviewVerifierTests {
         let counter = folder.appending(path: "cli.count")
         try Data("""
             #!/usr/bin/python3
-            import pathlib,sys
+            import json, pathlib, sys
+            if sys.argv[1:] == ["app-server"]:
+                results = {
+                    "account/read": {"account": {"type": "chatgpt"}, "requiresOpenaiAuth": True},
+                    "account/rateLimits/read": {"ordinaryUsageAllowed": True},
+                }
+                for line in sys.stdin:
+                    request = json.loads(line)
+                    method = request["method"]
+                    if method in results:
+                        print(json.dumps({"id": request["id"], "result": results[method]}), flush=True)
+                    if method == "account/rateLimits/read":
+                        break
+                sys.exit(0)
             counter=pathlib.Path(__file__).with_suffix('.count')
             counter.write_text(str(int(counter.read_text())+1 if counter.exists() else 1))
             sys.stdin.read()

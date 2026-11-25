@@ -1,15 +1,20 @@
+import Darwin
 import Foundation
 
 /// Asks Codex's own account endpoints whether the account can run work.
 ///
 /// `codex exec --json` reports failures as prose only, so an unrecognized failure is
 /// confirmed through the structured `account/read` and `account/rateLimits/read` requests
-/// of `codex app-server`. Any probe problem yields no verdict; it never invents a hold.
+/// of `codex app-server`. An incomplete response has no verdict.
 enum CodexAccountProbe {
     private static let accountID = 2
     private static let limitsID = 3
 
     static func issue(fromResponses lines: [String], now: Date = Date()) -> AssistantCLIHealthIssue? {
+        check(fromResponses: lines).issue
+    }
+
+    static func check(fromResponses lines: [String]) -> AssistantCLIHealthCheck {
         var account: [String: Any]?
         var limits: [String: Any]?
         for line in lines {
@@ -19,20 +24,36 @@ enum CodexAccountProbe {
         }
         if let account, account["account"] is NSNull || account["account"] == nil,
            account["requiresOpenaiAuth"] as? Bool == true {
-            return .init(kind: .loginRequired)
+            return .held(.init(kind: .loginRequired))
         }
-        guard let limits else { return nil }
+        guard let limits else { return .unavailable }
         let snapshot = limits["rateLimits"] as? [String: Any]
         let blocked = limits["ordinaryUsageAllowed"] as? Bool == false
             || (limits["ordinaryUsageAllowed"] == nil && snapshot?["rateLimitReachedType"] is String)
-        guard blocked else { return nil }
+        guard blocked else {
+            let authenticated = account?["account"] is [String: Any] || account?["requiresOpenaiAuth"] as? Bool == false
+            return authenticated && limits["ordinaryUsageAllowed"] as? Bool == true ? .available : .unavailable
+        }
         let windows = ["primary", "secondary"].compactMap { snapshot?[$0] as? [String: Any] }
         let exhausted = windows.filter { ($0["usedPercent"] as? Double ?? 0) >= 100 }
-        let resets = (exhausted.isEmpty ? windows : exhausted).compactMap { $0["resetsAt"] as? Double }.filter { $0 > 0 }.max()
-        return .init(kind: .rateLimited, resetsAt: resets.map { Date(timeIntervalSince1970: $0) })
+        let resets = (exhausted.isEmpty ? windows : exhausted).compactMap { $0["resetsAt"] as? Double }
+            .filter { $0.isFinite && $0 > 0 }.max()
+        return .held(.init(kind: .rateLimited, resetsAt: resets.map { Date(timeIntervalSince1970: $0) }))
     }
 
     static func probe(executable: URL, environment: [String: String], timeout: TimeInterval = 10) async -> AssistantCLIHealthIssue? {
+        await check(executable: executable, environment: environment, timeout: timeout).issue
+    }
+
+    static func check(executable: URL, environment: [String: String], timeout: TimeInterval = 10) async -> AssistantCLIHealthCheck {
+        #if DEBUG
+        guard ProcessRunner.permitsTestExecutable(executable, environment: ProcessInfo.processInfo.environment,
+            temporaryDirectory: FileManager.default.temporaryDirectory) else {
+            try? FileHandle.standardError.write(contentsOf: Data("MergeTether test guard rejected service CLI \(executable.path)\n".utf8))
+            return .unavailable
+        }
+        #endif
+        guard !Task.isCancelled else { return .unavailable }
         let requests = [
             #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"MergeTether","version":"1"}}}"#,
             #"{"method":"initialized"}"#,
@@ -44,10 +65,12 @@ enum CodexAccountProbe {
         process.arguments = ["app-server"]
         process.environment = environment
         let input = Pipe(), output = Pipe()
+        let writer = input.fileHandleForWriting
+        guard fcntl(writer.fileDescriptor, F_SETNOSIGPIPE, 1) == 0 else { return .unavailable }
         process.standardInput = input
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
-        do { try process.run() } catch { return nil }
+        do { try process.run() } catch { return .unavailable }
         defer { if process.isRunning { process.terminate() } }
         let collector = LineCollector(expecting: [accountID, limitsID])
         output.fileHandleForReading.readabilityHandler = { handle in
@@ -56,10 +79,11 @@ enum CodexAccountProbe {
         }
         defer { output.fileHandleForReading.readabilityHandler = nil }
         // stdin stays open: the server exits at EOF before it answers.
-        for request in requests { input.fileHandleForWriting.write(Data((request + "\n").utf8)) }
+        defer { try? writer.close() }
+        do { try writer.write(contentsOf: Data((requests.joined(separator: "\n") + "\n").utf8)) }
+        catch { return .unavailable }
         let lines = await collector.wait(timeout: timeout)
-        try? input.fileHandleForWriting.close()
-        return issue(fromResponses: lines)
+        return Task.isCancelled ? .unavailable : check(fromResponses: lines)
     }
 
     private final class LineCollector: @unchecked Sendable {
@@ -99,12 +123,21 @@ enum CodexAccountProbe {
         }
 
         func wait(timeout: TimeInterval) async -> [String] {
-            Task { try? await Task.sleep(for: .seconds(timeout)); finish() }
-            return await withCheckedContinuation { continuation in
-                lock.lock()
-                if done { let result = lines; lock.unlock(); continuation.resume(returning: result); return }
-                self.continuation = continuation
-                lock.unlock()
+            let deadline = Task {
+                do { try await Task.sleep(for: .seconds(timeout)) }
+                catch { return }
+                finish()
+            }
+            defer { deadline.cancel() }
+            return await withTaskCancellationHandler {
+                await withCheckedContinuation { continuation in
+                    lock.lock()
+                    if done { let result = lines; lock.unlock(); continuation.resume(returning: result); return }
+                    self.continuation = continuation
+                    lock.unlock()
+                }
+            } onCancel: {
+                self.finish()
             }
         }
     }

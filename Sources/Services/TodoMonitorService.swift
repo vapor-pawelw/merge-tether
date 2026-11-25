@@ -260,6 +260,9 @@ final class TodoMonitorService {
             inbox: todoStore, providers: assistantDependencies, health: cliHealth, residualLookup: residualLookup)
     }()
     private var timer: Timer?
+    @ObservationIgnored private(set) lazy var assistantLimitRecovery = AssistantCLILimitRecovery(health: cliHealth) { [weak self] assistant in
+        self?.assistantCLIHealthDidRecover(assistant)
+    }
     @ObservationIgnored private var wakeObserver: NSObjectProtocol?
     @ObservationIgnored private var wakeRefreshPending = false
     private var hasCompletedFirstFetch: Bool { todoStore.hasCompletedFirstFetch }
@@ -358,16 +361,7 @@ final class TodoMonitorService {
             self.wakeAutomaticRetries()
         }
         assistantDependencies.onRecovered = { [weak self] assistant in
-            guard let self, self.settings.automation.selectedAssistant == assistant else { return }
-            self.attention.authorFeedbackCoordinator?.retryReadOnlyFailures()
-            self.attention.aiOriginCoordinator.retryReadOnlyFailures()
-            self.authoredMergeRequests.workflow.retryReadOnlyFailures()
-            if let host = self.glab.resolvedHost, let username = self.glab.currentUsername {
-                self.attention.draftProofRecoveryCoordinator?.retryReadOnlyFailures(host: host, username: username)
-            }
-            if self.settings.automation.autoVerifyReReview {
-                Task { await self.attention.retryFailedReReviews() }
-            }
+            self?.retryReadOnlyAssistantFailures(assistant)
         }
 
         // Hydrate the service from any previously persisted state so the
@@ -477,6 +471,27 @@ final class TodoMonitorService {
     /// Refreshes CLI availability and sign-in without depending on desktop chats.
     func refreshAvailableAssistants() {
         assistantDependencies.refresh(force: true)
+    }
+
+    func assistantCLIHealthDidRecover(_ assistant: AutomationAssistant) {
+        AssistantAutomationRunner.resumePendingJobs()
+        guard settings.automation.selectedAssistant == assistant else { return }
+        retryReadOnlyAssistantFailures(assistant)
+        wakeAutomaticRetries()
+        Task { await refreshNow() }
+    }
+
+    private func retryReadOnlyAssistantFailures(_ assistant: AutomationAssistant) {
+        guard settings.automation.selectedAssistant == assistant else { return }
+        attention.authorFeedbackCoordinator?.retryReadOnlyFailures()
+        attention.aiOriginCoordinator.retryReadOnlyFailures()
+        authoredMergeRequests.workflow.retryReadOnlyFailures()
+        if let host = glab.resolvedHost, let username = glab.currentUsername {
+            attention.draftProofRecoveryCoordinator?.retryReadOnlyFailures(host: host, username: username)
+        }
+        if settings.automation.autoVerifyReReview {
+            Task { await attention.retryFailedReReviews() }
+        }
     }
 
     var boardRefreshState: BoardRefreshState {
@@ -1064,6 +1079,7 @@ final class TodoMonitorService {
             }
         }
         if wakeObserver == nil, ApplicationLaunchMode.resolve(environment: ProcessInfo.processInfo.environment) == .application {
+            assistantLimitRecovery.start()
             wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification,
                 object: NSWorkspace.shared, queue: .main) { [weak self] _ in
                 Task { @MainActor in await self?.refreshAfterSystemWake() }
@@ -1073,6 +1089,7 @@ final class TodoMonitorService {
 
     func stopTimer() {
         stopAutomaticRetries()
+        assistantLimitRecovery.stop()
         timer?.invalidate()
         timer = nil
         wakeRefreshPending = false

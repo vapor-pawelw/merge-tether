@@ -542,6 +542,38 @@ import Testing
         #expect(Set(executed) == [codex.id, claude.id])
     }
 
+    @Test func confirmedRecoveryFromAPersistedTextResetStartsOnlyEligibleQueuedWork() async throws {
+        let (settings, name, defaults) = try fixture()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let saved = AssistantCLIHealthStore(defaults: defaults)
+        let cli = URL(fileURLWithPath: "/example/codex")
+        saved.record(.init(kind: .rateLimited, resetHint: "Jan 1st, 2020 12:00 PM"), assistant: .codex,
+            executable: cli, startedAt: Date(timeIntervalSince1970: 1_577_000_000))
+        let health = AssistantCLIHealthStore(defaults: defaults)
+        let queued = job(iid: 1)
+        var stopped = job(state: .cancelled, iid: 2)
+        stopped.execution?.cancellationOrigin = .user
+        settings.assistantHandoffs = [queued, stopped]
+        var started: [UUID] = []
+        let coordinator = AssistantJobCoordinator(healthStore: health, execute: { handoff, _ in
+            started.append(handoff.id)
+            return .init(result: .init(status: .succeeded, summary: "Done"), output: "")
+        })
+        let recovery = AssistantCLILimitRecovery(health: health, check: { assistant, executable in
+            #expect(assistant == .codex && executable == cli)
+            #expect(started.isEmpty)
+            return .available
+        }, onRecovered: { _ in })
+        defer { recovery.stop() }
+        #expect(coordinator.schedule(queued, settings: settings))
+        #expect(started.isEmpty)
+        recovery.start()
+        for _ in 0..<100 where coordinator.isRunning(queued.id) { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(started == [queued.id])
+        #expect(health.hold(for: .codex) == nil)
+        #expect(settings.assistantHandoffs[1].execution?.cancellationOrigin == .user)
+    }
+
     @Test func retiredReminderCannotBeRetriedIntoAnotherExecutableJob() async throws {
         let (settings, name, defaults) = try fixture()
         defer { defaults.removePersistentDomain(forName: name) }
