@@ -473,6 +473,27 @@
         "pl": { "stringUnit": { "state": "translated", "value": "Oznacz wszystkie jako przeczytane" } }
       }
     },
+    "board.inbox.readChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The Inbox changed. Review the current notifications before marking them as read." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Zawartość skrzynki się zmieniła. Sprawdź aktualne powiadomienia przed oznaczeniem ich jako przeczytane." } }
+      }
+    },
+    "board.inbox.readPartial": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Some notifications were marked as read. Refresh the Inbox and check what remains." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Część powiadomień oznaczono jako przeczytane. Odśwież skrzynkę i sprawdź pozostałe." } }
+      }
+    },
+    "board.inbox.readUncertain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Couldn’t confirm which notifications were marked as read. Refresh the Inbox and check what remains." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Nie udało się potwierdzić, które powiadomienia oznaczono jako przeczytane. Odśwież skrzynkę i sprawdź pozostałe." } }
+      }
+    },
     "board.inbox.accessibilityCount": {
       "extractionState": "manual",
       "localizations": {

@@ -408,6 +408,25 @@ extension RemoteConnection: RemoteHostTransport {}
                 guard settled, self.connection === active, !current.partial,
                       current.hostSession == board.hostSession, current.account == board.account,
                       current.commandCards.contains(where: { $0.hasSameActionContext(as: card) && $0.actions.contains(action) }) else { return .changed }
+                if command.isInboxRead || command.isTodoAcknowledgement {
+                    guard action.kind == .markDone, command.argument == nil else { return .changed }
+                    let connectionID = ObjectIdentifier(active), pairingSession = pairing.sessionID
+                    let session = current.hostSession, account = current.account
+                    let revision = self.monitor.glab.accountRevision
+                    let isCurrent: @MainActor @Sendable () -> Bool = {
+                        !Task.isCancelled && self.connected && self.connection.map(ObjectIdentifier.init) == connectionID
+                            && self.pairing?.sessionID == pairingSession && self.hostSession == session
+                            && self.account == account && self.monitor.glab.accountRevision == revision
+                            && !self.monitor.isLoading
+                    }
+                    if command.isInboxRead {
+                        guard let selection = RemoteInboxReadSelection(self.monitor.inboxItems),
+                              selection.action(hostSession: session, account: account) == action else { return .changed }
+                        return await selection.acknowledge(monitor: self.monitor, isCurrent: isCurrent)
+                    }
+                    return await RemoteInboxReadSelection.acknowledgeTodo(card: card, action: action,
+                        account: account, monitor: self.monitor, isCurrent: isCurrent)
+                }
                 return await self.execute(card, action: action, argument: command.argument)
             }
             try? await active.send(.init(type: .result, result: result))
@@ -838,15 +857,9 @@ extension RemoteConnection: RemoteHostTransport {}
             }
         }
         if card.id.hasPrefix("todo:"), let todo = monitor.currentAccountTodos.first(where: { "todo:\($0.id)" == card.id }) {
-            switch action.kind {
-            case .markDone:
-                await monitor.markDone(todo)
-                return monitor.allTodos.contains(where: { $0.id == todo.id }) ? .uncertain : .completed
-            case .prepare:
-                await monitor.runAutomationManually(for: todo)
-                return monitor.automationAction(for: todo) == .failed ? .failed : .completed
-            default: return .changed
-            }
+            guard action.kind == .prepare else { return .changed }
+            await monitor.runAutomationManually(for: todo)
+            return monitor.automationAction(for: todo) == .failed ? .failed : .completed
         }
         let board = monitor.boardSnapshot
         guard let item = (board.own + board.reviewed).map(\.item)

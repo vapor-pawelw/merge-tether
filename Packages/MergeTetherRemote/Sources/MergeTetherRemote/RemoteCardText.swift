@@ -1,5 +1,12 @@
 import Foundation
 
+public extension RemoteCardText {
+    var showsDraftStyle: Bool {
+        // Older Macs only sent the translated badge. These were the two supported locales.
+        isDraft ?? (draftBadge == "DRAFT" || draftBadge == "SZKIC")
+    }
+}
+
 public struct RemoteCardSelection: Identifiable, Equatable, Sendable {
     public let card: RemoteCard
     public let cta: RemoteCardCTA?

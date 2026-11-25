@@ -16,6 +16,10 @@ struct RemoteInboxView: View {
     }
     private var jobCards: [RemoteCard] { cards?.filter { $0.id.hasPrefix("job:") } ?? [] }
     private var updateCards: [RemoteCard] { cards?.filter { $0.id.hasPrefix("completion:") } ?? [] }
+    private var pendingRead: RemoteCard? {
+        guard model.state.pending?.isInboxRead == true else { return nil }
+        return model.pendingActionCard
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,6 +38,22 @@ struct RemoteInboxView: View {
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
+            if let control = pendingRead ?? model.state.board?.inboxReadCard, let action = control.actions.first {
+                Button {
+                    Task { await model.perform(card: control, action: action) }
+                } label: {
+                    RemoteActionProgressLabel(running: pendingRead != nil) {
+                        Label(.Board.boardInboxMarkAllRead, systemImage: "checkmark")
+                    }
+                    .frame(minHeight: 44)
+                }
+                .buttonStyle(.bordered)
+                .modifier(RemoteActionAvailability(state: model.state))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
+                .accessibilityIdentifier("remote.inbox.mark-all-read")
+            }
             Divider()
 
             if cards == nil {
@@ -68,6 +88,12 @@ struct RemoteInboxView: View {
             }
         }
         .background(.background)
+        .alert(Text(model.resultTitle), isPresented: Binding(
+            get: { model.state.result != nil },
+            set: { if !$0 { model.state.acknowledgeResult() } }
+        )) {
+            Button(.Remote.remoteClose) { model.state.acknowledgeResult() }
+        }
     }
 
     private var unavailableState: some View {

@@ -135,8 +135,8 @@ struct RemoteBoardView: View {
                     .presentationDragIndicator(.visible)
             }
             .alert(Text(model.resultTitle), isPresented: Binding(
-                get: { selected == nil && model.state.result != nil },
-                set: { if !$0, selected == nil { model.state.acknowledgeResult() } }
+                get: { selected == nil && !showingInbox && model.state.result != nil },
+                set: { if !$0, selected == nil, !showingInbox { model.state.acknowledgeResult() } }
             )) {
                 Button(.Remote.remoteClose) { model.state.acknowledgeResult() }
             } message: {
@@ -316,8 +316,7 @@ struct RemoteCardView: View {
     private var primaryCTA: RemoteCardCTA? { card.primaryCTA.flatMap { $0.duplicatesCardTap ? nil : $0 } }
     private var secondaryCTA: RemoteCardCTA? { card.presentation?.secondaryCTA.flatMap { $0.duplicatesCardTap ? nil : $0 } }
     private var inboxUpdateDate: Date? { expanded ? nil : card.completionObservedAt }
-    // Paired Macs send the English DRAFT badge in the snapshot, alongside other lifecycle labels.
-    private var showsDraftStyle: Bool { !expanded && card.presentation?.draftBadge == "DRAFT" }
+    private var showsDraftStyle: Bool { !expanded && card.presentation?.showsDraftStyle == true }
     private var contentOpacity: Double { showsDraftStyle ? 0.5 : 1 }
     private var draftBadgeTint: Color {
         colorScheme == .dark
@@ -328,7 +327,9 @@ struct RemoteCardView: View {
         guard let actionsModel else { return nil }
         let actions = actionsModel.pendingActionCard.flatMap { $0.id == card.id ? $0.actions : nil } ?? card.actions
         return actions.first {
-            $0.kind == .finishCommentReview || (card.id.hasPrefix("completion:") && $0.id == "seen" && $0.kind == .markDone)
+            $0.kind == .finishCommentReview || ($0.kind == .markDone
+                && ((card.id.hasPrefix("completion:") && $0.id == "seen")
+                    || (card.id.hasPrefix("todo:") && $0.id == "markDone")))
         }
     }
     private var showsActions: Bool {
@@ -390,6 +391,8 @@ struct RemoteCardView: View {
         if let action = directAction, let actionsModel {
             let pending = actionsModel.pendingActionCard?.id == card.id ? actionsModel.state.pending : nil
             let seen = action.kind == .markDone
+            let todoRead = seen && card.id.hasPrefix("todo:")
+            let actionIdentifier = todoRead ? "mark-read" : (seen ? "seen" : "finish-comment-review")
             let button = Button {
                 if seen {
                     Task { await actionsModel.perform(card: card, action: action) }
@@ -400,6 +403,7 @@ struct RemoteCardView: View {
             } label: {
                 RemoteActionProgressLabel(running: pending?.actionID == action.id) {
                     if let label = action.label { Text(verbatim: label) }
+                    else if todoRead { Text(.Board.boardEventMarkRead) }
                     else { Text(seen ? .Remote.remoteSeen : .CommentReview.commentReviewFinish) }
                 }
             }
@@ -409,7 +413,7 @@ struct RemoteCardView: View {
             }
             .font(.subheadline.weight(.semibold)).controlSize(.large)
             .modifier(RemoteActionAvailability(state: actionsModel.state))
-            .accessibilityIdentifier("remote.\(seen ? "seen" : "finish-comment-review").\(card.id)")
+            .accessibilityIdentifier("remote.\(actionIdentifier).\(card.id)")
         } else if let cta = primaryCTA {
             RemoteCardCTAButton(cta: cta, canAct: { actionsModel?.state.canAct(now: $0) == true }) { onOpenCTA?(cta) }
                 .font(.subheadline.weight(.semibold)).buttonStyle(.bordered)

@@ -108,6 +108,7 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
     public var authorAvatarURL: URL?
     public var repository: String
     public var draftBadge: String?
+    public var isDraft: Bool?
     public var status: String?
     public var statusPeopleMessage: RemotePeopleMessage?
     /// Additive marker for active AI work; absent for deterministic reads and older hosts.
@@ -134,7 +135,7 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
     /// The paired Mac confirmed automatic approval of this head while findings were open.
     public var approvedWithOpenFindings: Bool?
     public var automaticApprovalOff: Bool?
-    public init(author: String? = nil, repository: String, draftBadge: String? = nil,
+    public init(author: String? = nil, repository: String, draftBadge: String? = nil, isDraft: Bool? = nil,
                 status: String? = nil, nextStep: String? = nil, working: Bool = false,
                 chips: [RemoteCardChip] = [], secondaryCTA: RemoteCardCTA? = nil,
                 authorUsername: String? = nil, authorAvatarURL: URL? = nil,
@@ -147,7 +148,7 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
         self.pendingDrafts = pendingDrafts
         self.requirements = requirements; self.steps = steps; self.currentStep = currentStep
         self.author = author; self.authorUsername = authorUsername; self.authorAvatarURL = authorAvatarURL
-        self.repository = repository; self.draftBadge = draftBadge
+        self.repository = repository; self.draftBadge = draftBadge; self.isDraft = isDraft
         self.statusSymbol = statusSymbol
         self.status = status; self.nextStep = nextStep; self.working = working
         self.chips = chips; self.secondaryCTA = secondaryCTA
@@ -271,6 +272,9 @@ public struct RemoteLane: Codable, Equatable, Identifiable, Sendable {
 }
 
 public struct RemoteBoard: Codable, Equatable, Sendable {
+    public static let inboxReadCardID = "inbox:read"
+    public static let inboxReadActionID = "markAllRead"
+
     public var hostSession: UUID
     public var account: String
     public var updatedAt: Date?
@@ -278,6 +282,7 @@ public struct RemoteBoard: Codable, Equatable, Sendable {
     public var automationPaused: Bool?
     public var lanes: [RemoteLane]
     public var draftRegeneration: RemoteDraftRegenerationControl?
+    public var inboxReadAction: RemoteAction?
     public var cardAssistants: [RemoteCardAssistant]?
     public var issueTagsOmitted: Bool?
     public init(hostSession: UUID, account: String, updatedAt: Date? = nil, partial: Bool = false, lanes: [RemoteLane],
@@ -286,7 +291,12 @@ public struct RemoteBoard: Codable, Equatable, Sendable {
         self.partial = partial; self.lanes = lanes; self.automationPaused = automationPaused
         self.draftRegeneration = draftRegeneration
     }
-    public var commandCards: [RemoteCard] { cards + (draftRegeneration.map { [$0.card] } ?? []) }
+    public var inboxReadCard: RemoteCard? {
+        guard !partial, let action = inboxReadAction, action.id == Self.inboxReadActionID,
+              action.kind == .markDone else { return nil }
+        return .init(id: Self.inboxReadCardID, title: "", project: "", url: nil, actions: [action])
+    }
+    public var commandCards: [RemoteCard] { cards + [draftRegeneration?.card, inboxReadCard].compactMap { $0 } }
     public var cards: [RemoteCard] { lanes.flatMap(\.cards) }
 
     public var avatarThumbnailURLs: [URL] {
@@ -338,6 +348,12 @@ public struct RemoteCommand: Codable, Equatable, Sendable {
     }
     public var isCompletionAcknowledgement: Bool {
         cardID.hasPrefix("completion:") && actionID == "seen"
+    }
+    public var isInboxRead: Bool {
+        cardID == RemoteBoard.inboxReadCardID && actionID == RemoteBoard.inboxReadActionID
+    }
+    public var isTodoAcknowledgement: Bool {
+        cardID.hasPrefix("todo:") && actionID == "markDone"
     }
     public var isDraftRegeneration: Bool { cardID == RemoteDraftRegenerationControl.cardID }
     public var isCardChange: Bool { actionID == RemoteCardChange.actionID }
