@@ -587,6 +587,8 @@ final class SettingsManager {
         mrSettingsArchive = store.load(Key.mergeRequestAccountRecords, fallback: legacyArchive)
         if var savedScope = mrSettingsArchive.accountAutomationScope {
             if store.savedFingerprint(forKey: Key.automation) == mrSettingsArchive.mirrorFingerprints[Key.automation] {
+                savedScope.requiresAssignmentClaim = runtimeAutomation.requiresAssignmentClaim
+                savedScope.treatsAssignedRequestsAsOwn = useAssigneesAsOwners
                 savedScope.isGloballySuspended = !globallyEnabled
                 automation.scope = savedScope
             } else {

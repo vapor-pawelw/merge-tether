@@ -133,6 +133,22 @@ struct MRSettingsRecordTests {
         }
     }
 
+    @Test func archivedScopeInheritsTheConfiguredAssignmentConfirmation() throws {
+        try withDefaults { defaults in
+            let settings = SettingsManager(defaults: defaults)
+            settings.automation.applyPreset(.full, for: .codex)
+            #expect(settings.bindAuthenticatedAccount(.init(host: target.host, username: target.username, userID: 21)))
+            let data = try #require(defaults.data(forKey: "mergeRequestAccountRecords"))
+            var archive = try JSONDecoder().decode(MRSettingsArchive.self, from: data)
+            #expect(archive.accountAutomationScope?.assignedOwnershipConfirmation == false)
+            archive.accountAutomationScope?.assignedOwnershipConfirmation = nil
+            defaults.set(try JSONEncoder().encode(archive), forKey: "mergeRequestAccountRecords")
+
+            let restarted = SettingsManager(defaults: defaults)
+            #expect(!restarted.automation.requiresAssignmentClaim)
+        }
+    }
+
     @Test func assignmentClaimFollowsTheGitLabAccountAcrossRenameAndRestart() throws {
         try withDefaults { defaults in
             let settings = SettingsManager(defaults: defaults)

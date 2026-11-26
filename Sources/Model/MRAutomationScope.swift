@@ -86,6 +86,7 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
                 uniquingKeysWith: { first, _ in first })
         }
         targetsFollowingActionDefaults = targetsFollowingActionDefaults.map { Set($0.compactMap(transform)) }
+        claimedAssignments = claimedAssignments.map { Set($0.compactMap(transform)) }
     }
 
     mutating func retainAccountTargets(from other: Self) {
@@ -97,6 +98,7 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
         if let targets = other.targetsFollowingActionDefaults {
             targetsFollowingActionDefaults = (targetsFollowingActionDefaults ?? []).union(targets)
         }
+        if let claims = other.claimedAssignments { claimedAssignments = (claimedAssignments ?? []).union(claims) }
     }
 
     init() {}
