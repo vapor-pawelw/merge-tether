@@ -322,19 +322,21 @@ struct MREffectivePolicyPresentationTests {
 
     @Test(arguments: [AutomationPublicationMode.all, .filtered, .aiReplies, .manual])
     func renderingExplicitPublicationFiltersPreservesDormantValuesAndMakesNoRequests(_ mode: AutomationPublicationMode) throws {
-        var restrictions = AutomaticPublicationRestrictions(repositories: [
-            .init(host: target.host, entityID: 1, label: "Custom repository")
-        ], requireAI: false)
-        let before = restrictions
-        let gitlab = InMemoryGitLab()
-        defer { gitlab.close() }
-        let glab = gitlab.service(host: target.host, username: target.username)
-        let view = NSHostingView(rootView: Form {
-            PublicationRestrictionsSettingsView(restrictions: Binding(get: { restrictions }, set: { restrictions = $0 }),
-                mode: mode, glab: glab, preset: .full)
-        }.frame(width: 650))
-        #expect(view.fittingSize.height > 0)
-        #expect(restrictions == before && gitlab.requests.isEmpty)
+        try fixture { settings, _, _ in
+            var restrictions = AutomaticPublicationRestrictions(repositories: [
+                .init(host: target.host, entityID: 1, label: "Custom repository")
+            ], requireAI: false)
+            let before = restrictions
+            let gitlab = InMemoryGitLab()
+            defer { gitlab.close() }
+            let glab = gitlab.service(host: target.host, username: target.username)
+            let view = NSHostingView(rootView: Form {
+                PublicationRestrictionsSettingsView(restrictions: Binding(get: { restrictions }, set: { restrictions = $0 }),
+                    mode: mode, glab: glab, settings: settings, preset: .full)
+            }.frame(width: 650))
+            #expect(view.fittingSize.height > 0)
+            #expect(restrictions == before && gitlab.requests.isEmpty)
+        }
     }
 
     @Test(arguments: [AutomationRunner.shell, .assistant])

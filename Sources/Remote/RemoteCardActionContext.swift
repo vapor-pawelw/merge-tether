@@ -92,6 +92,24 @@ import MergeTetherRemote
         }
     }
 
+    func executeAIReplyDecision(_ action: RemoteAction, card: RemoteCard) async -> RemoteCommandResult.Status {
+        guard let item else { return .changed }
+        for remoteDraft in card.drafts {
+            guard let decision = remoteDraft.aiReplyDecisions?.first(where: { $0.reply == action || $0.human == action }),
+                  let draft = item.drafts.first(where: { $0.id == remoteDraft.id }),
+                  let source = item.aiReplyDecisions[remoteDraft.id]?.first(where: { $0.id == decision.id }) else { continue }
+            switch await monitor.attention.decideAIReply(decision.reply == action ? .reply : .human,
+                source: source, draft: draft, displayed: item, originCenter: monitor.commentOrigins) {
+            case .completed: return .completed
+            case .draftStillPrivate: return .partial
+            case .changed: return .changed
+            case .failed: return .failed
+            case .uncertain: return .uncertain
+            }
+        }
+        return .changed
+    }
+
     private var canRemove: Bool {
         guard !isFinished, isReviewed, let request = item?.mergeRequest else { return false }
         return request.author.username != target.username && request.projectID == target.projectID

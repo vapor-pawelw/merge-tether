@@ -86,7 +86,7 @@ import Observation
     }
     public func command(card: RemoteCard, action: RemoteAction, argument: String? = nil, now: Date = Date()) -> RemoteCommand? {
         guard canAct(now: now), let board,
-              board.commandCards.contains(where: { $0.hasSameActionContext(as: card) && $0.actions.contains(action) }) else { return nil }
+              board.commandCards.contains(where: { $0.hasSameActionContext(as: card) && $0.commandActions.contains(action) }) else { return nil }
         let command = RemoteCommand(hostSession: board.hostSession, account: board.account, cardID: card.id, actionID: action.id,
                                     token: action.token, argument: argument)
         pending = command; pendingUntil = now.addingTimeInterval(45)

@@ -677,16 +677,31 @@ final class SettingsManager {
     func markAutomationAuthor(_ identity: PublicationIdentity, host: String, user: GitLabAuthenticatedUser) -> Bool {
         var candidate = reviewParticipationPreferences
         guard candidate.markAutomationAuthor(identity, host: host, user: user) else { return false }
-        return commitAutomationAuthorPreferences(candidate)
+        return commitReviewParticipationPreferences(candidate)
     }
 
     func unmarkAutomationAuthor(_ id: UUID, host: String, username: String) -> Bool {
         var candidate = reviewParticipationPreferences
         guard candidate.unmarkAutomationAuthor(id, host: host, username: username) else { return false }
-        return commitAutomationAuthorPreferences(candidate)
+        return commitReviewParticipationPreferences(candidate)
     }
 
-    private func commitAutomationAuthorPreferences(_ candidate: ReviewParticipationPreferences) -> Bool {
+    @discardableResult
+    func recordAIReplyTrust(_ classification: AICommentOriginOverride.Classification,
+        notes: [GitLabMergeRequestDiscussion.Note], host: String, user: GitLabAuthenticatedUser, at date: Date = Date()) -> Bool {
+        var candidate = reviewParticipationPreferences
+        candidate.recordAIReplyTrust(classification, notes: notes, host: host, user: user, at: date)
+        return commitReviewParticipationPreferences(candidate)
+    }
+
+    func resetAIReplyTrust(_ id: ReviewParticipationPreferences.AIReplyTrust.ID) -> Bool {
+        var candidate = reviewParticipationPreferences
+        candidate.resetAIReplyTrust(id)
+        return commitReviewParticipationPreferences(candidate)
+    }
+
+    private func commitReviewParticipationPreferences(_ candidate: ReviewParticipationPreferences) -> Bool {
+        guard candidate != reviewParticipationPreferences else { return true }
         persistenceStore.preserveCorruptValues()
         let saved = transferMRSettings(.savePreference(.reviewParticipation(candidate)))
         let synchronized = persistenceStore.synchronize()

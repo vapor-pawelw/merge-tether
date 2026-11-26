@@ -460,13 +460,26 @@ import MergeTetherRemote
             }
         }
 
-        func assess(noteID: Int, body: String) throws {
+        func assess(noteID: Int, body: String, trustAuthor: Bool = true,
+                    criteriaVersion: Int = AICommentOriginAssessor.criteriaVersion) throws {
             let directory = folder.appending(path: "ai-assessments/gitlab.example.org")
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let record = AICommentAssessment(version: 1, host: "gitlab.example.org", projectID: 1, iid: 2,
-                noteID: noteID, bodySHA256: AICommentAssessmentStore.digest(body), confidence: "very_high", evidence: "Verified AI provenance")
+            let record = AICommentAssessment(version: 2, host: "gitlab.example.org", projectID: 1, iid: 2,
+                noteID: noteID, bodySHA256: AICommentAssessmentStore.digest(body), confidence: "very_high", evidence: "Style assessment",
+                provider: "codex", model: "test", criteriaVersion: criteriaVersion, username: "me", authorID: 8, purpose: .publication)
+            if trustAuthor { confirmAIComments(2) }
             // Simulates the app's own sealed result; plain records never authorize publication.
             try SealedAssessmentFile.write(record, to: directory.appending(path: "1-2-\(noteID).json"))
+        }
+
+        func confirmAIComments(_ count: Int, authorID: Int = 8,
+                               classification: AICommentOriginOverride.Classification = .ai) {
+            let sources = (0..<count).map { index in
+                GitLabMergeRequestDiscussion.Note(id: 900 + index, author: .init(id: authorID, username: "reviewer", name: nil),
+                    system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "Earlier feedback")
+            }
+            #expect(settings.recordAIReplyTrust(classification, notes: sources, host: "gitlab.example.org",
+                user: .init(id: 3, username: "me")))
         }
 
         func verifyFollowUpDrafts() throws {
@@ -597,14 +610,6 @@ import MergeTetherRemote
                 return InMemoryGitLab.output(code: 100)
             }
             let path = request.endpoint
-            if gitlab.has("ai-assessment-after-preview-pending") {
-                gitlab.remove("ai-assessment-after-preview-pending")
-                let destination = folder.appending(path: "ai-assessments/gitlab.example.org")
-                try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
-                try Data(contentsOf: folder.appending(path: "late-ai-assessment.json"))
-                    .write(to: destination.appending(path: "1-2-41.json"))
-                gitlab.write("ai-assessment-added-after-preview")
-            }
             switch path {
             case "/user":
                 if gitlab.has("fail-next-approval-user") { gitlab.remove("fail-next-approval-user"); return InMemoryGitLab.output(code: 1) }
@@ -683,9 +688,6 @@ import MergeTetherRemote
                 try gitlab.editArray("drafts.json") { $0.removeAll { $0["id"] as? Int == id } }
                 return InMemoryGitLab.output()
             case "/users/8":
-                if gitlab.has("add-ai-assessment-after-preview") {
-                    gitlab.remove("add-ai-assessment-after-preview"); gitlab.write("ai-assessment-after-preview-pending")
-                }
                 if gitlab.has("edit-after-proof-draft-read") && gitlab.has("proof-draft-read") {
                     gitlab.remove("edit-after-proof-draft-read")
                     try gitlab.editArray("drafts.json") { drafts in
@@ -3192,7 +3194,7 @@ import MergeTetherRemote
     private let duoDiscussion = #"[{"id":"abc","notes":[{"id":40,"body":"AI finding","author":{"id":8,"username":"GitLabDuo"},"system":false,"resolvable":true,"resolved":false}]}]"#
 
     @Test(arguments: ["verified", "locallyDeclared", "displayCacheOnly", "disabled", "unknown", "human", "mixed"])
-    func ordinaryBotRepliesUseTheirOwnPermissionWithoutAIClassification(_ evidence: String) async throws {
+    func verifiedOrDeclaredBotRepliesQualifyInAIReplyMode(_ evidence: String) async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
         harness.settings.automation.publicationMode = .aiReplies
@@ -3220,7 +3222,7 @@ import MergeTetherRemote
         } else if evidence == "displayCacheOnly" {
             harness.glab.updateLocalAutomationAuthors([8], host: host, username: "me")
         }
-        let qualifies = evidence == "verified" || evidence == "locallyDeclared"
+        let qualifies = ["verified", "locallyDeclared", "disabled"].contains(evidence)
         try harness.recordVerdict("objections", head: head)
         try await harness.poll()
         let preview = try #require(harness.monitor.currentItems.first)
@@ -3288,6 +3290,7 @@ import MergeTetherRemote
         try harness.write("drafts.json", draftJSON)
         let human = duoDiscussion.replacingOccurrences(of: "GitLabDuo", with: "alice")
         try harness.write("discussions.json", human)
+        try harness.write("duo.json", #"{"id":8,"username":"alice","bot":false}"#)
         try harness.recordVerdict("objections", head: head)
         try await harness.poll()
         try await harness.poll()
@@ -3299,6 +3302,140 @@ import MergeTetherRemote
         try harness.assess(noteID: 40, body: "AI finding")
         try await harness.poll()
         #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
+    }
+
+    @Test(arguments: [0, 1, 2], [false, true])
+    func sealedStyleEvidenceOnlyPublishesForTrustedAuthors(_ confirmations: Int, _ markedHuman: Bool) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try harness.write("discussions.json", duoDiscussion.replacingOccurrences(of: "GitLabDuo", with: "reviewer"))
+        try harness.write("duo.json", #"{"id":8,"username":"reviewer","bot":false}"#)
+        try harness.recordVerdict("objections", head: head)
+        try harness.assess(noteID: 40, body: "AI finding", trustAuthor: false)
+        harness.confirmAIComments(confirmations)
+        if markedHuman { harness.confirmAIComments(1, classification: .human) }
+
+        let trusted = confirmations >= 2 && !markedHuman
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentItems.first)
+        #expect(item.automaticDraftIDs == (trusted ? [12] : []))
+        #expect(item.aiReplyDecisions[12]?.map(\.id) == (trusted ? nil : [40]))
+        #expect(item.needsAttention)
+        try await harness.poll()
+        #expect(harness.log("selected.log").contains("/draft_notes/12/publish") == trusted)
+        let loggedTrust = harness.settings.automationEvents.contains { event in
+            event.origin == .automatic && event.publicationBasedOnAuthorTrust == true
+        }
+        let record = harness.settings.reviewParticipationPreferences.aiReplyTrust(host: host, accountID: 3, authorID: 8)
+        #expect(loggedTrust == trusted)
+        #expect(record?.confirmedAINotes[40] == nil)
+    }
+
+    @Test(arguments: ["reply", "human", "changed draft", "missing proof"])
+    func AIReplyDecisionsOnlyActOnTheCheckedDraftAndSource(_ scenario: String) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try harness.write("discussions.json", duoDiscussion.replacingOccurrences(of: "GitLabDuo", with: "reviewer"))
+        try harness.write("duo.json", #"{"id":8,"username":"reviewer","bot":false}"#)
+        try harness.recordVerdict("objections", head: head)
+        try harness.assess(noteID: 40, body: "AI finding", trustAuthor: false)
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentItems.first)
+        let source = try #require(item.aiReplyDecisions[12]?.first)
+        let draft = try #require(item.drafts.first(where: { $0.id == 12 }))
+        let directory = harness.folder.appending(path: "ai-assessments")
+        let center = CommentOriginOverrideCenter(directory: directory, gain: { _, _, _ in
+            Issue.record("An explicit draft decision must not schedule a timed publication")
+            return 0
+        }, resume: { _ in Issue.record("An explicit draft decision must select one reply") })
+        if scenario == "changed draft" {
+            try harness.write("drafts.json", draftJSON.replacingOccurrences(of: "Thanks, looks fixed.", with: "/merge"))
+        } else if scenario == "missing proof" {
+            try FileManager.default.removeItem(at: harness.folder.appending(path: "verdicts/\(host)/1-2.json"))
+        }
+        let result = await harness.monitor.decideAIReply(scenario == "human" ? .human : .reply,
+            source: source, draft: draft, displayed: item, originCenter: center)
+        let expected: MergeRequestAttentionMonitor.AIReplyDecisionResult = switch scenario {
+        case "changed draft": .changed
+        case "missing proof": .draftStillPrivate
+        default: .completed
+        }
+        #expect(result == expected)
+        try await harness.poll()
+        let record = harness.settings.reviewParticipationPreferences.aiReplyTrust(host: host, accountID: 3, authorID: 8)
+        let key = AICommentOriginOverrideStore.Key(host: host, projectID: 1, iid: 2, noteID: 40)
+        let override = AICommentOriginOverrideStore.stored(key, in: directory)
+        let manualPublication = harness.settings.automationEvents.contains { event in
+            event.action == .publication && event.origin == .manual
+        }
+        #expect(center.pending.isEmpty)
+        switch scenario {
+        case "reply":
+            #expect(override?.classification == .ai)
+            #expect(record?.confirmedAINotes.keys.sorted() == [40])
+            #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
+            #expect(manualPublication)
+        case "human":
+            #expect(override?.classification == .human)
+            #expect(record?.humanNotes.keys.sorted() == [40])
+            #expect(harness.monitor.currentItems.first?.needsAttention == true)
+            #expect(harness.log("selected.log").isEmpty)
+        case "missing proof":
+            #expect(override?.classification == .ai)
+            #expect(record?.confirmedAINotes.keys.sorted() == [40])
+            #expect(harness.log("selected.log").isEmpty)
+        default:
+            #expect(override == nil && record == nil)
+            #expect(harness.log("selected.log").isEmpty)
+        }
+        #expect(!harness.log("selected.log").contains("/draft_notes/11/publish"))
+        #expect(harness.log("publish.log").isEmpty)
+    }
+
+    @Test(arguments: [true, false])
+    func manuallyPublishingAStyleAssessedReplyCountsOnce(_ assessedAI: Bool) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try harness.write("discussions.json", duoDiscussion.replacingOccurrences(of: "GitLabDuo", with: "reviewer"))
+        try harness.write("duo.json", #"{"id":8,"username":"reviewer","bot":false}"#)
+        try harness.recordVerdict("objections", head: head)
+        if assessedAI { try harness.assess(noteID: 40, body: "AI finding", trustAuthor: false) }
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentItems.first)
+        let draft = try #require(item.drafts.first(where: { $0.id == 12 }))
+        await harness.monitor.publishDrafts([draft],
+            for: .init(host: host, username: "me", projectID: 1, iid: 2, url: item.url))
+        #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
+        let history = harness.settings.reviewParticipationPreferences.aiReplyTrust(host: host, accountID: 3, authorID: 8)
+        #expect(history?.confirmedAINotes.keys.sorted() == (assessedAI ? [40] : nil))
+    }
+
+    @Test(arguments: ["footer", "override", "old assessment"])
+    func definiteCommentSignalsDoNotDependOnAuthorHistory(_ scenario: String) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        let body = scenario == "footer" ? "AI finding\n\nGenerated by SoftNet AI Test Review powered by Claude" : "AI finding"
+        let base = duoDiscussion.replacingOccurrences(of: "GitLabDuo", with: "reviewer")
+        let encodedBody = String(decoding: try JSONEncoder().encode(body), as: UTF8.self)
+        try harness.write("discussions.json", base.replacingOccurrences(of: #""AI finding""#, with: encodedBody))
+        try harness.write("duo.json", #"{"id":8,"username":"reviewer","bot":false}"#)
+        try harness.recordVerdict("objections", head: head)
+        if scenario == "override" {
+            try AICommentOriginOverrideStore.save(.init(version: 1, host: host, username: "me",
+                projectID: 1, iid: 2, noteID: 40, authorID: 8, bodySHA256: AICommentAssessmentStore.digest(body),
+                classification: .ai, createdAt: .distantPast, activatesAt: .distantPast),
+                in: harness.folder.appending(path: "ai-assessments"))
+        } else if scenario == "old assessment" {
+            try harness.assess(noteID: 40, body: body, criteriaVersion: AICommentOriginAssessor.criteriaVersion - 1)
+        }
+        try await harness.poll()
+        try await harness.poll()
+        #expect(harness.log("selected.log").contains("/draft_notes/12/publish") == (scenario != "old assessment"))
+        #expect(!harness.settings.automationEvents.contains(where: { $0.publicationBasedOnAuthorTrust == true }))
     }
 
     @Test func aiPublicationRespectsScopeOptOutAndVerifiedDuoIdentity() async throws {
@@ -3428,19 +3565,26 @@ import MergeTetherRemote
         try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"First reply","discussion_id":"abc"},{"id":14,"author_id":3,"note":"Second reply","discussion_id":"later"}]"#)
         try harness.write("discussions.json", #"[{"id":"abc","notes":[{"id":40,"body":"AI finding","author":{"id":8,"username":"GitLabDuo"},"system":false}]},{"id":"later","notes":[{"id":41,"body":"Later AI finding","author":{"id":9,"username":"alice"},"system":false}]}]"#)
         try harness.recordVerdict("objections", head: head)
-        let lateProof = AICommentAssessment(version: 1, host: host, projectID: 1, iid: 2, noteID: 41,
-            bodySHA256: AICommentAssessmentStore.digest("Later AI finding"), confidence: "very_high", evidence: "Verified AI provenance")
+        harness.confirmAIComments(2, authorID: 9)
+        let bodyDigest = AICommentAssessmentStore.digest("Later AI finding")
         let expectedPath = harness.folder.appending(path: "ai-assessments/\(host)/1-2-41.json")
-        try EvidenceSeal.seal(JSONEncoder().encode(lateProof), context: AICommentAssessmentStore.sealContext(for: expectedPath))
-            .write(to: harness.folder.appending(path: "late-ai-assessment.json"))
+        try FileManager.default.createDirectory(at: expectedPath.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let uncertain = AICommentAssessment(version: 2, host: host, projectID: 1, iid: 2, noteID: 41,
+            bodySHA256: bodyDigest, confidence: "uncertain", evidence: "Insufficient evidence", classification: "uncertain",
+            provider: "codex", model: "test", criteriaVersion: AICommentOriginAssessor.criteriaVersion, username: "me",
+            authorID: 9, purpose: .publication)
+        try SealedAssessmentFile.write(uncertain, to: expectedPath)
         try await harness.poll()
         let preview = try #require(harness.monitor.currentItems.first)
         #expect(preview.automaticDraftIDs == [12])
-        try harness.write("add-ai-assessment-after-preview", "yes")
+        let lateProof = AICommentAssessment(version: 2, host: host, projectID: 1, iid: 2, noteID: 41,
+            bodySHA256: bodyDigest, confidence: "very_high", evidence: "Style assessment",
+            provider: "codex", model: "test", criteriaVersion: AICommentOriginAssessor.criteriaVersion, username: "me",
+            authorID: 9, purpose: .publication)
+        try SealedAssessmentFile.write(lateProof, to: expectedPath)
 
-        try await harness.poll()
+        await harness.monitor.publishDrafts(of: preview.id, automatic: true, checkedDraftIDs: preview.automaticDraftIDs)
 
-        #expect(harness.gitlab.has("ai-assessment-added-after-preview"))
         #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
         #expect(!harness.log("selected.log").contains("/draft_notes/14/publish"))
         #expect(harness.monitor.currentItems.first?.drafts.map(\.id) == [14])
@@ -5087,7 +5231,7 @@ import MergeTetherRemote
         #expect(harness.monitor.currentOpenItems.first?.requiresDiscussionRecheck == false)
     }
 
-    @Test(arguments: ["aiAssisted", "uncertain", "proofPending", "noWorker"])
+    @Test(arguments: ["aiAssisted", "trustedAuthor", "uncertain", "proofPending", "noWorker"])
     func humanPostedSourcesAreAssessedWithoutAWorkerAndStayNeutralUntilClassificationFinishes(outcome: String) async throws {
         let probe = OriginProbe()
         defer { probe.finish(ai: false) }
@@ -5095,6 +5239,7 @@ import MergeTetherRemote
             assessAIOrigin: { _, notes, _, _, _, _ in await probe.assess(notes) })
         defer { harness.cleanUp() }
         harness.settings.automation.publicationMode = .aiReplies
+        if outcome == "trustedAuthor" { harness.confirmAIComments(2, authorID: 9) }
         try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Verified fix","discussion_id":"human"}]"#)
         try harness.write("discussions.json", #"[{"id":"human","notes":[{"id":49,"author":{"id":9,"username":"alice"},"body":"A source comment posted by a human account.","system":false,"resolvable":true,"resolved":false}]}]"#)
         if outcome != "proofPending" && outcome != "noWorker" {
@@ -5115,11 +5260,16 @@ import MergeTetherRemote
         try await harness.poll()
         try await harness.poll()
         #expect(harness.monitor.currentOpenItems.first?.aiOriginChecking == false)
-        if outcome == "aiAssisted" {
+        if outcome == "trustedAuthor" {
             #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
         } else {
             #expect(harness.log("selected.log").isEmpty)
             #expect(harness.monitor.currentOpenItems.first?.draftCount == 1)
+            if outcome == "aiAssisted" {
+                let checked = try #require(harness.monitor.currentOpenItems.first)
+                #expect(checked.aiReplyDecisions[12]?.map(\.id) == [49])
+                #expect(checked.needsAttention)
+            }
         }
     }
 

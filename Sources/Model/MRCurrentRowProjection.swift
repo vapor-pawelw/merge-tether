@@ -34,6 +34,7 @@ struct MRCurrentRowProjection {
             value.reReviewFeedbackChecked = false
             value.manualMergeAvailable = false
             value.automaticDraftIDs = []
+            value.aiReplyDecisions = [:]
             value.automaticPublicationPolicy = nil
             if !value.drafts.isEmpty { value.requiresDiscussionRecheck = true }
         }

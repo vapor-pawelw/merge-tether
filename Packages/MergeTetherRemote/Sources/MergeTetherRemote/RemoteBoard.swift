@@ -8,6 +8,8 @@ public enum RemoteActionKind: String, Codable, Sendable { case publish, approve,
     public static let mrControls: Set<RemoteActionKind> = [.publishDraft, .runReview, .stopJob, .ignoreSuggestion, .restoreSuggestion]
     // Sent only to phones that announce `commentOriginCapability`; its command carries a `RemoteCommentOriginRequest`.
     case setCommentOrigin
+    // These actions appear only inside the optional per-draft decision data.
+    case confirmAIReply, markReplyHuman
     case markReady
     case personalApprove, removeApproval
     case editReviewers
@@ -55,6 +57,18 @@ public struct RemoteAction: Codable, Equatable, Identifiable, Sendable {
     public var isAuthorFeedbackVerification: Bool { kind == .verify && id == "verifyAuthorFeedback" }
 }
 
+public struct RemoteAIReplyDecision: Codable, Equatable, Identifiable, Sendable {
+    public let id: Int
+    public let authorLabel: String
+    public let excerpt: String?
+    public let reply: RemoteAction
+    public let human: RemoteAction
+
+    public init(id: Int, authorLabel: String, excerpt: String? = nil, reply: RemoteAction, human: RemoteAction) {
+        self.id = id; self.authorLabel = authorLabel; self.excerpt = excerpt; self.reply = reply; self.human = human
+    }
+}
+
 public struct RemoteDraft: Codable, Equatable, Identifiable, Sendable {
     public var id: Int
     public var body: String
@@ -62,10 +76,12 @@ public struct RemoteDraft: Codable, Equatable, Identifiable, Sendable {
     public var publicationWarnings: [String]?
     /// Other participants of the thread a reply draft answers; older Macs omit it.
     public var replyRecipients: [RemotePerson]?
+    public var aiReplyDecisions: [RemoteAIReplyDecision]?
     public init(id: Int, body: String, context: String? = nil, publicationWarnings: [String]? = nil,
-                replyRecipients: [RemotePerson]? = nil) {
+                replyRecipients: [RemotePerson]? = nil, aiReplyDecisions: [RemoteAIReplyDecision]? = nil) {
         self.id = id; self.body = body; self.context = context; self.publicationWarnings = publicationWarnings
         self.replyRecipients = replyRecipients
+        self.aiReplyDecisions = aiReplyDecisions
     }
 }
 

@@ -1,5 +1,22 @@
 import Foundation
 
+enum AIReplyTrustLane: Equatable, Sendable {
+    case definite, trustedAuthor, unconfirmed, humanOrUncertain
+
+    init(override: AICommentOriginOverride.Classification?, definite: Bool, styleSaysAI: Bool, trustsAuthor: Bool) {
+        switch `override` {
+        case .ai: self = .definite
+        case .human, .uncertain: self = .humanOrUncertain
+        case nil:
+            if definite { self = .definite }
+            else if styleSaysAI { self = trustsAuthor ? .trustedAuthor : .unconfirmed }
+            else { self = .humanOrUncertain }
+        }
+    }
+
+    var permitsAutomaticReply: Bool { self == .definite || self == .trustedAuthor }
+}
+
 /// Stable GitLab identity; the label is presentation only.
 struct PublicationIdentity: Codable, Equatable, Sendable, Identifiable {
     let host: String

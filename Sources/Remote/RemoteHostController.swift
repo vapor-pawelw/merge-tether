@@ -420,7 +420,7 @@ extension RemoteConnection: RemoteHostTransport {}
                 let current = self.snapshot()
                 guard settled, self.connection === active, !current.partial,
                       current.hostSession == board.hostSession, current.account == board.account,
-                      current.commandCards.contains(where: { $0.hasSameActionContext(as: card) && $0.actions.contains(action) }) else { return .changed }
+                      current.commandCards.contains(where: { $0.hasSameActionContext(as: card) && $0.commandActions.contains(action) }) else { return .changed }
                 if command.isInboxRead || command.isTodoAcknowledgement {
                     guard action.kind == .markDone, command.argument == nil else { return .changed }
                     let connectionID = ObjectIdentifier(active), pairingSession = pairing.sessionID
@@ -910,6 +910,10 @@ extension RemoteConnection: RemoteHostTransport {}
               RemoteBoardAdapter.card(row.item, account: account).drafts == card.drafts,
               row.item.mergeRequest?.sha == card.head else { return .changed }
         let item = row.item
+        if action.kind == .confirmAIReply || action.kind == .markReplyHuman {
+            guard argument == nil, let context = RemoteCardActionContext(card: card, board: board, monitor: monitor) else { return .changed }
+            return await context.executeAIReplyDecision(action, card: card)
+        }
         if action.kind == .setCommentOrigin {
             guard phoneSupportsCommentOrigins, let request = RemoteCommentOriginRequest(argument: argument) else { return .changed }
             return await executeCommentOrigin(request, item: item)

@@ -5,6 +5,7 @@ struct PublicationRestrictionsSettingsView: View {
     @Binding var restrictions: AutomaticPublicationRestrictions
     let mode: AutomationPublicationMode
     let glab: GlabService
+    let settings: SettingsManager
     let preset: AutomationPreset?
 
     private var filtersActive: Bool { mode == .filtered || mode == .aiReplies }
@@ -74,6 +75,10 @@ struct PublicationRestrictionsSettingsView: View {
                     Text(verbatim: summary).font(.caption).foregroundStyle(.secondary)
                 }
             }
+            if filtersActive && requiresAI {
+                Text(.PublicationPolicy.publicationAiReplyTrustHelp).font(.caption).foregroundStyle(.secondary)
+                AIReplyTrustSettings(glab: glab, settings: settings)
+            }
             Text(.PublicationPolicy.publicationAutomationOnlyHelp).font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -93,6 +98,67 @@ struct PublicationRestrictionsSettingsView: View {
             parts.append(String(localized: .PublicationPolicy.publicationBotRepliesShort))
         }
         return parts.isEmpty ? String(localized: .PublicationPolicy.publicationNoConditionsShort) : parts.joined(separator: " · ")
+    }
+}
+
+private struct AIReplyTrustSettings: View {
+    let glab: GlabService
+    let settings: SettingsManager
+    @State private var expanded = false
+    @State private var accountID: Int?
+    @State private var loadedRevision: UInt64?
+    @State private var resetFailed = false
+
+    private var records: [ReviewParticipationPreferences.AIReplyTrust] {
+        guard loadedRevision == glab.accountRevision, let accountID, let host = glab.resolvedHost else { return [] }
+        return settings.reviewParticipationPreferences.aiReplyTrustRecords.filter {
+            $0.id.host == host && $0.id.accountID == accountID
+        }.sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
+    }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            if loadedRevision == glab.accountRevision, records.isEmpty {
+                Text(.PublicationPolicy.publicationAiReplyTrustEmpty).font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(records) { record in
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text(verbatim: record.label)
+                        HStack(spacing: 8) {
+                            Text(record.confirmedAINotes.count, format: .number).monospacedDigit()
+                            Text(record.trustsStyleAssessment ? .PublicationPolicy.publicationAiReplyTrustEligible
+                                : record.humanNotes.isEmpty ? .PublicationPolicy.publicationAiReplyTrustWaiting
+                                : .PublicationPolicy.publicationAiReplyTrustHuman)
+                        }
+                        .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        guard loadedRevision == glab.accountRevision else { return }
+                        resetFailed = !settings.resetAIReplyTrust(record.id)
+                    } label: {
+                        Text(.PublicationPolicy.publicationReset)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            if resetFailed { Text(.PublicationPolicy.publicationAiReplyTrustResetFailed).font(.caption).foregroundStyle(.red) }
+        } label: {
+            Text(.PublicationPolicy.publicationAiReplyTrustAuthors)
+        }
+        .task(id: expanded ? glab.accountRevision : nil) {
+            guard expanded else { return }
+            accountID = nil
+            loadedRevision = nil
+            resetFailed = false
+            let revision = glab.accountRevision
+            guard let host = glab.resolvedHost, let username = glab.currentUsername,
+                  let user = try? await glab.fetchAuthenticatedUser(host: host, expectedUsername: username),
+                  !Task.isCancelled, glab.accountRevision == revision else { return }
+            accountID = user.id
+            loadedRevision = revision
+        }
     }
 }
 

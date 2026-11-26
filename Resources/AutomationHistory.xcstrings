@@ -1,6 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "automationHistory.publicationAuthorTrust": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reply published automatically based on author trust"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Odpowiedź opublikowana automatycznie na podstawie zaufania do autora"
+          }
+        }
+      }
+    },
     "automationHistory.source.gitLab": {
       "extractionState": "manual",
       "localizations": {

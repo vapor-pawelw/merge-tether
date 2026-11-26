@@ -1,6 +1,108 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "commentReview.replyAI": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reply (AI)"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Odpowiedz (AI)"
+          }
+        }
+      }
+    },
+    "commentReview.markHuman": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "It's human"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "To człowiek"
+          }
+        }
+      }
+    },
+    "commentReview.unconfirmedAI.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Possible AI comment by %@"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Komentarz od %@ mógł powstać z pomocą AI"
+          }
+        }
+      }
+    },
+    "commentReview.aiDraftStillPrivate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI origin confirmed. The reply is still private."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Potwierdzono udział AI. Odpowiedź pozostaje prywatna."
+          }
+        }
+      }
+    },
+    "commentReview.aiReplyChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The draft or its source changed. Refresh and review it again."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Szkic lub komentarz źródłowy się zmienił. Odśwież i sprawdź ponownie."
+          }
+        }
+      }
+    },
+    "commentReview.aiReplyUncertain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI origin confirmed. Check GitLab for the publication result."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Potwierdzono udział AI. Sprawdź wynik publikacji w GitLabie."
+          }
+        }
+      }
+    },
     "commentReview.delete": {
       "extractionState": "manual",
       "localizations": {

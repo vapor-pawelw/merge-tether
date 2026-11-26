@@ -89,6 +89,17 @@ struct RemoteDraftCard: View {
                 .font(.caption).foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)
             }
+            ForEach(draft.aiReplyDecisions ?? []) { decision in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(.CommentReview.commentReviewUnconfirmedAI(decision.authorLabel))
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let excerpt = decision.excerpt { Text(verbatim: excerpt).font(.caption).lineLimit(3) }
+                    ViewThatFits(in: .horizontal) {
+                        HStack { aiDecisionButtons(decision) }
+                        VStack(alignment: .leading) { aiDecisionButtons(decision) }
+                    }
+                }
+            }
             // Drafts with quick actions or thread resolution get no button: the Mac shows their effects.
             if let publishAction {
                 Button { onAction(publishAction) } label: {
@@ -106,6 +117,18 @@ struct RemoteDraftCard: View {
         .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
         .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(Color.accentColor.opacity(0.18), lineWidth: 0.5) }
         .accessibilityIdentifier("remote.draft.\(draft.id)")
+    }
+
+    @ViewBuilder
+    private func aiDecisionButtons(_ decision: RemoteAIReplyDecision) -> some View {
+        ForEach([decision.reply, decision.human]) { action in
+            Button { onAction(action) } label: {
+                RemoteActionProgressLabel(running: runningActionID == action.id) {
+                    Text(action.kind.title).frame(minHeight: 44)
+                }
+            }
+            .buttonStyle(.bordered).disabled(!canAct)
+        }
     }
 }
 
