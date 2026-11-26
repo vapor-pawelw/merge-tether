@@ -345,11 +345,19 @@ struct ReReviewReceipt: Codable {
     var unconfirmed = false
     var requested: Bool?
     var headSHA: String? = nil
+    // An observed head can fence a legacy attempt, but cannot prove the head of the original write.
+    var adoptedFenceHeadSHA: String? = nil
+
+    var fenceHeadSHA: String? { headSHA ?? adoptedFenceHeadSHA }
 
     func covers(noteID: Int, headSHA: String) -> Bool {
-        // Older uncertain writes have no recorded head; keep their existing replay fence.
-        EvidenceContext(head: self.headSHA).binds(to: .init(head: headSHA),
-            policy: unconfirmed ? .uncertainReReviewReceipt : .head) && self.noteID >= noteID
+        guard self.noteID >= noteID else { return false }
+        if unconfirmed {
+            // Keep fencing replay until a complete GitLab read supplies a head for the legacy receipt.
+            guard let fenceHeadSHA else { return true }
+            return EvidenceContext(head: fenceHeadSHA).binds(to: .init(head: headSHA), policy: .uncertainReReviewReceipt)
+        }
+        return EvidenceContext(head: self.headSHA).binds(to: .init(head: headSHA), policy: .head)
     }
 }
 

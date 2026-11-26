@@ -514,6 +514,92 @@ struct ReReviewCoordinatorTests {
         #expect(f.gitlab.text("requested").isEmpty)
     }
 
+    @Test(arguments: ["unapproved", "review_started"])
+    func legacyUncertainReceiptAdoptsTheFirstHeadAndFencesItAcrossRestart(_ initialReviewerState: String) async throws {
+        let f = try Fixture()
+        defer { f.close() }
+        let key = ReReviewReceipt.Key(host: f.context.host, authorID: f.user.id, projectID: 1, iid: 2, reviewerID: 8)
+        f.settings.reReviewReceipts[key] = .init(noteID: 40, unconfirmed: true)
+        let coordinator = f.coordinator()
+        let request = try f.request()
+        let feedback = try f.feedback()
+        f.gitlab.write("reviewers", Fixture.assignedReviewersJSON.replacingOccurrences(of: "unapproved", with: initialReviewerState))
+        await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+
+        let reloaded = SettingsManager(defaults: f.defaults)
+        let receipt = try #require(reloaded.reReviewReceipts[key])
+        #expect(receipt.unconfirmed && receipt.requested != true)
+        #expect(receipt.covers(noteID: 40, headSHA: "head"))
+        #expect(!receipt.covers(noteID: 40, headSHA: "new-head"))
+        let restarted = ReReviewCoordinator(settings: reloaded, glab: f.glab, canAutomate: { _ in true }, verify: { _, _, _ in
+            Issue.record("Manual verification unexpectedly started an assistant")
+            throw CancellationError()
+        })
+        await restarted.refresh(for: request, feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+        #expect(restarted.status(for: f.context, authorID: f.user.id).state == nil)
+        #expect(reloaded.reReviewReceipts[key]?.unconfirmed == true)
+
+        f.gitlab.write("reviewers", Fixture.assignedReviewersJSON)
+        f.gitlab.write("request", Fixture.requestJSON.replacingOccurrences(of: "head", with: "new-head"))
+        await restarted.refresh(for: try f.request(), feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+        #expect(restarted.status(for: f.context, authorID: f.user.id).state == .manual)
+        #expect(f.gitlab.text("requested").isEmpty)
+
+        let result = await restarted.confirm(f.context, user: f.user, head: "new-head", fingerprint: try f.fingerprint())
+        #expect(result == .confirmed && f.gitlab.text("requested") == "review\n")
+        #expect(reloaded.reReviewReceipts[key]?.headSHA == "new-head")
+    }
+
+    @Test(arguments: ["discussion", "partialDiscussion", "reviewers", "approvals", "account", "request", "missingHead", "changedHead"],
+        [false, true])
+    func invalidObservationKeepsTheLegacyUncertainFence(_ failure: String, alreadyAdopted: Bool) async throws {
+        let f = try Fixture()
+        defer { f.close() }
+        let key = ReReviewReceipt.Key(host: f.context.host, authorID: f.user.id, projectID: 1, iid: 2, reviewerID: 8)
+        f.settings.reReviewReceipts[key] = .init(noteID: 40, unconfirmed: true)
+        try #require(f.settings.save())
+        let feedback = try f.feedback()
+        let coordinator = f.coordinator()
+        if alreadyAdopted {
+            await coordinator.refresh(for: try f.request(), feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+            f.gitlab.write("request", Fixture.requestJSON.replacingOccurrences(of: "head", with: "new-head"))
+        }
+        let request = try f.request()
+        let original = try #require(f.gitlab.handler)
+        f.gitlab.handler = { call in
+            if call.endpoint.contains("/discussions?") {
+                if failure == "discussion" { return InMemoryGitLab.output(code: 1) }
+                if failure == "partialDiscussion" { return InMemoryGitLab.output("[[{}],") }
+            }
+            if (failure == "reviewers" && call.endpoint.contains("/reviewers?"))
+                || (failure == "approvals" && call.endpoint.hasSuffix("/approvals")) {
+                return InMemoryGitLab.output(code: 1)
+            }
+            if failure == "account", call.endpoint == "/user" {
+                return InMemoryGitLab.output(#"{"id":4,"username":"me"}"#)
+            }
+            if failure == "request", call.endpoint == "/projects/1/merge_requests/2" {
+                return InMemoryGitLab.output(code: 1)
+            }
+            return try await original(call)
+        }
+        if failure == "changedHead" {
+            f.gitlab.write("request", Fixture.requestJSON.replacingOccurrences(of: "head", with: "other-head"))
+        } else if failure == "missingHead" {
+            f.gitlab.write("request", Fixture.requestJSON.replacingOccurrences(of: #""sha":"head","#, with: ""))
+        }
+
+        await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+
+        let receipt = try #require(SettingsManager(defaults: f.defaults).reReviewReceipts[key])
+        #expect(receipt.unconfirmed)
+        #expect(receipt.covers(noteID: 40, headSHA: "head"))
+        #expect(receipt.covers(noteID: 40, headSHA: "new-head") == !alreadyAdopted)
+        #expect(f.settings.reReviewReceipts[key]?.covers(noteID: 40, headSHA: "new-head") == !alreadyAdopted)
+        #expect(coordinator.status(for: f.context, authorID: f.user.id).state != .manual)
+        #expect(f.gitlab.text("requested").isEmpty)
+    }
+
     @Test(arguments: [false, true])
     func receiptDisplayUsesCurrentMembershipWithoutDeletingItsJournal(_ unconfirmed: Bool) async throws {
         let f = try Fixture()

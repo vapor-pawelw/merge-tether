@@ -233,7 +233,8 @@ struct MergeRequestBoardSnapshotTests {
         var result = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 42), title: request.title,
             url: request.webURL, discussionObservation: .unresolvedIncoming, mergeRequest: request, isAuthored: true, feedback: [note])
         result.observedDiscussionFingerprint = "current-conversation"
-        result.authorFeedbackStatus = .init(head: "abc", fingerprint: "current-conversation", phase: .complete,
+        result.authorFeedbackStatus = .init(head: "abc", fingerprint: "current-conversation",
+            semanticContextFingerprint: request.semanticContextFingerprint, phase: .complete,
             findings: [.init(id: 40, discussionID: "thread", reviewerID: 8, reviewerUsername: "reviewer",
                 state: .waitingAcceptance, reason: "The correction is verified; awaiting the reviewer.", waitingForReviewers: ["reviewer"])],
             addressedNoteIDs: [40])
@@ -312,6 +313,7 @@ struct MergeRequestBoardSnapshotTests {
     func informativeFeedbackStatesRemainVisibleWithoutCompletedTextProof(_ phase: AuthorFeedbackStatus.Phase, _ text: String) throws {
         var original = try addressedFeedbackItem()
         original.authorFeedbackStatus?.phase = phase
+        original.authorFeedbackStatus?.semanticContextFingerprint = nil
         original.observedDiscussionFingerprint = text == "missing-snapshot" ? nil : text
         let row = try #require(snapshot(own: [original]).own.first)
         #expect(row.presented.authorFeedbackStatus?.phase == phase)
@@ -320,7 +322,8 @@ struct MergeRequestBoardSnapshotTests {
 
     @Test func verdictForAnOlderSourceCannotHideFeedback() throws {
         var original = try addressedFeedbackItem()
-        original.authorFeedbackStatus = .init(head: "previous-head", fingerprint: "current-conversation", phase: .complete,
+        original.authorFeedbackStatus = .init(head: "previous-head", fingerprint: "current-conversation",
+            semanticContextFingerprint: original.authorFeedbackStatus?.semanticContextFingerprint, phase: .complete,
             findings: original.authorFeedbackStatus!.findings, addressedNoteIDs: [40])
         let row = try #require(snapshot(own: [original]).own.first)
         #expect(row.needsAttention && row.item.needsDiscussion && !row.item.feedback.isEmpty)

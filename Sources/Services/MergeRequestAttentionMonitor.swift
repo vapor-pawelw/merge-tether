@@ -116,7 +116,9 @@ final class MergeRequestAttentionMonitor {
         mutating func invalidateChangedDiscussionSnapshot(head: String?, fingerprint: String?, semanticContextFingerprint: String? = nil) {
             let read = EvidenceContext(head: head, discussionContent: fingerprint.map(DiscussionContentDigest.init),
                                        semanticContext: semanticContextFingerprint.map(SemanticContextDigest.init))
-            guard read.binds(to: observedEvidenceContext, policy: .observedFeedback) else {
+            let observed = observedEvidenceContext
+            guard read.binds(to: observed, policy: .feedbackProgress),
+                  read.binds(to: observed, policy: .discussionContent) else {
                 observedDiscussionFingerprint = nil
                 observedActiveDiscussionFingerprint = nil
                 discussionReadStartedAt = nil

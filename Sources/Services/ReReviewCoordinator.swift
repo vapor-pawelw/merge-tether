@@ -335,7 +335,7 @@ final class ReReviewCoordinator {
             settings.reReviewDraftBaselines.removeValue(forKey: target)
             settings.save()
         }
-        guard let head = request.sha else { return }
+        guard let head = request.sha, !head.isEmpty else { return }
         let authorProgress = authorFeedbackStatus(request)
         let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
         let usedAssistant = settings.assistantHandoffs.contains {
@@ -391,6 +391,7 @@ final class ReReviewCoordinator {
             async let approved = glab.fetchMergeRequestApproverIDs(projectID: request.projectID, iid: request.iid, host: host)
             (reviewers, approvers) = try await (states, approved)
             observeCurrentReviewers(reviewers, context: context)
+            guard try await observeUncertainReceiptHead(head, for: request, context: context, user: user) else { return }
         } catch {
             markReviewerReadFailed()
             return
@@ -730,6 +731,34 @@ final class ReReviewCoordinator {
             settings.reReviewDraftBaselines.removeValue(forKey: target)
             settings.save()
         }
+    }
+
+    private func observeUncertainReceiptHead(_ head: String, for request: GitLabMergeRequest, context: Context,
+                                             user: GitLabAuthenticatedUser) async throws -> Bool {
+        let keys = settings.reReviewReceipts.compactMap { key, receipt in
+            key.host == context.host && key.authorID == user.id && key.projectID == context.projectID
+                && key.iid == context.iid && receipt.unconfirmed && receipt.fenceHeadSHA != head ? key : nil
+        }
+        guard !keys.isEmpty else { return true }
+
+        let current = try await glab.fetchMergeRequest(projectID: context.projectID, iid: context.iid, host: context.host)
+        let currentUser = try await glab.fetchAuthenticatedUser(host: context.host, expectedUsername: context.username)
+        guard currentUser == user, !Task.isCancelled, isCurrent(context), runtimePermitsReReview(context),
+              settings.automation.hasAutomaticActionConsent, settings.automation.autoReReviewEnabled,
+              current.isOpen, current.author.id == user.id, current.webURL == request.webURL,
+              current.webURL.isGitLabMergeRequest(host: context.host, iid: context.iid),
+              request.evidenceContext().binds(to: current.evidenceContext(), policy: .requestText),
+              settings.effectiveAutomationScope.permits(current, host: context.host, username: context.username) else { return false }
+
+        let unbound = keys.filter { key in
+            guard let receipt = settings.reReviewReceipts[key] else { return false }
+            return receipt.unconfirmed && receipt.fenceHeadSHA == nil
+        }
+        guard !unbound.isEmpty else { return true }
+        for key in unbound { settings.reReviewReceipts[key]?.adoptedFenceHeadSHA = head }
+        if settings.save() { return true }
+        for key in unbound { settings.reReviewReceipts[key]?.adoptedFenceHeadSHA = nil }
+        return false
     }
 
     private func excludedReviewers(_ context: Context, key: ReReviewKey, discussions: [GitLabMergeRequestDiscussion], authorID: Int) -> Set<Int> {

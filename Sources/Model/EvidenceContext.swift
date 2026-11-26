@@ -70,7 +70,7 @@ struct EvidenceContext: Sendable {
         case reviewContent
         /// In-progress feedback binds the head and any recorded MR text, before discussions are verified.
         case feedbackProgress
-        /// Displayed complete feedback and partial-read invalidation also require the observed discussion content.
+        /// Displayed complete feedback requires a recorded head, MR text and observed discussion content.
         case observedFeedback
         /// An assessment used for workflow decisions must match head, full discussion content and MR text.
         case verifiedFeedback
@@ -84,7 +84,7 @@ struct EvidenceContext: Sendable {
         case draftRecovery
         /// A legacy follow-up proof binds its head and any MR text and recovery digests it recorded.
         case legacyFollowUpProof
-        /// A legacy uncertain re-review write can still prevent replay if it did not record a head.
+        /// An uncertain re-review fence with a known head applies to that head only.
         case uncertainReReviewReceipt
     }
 
@@ -114,7 +114,8 @@ struct EvidenceContext: Sendable {
         case .feedbackProgress:
             return matches(head, current.head) && matchesIfRecorded(semanticContext, current.semanticContext)
         case .observedFeedback:
-            return binds(to: current, policy: .feedbackProgress) && matches(discussionContent, current.discussionContent)
+            return matches(head, current.head) && matches(semanticContext, current.semanticContext)
+                && matches(discussionContent, current.discussionContent)
         case .verifiedFeedback:
             return binds(to: current, policy: .requestText) && matches(discussionContent, current.discussionContent)
         case .feedbackPresentation:
@@ -130,7 +131,7 @@ struct EvidenceContext: Sendable {
             return matches(head, current.head) && matchesIfRecorded(semanticContext, current.semanticContext)
                 && matchesIfRecorded(recoveryContext, current.recoveryContext)
         case .uncertainReReviewReceipt:
-            return current.head != nil && matchesIfRecorded(head, current.head)
+            return matches(head, current.head)
         }
     }
 
