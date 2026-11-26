@@ -25,10 +25,12 @@ enum AICommentProvenanceStore {
         let position: GitLabDraftNote.Position?
         let resolveDiscussion: Bool?
 
+        var evidenceContext: EvidenceContext { .init(head: headSHA, commentBody: .init(bodySHA256)) }
+
         func matches(_ draft: GitLabDraftNote, context: Context) -> Bool {
             version == 1 && self.context == context && context.isValid && AICommentProvenanceStore.validHead(headSHA)
                 && draft.id == draftID && draft.authorID == context.userID
-                && draft.note.map(AICommentAssessmentStore.digest) == bodySHA256
+                && evidenceContext.binds(to: AICommentAssessmentStore.bodyEvidence(draft.note), policy: .commentBody)
                 && draft.discussionID == discussionID && draft.position == position
                 && draft.resolveDiscussion == resolveDiscussion
         }
@@ -41,6 +43,8 @@ enum AICommentProvenanceStore {
         let noteID: Int
         let discussionID: String
         let bodySHA256: String
+
+        var evidenceContext: EvidenceContext { .init(commentBody: .init(bodySHA256)) }
     }
     struct Snapshot: Sendable {
         fileprivate let context: Context
@@ -54,7 +58,7 @@ enum AICommentProvenanceStore {
                   note.author?.id == context.userID, note.author?.username == context.username,
                   let body = note.body, !body.isEmpty, let record = notes[id] else { return false }
             return record.version == 1 && record.context == context && record.noteID == id && record.draftID > 0 && record.discussionID == discussionID
-                && record.bodySHA256 == AICommentAssessmentStore.digest(body)
+                && record.evidenceContext.binds(to: AICommentAssessmentStore.bodyEvidence(body), policy: .commentBody)
         }
     }
 
@@ -65,6 +69,8 @@ enum AICommentProvenanceStore {
             let bodySHA256: String
             let markdown: String
             var proposedSolution = false
+
+            var evidenceContext: EvidenceContext { .init(commentBody: .init(bodySHA256)) }
         }
         var drafts: [Int: Entry] = [:]
         var notes: [Int: Entry] = [:]
@@ -75,7 +81,7 @@ enum AICommentProvenanceStore {
         /// A draft edited after generation no longer matches the text the context explained.
         func forDraft(_ draft: GitLabDraftNote) -> Entry? {
             guard let id = draft.id, let entry = drafts[id], let body = draft.note,
-                  AICommentAssessmentStore.digest(body) == entry.bodySHA256 else { return nil }
+                  entry.evidenceContext.binds(to: AICommentAssessmentStore.bodyEvidence(body), policy: .commentBody) else { return nil }
             return entry
         }
 
@@ -125,10 +131,11 @@ enum AICommentProvenanceStore {
         return claims.compactMap { claim in
             let matches = current.filter { $0.id == claim.id }
             let previous = baseline.first { $0.id == claim.id }
+            let evidence = EvidenceContext(commentBody: .init(claim.bodySHA256))
             guard claim.id > 0, matches.count == 1, let draft = matches.first,
                   draft.authorID == userID, let body = draft.note, !body.isEmpty,
-                  AICommentAssessmentStore.digest(body) == claim.bodySHA256,
-                  previous?.note.map(AICommentAssessmentStore.digest) != claim.bodySHA256 else { return nil }
+                  evidence.binds(to: AICommentAssessmentStore.bodyEvidence(body), policy: .commentBody),
+                  !evidence.binds(to: AICommentAssessmentStore.bodyEvidence(previous?.note), policy: .commentBody) else { return nil }
             return (claim, draft)
         }
     }
@@ -165,7 +172,8 @@ enum AICommentProvenanceStore {
         }
         if let snapshot, snapshot.context == context {
             for (noteID, note) in snapshot.notes {
-                guard let entry = result.drafts[note.draftID], entry.bodySHA256 == note.bodySHA256 else { continue }
+                guard let entry = result.drafts[note.draftID],
+                      entry.evidenceContext.binds(to: note.evidenceContext, policy: .commentBody) else { continue }
                 result.notes[noteID] = entry
             }
         }
@@ -249,8 +257,10 @@ enum AICommentProvenanceStore {
         var records: [PublishedNote] = []
         var matched: Set<Int> = []
         for draft in publication.drafts {
+            let reviewed = EvidenceContext(commentText: draft.note)
             let candidates = added.filter { discussionID, note in
-                note.author?.username == context.username && note.body == draft.note
+                note.author?.username == context.username
+                    && reviewed.binds(to: .init(commentText: note.body), policy: .commentText)
                     && (draft.discussionID == nil || draft.discussionID == discussionID)
                     && AICommentProvenanceStore.positionMatches(draft.position, note.position, reply: draft.discussionID != nil)
             }
@@ -318,7 +328,8 @@ enum AICommentProvenanceStore {
                 for (index, note) in published.enumerated() {
                     guard let id = note.id, id > 0, existing.notes[id] == nil,
                           note.author?.id == context.userID, note.author?.username == context.username,
-                          let body = note.body, !body.isEmpty, AICommentAssessmentStore.digest(body) == record.bodySHA256 else { continue }
+                          let body = note.body, !body.isEmpty,
+                          record.evidenceContext.binds(to: AICommentAssessmentStore.bodyEvidence(body), policy: .commentBody) else { continue }
                     let placed = record.discussionID.map { $0 == threadID }
                         ?? (index == 0 && positionMatches(record.position, note.position, reply: false))
                     guard placed else { continue }

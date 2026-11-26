@@ -179,9 +179,11 @@ struct MergeConflictReceipt: Codable, Hashable {
     var allowsPush: Bool? = nil
     var jobID: UUID? = nil
 
+    var evidenceContext: EvidenceContext { .init(head: sourceSHA, targetHead: targetSHA) }
+
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.host == rhs.host && lhs.userID == rhs.userID && lhs.projectID == rhs.projectID
-            && lhs.iid == rhs.iid && lhs.sourceSHA == rhs.sourceSHA && lhs.targetSHA == rhs.targetSHA
+            && lhs.iid == rhs.iid && lhs.evidenceContext.binds(to: rhs.evidenceContext, policy: .sourceAndTargetHeads)
     }
 
     func hash(into hasher: inout Hasher) {

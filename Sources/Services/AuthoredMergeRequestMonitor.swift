@@ -24,7 +24,7 @@ final class AuthoredMergeRequestMonitor {
     /// Catalog readiness concerns fetched MR data, independently of whether an
     /// optional automation action succeeds. Soft refreshes keep it ready.
     private var syncedCatalogRevision: UInt64?
-    var hasSyncedCurrentCatalog: Bool { syncedCatalogRevision == glab.accountRevision && lastAccount.map(isCurrent) == true }
+    var hasSyncedCurrentCatalog: Bool { EvidenceContext.sameAccountRevision(syncedCatalogRevision, glab.accountRevision) && lastAccount.map(isCurrent) == true }
     private(set) var lastRefresh: Date?
     private(set) var catalogReadStartedAt: Date?
     let workflow: MergeWorkflowAutomation
@@ -72,7 +72,7 @@ final class AuthoredMergeRequestMonitor {
         if conflictAutomationState(for: request) == .available { return false }
         guard let host = glab.resolvedHost else { return false }
         return failedConflicts.contains {
-            $0.host == host && $0.projectID == request.projectID && $0.iid == request.iid && $0.sourceSHA == request.sha
+            $0.host == host && $0.projectID == request.projectID && $0.iid == request.iid && $0.evidenceContext.binds(to: .init(head: request.sha), policy: .head)
         }
     }
 
@@ -86,13 +86,13 @@ final class AuthoredMergeRequestMonitor {
               request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
               settings.automation.scope.permits(request, host: host, username: username) else { return nil }
         let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
-        let preparing = preparingConflicts[work].map { $0.sourceSHA == sha && $0.configuration == settings.automation } == true
+        let preparing = preparingConflicts[work].map { EvidenceContext.sameHead($0.sourceSHA, sha) && $0.configuration == settings.automation } == true
         if preparing { return .processing }
-        if let failure = failedPreparations[work], failure.sourceSHA == sha, failure.configuration == settings.automation {
+        if let failure = failedPreparations[work], EvidenceContext.sameHead(failure.sourceSHA, sha), failure.configuration == settings.automation {
             return .requiresAttention
         }
         let receipt = settings.conflictReceipts.first {
-            $0.matches(request, host: host, userID: request.author.id) && $0.sourceSHA == sha
+            $0.matches(request, host: host, userID: request.author.id) && $0.evidenceContext.binds(to: .init(head: sha), policy: .head)
         }
         let previousJob = receipt.flatMap { conflictJob(for: $0, username: username) }
         if isLoading, receipt?.allowsPush == true, previousJob?.allowsPush == true,
@@ -129,7 +129,7 @@ final class AuthoredMergeRequestMonitor {
     }
 
     private func runtimePermits(_ work: AssistantAutomationRunner.MergeRequestWork, account: Account) -> Bool {
-        guard let runtimeScope, runtimeScope.account == account, runtimeScope.revision == glab.accountRevision else { return true }
+        guard let runtimeScope, runtimeScope.account == account, EvidenceContext.sameAccountRevision(runtimeScope.revision, glab.accountRevision) else { return true }
         return runtimeScope.scope.resolve(.mergeRequest(host: work.host, username: account.username,
             projectID: work.projectID, iid: work.iid)).active
     }
@@ -147,7 +147,7 @@ final class AuthoredMergeRequestMonitor {
     private func conflictJob(for receipt: MergeConflictReceipt, username: String) -> AssistantAutomationRunner.Handoff? {
         let matching = settings.assistantHandoffs.filter {
             $0.key.work.host == receipt.host && $0.key.work.projectID == receipt.projectID && $0.key.work.iid == receipt.iid
-                && $0.key.username == username && $0.expectedHeadSHA == receipt.sourceSHA
+                && $0.key.username == username && receipt.evidenceContext.binds(to: .init(head: $0.expectedHeadSHA), policy: .head)
         }
         if let id = receipt.jobID { return matching.first { $0.id == id } }
         return matching.filter { ($0.taskPrompt ?? $0.prompt).contains("Resolve the merge conflict in this GitLab merge request.") }
@@ -292,7 +292,7 @@ final class AuthoredMergeRequestMonitor {
         let owned = listed.filter {
             $0.state == .opened && $0.author.id == user.id && $0.webURL.isGitLabMergeRequest(host: host, iid: $0.iid)
         }
-        guard glab.accountRevision == revision else { return }
+        guard EvidenceContext.sameAccountRevision(revision, glab.accountRevision) else { return }
         onObservedMergeRequests?(owned, readStartedAt)
         var results: [AuthoredMergeRequestStatus] = []
         var actionFailed = false
@@ -561,7 +561,7 @@ final class AuthoredMergeRequestMonitor {
                 expectedDiscussionFingerprint: fingerprint, expectedSemanticContextFingerprint: request.semanticContextFingerprint,
                 action: action, expectedPolicy: policy, expectedTrainRecoveryNoteIDs: trainRecovery?.noteIDs,
                 onRecoveryQueueObserved: {
-                    guard var previous = trainRecovery?.receipt, self.isCurrent(account), self.glab.accountRevision == revision,
+                    guard var previous = trainRecovery?.receipt, self.isCurrent(account), EvidenceContext.sameAccountRevision(revision, self.glab.accountRevision),
                           self.receipt(for: request, account: account) == previous else { return }
                     previous.observedReplacementQueue = true
                     _ = self.settings.saveMergeSubmission(previous)
@@ -675,7 +675,7 @@ final class AuthoredMergeRequestMonitor {
             projectRequiresResolvedDiscussions: policy?.requiresResolvedDiscussions, autoMergeEnabled: autoMergeEnabled,
             dependencyReadiness: dependencyReadiness,
             conflictTaskFailed: failedConflicts.contains {
-                $0.matches(request, host: host, userID: user.id) && $0.sourceSHA == request.sha
+                $0.matches(request, host: host, userID: user.id) && $0.evidenceContext.binds(to: .init(head: request.sha), policy: .head)
             }, pendingDraftCount: pendingDraftCount,
             requiresCommentReview: settings.pendingCommentReviews.contains(target),
             action: policy?.action, submissionState: state, queueHasEnded: queueHasEnded
@@ -736,8 +736,8 @@ final class AuthoredMergeRequestMonitor {
         async let targetHead = glab.fetchBranchHeadSHA(projectID: targetProjectID, branch: request.targetBranch, host: host)
         do {
             let (liveSource, liveTarget) = try await (sourceHead, targetHead)
-            guard isCurrent(account, revision: revision), settings.automation == automation, liveSource == sourceSHA,
-                  request.mergeTrainConflict == nil || request.mergeTrainConflict?.targetSHA == liveTarget,
+            guard isCurrent(account, revision: revision), settings.automation == automation, EvidenceContext.sameHead(sourceSHA, liveSource),
+                  request.mergeTrainConflict == nil || EvidenceContext.sameHead(request.mergeTrainConflict?.targetSHA, liveTarget),
                   preparingConflicts[work] != nil, runtimePermits(work, account: account),
                   settings.automation.scope.permits(request, host: host, username: account.username) else { return }
             let allowPush = automation.permitsConflictPush(project: request.webURL.gitLabProjectPath)

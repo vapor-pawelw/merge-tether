@@ -9,7 +9,7 @@ enum PipelineJobReconciliation {
               displayed.author.id == details.author.id, displayed.author.username == details.author.username,
               details.author.username == job.key.username,
               MergeRequestDependencySummary.Context(displayed) == MergeRequestDependencySummary.Context(details),
-              displayed.semanticContextFingerprint == details.semanticContextFingerprint,
+              displayed.evidenceContext().binds(to: details.evidenceContext(), policy: .semanticText),
               displayed.draft == details.draft,
               let pipeline = details.headPipeline, let id = pipeline.id, id > 0 else { return nil }
         return details
@@ -27,7 +27,7 @@ enum PipelineJobReconciliation {
               request.projectID == prior.projectID, request.iid == prior.mergeRequestIID,
               request.author.username == job.key.username,
               request.webURL.isGitLabMergeRequest(host: prior.host, iid: prior.mergeRequestIID),
-              let expected = job.expectedHeadSHA, !expected.isEmpty, request.sha == expected,
+              let expected = job.expectedHeadSHA, !expected.isEmpty, EvidenceContext.sameHead(expected, request.sha),
               let pipeline = request.headPipeline, let id = pipeline.id, id > 0,
               pipeline.projectID == nil || pipeline.projectID == request.projectID else { return false }
         if id == prior.pipelineID {

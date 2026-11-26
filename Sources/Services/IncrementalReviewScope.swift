@@ -36,6 +36,8 @@ enum MergeRequestDiffDigest {
 struct ReviewDiffSnapshot: Codable, Equatable {
     let headSHA: String
     let digest: String
+
+    var evidenceContext: EvidenceContext { .init(head: headSHA, reviewDiff: .init(digest)) }
 }
 
 extension GlabService {
@@ -45,7 +47,9 @@ extension GlabService {
             "/projects/\(request.projectID)/merge_requests/\(request.iid)/raw_diffs", host: host, decode: { $0 })
         // GitLab returns the latest raw diff. Check the head after reading it against the prior observation.
         let current = try await fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
-        guard current.state == .opened, current.sha == head else { throw AssistantJobExecutor.ExecutionError.headChanged }
+        guard current.state == .opened, EvidenceContext.sameHead(head, current.sha) else {
+            throw AssistantJobExecutor.ExecutionError.headChanged
+        }
         return ReviewDiffSnapshot(headSHA: head, digest: MergeRequestDiffDigest.normalized(String(decoding: diff, as: UTF8.self)))
     }
 }

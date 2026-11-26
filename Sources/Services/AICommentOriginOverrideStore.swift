@@ -18,6 +18,8 @@ struct AICommentOriginOverride: Codable, Equatable, Sendable {
     /// An override that widens automatic publication waits until this moment, so it can still be undone.
     let activatesAt: Date
 
+    var evidenceContext: EvidenceContext { .init(commentBody: .init(bodySHA256)) }
+
     func isActive(at now: Date) -> Bool { activatesAt <= now }
 
     var badge: MRDiscussionSnapshot.OriginBadge {
@@ -52,7 +54,8 @@ enum AICommentOriginOverrideStore {
                                       username: String? = nil, in assessmentDirectory: URL) -> AICommentOriginOverride? {
         guard let id = note.id, id > 0, let authorID = note.author?.id, authorID > 0, let body = note.body,
               let record = stored(.init(host: host, projectID: projectID, iid: iid, noteID: id), in: assessmentDirectory),
-              record.authorID == authorID, record.bodySHA256 == AICommentAssessmentStore.digest(body),
+              record.authorID == authorID,
+              record.evidenceContext.binds(to: AICommentAssessmentStore.bodyEvidence(body), policy: .commentBody),
               username.map({ $0 == record.username }) ?? true else { return nil }
         return record
     }

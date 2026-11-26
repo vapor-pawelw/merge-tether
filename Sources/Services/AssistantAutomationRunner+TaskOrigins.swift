@@ -6,7 +6,7 @@ extension AssistantAutomationRunner {
         return settings.workflowActivity.first {
             $0.assistantJobID == job.id && $0.host == job.key.work.host && $0.user.username == job.key.username
                 && $0.event.mergeRequest.projectID == job.key.work.projectID && $0.event.mergeRequest.iid == job.key.work.iid
-                && $0.event.mergeRequest.sha == job.expectedHeadSHA
+                && EvidenceContext.sameHead(job.expectedHeadSHA, $0.event.mergeRequest.sha)
         }?.event.blockerDiagnosis
     }
 
@@ -33,7 +33,7 @@ extension AssistantAutomationRunner {
                let source = job.expectedHeadSHA, GlabService.isFullGitSHA(source),
                settings.conflictReceipts.contains(where: {
                    $0.jobID == job.id && $0.host == job.key.work.host && $0.projectID == job.key.work.projectID
-                       && $0.iid == job.key.work.iid && $0.sourceSHA == source && $0.userID > 0
+                       && $0.iid == job.key.work.iid && $0.evidenceContext.binds(to: .init(head: source), policy: .head) && $0.userID > 0
                        && GlabService.isFullGitSHA($0.targetSHA) && $0.allowsPush == job.allowsPush
                }) {
                 settings.assistantHandoffs[index].taskIntent = .conflictResolution

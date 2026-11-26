@@ -192,7 +192,7 @@ final class MergeWorkflowMonitor {
             next.reviews.removeAll()
         }
 
-        guard !Task.isCancelled, glab.accountRevision == accountRevision, isCurrent() else { return }
+        guard !Task.isCancelled, EvidenceContext.sameAccountRevision(accountRevision, glab.accountRevision), isCurrent() else { return }
         if prior != next {
             var proposed = baselines
             proposed[account] = next
@@ -465,7 +465,7 @@ final class MergeWorkflowMonitor {
                 AssistantAutomationRunner.isForeignPipelineDiagnosis(for: run, history: reviewHistory) ? candidate?.headSHA : nil
             }
             let verdict = diagnosedHead == nil ? candidate : nil
-            if let diagnosedHead, previous.reviewedHead == diagnosedHead {
+            if let diagnosedHead, EvidenceContext.sameHead(previous.reviewedHead, diagnosedHead) {
                 previous.reviewedHead = nil
                 previous.reviewedDiff = nil
                 previous.reviewedNoteRevisions = nil
@@ -477,9 +477,11 @@ final class MergeWorkflowMonitor {
                 encoder.outputFormatting = [.sortedKeys]
                 return (try? encoder.encode(verdict)).map { UserAttentionSnapshot.digest(String(decoding: $0, as: UTF8.self)) }
             }()
-            let verdictDigest = verdict?.headSHA == head ? savedVerdictDigest : nil
+            let verdictDigest = EvidenceContext.sameHead(verdict?.headSHA, head) ? savedVerdictDigest : nil
             let changedVerdict = verdictDigest.map {
-                previous.lastObservedVerdictDigest != nil && previous.lastObservedVerdictDigest != $0
+                guard let previousDigest = previous.lastObservedVerdictDigest else { return false }
+                return !EvidenceContext(savedVerdict: .init(previousDigest))
+                    .binds(to: .init(savedVerdict: .init($0)), policy: .savedVerdict)
             } ?? false
             let changedTarget = await changedReviewTarget(request, run: verdictRun, verdict: verdict, host: account.host, glab: glab)
             let covered = changedTarget == nil
@@ -496,7 +498,7 @@ final class MergeWorkflowMonitor {
                 let revisions = MergeRequestDiffDigest.noteRevisions(GitLabMergeRequestDiscussion.activeForReview(discussions),
                         excludingAuthor: account.userID)
                 // A failed read leaves no digest, so a later head change is never mistaken for a rebase.
-                if previous.reviewedDiff?.headSHA != head {
+                if !EvidenceContext.sameHead(previous.reviewedDiff?.headSHA, head) {
                     previous.reviewedDiff = try? await glab.fetchReviewDiffSnapshot(for: request, host: account.host)
                 }
                 previous.reviewedHead = head
@@ -506,7 +508,7 @@ final class MergeWorkflowMonitor {
             // Its authenticated completion can establish earlier coverage without borrowing the live diff or notes.
             var recoveredReview = false
             if !previous.hasReviewed, !hasReviewEvidence, previous.reviewedHead == nil,
-               let verdict, verdict.version == 1, verdict.headSHA != head,
+               let verdict, verdict.version == 1, !EvidenceContext.sameHead(verdict.headSHA, head),
                let verdictRun, verdictRun.execution?.state == .succeeded,
                AssistantJobJournal.reviewVerdict(for: verdictRun) == verdict {
                 previous.reviewedHead = verdict.headSHA
@@ -520,7 +522,7 @@ final class MergeWorkflowMonitor {
                       job.manual != true, job.execution?.state == .failed, job.execution?.cancellationOrigin != .user,
                       job.execution?.remoteEffects?.isEmpty != false, job.execution?.pendingWorkerAudit == nil,
                       let change = job.execution?.sourceHeadChange, change.accountID == account.userID,
-                      change.attributedToAnotherAccount, change.previousSHA == job.expectedHeadSHA, change.currentSHA == head
+                      change.attributedToAnotherAccount, EvidenceContext.sameHead(job.expectedHeadSHA, change.previousSHA), EvidenceContext.sameHead(change.currentSHA, head)
                 else { return false }
                 return AssistantAutomationRunner.recordsReviewVerdict(for: job, history: reviewHistory)
             }
@@ -570,11 +572,13 @@ final class MergeWorkflowMonitor {
             }
             let newReplies = replies.flatMap { current in previous.seenAuthorReplies.map { current.subtracting($0) } } ?? []
             if let replies { previous.seenAuthorReplies = (previous.seenAuthorReplies ?? []).union(replies) }
-            let movedToUncoveredHead = hasReviewed && previous.head != head && covered != true
+            let movedToUncoveredHead = hasReviewed && !EvidenceContext.sameHead(previous.head, head) && covered != true
             let firstHeadReport = recoveredReview || (movedToUncoveredHead && !previous.reportedHeads.contains(head))
             // A prior report at this SHA used older review evidence. A fresh event needs its own admission ID.
-            let returnToken: String? = if movedToUncoveredHead, !firstHeadReport, verdict?.headSHA != head,
-                let savedVerdictDigest, previous.reportedHeadVerdicts?[head] != savedVerdictDigest {
+            let returnToken: String? = if movedToUncoveredHead, !firstHeadReport, !EvidenceContext.sameHead(verdict?.headSHA, head),
+                let savedVerdictDigest,
+                !EvidenceContext(savedVerdict: .init(savedVerdictDigest)).binds(
+                    to: .init(savedVerdict: previous.reportedHeadVerdicts?[head].map(SavedVerdictDigest.init)), policy: .savedVerdict) {
                 head + "-return-" + savedVerdictDigest
             } else { nil }
             let changedHead = firstHeadReport || returnToken != nil
@@ -599,13 +603,14 @@ final class MergeWorkflowMonitor {
                     token = "\(returnToken ?? head)-replies-\(replyIDs)"
                 }
                 var scope = IncrementalReviewScope(currentHead: head)
-                let observedReviewHead = previous.head == diagnosedHead ? nil : previous.head
-                let reviewedBaseline = previous.reviewedHead == head ? observedReviewHead : previous.reviewedHead ?? observedReviewHead
+                let observedReviewHead = EvidenceContext.sameHead(previous.head, diagnosedHead) ? nil : previous.head
+                let reviewedBaseline = EvidenceContext.sameHead(previous.reviewedHead, head) ? observedReviewHead : previous.reviewedHead ?? observedReviewHead
                 if changedHead, !externallySuperseded, let reviewed = reviewedBaseline {
                     scope.reviewedHead = reviewed
-                    if let reviewedDiff = previous.reviewedDiff, reviewedDiff.headSHA == reviewed,
+                    if let reviewedDiff = previous.reviewedDiff,
+                       reviewedDiff.evidenceContext.binds(to: .init(head: reviewed), policy: .head),
                        let currentDiff = try? await glab.fetchReviewDiffSnapshot(for: request, host: account.host) {
-                        scope.diffUnchanged = currentDiff.digest == reviewedDiff.digest
+                        scope.diffUnchanged = reviewedDiff.evidenceContext.binds(to: currentDiff.evidenceContext, policy: .reviewDiff)
                     }
                 }
                 scope.changedNoteIDs = changedActiveNotes
@@ -659,14 +664,15 @@ final class MergeWorkflowMonitor {
 
     private func changedReviewTarget(_ request: GitLabMergeRequest, run: AssistantAutomationRunner.Handoff?,
                                      verdict: ReviewVerdict?, host: String, glab: GlabService) async -> ReviewTargetBinding? {
-        guard let run, let head = request.sha, verdict?.headSHA == head,
+        guard let run, let head = request.sha, EvidenceContext.sameHead(verdict?.headSHA, head),
               AssistantJobJournal.reviewVerdict(for: run) == verdict,
               let reviewed = AssistantJobJournal.targetForReviewUpdates(for: run) else { return nil }
         let live: GitLabMergeRequest?
         if ReviewTargetBinding(request) != nil { live = request }
         else { live = try? await glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host) }
         guard let live, live.isOpen, live.webURL == request.webURL,
-              let current = ReviewTargetBinding(live), current.headSHA == head, current != reviewed else { return nil }
+              let current = ReviewTargetBinding(live), EvidenceContext.sameHead(head, current.headSHA),
+              !reviewed.evidenceContext.binds(to: current.evidenceContext, policy: .approvalTarget) else { return nil }
         return current
     }
 
@@ -683,7 +689,7 @@ final class MergeWorkflowMonitor {
                                    discussions: [GitLabMergeRequestDiscussion]?, glab: GlabService,
                                    account: Account, verdict: ReviewVerdict?, changedActiveNotes: [Int]) async -> String? {
         guard let head = request.sha, let discussions, let fingerprint = ReviewVerdict.fingerprint(discussions),
-              let verdict, verdict.version == 1, verdict.headSHA == head,
+              let verdict, verdict.version == 1, EvidenceContext.sameHead(verdict.headSHA, head),
               reviewCoverage(request, discussions: discussions, account: account, verdict: verdict) == false else { return nil }
         let metadataNeedsReview = verdict.requiresFreshReview(forSemanticContext: request.semanticContextFingerprint)
         let hasOwnOpenDiscussion = GitLabMergeRequestDiscussion.activeForReview(discussions).contains {

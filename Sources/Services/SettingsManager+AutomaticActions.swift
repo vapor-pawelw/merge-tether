@@ -21,6 +21,8 @@ extension SettingsManager {
             let snapshot: CommentReviewSnapshot
             var publishedBodyDigests: [Int: String] = [:]
 
+            var evidenceContext: EvidenceContext { .init(recoveryContext: .init(requestContext)) }
+
             init?(request: GitLabMergeRequest?, snapshot: CommentReviewSnapshot?, userID: Int) {
                 guard let request, let snapshot, snapshot.covers(request), userID > 0 else { return nil }
                 self.userID = userID
@@ -77,8 +79,8 @@ extension SettingsManager {
         if let evidence {
             // Keep the context from before the first successful write, including across batches.
             if progress.automaticallyPublishedDraftIDs.isEmpty { progress.automaticPublication = evidence }
-            if progress.automaticPublication?.userID == evidence.userID,
-               progress.automaticPublication?.requestContext == evidence.requestContext {
+            if let publication = progress.automaticPublication, publication.userID == evidence.userID,
+               publication.evidenceContext.binds(to: evidence.evidenceContext, policy: .recoveryDigest) {
                 for draft in drafts {
                     guard let id = draft.id, let body = draft.note, draft.authorID == evidence.userID else { continue }
                     progress.automaticPublication?.publishedBodyDigests[id] = AICommentAssessmentStore.digest(body)

@@ -61,7 +61,8 @@ struct CommentReviewCoordinator {
             else { return .changed }
             return draftsAreEmpty ? .completed : .pending
         case .automaticPublication(let receipt):
-            guard request.draftProofRecoveryContextFingerprint == receipt.requestContext else { return .changed }
+            guard receipt.evidenceContext.binds(to: .init(recoveryContext: request.draftProofRecoveryDigest),
+                                                policy: .recoveryDigest) else { return .changed }
             guard MRAttentionRecord.sameContext(latestRequest, request) else { return .stale }
             guard draftsAreEmpty, observed.snapshot != nil else { return .pending }
             return receipt.snapshot.matches(request, discussions: observed.discussions,

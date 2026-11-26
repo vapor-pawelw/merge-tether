@@ -46,7 +46,7 @@ extension GlabService {
         guard expectedUser == nil || expectedUser == user else { throw CancellationError() }
         let path = "/projects/\(project)/pipelines/\(id)"
         let pipeline: GitLabMergeRequest.Pipeline = try await mergeRequestAPI(path, host: host)
-        guard pipeline.id == id, pipeline.projectID == project, pipeline.sha == sha,
+        guard pipeline.id == id, pipeline.projectID == project, EvidenceContext.sameHead(sha, pipeline.sha),
               pipeline.status == expectedStatus, let ref = pipeline.ref,
               head.ref == nil || head.ref == ref
         else { throw CancellationError() }
@@ -58,13 +58,13 @@ extension GlabService {
         if mergedResult || failedTrain {
             guard project == targetProject else { throw CancellationError() }
         } else {
-            guard sha == source,
+            guard EvidenceContext.sameHead(source, sha),
                   (ref == request.sourceBranch && project == sourceProject)
                     || (ref == headRef && (project == sourceProject || project == targetProject))
             else { throw CancellationError() }
         }
         let sourceHead = try await fetchBranchHeadSHA(projectID: sourceProject, branch: request.sourceBranch, host: host)
-        guard sourceHead == source else { throw CancellationError() }
+        guard EvidenceContext.sameHead(source, sourceHead) else { throw CancellationError() }
         var targetHead: String?
         var hasStaleTarget = false
         if mergedResult {
@@ -77,9 +77,9 @@ extension GlabService {
             let commit: Commit = try await mergeRequestAPI(
                 "/projects/\(targetProject)/repository/commits/\(sha)", host: host
             )
-            guard commit.id == sha, commit.parentIDs.count == 2,
+            guard EvidenceContext.sameHead(sha, commit.id), commit.parentIDs.count == 2,
                   commit.parentIDs.contains(source), Set(commit.parentIDs).count == 2,
-                  commit.parentIDs.allSatisfy(Self.isFullGitSHA), source != target
+                  commit.parentIDs.allSatisfy(Self.isFullGitSHA), !EvidenceContext.sameHead(source, target)
             else { throw CancellationError() }
             hasStaleTarget = Set(commit.parentIDs) != Set([source, target])
             targetHead = target
@@ -90,24 +90,24 @@ extension GlabService {
         }
 
         let current = try await fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
-        guard current.state == request.state, current.author.id == request.author.id, current.sha == source,
+        guard current.state == request.state, current.author.id == request.author.id, EvidenceContext.sameHead(source, current.sha),
               current.sourceProjectID == sourceProject, current.sourceBranch == request.sourceBranch,
               current.targetProjectID == targetProject, current.targetBranch == request.targetBranch,
               current.headPipeline?.id == id, current.headPipeline?.projectID == project,
-              current.headPipeline?.sha == sha, current.headPipeline?.status == expectedStatus,
+              EvidenceContext.sameHead(sha, current.headPipeline?.sha), current.headPipeline?.status == expectedStatus,
               current.headPipeline?.ref == nil || current.headPipeline?.ref == ref
         else { throw CancellationError() }
         let finalSource = try await fetchBranchHeadSHA(projectID: sourceProject, branch: request.sourceBranch, host: host)
-        guard finalSource == source else { throw CancellationError() }
+        guard EvidenceContext.sameHead(source, finalSource) else { throw CancellationError() }
         if let targetHead {
             let finalTarget = try await fetchBranchHeadSHA(projectID: targetProject, branch: request.targetBranch, host: host)
-            guard finalTarget == targetHead else { throw CancellationError() }
+            guard EvidenceContext.sameHead(targetHead, finalTarget) else { throw CancellationError() }
         }
         let finalPipeline: GitLabMergeRequest.Pipeline = try await mergeRequestAPI(path, host: host)
         let finalUser = try await fetchAuthenticatedUser(host: host, expectedUsername: username)
-        guard finalPipeline.id == id, finalPipeline.projectID == project, finalPipeline.sha == sha,
+        guard finalPipeline.id == id, finalPipeline.projectID == project, EvidenceContext.sameHead(sha, finalPipeline.sha),
               finalPipeline.status == expectedStatus, finalPipeline.ref == ref,
-              finalUser == user, accountRevision == revision,
+              finalUser == user, EvidenceContext.sameAccountRevision(revision, accountRevision),
               resolvedHost == host, currentUsername == username, !Task.isCancelled
         else { throw CancellationError() }
         if hasStaleTarget, let targetHead {
@@ -140,7 +140,7 @@ extension GlabService {
         let project = request.projectID
         let train: Commit = try await mergeRequestAPI("/projects/\(project)/repository/commits/\(sha)", host: host)
         let trainParents = Set(train.parentIDs)
-        guard train.id == sha, source != target,
+        guard EvidenceContext.sameHead(sha, train.id), !EvidenceContext.sameHead(source, target),
               train.parentIDs.allSatisfy(Self.isFullGitSHA), trainParents.count == train.parentIDs.count,
               trainParents == Set([target]) || trainParents == Set([source, target]) else { throw CancellationError() }
 
@@ -151,12 +151,12 @@ extension GlabService {
         guard Self.isFullGitSHA(reference.commitID) else { throw CancellationError() }
         let merged: Commit = try await mergeRequestAPI(
             "/projects/\(project)/repository/commits/\(reference.commitID)", host: host)
-        guard merged.id == reference.commitID, merged.parentIDs.count == 2,
+        guard EvidenceContext.sameHead(reference.commitID, merged.id), merged.parentIDs.count == 2,
               Set(merged.parentIDs) == Set([source, target]) else { throw CancellationError() }
-        if merged.id == sha { return }
+        if EvidenceContext.sameHead(sha, merged.id) { return }
         let comparison: Comparison = try await mergeRequestAPI(
             "/projects/\(project)/repository/compare?from=\(merged.id)&to=\(sha)&straight=true", host: host)
-        guard comparison.commit.id == sha, comparison.compareTimeout == false, comparison.diffs.isEmpty
+        guard EvidenceContext.sameHead(sha, comparison.commit.id), comparison.compareTimeout == false, comparison.diffs.isEmpty
         else { throw CancellationError() }
     }
 }

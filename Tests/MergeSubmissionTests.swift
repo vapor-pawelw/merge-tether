@@ -120,6 +120,19 @@ import Testing
         }
     }
 
+    @Test func omittedDiscussionExpectationAllowsSubmissionWithDifferentDiscussions() async throws {
+        try await fixture { glab, gitlab, request in
+            gitlab.write("drift", "newFeedback")
+            gitlab.write("outcome", "train")
+            let result = try await glab.mergeMergeRequest(projectID: 1, iid: 2, headSHA: request.sha!, host: host,
+                expectedUser: user, expectedContext: .init(request),
+                expectedSemanticContextFingerprint: request.semanticContextFingerprint,
+                action: .enqueue, expectedPolicy: policy, shouldProceed: { true })
+            #expect(result == .inTrain)
+            #expect(gitlab.requests.filter { $0.method != "GET" }.count == 1)
+        }
+    }
+
     @Test func unconfirmedTrainResponseIsUncertainAndNeverRetried() async throws {
         try await fixture { glab, gitlab, request in
             gitlab.write("outcome", "unknown")

@@ -12,11 +12,13 @@ struct PipelineRefreshAttempt: Codable, Hashable {
     let targetSHA: String
     var createdPipelineID: Int? = nil
 
+    var evidenceContext: EvidenceContext { .init(head: sourceSHA, targetHead: targetSHA) }
+
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.target == rhs.target && lhs.userID == rhs.userID && lhs.oldPipelineID == rhs.oldPipelineID
             && lhs.sourceProjectID == rhs.sourceProjectID && lhs.sourceBranch == rhs.sourceBranch
-            && lhs.sourceSHA == rhs.sourceSHA && lhs.targetProjectID == rhs.targetProjectID
-            && lhs.targetBranch == rhs.targetBranch && lhs.targetSHA == rhs.targetSHA
+            && lhs.targetProjectID == rhs.targetProjectID && lhs.targetBranch == rhs.targetBranch
+            && lhs.evidenceContext.binds(to: rhs.evidenceContext, policy: .sourceAndTargetHeads)
     }
 
     func hash(into hasher: inout Hasher) {
@@ -75,7 +77,7 @@ extension GlabService {
                 && !settings.ignoredMergeRequests.contains(target)
                 && request.author.id == expectedUser.id && request.hasConflicts == false
                 && self.resolvedHost == host && self.currentUsername == expectedUser.username
-                && self.accountRevision == proof.accountRevision && shouldProceed()
+                && EvidenceContext.sameAccountRevision(proof.accountRevision, self.accountRevision) && shouldProceed()
         }
         guard permitted(), let oldID = proof.pipeline.id, let sourceProject = request.sourceProjectID,
               let source = request.sha, let targetProject = request.targetProjectID else { throw CancellationError() }
@@ -99,7 +101,7 @@ extension GlabService {
             _ = try await verifiedFailedPipeline(for: request, host: host, expectedUser: expectedUser)
             throw CancellationError()
         } catch GitLabPipelineEvidenceError.staleTarget(let latest) {
-            guard latest.targetHeadSHA == proof.targetHeadSHA, latest.user == proof.user,
+            guard EvidenceContext.sameHead(proof.targetHeadSHA, latest.targetHeadSHA), latest.user == proof.user,
                   configuration.scope.permits(latest.request, host: host, username: expectedUser.username)
             else { throw CancellationError() }
         }
@@ -124,7 +126,7 @@ extension GlabService {
             let commit: Commit = try await mergeRequestAPI(
                 "/projects/\(targetProject)/repository/commits/\(sha)", host: host
             )
-            guard commit.id == sha, commit.parentIDs.count == 2,
+            guard EvidenceContext.sameHead(sha, commit.id), commit.parentIDs.count == 2,
                   Set(commit.parentIDs) == Set([source, proof.targetHeadSHA])
             else { throw PipelineRefreshError.unconfirmedResponse }
         }
@@ -132,16 +134,17 @@ extension GlabService {
         let current = try await fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
         let sourceHead = try await fetchBranchHeadSHA(projectID: sourceProject, branch: request.sourceBranch, host: host)
         let targetHead = try await fetchBranchHeadSHA(projectID: targetProject, branch: request.targetBranch, host: host)
-        guard permitted(), user == expectedUser, sourceHead == source, targetHead == proof.targetHeadSHA,
-              current.state == .opened, current.author.id == expectedUser.id, current.sha == source,
+        guard permitted(), user == expectedUser,
+              attempt.evidenceContext.binds(to: .init(head: sourceHead, targetHead: targetHead), policy: .sourceAndTargetHeads),
+              current.state == .opened, current.author.id == expectedUser.id, EvidenceContext.sameHead(source, current.sha),
               configuration.scope.permits(current, host: host, username: expectedUser.username),
               current.hasConflicts == false,
               current.sourceProjectID == sourceProject, current.sourceBranch == request.sourceBranch,
               current.targetProjectID == targetProject, current.targetBranch == request.targetBranch,
-              confirmed.id == id, confirmed.projectID == targetProject, confirmed.sha == sha,
+              confirmed.id == id, confirmed.projectID == targetProject, EvidenceContext.sameHead(sha, confirmed.sha),
               created.projectID == nil || created.projectID == targetProject, created.ref == confirmed.ref,
               confirmed.ref == "refs/merge-requests/\(request.iid)/merge"
-                || (confirmed.ref == "refs/merge-requests/\(request.iid)/head" && sha == source)
+                || (confirmed.ref == "refs/merge-requests/\(request.iid)/head" && EvidenceContext.sameHead(source, sha))
         else { throw PipelineRefreshError.unconfirmedResponse }
         var completedAttempt = attempt
         completedAttempt.createdPipelineID = id

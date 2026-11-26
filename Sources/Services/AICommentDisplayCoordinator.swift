@@ -124,11 +124,11 @@ import Observation
         let actionDirectory = assessmentDirectory, displayDirectory = self.displayDirectory
         let missing = await cacheRead(candidates, target, actionDirectory, displayDirectory, configuration.aiCommentCriteriaOverride)
         guard latest[target] == invocation, !Task.isCancelled, settings.automation == configuration,
-              glab.accountRevision == accountRevision, glab.resolvedHost == host,
+              EvidenceContext.sameAccountRevision(accountRevision, glab.accountRevision), glab.resolvedHost == host,
               glab.currentUsername == username, settings.automaticWritesAllowed else { return }
         guard !missing.isEmpty else { queued.removeValue(forKey: target); return }
         guard configuration.selectedAssistant != nil, await canAutomate(configuration.assistant), latest[target] == invocation, !Task.isCancelled,
-              settings.automation == configuration, glab.accountRevision == accountRevision,
+              settings.automation == configuration, EvidenceContext.sameAccountRevision(accountRevision, glab.accountRevision),
               glab.resolvedHost == host, glab.currentUsername == username, settings.automaticWritesAllowed else { return }
         contexts[target] = .init(request: request, revision: accountRevision)
         queued[target] = .init(notes: missing, generation: invocation)
@@ -154,7 +154,7 @@ import Observation
 
     private func isCurrent(_ target: MRAutomationScope.Target, assistant: AutomationAssistant,
                            model: String, thinking: VerificationThinking) -> Bool {
-        guard let context = contexts[target], context.revision == glab.accountRevision,
+        guard let context = contexts[target], EvidenceContext.sameAccountRevision(context.revision, glab.accountRevision),
               glab.resolvedHost == target.host, glab.currentUsername == target.username,
               settings.automaticWritesAllowed, settings.automation.selectedAssistant == assistant,
               settings.automation.verificationThinking == thinking,
@@ -172,7 +172,7 @@ import Observation
                 let current = try await readCurrent(target)
                 guard !Task.isCancelled, latest[target] == generation, notes.allSatisfy({ original in
                     let matches = current.filter { $0.id == original.id }
-                    return matches.count == 1 && matches[0].body == original.body && matches[0].author?.id == original.author?.id
+                    return matches.count == 1 && original.matchesOriginSource(matches[0])
                 }), isCurrent(target, assistant: assistant, model: model, thinking: thinking),
                       settings.automation.aiCommentCriteriaOverride == criteriaOverride else { throw CancellationError() }
                 return try await assess(target, notes, assistant, model, thinking, criteriaOverride)
@@ -197,20 +197,20 @@ import Observation
 
     private func readCurrent(_ target: MRAutomationScope.Target) async throws -> [GitLabMergeRequestDiscussion.Note] {
         guard !Task.isCancelled, let iid = target.iid, let generation = latest[target], let context = contexts[target],
-              context.revision == glab.accountRevision else { throw CancellationError() }
+              EvidenceContext.sameAccountRevision(context.revision, glab.accountRevision) else { throw CancellationError() }
         let user = try await glab.fetchAuthenticatedUser(host: target.host, expectedUsername: target.username)
         guard !Task.isCancelled, latest[target] == generation, contexts[target] != nil,
-              context.revision == glab.accountRevision else { throw CancellationError() }
+              EvidenceContext.sameAccountRevision(context.revision, glab.accountRevision) else { throw CancellationError() }
         let request = try await glab.fetchMergeRequest(projectID: target.projectID, iid: iid, host: target.host)
         guard !Task.isCancelled, latest[target] == generation, contexts[target] != nil,
               user.username == target.username, settings.automaticWritesAllowed,
-              context.revision == glab.accountRevision, glab.resolvedHost == target.host, glab.currentUsername == target.username,
+              EvidenceContext.sameAccountRevision(context.revision, glab.accountRevision), glab.resolvedHost == target.host, glab.currentUsername == target.username,
               request.webURL == context.request.webURL else { throw CancellationError() }
         contexts[target] = .init(request: request, revision: context.revision)
         guard settings.automation.scope.permits(request, host: target.host, username: target.username) else { throw CancellationError() }
         let notes = try await glab.fetchMergeRequestDiscussions(projectID: target.projectID, iid: iid, host: target.host).flatMap(\.notes)
         guard !Task.isCancelled, latest[target] == generation, contexts[target] != nil,
-              context.revision == glab.accountRevision, glab.resolvedHost == target.host,
+              EvidenceContext.sameAccountRevision(context.revision, glab.accountRevision), glab.resolvedHost == target.host,
               glab.currentUsername == target.username, settings.automaticWritesAllowed else { throw CancellationError() }
         return notes
     }
@@ -218,7 +218,7 @@ import Observation
     var sourceAssessmentDirectory: URL { assessmentDirectory }
 
     func permitsSourceRead(request: GitLabMergeRequest, accountRevision: UInt64) -> Bool {
-        guard !Task.isCancelled, glab.accountRevision == accountRevision, settings.automaticWritesAllowed,
+        guard !Task.isCancelled, EvidenceContext.sameAccountRevision(accountRevision, glab.accountRevision), settings.automaticWritesAllowed,
               let host = glab.resolvedHost, let username = glab.currentUsername, !username.isEmpty,
               request.webURL.isGitLabMergeRequest(host: host, iid: request.iid) else { return false }
         return settings.automation.scope.permits(request, host: host, username: username)
