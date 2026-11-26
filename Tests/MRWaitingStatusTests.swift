@@ -126,7 +126,7 @@ import MergeTetherRemote
     @Test func approvalOnlyWaitDoesNotRequireFeedbackAndZeroRequiredDoesNotInventAWait() throws {
         var item = try fixture()
         item.authorFeedbackStatus = nil
-        item.feedback = []; item.needsDiscussion = false
+        item.feedback = []; item.discussionObservation = .resolved
         #expect(model(row(item)).status == "Needs 2 more approvals")
         #expect(model(row(item)).waitingStatus?.coveredBlockers == [.approvals])
         item.approvalProgress = .init(completed: 1, required: 2)
@@ -188,17 +188,17 @@ import MergeTetherRemote
         case "code": item.authorFeedbackStatus?.followUpNoteIDs = [10]
         case "finding": item.authorFeedbackStatus?.findings[0] = .init(id: 10, discussionID: "thread", reviewerID: 7,
             reviewerUsername: "alice", state: .needsChanges, reason: "Fix the retry", waitingForReviewers: [])
-        case "draft": item.draftCount = 1
-        case "conflict": item.hasConflict = true
-        case "pipeline": item.failedPipeline = true
-        case "manual": item.humanActionRequired = true; item.requiresCommentReview = true
+        case "draft": item.drafts = attentionFixtureDrafts(1)
+        case "conflict": item.catalogIssues.insert(.conflict)
+        case "pipeline": item.catalogIssues.insert(.failedPipeline)
+        case "manual": item.requiresCommentReview = true
         case "rejectedReply": item.draftProofRecoveryReadFailure = true
         case "reviewReadFailure": item.reReviewReadiness = .failed
-        case "approvalAction": item.canApprove = true
-        case "mergeAction": item.needsMerge = true
+        case "approvalAction": item.approvalObservation = .manualFallback
+        case "mergeAction": item.manualMergeAvailable = true
         default: break
         }
-        var snapshot = row(item)
+        var snapshot = row(item, humanAttention: change == "manual")
         snapshot.evidenceMatchesCatalogContext = change != "stale"
         let presentation = MRCardPresentation(row: snapshot, reviewingContext: ReviewingContext(row: snapshot),
             allowsRemoval: false, assistantReady: true, confirmationState: change == "changed" ? .changed : nil,
@@ -209,15 +209,15 @@ import MergeTetherRemote
 
     @Test(arguments: ["blocked", "failed", "interrupted", "cancelled"])
     func stoppedWorkIsNotReplacedByWaitingForTheReviewer(_ state: String) throws {
-        var item = try fixture()
-        item.humanActionRequired = true
+        let item = try fixture()
         let executionState = try #require(AssistantJobExecution.State(rawValue: state))
         let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
             work: .init(host: "gitlab.example.test", projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
             title: "Follow-up", prompt: "Fix", createdAt: Date(), allowsPush: true,
             execution: .init(state: executionState, blocker: "Required evidence is unavailable."),
             expectedHeadSHA: item.mergeRequest?.sha)
-        let snapshot = MergeRequestBoardSnapshot.Row(item: item, latestJob: job, intents: [])
+        let snapshot = MergeRequestBoardSnapshot.Row(item: item, latestJob: job, intents: [],
+            attentionPresentation: .init(evidence: item, humanActionRequired: true, verifiesFeedback: false))
         let presentation = model(snapshot)
         let action = try #require(presentation.humanAction)
         #expect(presentation.waitingStatus == nil && presentation.status == nil)
@@ -297,8 +297,9 @@ import MergeTetherRemote
         #expect(!phone.actions.contains { [.merge, .enqueueMerge, .approve, .publish, .resolveThreads].contains($0.kind) })
     }
 
-    private func row(_ item: MergeRequestAttentionMonitor.Item) -> MergeRequestBoardSnapshot.Row {
-        .init(item: item, latestJob: nil, intents: [])
+    private func row(_ item: MergeRequestAttentionMonitor.Item, humanAttention: Bool? = false) -> MergeRequestBoardSnapshot.Row {
+        .init(item: item, latestJob: nil, intents: [],
+            attentionPresentation: .init(evidence: item, humanActionRequired: humanAttention, verifiesFeedback: false))
     }
     private func model(_ row: MergeRequestBoardSnapshot.Row) -> MRCardPresentation {
         .init(row: row, reviewingContext: ReviewingContext(row: row), allowsRemoval: false, assistantReady: true)
@@ -306,9 +307,9 @@ import MergeTetherRemote
     private func fixture() throws -> MergeRequestAttentionMonitor.Item {
         let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Feature","description":"Context","labels":[],"web_url":"https://gitlab.example.test/g/p/-/merge_requests/2","state":"opened","draft":false,"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_project_id":1,"target_project_id":1,"source_branch":"feature","target_branch":"main","detailed_merge_status":"mergeable","has_conflicts":false,"user":{"can_merge":true}}"#.utf8))
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
-            url: request.webURL, humanActionRequired: false, mergeRequest: request, isAuthored: true)
+            url: request.webURL, mergeRequest: request, isAuthored: true)
         item.observedDiscussionFingerprint = "conversation"
-        item.needsDiscussion = true
+        item.discussionObservation = .unresolvedIncoming
         item.feedback = [.init(id: 10, author: .init(id: 7, username: "alice", name: "Alice"),
             system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "Check the retry")]
         item.approvalProgress = .init(completed: 0, required: 2)

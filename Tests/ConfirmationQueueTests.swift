@@ -44,7 +44,8 @@ import MergeTetherRemote
         let waiting = evidence == "pending" || evidence == "started"
         #expect(item.mergeRequest?.detailedMergeStatus == .requestedChanges)
         #expect(item.authorFeedbackStatus?.waitingForReviewer == true)
-        #expect(item.needsChanges != waiting)
+        #expect(item.needsChanges)
+        #expect(item.presentingVerifiedAuthorFeedback().needsChanges != waiting)
         #expect(harness.log("re-review.log").isEmpty)
     }
 

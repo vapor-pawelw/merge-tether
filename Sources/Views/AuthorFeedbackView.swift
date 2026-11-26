@@ -2,7 +2,7 @@ import SwiftUI
 import MergeTetherRemote
 
 struct AuthorFeedbackView: View {
-    let item: MergeRequestAttentionMonitor.Item
+    let item: MergeRequestAttentionMonitor.ItemPresentation
     let monitor: TodoMonitorService
     /// Inside Details' Next step the surrounding disclosure already provides the title and frame.
     var embedded = false

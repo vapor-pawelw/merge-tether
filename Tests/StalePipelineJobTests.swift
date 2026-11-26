@@ -34,8 +34,8 @@ struct StalePipelineJobTests {
         let job = job()
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 7, iid: 11), title: request.title,
             url: request.webURL, mergeRequest: request, isAuthored: true)
-        item.draftCount = independent == "draft" ? 1 : 0
-        item.needsDiscussion = independent == "feedback"
+        item.drafts = attentionFixtureDrafts(independent == "draft" ? 1 : 0)
+        item.discussionObservation = independent == "feedback" ? .unresolvedIncoming : .resolved
         let hasIntent = ["intent", "oldPipelineIntent", "independentFollowUp"].contains(independent)
         let intents: [MRTodoIntent] = hasIntent ? [.init(id: UUID(),
             target: .init(host: Self.host, username: "me", projectID: 7, iid: 11),
@@ -73,7 +73,6 @@ struct StalePipelineJobTests {
         job.execution?.finishedAt = Date(timeIntervalSince1970: 100)
         var catalogItem = MergeRequestAttentionMonitor.Item(id: .init(projectID: 7, iid: 11), title: catalog.title,
             url: catalog.webURL, mergeRequest: catalog, isAuthored: true)
-        catalogItem.draftCount = 1
         catalogItem.drafts = try JSONDecoder().decode([GitLabDraftNote].self,
             from: Data(#"[{"id":123,"author_id":1,"note":"Keep my draft"}]"#.utf8))
         catalogItem.requiresDiscussionRecheck = true

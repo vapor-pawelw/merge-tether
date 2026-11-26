@@ -187,7 +187,7 @@ struct MRBoardManualOrderTests {
              "source_branch":"feature","target_branch":"main","labels":[]}
             """.utf8))
             return .init(id: .init(projectID: 1, iid: iid), title: request.title, url: request.webURL,
-                needsDiscussion: attention.contains(iid), mergeRequest: request, isAuthored: authored)
+                discussionObservation: attention.contains(iid) ? .unresolvedIncoming : .resolved, mergeRequest: request, isAuthored: authored)
         }
     }
 }

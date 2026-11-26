@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct InboxAttentionActions: View {
-    let item: MergeRequestAttentionMonitor.Item
+    let item: MergeRequestAttentionMonitor.ItemPresentation
     let monitor: TodoMonitorService
     let feedbackAction: TodoAutomationService.ActionState?
     var assistant: AutomationAssistant = .codex

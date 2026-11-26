@@ -7,8 +7,8 @@ struct MRHumanActionTests {
     @Test(arguments: [false, true])
     func reReviewConfirmationDistinguishesGenericReadinessFromAnOutstandingConcern(_ concrete: Bool) throws {
         var item = item()
-        item.needsMerge = true
-        item.canConfirmReReview = true
+        item.manualMergeAvailable = true
+        item.reReviewFeedbackChecked = true
         item.reReviewReadiness = .uncertain(concrete ? [.init(noteID: 10, reason: "An explicit merge condition is unmet")] : [])
 
         let action = try #require(MRHumanAction(row: row(item), assistantReady: false))
@@ -23,7 +23,7 @@ struct MRHumanActionTests {
         item.mergeRequest = try MRDependencyPresentationTests().request(2, project: 1)
         item.isAuthored = true
         item.reReviewReadiness = .failed
-        item.canConfirmReReview = true
+        item.reReviewFeedbackChecked = true
         let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
 
         #expect(action.action == .retryReReview)
@@ -32,7 +32,7 @@ struct MRHumanActionTests {
 
     @Test func aConcreteReReviewConditionTakesPriorityAfterTheGitLabThreadWasClosed() throws {
         var item = item()
-        item.needsMerge = true
+        item.manualMergeAvailable = true
         item.reReviewReadiness = .blocked([.init(noteID: 10, reason: "The explicit merge condition is still unmet")])
 
         let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
@@ -43,7 +43,7 @@ struct MRHumanActionTests {
 
     @Test func unresolvedFeedbackTakesPriorityOverMergeReadiness() throws {
         var item = item()
-        item.needsMerge = true
+        item.manualMergeAvailable = true
         item.authorFeedbackStatus = .init(head: "head", fingerprint: "comments", phase: .complete,
             findings: [.init(id: 10, discussionID: "thread", reviewerID: 7, reviewerUsername: "reviewer",
                 state: .needsVerification, reason: "An existing requirement needs a decision", waitingForReviewers: [],
@@ -57,7 +57,7 @@ struct MRHumanActionTests {
 
     @Test func anExternalDecisionRemainsReviewableWithoutAnAssistant() throws {
         var item = item()
-        item.needsMerge = true
+        item.manualMergeAvailable = true
         let note = try FeedbackManualDecisionFixture.note()
         item.authorFeedbackStatus = .init(head: "head", fingerprint: "comments", phase: .complete,
             findings: [.init(id: 10, discussionID: "thread", reviewerID: 7, reviewerUsername: "reviewer",
@@ -125,7 +125,6 @@ struct MRHumanActionTests {
     @Test(arguments: ["ready", "verification", "discussion", "changed"])
     func directPublicationRequiresTheNormalPublicationCheckpoint(_ state: String) throws {
         var value = item()
-        value.draftCount = 1
         value.drafts = [.init(id: 11, authorID: 3, note: "Reply", discussionID: nil, position: nil)]
         value.awaitingRemoteVerification = state == "verification"
         value.requiresDiscussionRecheck = state == "discussion"
@@ -204,7 +203,7 @@ struct MRHumanActionTests {
     @Test(arguments: [false, true])
     func aFailedCheckDoesNotClaimItsSourceIsTheMRWideStatus(_ authorCheck: Bool) throws {
         var item = item()
-        item.needsChanges = true
+        item.catalogIssues.insert(.changesRequested)
         if authorCheck { item.authorFeedbackStatus = .init(head: "head", fingerprint: "comments", phase: .failed) }
         else { item.reReviewReadiness = .failed }
         let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
@@ -323,7 +322,7 @@ struct MRHumanActionTests {
 
     @Test func aServerChangeRequestDoesNotInventACommentOrVerifiedCorrection() throws {
         var item = item()
-        item.needsChanges = true
+        item.catalogIssues.insert(.changesRequested)
         let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
         #expect(action.action == .reviewFeedback)
         #expect(action.explanation == "GitLab reports requested changes. Review the current feedback.")
@@ -364,7 +363,7 @@ struct MRHumanActionTests {
     }
     private func row(_ item: MergeRequestAttentionMonitor.Item,
                      execution: AssistantJobExecution? = nil, expectedHead: String? = nil,
-                     mayPush: Bool = false, executable: Bool = true) -> MergeRequestBoardSnapshot.Row {
+                     mayPush: Bool = false, executable: Bool = true, humanAttention: Bool? = nil) -> MergeRequestBoardSnapshot.Row {
         let job = execution.map { execution in
             AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
                 work: .init(host: "gitlab.example.test", projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
@@ -372,7 +371,8 @@ struct MRHumanActionTests {
                 execution: execution, taskPrompt: executable ? "Review this MR" : nil,
                 mergeRequestURL: executable ? item.url : nil, expectedHeadSHA: expectedHead)
         }
-        return .init(item: item, latestJob: job, intents: [])
+        return .init(item: item, latestJob: job, intents: [],
+            attentionPresentation: .init(evidence: item, humanActionRequired: humanAttention, verifiesFeedback: false))
     }
 
     private func stoppedHistoryRow(state: AssistantJobExecution.State, manualDraft: Bool = false,
@@ -381,8 +381,7 @@ struct MRHumanActionTests {
         let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Example","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"head","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
         item.mergeRequest = request
         item.isAuthored = true
-        item.draftCount = manualDraft ? 1 : 0
-        item.humanActionRequired = manualDraft ? true : nil
+        item.drafts = attentionFixtureDrafts(manualDraft ? 1 : 0)
         let base = row(item, execution: .init(state: state, error: "Historical failure"), expectedHead: "head")
         let job = try #require(base.latestJob)
         let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2)
@@ -394,7 +393,8 @@ struct MRHumanActionTests {
                 todoIDs: [], noteIDs: [], sourceEvents: [], request: request, headSHA: "head",
                 error: "Conflict verification failed", updatedAt: Date()))
         }
-        return .init(item: item, latestJob: job, intents: intents)
+        return .init(item: item, latestJob: job, intents: intents,
+            attentionPresentation: .init(evidence: item, humanActionRequired: manualDraft ? true : nil))
     }
 
     private func partiallyIgnoredStoppedRow(blocker: String = "The old contract suggestion is unresolved") throws -> MergeRequestBoardSnapshot.Row {
@@ -505,7 +505,7 @@ struct MRHumanActionTests {
     @Test func aRunAllowedToPushMayHaveChangedTheHeadBeforeStopping() throws {
         var item = item()
         item.mergeRequest = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Example","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"pushed","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
-        item.draftCount = 2
+        item.drafts = attentionFixtureDrafts(2)
         let reason = "The fix reached the branch but its tests could not start."
         let action = try #require(MRHumanAction(row: row(item, execution: .init(state: .blocked, blocker: reason),
             expectedHead: "before-push", mayPush: true), assistantReady: true))
@@ -515,12 +515,12 @@ struct MRHumanActionTests {
     @Test(arguments: [MRHumanAction.Action.reviewApproval, .reviewMerge, .reviewDecision, .reviewHandoff])
     func humanDecisionsDoNotRequireSettingUpAnAssistant(_ expected: MRHumanAction.Action) throws {
         var item = item()
-        item.needsDiscussion = true
+        item.discussionObservation = .unresolvedIncoming
         switch expected {
-        case .reviewApproval: item.canApprove = true
-        case .reviewMerge: item.needsMerge = true
-        case .reviewDecision: item.canConfirmReReview = true
-        default: item.needsPipelineHandoff = true
+        case .reviewApproval: item.approvalObservation = .manualFallback
+        case .reviewMerge: item.manualMergeAvailable = true
+        case .reviewDecision: item.reReviewFeedbackChecked = true; item.reReviewReadiness = .manual
+        default: item.pipelineHandoffPending = true
         }
         let action = try #require(MRHumanAction(row: row(item), assistantReady: false))
         #expect(action.action == expected)
@@ -528,9 +528,8 @@ struct MRHumanActionTests {
 
     @Test func automaticApprovalWithoutAnAssistantExplainsTheMissingSetup() throws {
         var item = item()
-        item.autoApproveReady = true
-        item.humanActionRequired = true
-        let action = try #require(MRHumanAction(row: row(item), assistantReady: false))
+        item.approvalObservation = .checked(manualVerdictPermitsApproval: true, automaticGatePassed: true, awaitsDiscussionReadiness: false)
+        let action = try #require(MRHumanAction(row: row(item, humanAttention: true), assistantReady: false))
         #expect(action.kind == .setupAssistant)
         #expect(action.action == .setupAssistant)
     }
@@ -546,12 +545,12 @@ struct MRHumanActionTests {
     @Test func anOldRunCannotReplaceTheCurrentPublicationDecision() throws {
         var item = item()
         item.mergeRequest = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Example","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"current","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
-        item.draftCount = 2
+        item.drafts = attentionFixtureDrafts(2)
         let execution = AssistantJobExecution(state: .blocked, summary: "A failure on the previous revision.")
         let action = try #require(MRHumanAction(row: row(item, execution: execution, expectedHead: "previous"), assistantReady: true))
         #expect(action.kind == .publication && action.action == .reviewDrafts)
         #expect(action.detail == nil)
-        item.draftCount = 0
+        item.drafts = []
         let previous = try #require(MRHumanAction(row: row(item, execution: execution, expectedHead: "previous"), assistantReady: true))
         #expect(previous.kind == .interruptedRun && previous.action == .reviewRun)
         #expect(previous.detail == nil)
@@ -560,7 +559,7 @@ struct MRHumanActionTests {
     @Test(arguments: [AssistantJobExecution.State.blocked, .failed])
     func stoppedRunOffersRetryWithoutLosingTheActualReasonOrDraftPriority(_ state: AssistantJobExecution.State) throws {
         var item = item()
-        item.draftCount = 3
+        item.drafts = attentionFixtureDrafts(3)
         let reason = "The source branch could not be pushed because push permission is off."
         let execution = AssistantJobExecution(state: state, summary: "[MR](https://gitlab.example.test/mr/2)\n\nThree comments checked.\n\n\(reason)")
         let action = try #require(MRHumanAction(row: row(item, execution: execution), assistantReady: true))
@@ -579,9 +578,8 @@ struct MRHumanActionTests {
     }
 
     @Test func cancelledWorkDoesNotOverrideAnExplicitNeutralAttentionProjection() {
-        var item = item()
-        item.humanActionRequired = false
-        #expect(MRHumanAction(row: row(item, execution: .init(state: .cancelled)), assistantReady: true) == nil)
+        let item = item()
+        #expect(MRHumanAction(row: row(item, execution: .init(state: .cancelled), humanAttention: false), assistantReady: true) == nil)
     }
 
     @Test func aLegacyRunWithoutExecutableInstructionsKeepsItsResultAction() throws {
@@ -593,7 +591,7 @@ struct MRHumanActionTests {
 
     @Test func aCompletedRunDoesNotReplaceTheCurrentPublicationDecisionWithRetry() throws {
         var item = item()
-        item.draftCount = 1
+        item.drafts = attentionFixtureDrafts(1)
         let action = try #require(MRHumanAction(row: row(item, execution: .init(state: .succeeded)), assistantReady: true))
         #expect(action.kind == .publication && action.action == .reviewDrafts)
     }
@@ -615,7 +613,7 @@ struct MRHumanActionTests {
 
     @Test func draftCountAloneProducesAConcretePublicationReason() throws {
         var item = item()
-        item.draftCount = 3
+        item.drafts = attentionFixtureDrafts(3)
         let action = try #require(MRHumanAction(row: row(item), assistantReady: false))
         #expect(action.kind == .publication)
         #expect(action.action == .reviewDrafts)
@@ -628,7 +626,7 @@ struct MRHumanActionTests {
         var item = item()
         let diagnostic = "Current account and headSHA match the snapshot. Technical evidence is missing."
         item.draftProofRecoveryFailure = worker ? nil : diagnostic
-        item.draftCount = worker ? 0 : 1
+        item.drafts = attentionFixtureDrafts(worker ? 0 : 1)
         let row = row(item, execution: worker ? .init(state: .blocked, error: diagnostic) : nil)
         let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
             allowsRemoval: false, assistantReady: true)
@@ -641,7 +639,7 @@ struct MRHumanActionTests {
     @Test(arguments: ["The test described in this reply could not be confirmed. Check the reply before publishing.", "  ", String(repeating: "x", count: 201)])
     func onlyBoundedHumanSummariesBecomeHeadlines(summary: String) throws {
         var item = item()
-        item.draftCount = 2
+        item.drafts = attentionFixtureDrafts(2)
         item.draftProofRecoveryFailure = "Current account and commit match, but independent evidence is missing."
         item.draftProofRecoverySummary = summary
         let row = row(item)
@@ -654,7 +652,6 @@ struct MRHumanActionTests {
 
     @Test func semanticRejectionPointsToTheExactPreparedReplyAndItsSourceDiscussion() throws {
         var item = item()
-        item.draftCount = 2
         item.drafts = [.init(id: 11, authorID: 3, note: "A verified reply waiting for publication permission", discussionID: "other", position: nil),
             .init(id: 12, authorID: 3, note: "I confirmed empty HTTP 200 in a test.\nThe second sentence is part of this reply.", discussionID: "source", position: nil)]
         item.draftProofRecoveryFailure = "No independent evidence establishes the claimed test run."
@@ -674,7 +671,6 @@ struct MRHumanActionTests {
 
     @Test func aRejectedIDMissingFromTheCurrentDraftsCannotInventAQuote() throws {
         var item = item()
-        item.draftCount = 1
         item.drafts = [.init(id: 11, authorID: 3, note: "User's current reply", discussionID: "other", position: nil)]
         item.draftProofRecoveryFailure = "The current draft snapshot could not be read."
         item.rejectedDrafts = [.init(draftID: 12, state: .invalid, reason: "An older reply was invalid",
@@ -686,7 +682,7 @@ struct MRHumanActionTests {
 
     @Test func failedDraftProofRecoveryOffersVerificationWithoutPublication() throws {
         var item = item()
-        item.draftCount = 1
+        item.drafts = attentionFixtureDrafts(1)
         let reason = "The remote file changed after this draft was prepared."
         item.draftProofRecoveryFailure = reason
         let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
@@ -697,14 +693,14 @@ struct MRHumanActionTests {
 
     @Test func recoveringDraftProofDoesNotAskForManualPublication() {
         var item = item()
-        item.draftCount = 1
+        item.drafts = attentionFixtureDrafts(1)
         item.draftProofRecoveryChecking = true
         #expect(MRHumanAction(row: row(item), assistantReady: true) == nil)
     }
 
     @Test func recoveringDraftProofKeepsAnIndependentBlockedRunAction() throws {
         var item = item()
-        item.draftCount = 1
+        item.drafts = attentionFixtureDrafts(1)
         item.draftProofRecoveryChecking = true
         item.authorFeedbackStatus = .init(head: "head", fingerprint: "discussion", phase: .checking)
         let action = try #require(MRHumanAction(row: row(item, execution: .init(state: .blocked, blocker: "Tests could not run.")), assistantReady: true))
@@ -715,7 +711,7 @@ struct MRHumanActionTests {
         var item = item()
         let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Example","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"head","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
         item.mergeRequest = request
-        item.draftCount = 1
+        item.drafts = attentionFixtureDrafts(1)
         item.draftProofRecoveryChecking = true
         item.authorFeedbackStatus = .init(head: "head", fingerprint: "discussion", phase: .checking)
         let intent = MRTodoIntent(id: UUID(), target: .init(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2),
@@ -733,7 +729,7 @@ struct MRHumanActionTests {
         let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Example","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"head","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
         item.mergeRequest = request
         item.isAuthored = true
-        item.draftCount = 4
+        item.drafts = attentionFixtureDrafts(4)
         item.draftProofRecoveryChecking = true
         item.observedDiscussionFingerprint = "discussion"
         item.authorFeedbackStatus = .init(head: "head", fingerprint: "discussion",
@@ -750,14 +746,14 @@ struct MRHumanActionTests {
 
     @Test func oneDraftUsesSingularLanguage() throws {
         var item = item()
-        item.draftCount = 1
+        item.drafts = attentionFixtureDrafts(1)
         let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
         #expect(String(localized: action.message) == "1 comment needs your review before publication.")
     }
 
     @Test func uncheckedDraftsExplainWhyPublicationNeedsReview() throws {
         var item = item()
-        item.draftCount = 2
+        item.drafts = attentionFixtureDrafts(2)
         item.requiresDiscussionRecheck = true
         let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
         #expect(action.kind == .uncheckedDrafts)
@@ -791,7 +787,7 @@ struct MRHumanActionTests {
 
     @Test func missingAssistantUsesSetupOnlyWhenNoPublicationDecisionIsPending() throws {
         var item = item()
-        item.needsDiscussion = true
+        item.discussionObservation = .unresolvedIncoming
         let action = try #require(MRHumanAction(row: row(item), assistantReady: false))
         #expect(action.kind == .setupAssistant)
         #expect(action.action == .setupAssistant)
@@ -810,23 +806,21 @@ struct MRHumanActionTests {
 
     @Test func quietSharedHumanProjectionOverridesAutomaticFlags() {
         var item = item()
-        item.needsDiscussion = true
-        item.failedPipeline = true
-        item.humanActionRequired = false
-        #expect(MRHumanAction(row: row(item), assistantReady: true) == nil)
+        item.discussionObservation = .unresolvedIncoming
+        item.catalogIssues.insert(.failedPipeline)
+        #expect(MRHumanAction(row: row(item, humanAttention: false), assistantReady: true) == nil)
     }
 
     @Test(arguments: [AssistantJobExecution.State.queued, .running])
     func activeAutomationIsQuietEvenWithOldFailureFlags(_ state: AssistantJobExecution.State) {
         var item = item()
-        item.needsDiscussion = true
-        item.humanActionRequired = true
-        #expect(MRHumanAction(row: row(item, execution: .init(state: state)), assistantReady: true) == nil)
+        item.discussionObservation = .unresolvedIncoming
+        #expect(MRHumanAction(row: row(item, execution: .init(state: state), humanAttention: true), assistantReady: true) == nil)
     }
 
     @Test func readOnlyCheckingAndPublicationAreQuiet() {
         var item = item()
-        item.draftCount = 2
+        item.drafts = attentionFixtureDrafts(2)
         item.authorFeedbackStatus = .init(head: "head", fingerprint: "text", phase: .checking)
         #expect(MRHumanAction(row: row(item), assistantReady: true) == nil)
         item.authorFeedbackStatus = nil

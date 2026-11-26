@@ -25,7 +25,7 @@ struct BoardAttentionPresenterTests {
             evidenceMatchesCatalogContext: context != "catalog")
         let result = BoardAttentionPresenter.project(.init(account: account, host: "host",
             username: context == "account" ? "other" : "me", rows: [
-                .init(row: row, item: item, confirmationState: nil, busy: false, automaticDraftIDs: [],
+                .init(row: row, item: row.presented, confirmationState: nil, busy: false, automaticDraftIDs: [],
                     checking: false, automaticIntentIDs: [])
             ], proposals: [], otherTodos: [], inboxLoading: false, assessingMentionNoteIDs: [],
             assistantReady: true, assistantPreparing: true))
@@ -76,11 +76,10 @@ struct BoardAttentionPresenterTests {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
             url: URL(string: "https://host/group/repo/-/merge_requests/2")!)
         item.mergeRequest = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"author","name":"Author"},"title":"Example","web_url":"https://host/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"head","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
-        item.draftCount = 1
         item.drafts = [.init(id: 11, authorID: 7, note: "First reply", discussionID: "thread", position: nil)]
         func input(automatic: Set<Int> = [], checking: Bool = false, busy: Bool = false) -> BoardAttentionPresenter.ProjectionInput {
             .init(account: account, host: "host", username: "me", rows: [
-                .init(row: .init(item: item, latestJob: nil, intents: []), item: item,
+                .init(row: .init(item: item, latestJob: nil, intents: []), item: item.presentingVerifiedAuthorFeedback(),
                     confirmationState: nil, busy: busy, automaticDraftIDs: automatic,
                     checking: checking, automaticIntentIDs: [])
             ], proposals: [], otherTodos: [], inboxLoading: false, assessingMentionNoteIDs: [],

@@ -96,7 +96,7 @@ import MergeTetherRemote
 
     @Test func pendingDraftsSummaryNamesPeopleStillWithoutAPublishedReply() throws {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "MR",
-            url: URL(string: "https://gitlab.example.com/g/p/-/merge_requests/2")!, needsDiscussion: false)
+            url: URL(string: "https://gitlab.example.com/g/p/-/merge_requests/2")!)
         #expect(MRPendingDraftsSummary(item: item) == nil)
         func draft(_ id: Int, _ thread: String?) -> GitLabDraftNote {
             .init(id: id, authorID: 3, note: "Reply", discussionID: thread, position: nil)
@@ -104,7 +104,6 @@ import MergeTetherRemote
         let alice = PersonIdentity(name: "Alice Example", username: "alice")
         let bob = PersonIdentity(name: "Bob Example", username: "bob")
         item.drafts = [draft(1, "a"), draft(2, "b"), draft(3, nil), draft(4, "missing")]
-        item.draftCount = 4
         item.replyRecipients = ["a": [alice], "b": [bob, alice], "unrelated": [.init(name: "Carol", username: "carol")]]
         let summary = try #require(MRPendingDraftsSummary(item: item))
         #expect(summary.count == 4)
@@ -113,7 +112,6 @@ import MergeTetherRemote
         #expect(message == "4 unpublished drafts for Alice Example and Bob Example")
 
         item.drafts = [draft(1, "a")]
-        item.draftCount = 1
         let reply = try #require(MRPendingDraftsSummary(item: item))
         #expect(String(localized: reply.message) == "1 unpublished draft for Alice Example")
         #expect(reply.peopleMessage?.people == [.init(name: "Alice Example", username: "alice")])
@@ -126,7 +124,7 @@ import MergeTetherRemote
 
     @Test func pendingDraftsSummaryCapsTheNamedPeople() throws {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "MR",
-            url: URL(string: "https://gitlab.example.com/g/p/-/merge_requests/2")!, needsDiscussion: false)
+            url: URL(string: "https://gitlab.example.com/g/p/-/merge_requests/2")!)
         item.drafts = [.init(id: 1, authorID: 3, note: "Reply", discussionID: "t", position: nil)]
         item.replyRecipients = ["t": ["a", "b", "c", "d", "e"].map { (id: String) in PersonIdentity(name: "Person \(id)", username: id) }]
         let message = String(localized: try #require(MRPendingDraftsSummary(item: item)).message)

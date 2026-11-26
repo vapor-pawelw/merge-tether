@@ -4,7 +4,7 @@ extension MergeRequestAttentionMonitor.Item {
     /// Only the pending-draft updater opts into this comparison. This includes its
     /// mutations and updateItem's derived safety flags; other mutations always publish.
     func hasSamePendingDraftEvidence(as previous: Self) -> Bool {
-        drafts == previous.drafts && draftCount == previous.draftCount
+        drafts == previous.drafts
             && incomingReplyDiscussionIDs == previous.incomingReplyDiscussionIDs
             && ownPublishedReplies == previous.ownPublishedReplies
             && requiresCommentReview == previous.requiresCommentReview
@@ -13,8 +13,8 @@ extension MergeRequestAttentionMonitor.Item {
             && reviewingActivity == previous.reviewingActivity
             && observedDiscussionFingerprint == previous.observedDiscussionFingerprint
             && requiresDiscussionRecheck == previous.requiresDiscussionRecheck
-            && canApprove == previous.canApprove && autoApproveReady == previous.autoApproveReady
-            && canConfirmReReview == previous.canConfirmReReview
+            && approvalObservation == previous.approvalObservation
+            && reReviewFeedbackChecked == previous.reReviewFeedbackChecked
             && awaitingRemoteVerification == previous.awaitingRemoteVerification
     }
 }

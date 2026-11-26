@@ -4,6 +4,7 @@ import Observation
 @MainActor
 @Observable
 final class MergeRequestAttentionMonitor {
+    /// Account-bound observations and checked workflow inputs for one merge request.
     struct Item: Identifiable, Sendable {
         typealias ID = GitLabMergeRequestID
 
@@ -15,11 +16,11 @@ final class MergeRequestAttentionMonitor {
         var title: String
         var url: URL
         var lifecycleCompletionID: UUID?
-        var draftCount = 0
         var requiresCommentReview = false
         var commentReviewSnapshot: CommentReviewSnapshot?
         /// The current user's unpublished drafts, shown in Ready for your OK.
         var drafts: [GitLabDraftNote] = []
+        var draftCount: Int { drafts.count }
         /// Exact drafts covered by automatic publication, including the stability wait.
         var automaticDraftIDs: Set<Int> = []
         var automaticPublicationPolicy: AutomaticPublicationPolicy?
@@ -39,35 +40,25 @@ final class MergeRequestAttentionMonitor {
         /// Text actually read for this row; semantic results must match both this and its source head.
         var observedDiscussionFingerprint: String?
         var observedActiveDiscussionFingerprint: String?
-        /// Presentation only; the shared human-action projection leaves raw safety evidence intact.
-        var humanActionRequired: Bool?
-        /// The assistant has no objections to the current head and the user has nothing open,
-        /// but automatic approval does not apply, so the user approves in Ready for your OK.
-        var canApprove = false
+        var observationSession: GitLabAccountSession?
+        var discussionReadStartedAt: Date?
+        var approvalObservation: ApprovalObservation = .unchecked
         var metApprovalThreshold: AutoApprovalThreshold?
         var remainingApprovalFindings: [ReviewVerdictStore.RemainingFinding] = []
-        /// Deliberate automatic-approval opt-out is not a human checkpoint until
-        /// every discussion permits that automatic action. Manual approval stays available.
-        var approvalWaitingForReadiness = false
-        /// Automatic approval applies and the discussions allow it.
-        var autoApproveReady = false
-        var needsDiscussion = false
-        var hasOtherUnresolvedDiscussions = false
-        var hasConflict = false
-        var needsChanges = false
+        var catalogIssues: Set<CatalogIssue> = []
+        var discussionObservation: DiscussionObservation = .resolved
         /// nil means the current reviewer states could not be read.
         var changeRequestReviewers: Set<String>?
         /// Current reviewer states matched to confirmed receipts on this head.
         var confirmedPendingReReviewers: Set<String> = []
         var approvalProgress: MergeRequestApprovalProgress?
-        var needsMerge = false
-        var failedPipeline = false
-        var needsPipelineHandoff = false
+        var manualMergeAvailable = false
+        var pipelineHandoffPending = false
         var reReviewUnconfirmed = false
         var reReviewRequested = false
         var reReviewReadiness: ReReviewReadiness?
         var reReviewFingerprint: String?
-        var canConfirmReReview = false
+        var reReviewFeedbackChecked = false
         var draftFromTodo = false
         var mergeRequest: GitLabMergeRequest?
         var isAuthored = false
@@ -98,7 +89,7 @@ final class MergeRequestAttentionMonitor {
 
         var authoredRequest: GitLabMergeRequest? { isAuthored ? mergeRequest : nil }
         var canFinishCommentReview: Bool {
-            requiresCommentReview && draftCount == 0 && drafts.isEmpty && commentReviewSnapshot?.covers(mergeRequest) == true
+            requiresCommentReview && drafts.isEmpty && commentReviewSnapshot?.covers(mergeRequest) == true
         }
 
         func draftIDsHandledAutomatically(automation: AutomationSettings, target: MRAutomationScope.Target,
@@ -113,44 +104,12 @@ final class MergeRequestAttentionMonitor {
         }
 
         var observedEvidenceContext: EvidenceContext {
-            .init(mergeRequestID: id, head: mergeRequest?.sha,
+            .init(account: observationSession.map { .init(host: $0.host, username: $0.username) },
+                  accountRevision: observationSession?.revision, mergeRequestID: id, head: mergeRequest?.sha,
+                  target: mergeRequest?.evidenceTarget,
                   discussionContent: observedDiscussionFingerprint.map(DiscussionContentDigest.init),
                   activeDiscussionContent: observedActiveDiscussionFingerprint.map(DiscussionContentDigest.init),
                   semanticContext: mergeRequest?.semanticContextDigest)
-        }
-
-        func presentingVerifiedAuthorFeedback() -> Self {
-            var visible = self
-            guard isAuthored, let status = authorFeedbackStatus else {
-                visible.authorFeedbackStatus = nil
-                return visible
-            }
-            let observed = observedEvidenceContext
-            let policy: EvidenceContext.BindingPolicy = status.phase == .complete ? .observedFeedback : .feedbackProgress
-            guard status.evidenceContext.binds(to: observed, policy: policy) else {
-                visible.authorFeedbackStatus = nil
-                return visible
-            }
-            guard status.phase == .complete else { return visible }
-            let addressed = status.addressedNoteIDs.subtracting(status.replyNoteIDs).union(status.ignoredNoteIDs)
-            visible.feedback.removeAll { $0.id.map(addressed.contains) == true }
-            if visible.feedback.count != feedback.count && visible.feedback.isEmpty {
-                visible.needsDiscussion = hasOtherUnresolvedDiscussions
-            }
-            let waitingReviewers = Set(status.findings.filter { $0.state == .waitingAcceptance }.flatMap(\.waitingForReviewers))
-            let reviewsHandedOff = changeRequestReviewers.map { requesters in
-                requesters.isEmpty ? waitingReviewers.isSubset(of: confirmedPendingReReviewers)
-                    : requesters.isSubset(of: waitingReviewers)
-            } ?? false
-            if status.evidenceContext.binds(to: observed, policy: .semanticText),
-               !waitingReviewers.isEmpty, reviewsHandedOff, status.ignoredNoteIDs.isEmpty,
-               visible.feedback.isEmpty, !status.needsAttention,
-               status.followUpNoteIDs.isEmpty, status.replyNoteIDs.isEmpty,
-               status.pendingDraftCount == 0, draftCount == 0, drafts.isEmpty {
-                // GitLab may still block merging until acceptance; that is reviewer work.
-                visible.needsChanges = false
-            }
-            return visible
         }
 
         /// A partial read cannot bind existing raw feedback to a newly observed conversation.
@@ -160,100 +119,63 @@ final class MergeRequestAttentionMonitor {
             guard read.binds(to: observedEvidenceContext, policy: .observedFeedback) else {
                 observedDiscussionFingerprint = nil
                 observedActiveDiscussionFingerprint = nil
+                discussionReadStartedAt = nil
                 return
             }
         }
 
         func canOfferMerge(using status: AuthoredMergeRequestStatus) -> Bool {
-            status.blockers.isEmpty && status.request.isReadyForMergeChecks
+            let openMergeBlockers: Set<Status.Blocker> = [.discussion, .feedback, .changesRequested, .conflict, .failedPipeline, .pipelineHandoff]
+            return status.blockers.isEmpty && status.request.isReadyForMergeChecks
                 && status.request.projectID == id.projectID && status.request.iid == id.iid
                 && status.request.webURL == mergeRequest?.webURL && status.request.sha == mergeRequest?.sha
-                && !requiresCommentReview && draftCount == 0 && !needsDiscussion && feedback.isEmpty && !needsChanges && !hasConflict
-                && !failedPipeline && !needsPipelineHandoff && mergeRequest?.state == .opened
+                && !requiresCommentReview && drafts.isEmpty && self.status.blockers.isDisjoint(with: openMergeBlockers)
+                && mergeRequest?.state == .opened
                 && mergeRequest?.draft == false && mergeRequest?.detailedMergeStatus == .mergeable
                 && mergeRequest?.hasMergeConflict == false && mergeRequest?.blockingDiscussionsResolved != false
                 && (mergeRequest?.headPipeline == nil || mergeRequest?.headPipeline?.status == .success)
         }
 
-        func requiringUserAttention(
-            automation: AutomationSettings, target: MRAutomationScope.Target,
-            failedTriggers: Set<MergeWorkflowTrigger> = [], conflictTaskFailed: Bool = false,
-            pipelineOwnedAutomatically: Bool = false, feedbackOwnedAutomatically: Bool = false
-        ) -> Self {
-            guard automation.hasAutomaticActionConsent, let request = authoredRequest, request.isOpen,
-                  request.author.username == target.username,
-                  request.projectID == target.projectID, request.iid == target.iid,
-                  request.webURL.isGitLabMergeRequest(host: target.host, iid: request.iid),
-                  automation.scope.permits(request, host: target.host, username: target.username) else { return self }
-            func handles(_ trigger: MergeWorkflowTrigger) -> Bool {
-                let rule = automation.workflowRules[trigger]
-                return rule.mode == .assistant && rule.includes(request) && !failedTriggers.contains(trigger)
-            }
-            // Filter a presentation copy. Settings changes must reveal the original reasons immediately.
-            var visible = self
-            if automation.conflictTasksEnabled && !conflictTaskFailed { visible.hasConflict = false }
-            if handles(.pipelineFailure) && pipelineOwnedAutomatically && !needsPipelineHandoff { visible.failedPipeline = false }
-            let feedbackRule = automation.authorFeedback
-            let canPrepareFeedback = feedbackRule.runner == .assistant && feedbackRule.isConfigured
-                && feedbackRule.includes(project: request.webURL.gitLabProjectPath)
-            let handlesFeedback = !failedTriggers.contains(.newDiscussion) && (
-                (canPrepareFeedback && (feedbackRule.isEnabled || handles(.newDiscussion)))
-                    || (handles(.newDiscussion) && feedbackOwnedAutomatically))
-            if handlesFeedback && !feedback.isEmpty {
-                visible.needsDiscussion = hasOtherUnresolvedDiscussions
-                visible.feedback = []
-            }
-            if handles(.newDiscussion) && feedbackOwnedAutomatically { visible.needsChanges = false }
-            // Draft publication, ownership handoffs, requested changes and uncertain re-review
-            // receipts remain visible until their own eligibility/confirmation checks succeed.
-            return visible
-        }
-
-        private var hasOpenAction: Bool {
-            needsDiscussion || hasConflict || needsChanges || needsMerge || failedPipeline || needsPipelineHandoff
-                || requiresDiscussionRecheck || reReviewUnconfirmed || !feedback.isEmpty || (reReviewReadiness != nil && reReviewReadiness != .checking)
-                || authorFeedbackStatus?.needsAttention == true
-        }
-
-        var needsAttention: Bool { (requiresCommentReview && draftCount == 0) || (humanActionRequired ?? (needsConfirmation || hasOpenAction)) }
-
-        /// Something the user must confirm before it reaches other people.
-        var needsConfirmation: Bool { requiresCommentReview || draftCount > 0 || (canApprove && !approvalWaitingForReadiness) || canConfirmReReview }
-
-        var section: Section {
-            if mergeRequest?.isDraft(fallback: draftFromTodo) ?? draftFromTodo {
-                return .draftMergeRequests
-            }
-            return needsConfirmation && !hasOpenAction ? .unpublishedComments : .open
-        }
+        var status: Status { .init(evidence: self) }
+        var needsDiscussion: Bool { status.blockers.contains(.discussion) }
+        var hasOtherUnresolvedDiscussions: Bool { discussionObservation == .unresolvedOther }
+        var hasConflict: Bool { status.blockers.contains(.conflict) }
+        var needsChanges: Bool { status.blockers.contains(.changesRequested) }
+        var needsMerge: Bool { status.blockers.contains(.merge) }
+        var failedPipeline: Bool { status.blockers.contains(.failedPipeline) }
+        var needsPipelineHandoff: Bool { status.blockers.contains(.pipelineHandoff) }
+        var canApprove: Bool { status.approval == .manual || status.approval == .waitingForReadiness }
+        var autoApproveReady: Bool { status.approval == .automatic }
+        var approvalWaitingForReadiness: Bool { status.approval == .waitingForReadiness }
+        var canConfirmReReview: Bool { status.confirmations.contains(.reReview) }
+        var needsAttention: Bool { status.needsAttention }
+        var needsConfirmation: Bool { status.needsConfirmation }
+        var section: Section { status.section }
 
         static func ordered(_ items: [Self], draftsLast: Bool = true) -> [Self] {
-            items.map { item in
-                var order = item.mergeOrder
-                if !draftsLast, item.section == .draftMergeRequests {
-                    order.0 = (item.needsConfirmation && !item.hasOpenAction ? Section.unpublishedComments : .open).rawValue
-                }
-                return (item: item, order: order)
-            }
-                .sorted { $0.order < $1.order }
-                .map(\.item)
+            items.map { ($0, $0.mergeOrder(using: $0.status, draftsLast: draftsLast)) }
+                .sorted { $0.1 < $1.1 }
+                .map(\.0)
         }
 
-        private var mergeOrder: (Int, Int, Int, String, Int, Int) {
-            let order = mergeReadiness
+        func mergeOrder(using status: Status, draftsLast: Bool = true) -> (Int, Int, Int, String, Int, Int) {
+            let order = mergeReadiness(using: status)
+            let section = draftsLast ? status.section : status.openSection
             return (section.rawValue, order.priority, order.blockers, title, id.projectID, id.iid)
         }
 
-        var isCloseToMerge: Bool {
+        var isCloseToMerge: Bool { isCloseToMerge(using: status, feedbackRemaining: !feedback.isEmpty) }
+
+        func isCloseToMerge(using status: Status, feedbackRemaining: Bool) -> Bool {
             guard let request = mergeRequest, request.isOpen, request.draft == false,
-                  !request.hasQueuedMerge, draftCount == 0, drafts.isEmpty, !requiresCommentReview,
-                  !requiresDiscussionRecheck, feedback.isEmpty,
+                  !request.hasQueuedMerge, drafts.isEmpty, !requiresCommentReview,
+                  !requiresDiscussionRecheck, !feedbackRemaining,
                   approvalProgress.map({ $0.requirementsSatisfied ?? ($0.completed >= $0.required) }) != false,
                   dependencies.map({ $0.predecessors.isEmpty && $0.issues.isEmpty }) != false else { return false }
-            return mergeReadiness.priority == 0
+            return mergeReadiness(using: status).priority == 0
         }
 
-        private var mergeReadiness: (priority: Int, blockers: Int) {
+        private func mergeReadiness(using attention: Status) -> (priority: Int, blockers: Int) {
             guard let mergeRequest, let mergeStatus = mergeRequest.detailedMergeStatus else { return (2, 0) }
             let status = AuthoredMergeRequestStatus(
                 request: mergeRequest, approvals: nil, discussionsResolved: mergeRequest.blockingDiscussionsResolved,
@@ -261,10 +183,10 @@ final class MergeRequestAttentionMonitor {
             )
             // The list endpoint supplies merge status but does not verify approval rules.
             var blockers = Set(status.blockers).subtracting([.unknown, .draft])
-            if needsDiscussion { blockers.insert(.discussions) }
-            if hasConflict { blockers.insert(.conflicts) }
-            if needsChanges { blockers.insert(.changesRequested) }
-            if failedPipeline || needsPipelineHandoff { blockers.insert(.pipeline) }
+            if attention.blockers.contains(.discussion) { blockers.insert(.discussions) }
+            if attention.blockers.contains(.conflict) { blockers.insert(.conflicts) }
+            if attention.blockers.contains(.changesRequested) { blockers.insert(.changesRequested) }
+            if !attention.blockers.isDisjoint(with: [.failedPipeline, .pipelineHandoff]) { blockers.insert(.pipeline) }
             if mergeStatus == .mergeable && blockers.isEmpty { return (0, 0) }
             return (blockers.contains(.checking) ? 2 : 1, blockers.count)
         }
@@ -590,12 +512,12 @@ final class MergeRequestAttentionMonitor {
 
     var currentItems: [Item] {
         guard let account, isCurrent(account) else { return [] }
-        return items.map(presentAuthorFeedback)
+        return items.map(enrichObservation)
     }
 
     var currentOpenItems: [Item] {
         guard let account, isCurrent(account) else { return [] }
-        return openItems.map(presentAuthorFeedback)
+        return openItems.map(enrichObservation)
     }
 
     /// One account/revision-bound value read for the display projector; no additional owner or epoch.
@@ -610,14 +532,15 @@ final class MergeRequestAttentionMonitor {
 
     var presentationSnapshot: PresentationSnapshot? {
         guard let account, isCurrent(account), attentionRecordsRevision == glab.accountRevision else { return nil }
-        let evidence = attentionRecords.mapValues { presentAuthorFeedback($0.evidence) }
-        let candidates = attentionCandidateIDs.compactMap { evidence[$0] }
+        let evidence = attentionRecords.mapValues { enrichObservation($0.evidence) }
+        let candidates = attentionCandidateIDs.compactMap { evidence[$0]?.presentingVerifiedAuthorFeedback() }
         return .init(host: account.host, username: account.username, revision: glab.accountRevision,
             evidence: Array(evidence.values),
-            attention: Item.ordered(candidates.filter(\.needsAttention)), catalog: openItems.map(presentAuthorFeedback))
+            attention: ItemPresentation.ordered(candidates.filter(\.needsAttention)).map(\.evidence),
+            catalog: openItems.map(enrichObservation))
     }
 
-    private func presentAuthorFeedback(_ original: Item) -> Item {
+    private func enrichObservation(_ original: Item) -> Item {
         var item = original
         item.dependencies = item.mergeRequest.flatMap { request in
             guard let account, isCurrent(account) else { return nil }
@@ -648,7 +571,7 @@ final class MergeRequestAttentionMonitor {
                     pendingDraftCount: item.draftCount)
             }
         }
-        return item.presentingVerifiedAuthorFeedback()
+        return item
     }
 
     func retryDraftProofRecovery(_ id: Item.ID) {
@@ -1096,28 +1019,23 @@ final class MergeRequestAttentionMonitor {
                       previousCatalog[id] != nil || candidates[id] != nil || isTracked(mr) else { continue }
             }
             var item = Item(
-                id: id, title: mr.title, url: mr.webURL, draftCount: candidates[id]?.draftCount ?? 0,
+                id: id, title: mr.title, url: mr.webURL, drafts: candidates[id]?.drafts ?? [],
                 draftFromTodo: candidates[id]?.draftFromTodo ?? false, mergeRequest: mr, isAuthored: mr.author.id == user.id
             )
-            item.drafts = candidates[id]?.drafts ?? []
             item.requiresCommentReview = commentReviewPending(id, account: account)
             if item.isAuthored {
-                item.needsDiscussion = mr.blockingDiscussionsResolved == false
-                    || mr.detailedMergeStatus == .discussionsNotResolved
-                item.hasConflict = mr.hasMergeConflict
-                item.needsChanges = mr.detailedMergeStatus == .requestedChanges
-                item.failedPipeline = mr.headPipeline?.status == .failed
-                    || mr.detailedMergeStatus == .ciMustPass
+                item.catalogIssues = CatalogIssue.observed(in: mr)
+                if mr.blockingDiscussionsResolved == false || mr.detailedMergeStatus == .discussionsNotResolved {
+                    item.discussionObservation = .unresolvedOther
+                }
             }
             candidates[id] = item
         }
         if owned != nil {
             let ownedIDs = Set((owned ?? []).map { $0.mergeRequestID })
             for id in Array(candidates.keys) where !ownedIDs.contains(id) {
-                candidates[id]?.needsDiscussion = false
-                candidates[id]?.hasConflict = false
-                candidates[id]?.needsChanges = false
-                candidates[id]?.failedPipeline = false
+                candidates[id]?.catalogIssues = []
+                candidates[id]?.discussionObservation = .resolved
                 candidates[id]?.isAuthored = false
                 candidates[id]?.feedback = []
             }
@@ -1178,17 +1096,14 @@ final class MergeRequestAttentionMonitor {
                         let drafts = try? await glab.fetchOwnDraftNotes(
                             projectID: item.id.projectID, iid: item.id.iid, host: host, userID: user.id
                         )
-                        let draftCount = drafts?.count
                         if let drafts { updated.drafts = drafts }
                         if let drafts, !drafts.isEmpty {
                             ReviewVerdictStore.rememberDrafts(drafts, host: host, projectID: item.id.projectID,
                                                               iid: item.id.iid, in: verdictDirectory)
                         }
-                        updated.canApprove = false
+                        updated.approvalObservation = .unchecked
                         updated.metApprovalThreshold = nil
                         updated.remainingApprovalFindings = []
-                        updated.approvalWaitingForReadiness = false
-                        updated.autoApproveReady = false
                         if drafts?.isEmpty == true, !item.isAuthored,
                            let request = item.mergeRequest, request.author.id != user.id, request.draft != nil,
                            let head = request.sha, head != approvedHead,
@@ -1217,9 +1132,10 @@ final class MergeRequestAttentionMonitor {
                                 && authenticatedVerdict == ReviewVerdictStore.verdict(host: host, projectID: request.projectID,
                                     iid: request.iid, user: user, in: verdictDirectory)
                             let classifiedReviewAllowsApproval = authenticatedVerdict?.verdict == .classifiedFindings && automaticContext
-                            updated.canApprove = ((currentVerdict && check.ownReady) || classifiedReviewAllowsApproval) && !automatic
-                            updated.approvalWaitingForReadiness = updated.canApprove && (approvalOptedOut || autoApproves) && !automaticContext && !check.discussionsReady
-                            updated.autoApproveReady = automatic
+                            updated.approvalObservation = .checked(
+                                manualVerdictPermitsApproval: (currentVerdict && check.ownReady) || classifiedReviewAllowsApproval,
+                                automaticGatePassed: automatic,
+                                awaitsDiscussionReadiness: (approvalOptedOut || autoApproves) && !automaticContext && !check.discussionsReady)
                             if classifiedReviewAllowsApproval, let verdict = authenticatedVerdict, let discussions = check.discussions {
                                 updated.metApprovalThreshold = approvalThreshold
                                 updated.remainingApprovalFindings = await ReviewVerdictStore.remainingFindings(verdict,
@@ -1227,11 +1143,14 @@ final class MergeRequestAttentionMonitor {
                             }
                         }
                         let hasDrafts = !(drafts ?? item.drafts).isEmpty
+                        let discussionReadStartedAt = Date()
                         let discussions = if item.mergeRequest != nil || item.authoredRequest != nil || hasDrafts {
                             try? await glab.fetchMergeRequestDiscussions(
                                 projectID: item.id.projectID, iid: item.id.iid, host: host
                             )
                         } else { nil as [GitLabMergeRequestDiscussion]? }
+                        updated.observationSession = .init(host: account.host, username: account.username, revision: revision)
+                        updated.discussionReadStartedAt = discussions.map { _ in discussionReadStartedAt }
                         updated.observedDiscussionFingerprint = discussions.flatMap { ReviewVerdict.fingerprint($0) }
                         updated.observedActiveDiscussionFingerprint = discussions.flatMap {
                             ReviewVerdict.fingerprint(GitLabMergeRequestDiscussion.activeForReview($0))
@@ -1285,12 +1204,6 @@ final class MergeRequestAttentionMonitor {
                         } else {
                             updated.requiresDiscussionRecheck = false
                         }
-                        if item.isAuthored {
-                            // Without discussion evidence, the list endpoint's aggregate
-                            // blocker cannot safely be attributed to automated feedback.
-                            updated.hasOtherUnresolvedDiscussions = item.needsDiscussion
-                        }
-                        if let draftCount { updated.draftCount = draftCount }
                         updated.replyRecipients = [:]
                         updated.incomingReplyDiscussionIDs = AutomaticPublicationPolicy.incomingDiscussionIDs(in: discussions, userID: user.id)
                         if let discussions {
@@ -1304,7 +1217,7 @@ final class MergeRequestAttentionMonitor {
                             }
                         }
                         let feedback = discussions.map { ReReviewFeedback(discussions: $0, authorID: user.id) }
-                        return (updated, draftCount != nil && (!(item.isAuthored || hasDrafts) || discussions != nil), feedback, discussions, contextDraftIDs, recoveryRequest, recoveryReadStartedAt)
+                        return (updated, drafts != nil && (!(item.isAuthored || hasDrafts) || discussions != nil), feedback, discussions, contextDraftIDs, recoveryRequest, recoveryReadStartedAt)
                     }
                 }
                 for await (var item, success, feedback, discussions, workerDraftIDs, recoveryRequest, recoveryReadStartedAt) in group {
@@ -1314,7 +1227,7 @@ final class MergeRequestAttentionMonitor {
                     recordApprovalBaseline(for: item, user: user)
                     item.requiresCommentReview = commentReviewPending(item.id, account: account)
                     if item.requiresCommentReview {
-                        item.canApprove = false; item.autoApproveReady = false; item.canConfirmReReview = false
+                        item.approvalObservation = .unchecked; item.reReviewFeedbackChecked = false
                     }
                     if let recoveryRequest, let recoveryReadStartedAt {
                         remember(recoveryRequest, readStartedAt: recoveryReadStartedAt)
@@ -1491,14 +1404,12 @@ final class MergeRequestAttentionMonitor {
             if let published = publishedDrafts[id] {
                 // Use the latest action tombstones after all catalog reads have drained.
                 results[index].drafts.removeAll { published.contains($0) }
-                results[index].draftCount = results[index].drafts.count
                 if results[index].drafts.isEmpty { results[index].requiresDiscussionRecheck = false }
             }
             results[index].requiresCommentReview = commentReviewPending(id, account: account)
             if results[index].requiresCommentReview {
-                results[index].canApprove = false
-                results[index].autoApproveReady = false
-                results[index].canConfirmReReview = false
+                results[index].approvalObservation = .unchecked
+                results[index].reReviewFeedbackChecked = false
             }
             if results[index].isAuthored {
                 applyReReviewPresentation(&results[index], unanswered: authoredUnansweredFeedback[id] ?? true)
@@ -1572,10 +1483,10 @@ final class MergeRequestAttentionMonitor {
         let uncertain = discussions.contains { discussion in
             discussion.notes.contains { $0.system != true && $0.resolvable == true && $0.resolved == nil }
         }
-        item.hasOtherUnresolvedDiscussions = unresolved.contains { discussion in
+        let includesOther = unresolved.contains { discussion in
             !discussion.notes.contains { $0.id.map(feedbackIDs.contains) == true }
         } || ((uncertain || unresolved.isEmpty) && aggregateBlocker)
-        item.needsDiscussion = !unresolved.isEmpty || aggregateBlocker
+        item.discussionObservation = .init(unresolved: !unresolved.isEmpty || aggregateBlocker, includesOther: includesOther)
     }
 
     /// The inbox is published before optional dependency reads. A cancelled predecessor
@@ -2034,7 +1945,7 @@ final class MergeRequestAttentionMonitor {
                 self.settings?.recordAutomaticCommentPublication([draft], for: reviewTarget, revision: reviewRevision, evidence: completion)
                 updateItem(id) {
                     $0.drafts.removeAll { $0 == draft }
-                    $0.draftCount = $0.drafts.count
+
                 }
                 await recordPublication(origin, id: id, account: account, user: user, origin: .automatic)
             }
@@ -2084,7 +1995,7 @@ final class MergeRequestAttentionMonitor {
             let drafts = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
             guard current() else { return }
             settings?.beginCommentReview(for: commentReviewTarget(id, account: account))
-            updateItem(id) { $0.drafts = drafts; $0.draftCount = drafts.count }
+            updateItem(id) { $0.drafts = drafts }
             let matching = drafts.filter { $0.id == draftID }
             guard !matching.isEmpty else { return } // Already handled in GitLab; retain the human checkpoint.
             guard matching == [expected] else { confirmationStates[id] = .changed; return }
@@ -2094,10 +2005,10 @@ final class MergeRequestAttentionMonitor {
             // A poll started before DELETE may still carry this exact snapshot.
             publishedDrafts[id, default: []].append(expected)
             previousDrafts[id] = nil
-            updateItem(id) { $0.drafts.removeAll { $0 == expected }; $0.draftCount = $0.drafts.count }
+            updateItem(id) { $0.drafts.removeAll { $0 == expected } }
             let remaining = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
             guard current() else { return }
-            updateItem(id) { $0.drafts = remaining; $0.draftCount = remaining.count }
+            updateItem(id) { $0.drafts = remaining }
         } catch {
             if current() { confirmationStates[id] = .failed }
             Log.monitor.error("Could not delete draft: \(String(describing: error), privacy: .private)")
@@ -2201,7 +2112,6 @@ final class MergeRequestAttentionMonitor {
             if outcome == .changed { confirmationStates[id] = .changed }
             updateItem(id) {
                 $0.drafts = observed.drafts
-                $0.draftCount = observed.drafts.count
                 if !proof.isExplicit { $0.commentReviewSnapshot = observed.snapshot }
             }
             return outcome == .completed && wasPending
@@ -2241,7 +2151,7 @@ final class MergeRequestAttentionMonitor {
         }
         func display(_ drafts: [GitLabDraftNote]) {
             let visible = drafts.filter { publishedDrafts[id]?.contains($0) != true }
-            updateItem(id) { $0.drafts = visible; $0.draftCount = visible.count }
+            updateItem(id) { $0.drafts = visible }
         }
         confirmationStates[id] = .publishing
         defer {
@@ -2428,7 +2338,7 @@ final class MergeRequestAttentionMonitor {
             let current = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
             guard isCurrent(account) else { return }
             guard current == expected else {
-                updateItem(id) { $0.drafts = current; $0.draftCount = current.count }
+                updateItem(id) { $0.drafts = current }
                 confirmationStates[id] = nil
                 return
             }
@@ -2460,12 +2370,12 @@ final class MergeRequestAttentionMonitor {
                 publishedDrafts[id, default: []].append(draft)
                 publishedNow.append(draft)
                 settings.recordAutomaticCommentPublication([draft], for: reviewTarget, revision: reviewRevision, evidence: completion)
-                updateItem(id) { $0.drafts.removeAll { $0 == draft }; $0.draftCount = $0.drafts.count }
+                updateItem(id) { $0.drafts.removeAll { $0 == draft } }
                 await recordPublication(origin, id: id, account: account, user: user, origin: .automatic)
             }
             let remaining = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
             guard isCurrent(account) else { return }
-            updateItem(id) { $0.drafts = remaining; $0.draftCount = remaining.count }
+            updateItem(id) { $0.drafts = remaining }
             guard !publishedNow.isEmpty else { return }
             publicationChecked = true
         } catch {
@@ -2827,8 +2737,7 @@ final class MergeRequestAttentionMonitor {
             approvalReadFailures.removeValue(forKey: id)
             applyApprovalProgress(progress, to: displayed)
             updateItem(id, introducesAttention: false) {
-                $0.canApprove = false
-                $0.autoApproveReady = false
+                $0.approvalObservation = .unchecked
                 if $0.reviewingProgress == .waitingForOtherDiscussions, action == .approve { $0.reviewingProgress = .current }
             }
             settings.recordAutomationEvent(target: target, action: action == .approve ? .approve : .removeApproval,
@@ -2964,7 +2873,7 @@ final class MergeRequestAttentionMonitor {
                 remaining.removeAll { $0 == draft }
                 publishedDrafts[id, default: []].append(draft)
                 updateItem(id) {
-                    $0.drafts = remaining; $0.draftCount = remaining.count
+                    $0.drafts = remaining
                     $0.rememberPublishedReply(draft)
                 }
                 await recordPublication(origin, id: id, account: account, user: user, origin: .manual)
@@ -3082,8 +2991,7 @@ final class MergeRequestAttentionMonitor {
             applyApprovalProgress(progress, to: request)
             updateItem(id) {
                 guard MRAttentionRecord.sameContext($0.mergeRequest, request) else { return }
-                $0.canApprove = false
-                $0.autoApproveReady = false
+                $0.approvalObservation = .unchecked
                 if $0.reviewingProgress == .waitingForOtherDiscussions { $0.reviewingProgress = .current }
             }
             confirmationStates[id] = nil
@@ -3099,7 +3007,7 @@ final class MergeRequestAttentionMonitor {
             approvalReadFailures.removeValue(forKey: id)
             guard permits(evidence) else {
                 guard currentAccount() else { return false }
-                updateItem(id) { $0.canApprove = false }
+                updateItem(id) { $0.approvalObservation = .unchecked }
                 confirmationStates[id] = automatic ? nil : .changed
                 return false
             }
@@ -3110,7 +3018,7 @@ final class MergeRequestAttentionMonitor {
                       currentAccount(), autoApproveApplies(to: evidence.request, host: account.host, username: account.username) else {
                     if currentAccount() {
                         confirmationStates[id] = nil
-                        updateItem(id) { $0.canApprove = true; $0.autoApproveReady = false }
+                        updateItem(id) { $0.approvalObservation = .manualFallback }
                     }
                     return false
                 }
@@ -3180,7 +3088,7 @@ final class MergeRequestAttentionMonitor {
         change(&item)
         if let account {
             item.requiresCommentReview = commentReviewPending(id, account: account)
-            if item.requiresCommentReview { item.canApprove = false; item.autoApproveReady = false; item.canConfirmReReview = false }
+            if item.requiresCommentReview { item.approvalObservation = .unchecked; item.reReviewFeedbackChecked = false }
         }
         if item.drafts.isEmpty { item.awaitingRemoteVerification = false; item.requiresDiscussionRecheck = false }
         else if item.isAuthored, let settings, let account, let user, let request = item.mergeRequest {
@@ -3237,8 +3145,8 @@ final class MergeRequestAttentionMonitor {
             guard var current = read.drafts else {
                 updateItem(item.id, skipUnchangedPendingDraftEvidence: true) {
                     $0.requiresDiscussionRecheck = !$0.drafts.isEmpty
-                    $0.canApprove = false
-                    $0.canConfirmReReview = false
+                    $0.approvalObservation = .unchecked
+                    $0.reReviewFeedbackChecked = false
                     $0.reviewingProgress = nil
                 }
                 continue
@@ -3267,7 +3175,7 @@ final class MergeRequestAttentionMonitor {
                 }
             } ?? false)
             updateItem(item.id, skipUnchangedPendingDraftEvidence: true) {
-                $0.drafts = current; $0.draftCount = current.count
+                $0.drafts = current
                 $0.commentReviewSnapshot = CommentReviewSnapshot(request: request, discussions: discussions)
                 $0.incomingReplyDiscussionIDs = contextMatches
                     ? AutomaticPublicationPolicy.incomingDiscussionIDs(in: discussions, userID: user.id) : nil
@@ -3286,11 +3194,11 @@ final class MergeRequestAttentionMonitor {
                     fingerprint: discussions.flatMap { ReviewVerdict.fingerprint($0) },
                     semanticContextFingerprint: request?.semanticContextFingerprint)
                 $0.requiresDiscussionRecheck = !current.isEmpty && !contextCurrent
-                if !approvalCurrent { $0.canApprove = false }
+                if !approvalCurrent { $0.approvalObservation = .unchecked }
                 if !contextMatches || request == nil || discussions == nil || request?.sha != item.mergeRequest?.sha
                     || request?.semanticContextFingerprint != item.mergeRequest?.semanticContextFingerprint
                     || ReviewVerdict.fingerprint(discussions ?? []) != item.reReviewFingerprint {
-                    $0.canConfirmReReview = false
+                    $0.reReviewFeedbackChecked = false
                 }
             }
             if current != item.drafts {
@@ -3343,13 +3251,13 @@ final class MergeRequestAttentionMonitor {
     private func applyReReviewPresentation(_ item: inout Item, unanswered: Bool) {
         guard let account else { return }
         item.requiresCommentReview = commentReviewPending(item.id, account: account)
-        if item.requiresCommentReview { item.canApprove = false; item.autoApproveReady = false }
+        if item.requiresCommentReview { item.approvalObservation = .unchecked }
         let status = reReviewCoordinator?.currentStatus(for: reReviewContext(item.id, account: account),
             request: item.mergeRequest, fingerprint: item.observedDiscussionFingerprint,
             activeFingerprint: item.observedActiveDiscussionFingerprint, authorID: user?.id)
         item.reReviewReadiness = status?.state
         item.reReviewFingerprint = status?.fingerprint
-        item.canConfirmReReview = status?.state?.canConfirm == true && !unanswered && item.draftCount == 0 && !item.requiresCommentReview
+        item.reReviewFeedbackChecked = status != nil && !unanswered && item.drafts.isEmpty && !item.requiresCommentReview
         item.reReviewRequested = status?.requested ?? false
         item.reReviewUnconfirmed = status?.unconfirmed ?? false
     }
@@ -3409,18 +3317,5 @@ final class MergeRequestAttentionMonitor {
         await reReviewCoordinator?.refresh(for: request, feedback: feedback, draftCount: draftCount,
             context: reReviewContext(.init(projectID: request.projectID, iid: request.iid), account: account),
             user: user, discussions: discussions)
-    }
-}
-
-extension MergeRequestAttentionMonitor.Item {
-    /// A row missing from the filtered list has no manual reasons; its catalog
-    /// fallback must not restore work already owned by automation.
-    func presentingHumanAttention(filtered: Self?, unfiltered: Self?, assistantReady: Bool) -> Self {
-        if assistantReady {
-            return filtered ?? Self(id: id, title: title, url: url, mergeRequest: mergeRequest, isAuthored: isAuthored)
-        }
-        var manual = unfiltered ?? self
-        manual.needsMerge = manual.needsMerge || filtered?.needsMerge == true
-        return manual
     }
 }

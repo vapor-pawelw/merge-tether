@@ -46,7 +46,6 @@ struct DuplicateReplyDraftsTests {
         let duplicate = draft(11, "Fixed, thanks")
         let fresh = draft(12, "Other reply", thread: "t2")
         item.drafts = [duplicate, fresh]
-        item.draftCount = 2
         item.ownPublishedReplies = DuplicateReplyDrafts.publishedReplies(
             in: [thread("t1", [note(2, author: me, body: "Fixed, thanks")])], userID: me)
         #expect(item.duplicateDraftIDs == [11])

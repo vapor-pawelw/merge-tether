@@ -121,7 +121,7 @@ struct MRBoardProjectorTests {
         }
         let pinned = try mr(1, "not_approved")
         var attention = try mr(2, "requested_changes")
-        attention.needsChanges = true
+        attention.catalogIssues.insert(.changesRequested)
         var ready = try mr(3, "mergeable")
         ready.approvalProgress = .init(completed: 2, required: 2)
         var waiting = try mr(4, "mergeable", pipeline: "running")
@@ -141,7 +141,7 @@ struct MRBoardProjectorTests {
         let ready = item(mergeable)
         var attention = item(try request(["iid": 43, "web_url": "https://gitlab.test/g/p/-/merge_requests/43",
             "detailed_merge_status": "requested_changes"]))
-        attention.needsChanges = true
+        attention.catalogIssues.insert(.changesRequested)
         let approvals = try JSONDecoder().decode(GitLabMergeRequestApprovalState.self, from: Data(
             #"{"rules":[{"approvals_required":1,"approved":true}]}"#.utf8))
         let status = AuthoredMergeRequestStatus(request: mergeable, approvals: approvals, discussionsResolved: true,
@@ -176,7 +176,6 @@ struct MRBoardProjectorTests {
             .init(id: scenario == "missingID" ? nil : 8, authorID: 3, note: note, discussionID: "thread",
                 resolveDiscussion: scenario == "resolve" || scenario == "both", position: nil),
         ]
-        evidence.draftCount = evidence.drafts.count
         let projector = MRBoardProjector(input: input(evidence: evidence, catalog: evidence))
         let action = try #require(projector.pendingUserAttention.humanActions.values.first)
         #expect(action.kind == .publication && action.action == .reviewDrafts)
@@ -185,10 +184,8 @@ struct MRBoardProjectorTests {
 
     @Test func rawAutomaticOwnershipCannotHideAnOlderPrivateCheckpointAfterDraftFlip() throws {
         var evidence = item(try request())
-        evidence.draftCount = 1
         evidence.drafts = [.init(id: 7, authorID: 3, note: "Private A", discussionID: nil, position: nil)]
-        evidence.canApprove = true
-        evidence.autoApproveReady = true
+        evidence.approvalObservation = .checked(manualVerdictPermitsApproval: true, automaticGatePassed: true, awaitsDiscussionReadiness: false)
         evidence.automaticDraftIDs = [7]
         evidence.observedDiscussionFingerprint = "conversation-a"
         let catalog = item(try request(["draft": true]))
@@ -218,7 +215,7 @@ struct MRBoardProjectorTests {
         #expect(phone.detail == human.explanation && phone.needsAttention == attention.hasAttention)
         #expect(phone.primaryCTA?.title == String(localized: human.actionLabel))
         #expect(phone.actions.allSatisfy { ![RemoteActionKind.publish, .approve, .merge, .enqueueMerge].contains($0.kind) })
-        #expect(input.attention?.evidence.first?.canApprove == true)
+        #expect(input.attention?.evidence.first?.approvalObservation != .unchecked)
     }
 
     @Test(arguments: ["host", "username", "revision"])
@@ -237,7 +234,7 @@ struct MRBoardProjectorTests {
     @Test(arguments: ["sha", "target_branch"])
     func displayDependenciesComeFromTheCurrentCatalogWithoutRewritingEvidence(_ change: String) throws {
         var evidence = item(try request())
-        evidence.draftCount = 1
+        evidence.drafts = attentionFixtureDrafts(1)
         let oldParent = try request(["iid": 40, "web_url": "https://gitlab.test/g/p/-/merge_requests/40"])
         evidence.dependencies = .init(request: try request(), stack: nil,
             dependencies: .init(requests: [oldParent], hasHiddenDependency: false))
@@ -256,7 +253,7 @@ struct MRBoardProjectorTests {
     @Test func aRetainedCatalogObservationDoesNotErasePrivateMaterialsOrChangeTheirAuthorRole() throws {
         var evidence = item(try request())
         evidence.requiresCommentReview = true
-        evidence.draftCount = 1
+        evidence.drafts = attentionFixtureDrafts(1)
         var input = input(evidence: evidence, catalog: evidence)
         input.retainedRequests = [try request(["author": ["id": 8, "username": "other", "name": "Other"]])]
         let projector = MRBoardProjector(input: input)
@@ -296,7 +293,6 @@ struct MRBoardProjectorTests {
             "status": change == "pipeline" ? "success" : "failed"], "has_conflicts": change != "conflict"])
         #expect(MRAttentionRecord.sameContext(old, current))
         var evidence = item(old)
-        evidence.draftCount = 1
         evidence.drafts = [.init(id: 7, authorID: 3, note: "Private reply", discussionID: nil, position: nil)]
         var input = input(evidence: evidence, catalog: item(current))
         input.requestFacts = [.init(request: old, conflictProcessing: change == "conflict", pipelineProcessing: change == "pipeline"),
@@ -475,7 +471,7 @@ struct MRBoardProjectorTests {
 
     @Test func feedbackFailurePresentationUsesTheCurrentCanonicalDecisionRevision() throws {
         var evidence = item(try request())
-        evidence.needsDiscussion = true
+        evidence.discussionObservation = .unresolvedIncoming
         evidence.observedDiscussionFingerprint = "checked-discussions"
         evidence.feedback = [.init(id: 20, author: .init(id: 7, username: "reviewer", name: "Reviewer"),
             system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "Please rename X")]

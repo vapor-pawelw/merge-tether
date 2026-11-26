@@ -1245,7 +1245,7 @@ final class TodoMonitorService {
         guard request.isOpen else { throw GlabError.decoding("The merge request is no longer open") }
     }
 
-    var attentionItems: [MergeRequestAttentionMonitor.Item] { boardProjector?.attentionItems ?? [] }
+    var attentionItems: [MergeRequestAttentionMonitor.ItemPresentation] { boardProjector?.attentionItems ?? [] }
 
     var assistantHandoffs: [AssistantAutomationRunner.Handoff] {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return [] }
@@ -1476,7 +1476,7 @@ final class TodoMonitorService {
     }
 
     func handleFeedbackManually(for item: MergeRequestAttentionMonitor.Item) async {
-        if let status = item.authorFeedbackStatus, !status.followUpNoteIDs.isEmpty, let request = item.authoredRequest {
+        if let status = item.verifiedFeedback.assessment, !status.followUpNoteIDs.isEmpty, let request = item.authoredRequest {
             await runVerifiedAuthorFeedback(request: request, noteIDs: status.followUpNoteIDs, fingerprint: status.fingerprint)
         } else {
             await runAttentionFeedback(for: item)

@@ -35,7 +35,6 @@ struct MRAttentionRecordTests {
         var record = MRAttentionRecord(evidence: item, catalog: item)
         #expect(record.catalogItem?.drafts == item.drafts)
         record.evidence.drafts.removeAll()
-        record.evidence.draftCount = 0
         record.evidence.requiresCommentReview = true
         #expect(record.catalogItem?.drafts.isEmpty == true)
         #expect(record.catalogItem?.requiresCommentReview == true)
@@ -83,8 +82,8 @@ struct MRAttentionRecordTests {
         let request = try MRDependencyPresentationTests().request(2)
         let draft = GitLabDraftNote(id: 11, authorID: 7, note: "Pending reply", discussionID: nil, position: nil)
         return .init(id: .init(projectID: 34, iid: 2), title: request.title, url: request.webURL,
-            draftCount: 1, commentReviewSnapshot: .init(request: request, discussions: []), drafts: [draft],
+            commentReviewSnapshot: .init(request: request, discussions: []), drafts: [draft],
             automaticDraftIDs: [11], observedDiscussionFingerprint: ReviewVerdict.fingerprint([]),
-            canApprove: true, autoApproveReady: true, canConfirmReReview: true, mergeRequest: request, isAuthored: true)
+            approvalObservation: .manualFallback, reReviewReadiness: .manual, reReviewFeedbackChecked: true, mergeRequest: request, isAuthored: true)
     }
 }

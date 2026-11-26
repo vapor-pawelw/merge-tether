@@ -112,7 +112,8 @@ import MergeTetherRemote
 
     static func card(_ item: MergeRequestAttentionMonitor.Item, account: String,
                      extraActions: [RemoteActionKind] = [], context: [String] = [],
-                     failedFollowUp: MRHumanAction.FailedFollowUp? = nil) -> RemoteCard {
+                     failedFollowUp: MRHumanAction.FailedFollowUp? = nil,
+                     confirmations: MRCardPresentation.ConfirmationOffers? = nil) -> RemoteCard {
         let drafts = item.drafts.enumerated().map { index, draft in
             let context: String?
             if case let .line(location) = draft.kind { context = location }
@@ -122,19 +123,18 @@ import MergeTetherRemote
                 publicationWarnings: DraftPublicationRisk(draft: draft)?.messages.map { String(localized: $0) },
                 replyRecipients: recipients?.isEmpty == false ? recipients : nil)
         }
-        var card = RemoteCard(id: "mr:\(item.id.projectID):\(item.id.iid)", title: item.title,
+        var card = RemoteCard(id: mergeRequestCardID(item.id), title: item.title,
             project: item.url.gitLabProjectPath, url: item.url,
             head: item.mergeRequest?.sha, detail: detail(item), drafts: drafts)
         card.contextRevision = item.mergeRequest.flatMap(contextRevision)
         card.dependencies = .init(summary: item.dependencies, projectID: item.id.projectID)
-        let publishable = item.publishAllDrafts
+        let offers = confirmations ?? .init(evidence: item, offersPublishShortcut: true)
         var kinds = extraActions.filter { $0 != .verify }
         if item.mergeRequest?.sha != nil {
-            if item.draftCount == drafts.count, !publishable.isEmpty, !item.requiresDiscussionRecheck,
-               item.drafts.allSatisfy({ $0.id != nil && AICommentAssessmentStore.safeForAutomaticPublication($0) }) { kinds.append(.publish) }
-            if item.canApprove { kinds.append(.approve) }
-            if item.canConfirmReReview, item.reReviewReadiness?.canConfirm == true { kinds.append(.reReview) }
-            if item.canFinishCommentReview { kinds.append(.finishCommentReview) }
+            if !offers.publishableDraftIDs.isEmpty { kinds.append(.publish) }
+            if offers.approve { kinds.append(.approve) }
+            if offers.confirmReReview { kinds.append(.reReview) }
+            if offers.finishCommentReview { kinds.append(.finishCommentReview) }
         }
         let metadata = item.drafts.flatMap { draft -> [String] in
             [String(draft.authorID), draft.discussionID ?? "", String(describing: draft.resolveDiscussion),
@@ -153,7 +153,7 @@ import MergeTetherRemote
             card.actions = Array(Set(kinds.map(\.rawValue))).sorted().compactMap { raw in
                 guard let kind = RemoteActionKind(rawValue: raw) else { return nil }
                 if kind == .publish {
-                    let draftIDs = publishable.compactMap(\.id).map(String.init)
+                    let draftIDs = offers.publishableDraftIDs.map(String.init)
                     guard let publicationToken = try? RemoteDigest.token([token] + draftIDs) else { return nil }
                     return RemoteAction(id: raw, kind: kind, token: publicationToken)
                 }
@@ -221,7 +221,10 @@ import MergeTetherRemote
         let other = board.otherCards(jobs: monitor.assistantHandoffs, host: monitor.glab.resolvedHost,
             username: monitor.glab.currentUsername, pinnedCards: monitor.settings.boardPins)
         var result = project(board: board, other: other, session: session, account: account,
-            intents: monitor.settings.mrActionIntents, conflictReceipts: monitor.settings.conflictReceipts)
+            intents: monitor.settings.mrActionIntents, conflictReceipts: monitor.settings.conflictReceipts) { row, _ in
+                .init(id: mergeRequestCardID(row.id), title: row.displayTitle,
+                    project: row.displayURL.gitLabProjectPath, url: row.displayURL)
+            }
         result.codingProvider = monitor.settings.automation.selectedAssistant?.rawValue
         if includesReviewBoard {
             result.hiddenReviews = monitor.hiddenReviewAssignments.filter { account == "\($0.target.username)@\($0.target.host)" }
@@ -236,14 +239,15 @@ import MergeTetherRemote
                 for id in ids { orderGroups[id] = orderGroup }
             }
         }
-        let rows = board.own + board.reviewed
+        let rows = Dictionary((board.own + board.reviewed).map { (mergeRequestCardID($0.id), $0) },
+            uniquingKeysWith: { first, _ in first })
         let proposals = Dictionary(board.proposals.map { (boardOrderCardID($0.target), $0.target) },
             uniquingKeysWith: { first, _ in first })
         for lane in result.lanes.indices {
             for index in result.lanes[lane].cards.indices {
                 var card = result.lanes[lane].cards[index]
                 var noticeTarget = proposals[card.id]
-                if let row = rows.first(where: { "mr:\($0.id.projectID):\($0.id.iid)" == card.id }) {
+                if let row = rows[card.id] {
                     let item = row.item
                     if row.newReviewAssignedAt != nil {
                         noticeTarget = monitor.scopeTarget(projectID: row.id.projectID, iid: row.id.iid, url: row.displayURL)
@@ -264,7 +268,7 @@ import MergeTetherRemote
                     let context = handoffs.map(\.id).sorted() + [(try? RemoteDigest.token(monitor.settings.automation)) ?? "",
                         item.authorFeedbackStatus?.fingerprint ?? ""] + feedbackIDs
                     card = self.card(item, account: account, extraActions: extras, context: context,
-                        failedFollowUp: followUp)
+                        failedFollowUp: followUp, confirmations: presentation.confirmationOffers)
                     card = self.presentation(card, model: presentation)
                     if includesReviewBoard {
                         card.boardTraits = .init(needsAttention: row.needsAttention,
@@ -292,12 +296,8 @@ import MergeTetherRemote
                         result.lanes[lane].cards[index] = card
                         continue
                     }
-                    let mergeStatus = monitor.authoredMergeRequests.hasSyncedCurrentCatalog
-                        ? matchingMergeStatus(for: row, statuses: monitor.authoredMergeRequests.requests) : nil
-                    card = mergePresentation(card, item: item, status: mergeStatus,
-                        evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext,
-                        hasCurrentCatalog: monitor.authoredMergeRequests.hasSyncedCurrentCatalog,
-                        waitingStatus: presentation.waitingStatus)
+                    card = mergePresentation(card, item: item, controls: presentation.mergeControls,
+                        waitingStatus: presentation.cardWaitingRequirements)
                     let busy = presentation.actionsBlocked
                     if busy { card.actions = [] }
                     else {
@@ -309,8 +309,7 @@ import MergeTetherRemote
                             card.actions.append(.init(id: RemoteActionKind.editReviewers.rawValue, kind: .editReviewers, token: token))
                         }
                         let jobPublication = monitor.manualReviewConsent(for: item).publicationMode
-                        card = mergeActions(card, item: item, status: mergeStatus, monitor: monitor, account: account,
-                            evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext)
+                        card = mergeActions(card, item: item, controls: presentation.mergeControls, monitor: monitor, account: account)
                         let followUpInProgress = row.hasFollowUpInProgress
                         let workerRetryIntentID = followUp?.retriesWorker == true ? followUp?.intent.id : nil
                         let eligibleIntents = row.attentionIntents.filter { intent in
@@ -474,8 +473,15 @@ import MergeTetherRemote
     static func mergePresentation(_ original: RemoteCard, item: MergeRequestAttentionMonitor.Item,
                                   status: AuthoredMergeRequestStatus?, evidenceMatchesCatalogContext: Bool = true,
                                   hasCurrentCatalog: Bool = true, waitingStatus: MRWaitingStatus? = nil) -> RemoteCard {
+        let controls = MRManualMergePresentation(item: item, candidate: status,
+            evidenceMatchesCatalogContext: evidenceMatchesCatalogContext, hasCurrentCatalog: hasCurrentCatalog)
+        return mergePresentation(original, item: item, controls: controls, waitingStatus: waitingStatus)
+    }
+
+    private static func mergePresentation(_ original: RemoteCard, item: MergeRequestAttentionMonitor.Item,
+                                          controls: MRManualMergePresentation, waitingStatus: MRWaitingStatus?) -> RemoteCard {
         guard item.isAuthored, let request = item.mergeRequest, request.isOpen else { return original }
-        let checked = hasCurrentCatalog && evidenceMatchesCatalogContext && status?.matchesCurrentRequest(request) == true ? status : nil
+        let checked = controls.status
         let title: LocalizedStringResource
         let detail: String?
         let blocker: ManualMergeBlocker
@@ -492,9 +498,7 @@ import MergeTetherRemote
             detail = String(localized: .MergeActions.mergeActionsConfirmHelp)
             blocker = .submission
         } else {
-            let currentBlocker: ManualMergeBlocker? = !evidenceMatchesCatalogContext ? .context
-                : !hasCurrentCatalog ? .checking : item.manualMergeBlocker(using: status)
-            guard let currentBlocker else { return original }
+            guard let currentBlocker = controls.blocker else { return original }
             if original.presentation?.working == true {
                 var busy = original
                 busy.actions.removeAll { [.merge, .enqueueMerge].contains($0.kind) }
@@ -526,7 +530,7 @@ import MergeTetherRemote
         case .prerequisite(.other): ordinaryWait = dependencyHold
         default: ordinaryWait = false
         }
-        let showsWaiting = ordinaryWait && !knownMergeFailure && hasCurrentCatalog && evidenceMatchesCatalogContext
+        let showsWaiting = ordinaryWait && !knownMergeFailure && controls.hasCurrentCatalog && controls.evidenceMatchesCatalogContext
         let status = String(localized: showsWaiting ? waitingStatus?.title ?? title : title)
         card.presentation?.status = status
         card.presentation?.statusPeopleMessage = nil
@@ -553,8 +557,7 @@ import MergeTetherRemote
                 card.primaryCTA = .init(title: String(localized: .Board.boardDetails), destination: .overview)
             }
         }
-        if evidenceMatchesCatalogContext, hasCurrentCatalog,
-           let recovery = item.manualFeedbackRecovery(), recovery.recoveryAction != nil,
+        if let recovery = controls.feedbackRecovery, recovery.recoveryAction != nil,
            checked?.submissionState.title == nil {
             if card.primaryCTA?.destination != .feedback, card.presentation?.secondaryCTA == nil {
                 card.presentation?.secondaryCTA = .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewFeedback), destination: .feedback)
@@ -572,19 +575,25 @@ import MergeTetherRemote
     static func mergeActions(_ original: RemoteCard, item: MergeRequestAttentionMonitor.Item,
                              status: AuthoredMergeRequestStatus?, monitor: TodoMonitorService, account: String,
                              evidenceMatchesCatalogContext: Bool = true) -> RemoteCard {
+        let controls = MRManualMergePresentation(item: item, candidate: status,
+            evidenceMatchesCatalogContext: evidenceMatchesCatalogContext, hasCurrentCatalog: true)
+        return mergeActions(original, item: item, controls: controls, monitor: monitor, account: account)
+    }
+
+    private static func mergeActions(_ original: RemoteCard, item: MergeRequestAttentionMonitor.Item,
+                                     controls: MRManualMergePresentation, monitor: TodoMonitorService, account: String) -> RemoteCard {
         var card = original
         guard item.isAuthored, item.mergeRequest?.author.username == monitor.glab.currentUsername,
               let request = item.mergeRequest, request.isOpen,
               let token = try? RemoteDigest.token([account, try RemoteDigest.token(request),
                   item.observedDiscussionFingerprint ?? "", try MergeSubmissionFingerprint.configuration(monitor.settings)]) else { return card }
-        if evidenceMatchesCatalogContext, let status, item.canOfferManualMerge(using: status), let action = status.action {
+        if let action = controls.action {
             let kind: RemoteActionKind = action == .mergeNow ? .merge : .enqueueMerge
             card.actions.append(.init(id: kind.rawValue, kind: kind, token: token,
                 confirmationText: String(localized: .MergeActions.mergeActionsConfirmHelp) + "\n\n"
                     + String(localized: monitor.settings.automation.assistant.manualMergeVerificationDisclosure)))
         }
-        if item.draftCount == 0, item.drafts.isEmpty, !item.requiresDiscussionRecheck,
-           item.needsDiscussion || item.hasOtherUnresolvedDiscussions || request.blockingDiscussionsResolved == false {
+        if controls.hasDiscussionBlock {
             card.actions.append(.init(id: "checkThreads", kind: .checkThreads, token: token,
                 confirmationText: String(localized: .MergeActions.mergeActionsResolveHelp)))
         }
@@ -699,8 +708,14 @@ import MergeTetherRemote
         return card
     }
 
+    private static func mergeRequestCardID(_ id: GitLabMergeRequestID) -> String { "mr:\(id.projectID):\(id.iid)" }
+
     static func project(board: MergeRequestBoardSnapshot, other: [MergeRequestBoardSnapshot.OtherCard], session: UUID, account: String,
-                        intents: [MRTodoIntent] = [], conflictReceipts: Set<MergeConflictReceipt> = []) -> RemoteBoard {
+                        intents: [MRTodoIntent] = [], conflictReceipts: Set<MergeConflictReceipt> = [],
+                        rowCard: ((MergeRequestBoardSnapshot.Row, Bool) -> RemoteCard)? = nil) -> RemoteBoard {
+        func projectedRow(_ row: MergeRequestBoardSnapshot.Row, allowsRemoval: Bool) -> RemoteCard {
+            rowCard?(row, allowsRemoval) ?? presentation(card(row.item, account: account), row: row, allowsRemoval: allowsRemoval)
+        }
         let others = other.compactMap { entry -> RemoteCard? in
             switch entry.content {
             case .completion(let completion): return card(completion, account: account)
@@ -726,8 +741,8 @@ import MergeTetherRemote
             }
         }
         return .init(hostSession: session, account: account, lanes: [
-            .init(id: .own, cards: board.own.map { presentation(card($0.item, account: account), row: $0, allowsRemoval: false) }),
-            .init(id: .reviewed, cards: board.reviewed.map { presentation(card($0.item, account: account), row: $0, allowsRemoval: true) }),
+            .init(id: .own, cards: board.own.map { projectedRow($0, allowsRemoval: false) }),
+            .init(id: .reviewed, cards: board.reviewed.map { projectedRow($0, allowsRemoval: true) }),
             .init(id: .other, cards: others),
         ])
     }
@@ -771,6 +786,9 @@ import MergeTetherRemote
         card.approvals = model.row.displayItem.approvalProgress.flatMap {
             .init(completed: min($0.completed, $0.required), required: $0.required,
                 received: $0.completed, requirementsSatisfied: $0.requirementsSatisfied)
+        }
+        if model.confirmationOffers.publishableDraftIDs.isEmpty {
+            card.actions.removeAll { $0.kind == .publish }
         }
         if !model.row.evidenceMatchesCatalogContext {
             card.actions.removeAll { [.publish, .approve, .reReview, .merge, .enqueueMerge].contains($0.kind) }
@@ -870,6 +888,10 @@ import MergeTetherRemote
     }
 
     static func detail(_ item: MergeRequestAttentionMonitor.Item) -> String {
+        detail(item.presentingVerifiedAuthorFeedback())
+    }
+
+    static func detail(_ item: MergeRequestAttentionMonitor.ItemPresentation) -> String {
         var reasons: [LocalizedStringResource] = []
         if item.mergeRequest?.draft == true { reasons.append(.Remote.remoteDraftMR) }
         if item.hasConflict { reasons.append(.Remote.remoteConflict) }

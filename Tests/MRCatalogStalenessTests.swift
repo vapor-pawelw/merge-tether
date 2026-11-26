@@ -9,7 +9,7 @@ struct MRCatalogStalenessTests {
     @Test func readyMergeActionMustRemainInInboxWhenOwnViewIsReadOnly() {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 1), title: "Ready",
             url: URL(string: "https://gitlab.example.org/g/p/-/merge_requests/1")!)
-        item.needsMerge = true
+        item.manualMergeAvailable = true
         #expect(item.needsAttention)
     }
 
@@ -550,7 +550,7 @@ struct MRCatalogStalenessTests {
             project: .init(id: 1, nameWithNamespace: "Group / Project", pathWithNamespace: "g/p"),
             author: .init(id: 9, username: "alice", name: "Alice", avatarURL: nil),
             target: .init(id: 1, iid: 1, title: "Fix", state: "opened", draft: false, workInProgress: false))
-        let inbox = InboxSnapshot(todos: [todo], attention: [item], host: host, username: "me")
+        let inbox = InboxSnapshot(todos: [todo], attention: [item.presentingVerifiedAuthorFeedback()], host: host, username: "me")
         #expect(inbox.attention.first?.hasOtherUnresolvedDiscussions == true)
         #expect(inbox.attention.first?.needsDiscussion == true)
 

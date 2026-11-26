@@ -217,10 +217,10 @@ struct MergeRequestBrowserSnapshotTests {
         let ready = try status(request, approved: true)
         var current = item(request)
         #expect(current.canOfferMerge(using: ready))
-        current.needsDiscussion = true
+        current.discussionObservation = .unresolvedIncoming
         #expect(!current.canOfferMerge(using: ready))
-        current.needsDiscussion = false
-        current.draftCount = 1
+        current.discussionObservation = .resolved
+        current.drafts = attentionFixtureDrafts(1)
         #expect(!current.canOfferMerge(using: ready))
     }
 

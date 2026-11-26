@@ -133,7 +133,7 @@ struct ReviewingContext {
     init(row: MergeRequestBoardSnapshot.Row, workflowState: MergeWorkflowActivityState? = nil,
          assistantReady: Bool = true, assistantChecking: Bool = false,
          draftAutomationAllowed: Bool = false) {
-        let item = row.item
+        let item = row.presented
         if let request = row.displayRequest, request.projectID == item.id.projectID,
            request.iid == item.id.iid, request.webURL == row.displayURL,
            let host = item.url.host, item.url.isGitLabMergeRequest(host: host, iid: item.id.iid),

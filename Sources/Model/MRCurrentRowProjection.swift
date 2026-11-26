@@ -13,11 +13,12 @@ struct MRCurrentRowProjection {
         }
     }
     let item: MergeRequestAttentionMonitor.Item
+    let presentation: MergeRequestAttentionMonitor.ItemPresentation
     let catalog: Catalog
     let evidenceMatchesCatalogContext: Bool
 
     init(evidence: MergeRequestAttentionMonitor.Item, catalog: MergeRequestAttentionMonitor.Item,
-         username: String?) {
+         username: String?, presentation: MergeRequestAttentionMonitor.ItemPresentation? = nil) {
         evidenceMatchesCatalogContext = evidence.id == catalog.id
             && evidence.url.gitLabTodoMergeRequestURL(host: catalog.url.host ?? "", iid: evidence.id.iid)
                 == catalog.url.gitLabTodoMergeRequestURL(host: catalog.url.host ?? "", iid: catalog.id.iid)
@@ -29,17 +30,18 @@ struct MRCurrentRowProjection {
             value.dependencies = catalog.dependencies ?? evidence.dependencies
         } else {
             // Retain A's private material without advertising its checked verdict as B's.
-            value.canApprove = false
-            value.autoApproveReady = false
-            value.canConfirmReReview = false
-            value.needsMerge = false
+            value.approvalObservation = .unchecked
+            value.reReviewFeedbackChecked = false
+            value.manualMergeAvailable = false
             value.automaticDraftIDs = []
             value.automaticPublicationPolicy = nil
-            if value.draftCount > 0 || !value.drafts.isEmpty { value.requiresDiscussionRecheck = true }
+            if !value.drafts.isEmpty { value.requiresDiscussionRecheck = true }
         }
         if evidenceMatchesCatalogContext {
             value.isAuthored = catalog.isAuthored || catalog.mergeRequest?.author.username == username
         }
-        item = value.presentingVerifiedAuthorFeedback()
+        item = value
+        self.presentation = presentation?.replacingEvidence(value, keepsMergeDecision: evidenceMatchesCatalogContext)
+            ?? value.presentingVerifiedAuthorFeedback()
     }
 }

@@ -68,6 +68,7 @@ private struct CommandCenterMRCardContent: View {
             if finishedState == nil {
                 MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext,
                     actionsBlocked: presentation.actionsBlocked || isStarting || finishingCommentReview,
+                    projectedControls: presentation.mergeControls,
                     onReviewFeedback: { openAttention(.feedback) },
                     showsExplanations: false, showsRecoveryActions: false, textFont: .callout,
                     coveredBlockers: shownRequirements?.coveredBlockers ?? [],
@@ -113,7 +114,7 @@ private struct CommandCenterMRCardContent: View {
                             MRActionProgressLabel(working: finishingCommentReview) { Text(.CommentReview.commentReviewFinish) }
                         }
                         .buttonStyle(.bordered)
-                        .disabled(isStarting || finishingCommentReview || presentation.actionsBlocked || !item.canFinishCommentReview)
+                        .disabled(isStarting || finishingCommentReview || presentation.actionsBlocked || !presentation.confirmationOffers.finishCommentReview)
                     }
                 }
             } else {
@@ -371,17 +372,8 @@ private struct CommandCenterMRCardContent: View {
     }
 
     private var reviewingContext: ReviewingContext { presentation.reviewingContext }
-    /// Requirements are listed only where the neutral status would have shown them.
-    private var shownRequirements: MRWaitingStatus? {
-        guard humanAction == nil, neutralStatus != nil, let waiting = presentation.waitingStatus,
-              !waiting.requirements.isEmpty else { return nil }
-        return waiting
-    }
-    private var neutralStatus: LocalizedStringResource? {
-        if presentation.mergeStage != nil { return nil }
-        if let state = presentation.confirmedSubmission, state != .none { return nil }
-        return presentation.cardNeutralStatus
-    }
+    private var shownRequirements: MRWaitingStatus? { presentation.cardWaitingRequirements }
+    private var neutralStatus: LocalizedStringResource? { presentation.cardNeutralStatus }
 
     @ViewBuilder
     private func primaryAction(hasDirectMergeAction: Bool) -> some View {
@@ -465,7 +457,7 @@ private struct CommandCenterMRCardContent: View {
                     start { await monitor.attention.finishCommentReview(item) }
                 }
             } else {
-                switch action.draftPublicationShortcut(for: item.drafts) {
+                switch presentation.draftPublicationShortcut {
                 case .review:
                     primary(.CommentReview.commentReviewReviewBeforePublishing) { openAttention(.drafts) }
                 case .publishAll:

@@ -64,15 +64,15 @@ import Testing
     @MainActor @Test func catalogFallbackDoesNotRestoreAutomaticallyOwnedReasons() {
         var catalog = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
             url: URL(string: "https://gitlab.example.test/g/p/-/merge_requests/2")!)
-        catalog.hasConflict = true
-        catalog.failedPipeline = true
-        let automatic = catalog.presentingHumanAttention(filtered: nil, unfiltered: catalog, assistantReady: true)
+        catalog.catalogIssues.insert(.conflict)
+        catalog.catalogIssues.insert(.failedPipeline)
+        let automatic = MergeRequestAttentionMonitor.ItemPresentation.forHumanAttention(catalog: catalog, filtered: nil, unfiltered: catalog, assistantReady: true)
         #expect(!automatic.needsAttention)
-        let manual = catalog.presentingHumanAttention(filtered: nil, unfiltered: catalog, assistantReady: false)
+        let manual = MergeRequestAttentionMonitor.ItemPresentation.forHumanAttention(catalog: catalog, filtered: nil, unfiltered: catalog, assistantReady: false)
         #expect(manual.hasConflict && manual.failedPipeline)
         var mergeDecision = catalog
-        mergeDecision.needsMerge = true
-        #expect(catalog.presentingHumanAttention(filtered: mergeDecision, unfiltered: catalog,
+        mergeDecision.manualMergeAvailable = true
+        #expect(MergeRequestAttentionMonitor.ItemPresentation.forHumanAttention(catalog: catalog, filtered: mergeDecision.presentingVerifiedAuthorFeedback(), unfiltered: catalog,
             assistantReady: false).needsMerge)
     }
 

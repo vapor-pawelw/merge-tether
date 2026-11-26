@@ -3,6 +3,31 @@ import Testing
 @testable import MergeTether
 
 struct MergeActionReadinessTests {
+    @MainActor @Test(arguments: [false, true])
+    func phoneUsesTheMacMergeOfferWhenReReviewFindsAConcreteConcern(_ hasConcern: Bool) throws {
+        let checked = try status()
+        var evidence = try item(checked)
+        if hasConcern {
+            evidence.reReviewReadiness = .blocked([.init(noteID: 12, reason: "A merge condition remains open")])
+        }
+        let row = MergeRequestBoardSnapshot.Row(item: evidence, latestJob: nil, intents: [])
+        let mac = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
+            allowsRemoval: false, assistantReady: true, mergeStatus: checked)
+        let suite = "MergeOfferParity.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: "gitlab.example.test", username: "me")
+        let monitor = TodoMonitorService(settings: settings, glab: glab)
+        defer { monitor.stopTimer() }
+        let remote = RemoteBoardAdapter.mergeActions(RemoteBoardAdapter.card(evidence, account: "me@gitlab.example.test"),
+            item: evidence, status: checked, monitor: monitor, account: "me@gitlab.example.test")
+        #expect(remote.actions.contains { $0.kind == .merge } == (mac.mergeControls.action == .mergeNow))
+        #expect((mac.mergeControls.action == .mergeNow) == !hasConcern)
+    }
+
     @Test(arguments: ["discussions", "capability"])
     func independentFeedbackRecoverySurvivesAnotherPrimaryMergeBlocker(_ gate: String) throws {
         let checked = try status(blocker: gate == "discussions" ? "discussions" : "",
@@ -115,18 +140,18 @@ struct MergeActionReadinessTests {
         let checked = try status()
         var listed = try item(checked, removing: ["user"])
         switch blocker {
-        case "drafts": listed.draftCount = 1
+        case "drafts": listed.drafts = attentionFixtureDrafts(1)
         case "draftList": listed.drafts = [.init(id: 7, authorID: 3, note: "Private reply", discussionID: nil, position: nil)]
         case "review": listed.requiresCommentReview = true
         case "recheck": listed.requiresDiscussionRecheck = true
-        case "discussion": listed.needsDiscussion = true
-        case "otherDiscussion": listed.hasOtherUnresolvedDiscussions = true
+        case "discussion": listed.discussionObservation = .unresolvedIncoming
+        case "otherDiscussion": listed.discussionObservation = .unresolvedOther
         case "feedback": listed.feedback = [try JSONDecoder().decode(GitLabMergeRequestDiscussion.Note.self,
             from: Data("{\"id\":5,\"body\":\"Please check\"}".utf8))]
-        case "changes": listed.needsChanges = true
-        case "conflict": listed.hasConflict = true
-        case "pipeline": listed.failedPipeline = true
-        default: listed.needsPipelineHandoff = true
+        case "changes": listed.catalogIssues.insert(.changesRequested)
+        case "conflict": listed.catalogIssues.insert(.conflict)
+        case "pipeline": listed.catalogIssues.insert(.failedPipeline)
+        default: listed.pipelineHandoffPending = true
         }
         #expect(!listed.canOfferManualMerge(using: checked))
         #expect(listed.manualMergeBlocker(using: checked) != nil)
@@ -171,7 +196,7 @@ struct MergeActionReadinessTests {
         let checked = try status()
         var listed = try item(checked, removing: ["user"])
         listed.feedback = [try feedbackNote()]
-        listed.needsDiscussion = true
+        listed.discussionObservation = .unresolvedIncoming
         listed.observedDiscussionFingerprint = "conversation"
         listed.authorFeedbackStatus = .init(head: scenario == "head" ? "old" : checked.request.sha!,
             fingerprint: scenario == "conversation" ? "old" : "conversation",
@@ -306,7 +331,7 @@ struct MergeActionReadinessTests {
             : change == "description" ? ["description": "A new prerequisite before merge"] : [:]
         var listed = try item(checked, removing: ["user"], changes: changes)
         listed.feedback = [try #require(threads.first?.notes.first)]
-        listed.needsDiscussion = true
+        listed.discussionObservation = .unresolvedIncoming
         listed.observedDiscussionFingerprint = ReviewVerdict.fingerprint(observedThreads)
         listed.authorFeedbackStatus = .init(head: checked.request.sha!, fingerprint: fingerprint,
             semanticContextFingerprint: checked.request.semanticContextFingerprint, phase: .complete,

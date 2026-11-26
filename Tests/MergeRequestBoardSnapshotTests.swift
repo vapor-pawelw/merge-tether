@@ -14,7 +14,7 @@ struct MergeRequestBoardSnapshotTests {
         var checkpoint = item(42)
         checkpoint.mergeRequest = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(json.utf8))
         checkpoint.requiresCommentReview = true
-        checkpoint.draftCount = 1
+        checkpoint.drafts = attentionFixtureDrafts(1)
         checkpoint.observedDiscussionFingerprint = "checked-conversation"
         var catalog = checkpoint
         catalog.mergeRequest = try JSONDecoder().decode(GitLabMergeRequest.self,
@@ -41,7 +41,7 @@ struct MergeRequestBoardSnapshotTests {
         original.approvalProgress = MergeRequestApprovalProgress(completed: 1, required: 2)
         var checkpoint = original
         checkpoint.approvalProgress = nil
-        checkpoint.needsMerge = true
+        checkpoint.manualMergeAvailable = true
         let board = MergeRequestBoardSnapshot(own: [original], reviewed: [], todos: [], attention: [checkpoint],
             handoffs: [], host: host, username: "me")
         let row = try #require(board.own.first)
@@ -51,7 +51,7 @@ struct MergeRequestBoardSnapshotTests {
     private let host = "gitlab.example.org"
     private func item(_ iid: Int, attention: Bool = false) -> MergeRequestAttentionMonitor.Item {
         .init(id: .init(projectID: 1, iid: iid), title: "MR \(iid)",
-              url: URL(string: "https://\(host)/g/p/-/merge_requests/\(iid)")!, needsDiscussion: attention)
+              url: URL(string: "https://\(host)/g/p/-/merge_requests/\(iid)")!, discussionObservation: attention ? .unresolvedIncoming : .resolved)
     }
     private func todo(_ id: Int, projectID: Int = 1, iid: Int = 42, host: String = "gitlab.example.org",
                       type: TargetType = .mergeRequest, action: ActionName = .reviewRequested, suffix: String = "", draft: Bool = false) -> Todo {
@@ -179,7 +179,7 @@ struct MergeRequestBoardSnapshotTests {
         var oldAttention = finished
         oldAttention.mergeRequest = try JSONDecoder().decode(GitLabMergeRequest.self,
             from: Data(json.replacingOccurrences(of: "\"state\":\"\(state)\"", with: "\"state\":\"opened\"").utf8))
-        oldAttention.needsDiscussion = true
+        oldAttention.discussionObservation = .unresolvedIncoming
         let pin = try #require(BoardCardPin.mergeRequest(host: host, username: "me", projectID: 1, iid: 1))
         let board = MergeRequestBoardSnapshot(own: [item(1, attention: true), finished, item(3)], reviewed: [],
             todos: [], attention: [oldAttention], handoffs: [], host: host, username: "me", pinnedCards: [pin],
@@ -231,7 +231,7 @@ struct MergeRequestBoardSnapshotTests {
         let note = GitLabMergeRequestDiscussion.Note(id: 40, author: .init(id: 8, username: "reviewer", name: nil),
             system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "Please handle the fallback.")
         var result = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 42), title: request.title,
-            url: request.webURL, needsDiscussion: true, mergeRequest: request, isAuthored: true, feedback: [note])
+            url: request.webURL, discussionObservation: .unresolvedIncoming, mergeRequest: request, isAuthored: true, feedback: [note])
         result.observedDiscussionFingerprint = "current-conversation"
         result.authorFeedbackStatus = .init(head: "abc", fingerprint: "current-conversation", phase: .complete,
             findings: [.init(id: 40, discussionID: "thread", reviewerID: 8, reviewerUsername: "reviewer",
@@ -244,8 +244,9 @@ struct MergeRequestBoardSnapshotTests {
         let original = try addressedFeedbackItem()
         let row = try #require(snapshot(own: [original]).own.first)
         #expect(!row.needsAttention)
-        #expect(!row.item.needsDiscussion && row.item.feedback.isEmpty)
-        #expect(row.item.authorFeedbackStatus?.waitingForReviewer == true)
+        #expect(!row.presented.needsDiscussion && row.presented.feedback.isEmpty)
+        #expect(row.item.needsDiscussion && !row.item.feedback.isEmpty)
+        #expect(row.presented.authorFeedbackStatus?.waitingForReviewer == true)
         #expect(original.needsDiscussion && !original.feedback.isEmpty)
     }
 
@@ -261,7 +262,7 @@ struct MergeRequestBoardSnapshotTests {
         original.authorFeedbackStatus?.phase = .checking
         let row = try #require(snapshot(own: [original]).own.first)
         #expect(!row.needsAttention)
-        #expect(row.item.authorFeedbackStatus?.phase == .checking)
+        #expect(row.presented.authorFeedbackStatus?.phase == .checking)
     }
 
     @Test func boardUsesTheSameHumanActionsAsTheMenuIndicator() throws {
@@ -273,22 +274,22 @@ struct MergeRequestBoardSnapshotTests {
         #expect(board.own.map(\.id.iid) == [43, 42])
         #expect(board.own.first?.needsAttention == true)
         #expect(board.own.last?.needsAttention == false)
-        #expect(board.own.last?.item.needsAttention == false)
+        #expect(board.own.last?.presented.needsAttention == false)
         #expect(board.own.last?.item.needsDiscussion == true)
     }
 
     @Test func awaitingReviewerPreservesIndependentActions() throws {
         var original = try addressedFeedbackItem()
-        original.draftCount = 2
-        original.hasConflict = true
-        original.failedPipeline = true
-        original.needsChanges = true
-        original.hasOtherUnresolvedDiscussions = true
+        original.drafts = attentionFixtureDrafts(2)
+        original.catalogIssues.insert(.conflict)
+        original.catalogIssues.insert(.failedPipeline)
+        original.catalogIssues.insert(.changesRequested)
+        original.discussionObservation = .unresolvedOther
         let row = try #require(snapshot(own: [original]).own.first)
         #expect(row.needsAttention)
         #expect(row.item.draftCount == 2 && row.item.hasConflict && row.item.failedPipeline && row.item.needsChanges)
         #expect(row.item.needsDiscussion)
-        #expect(row.item.feedback.isEmpty)
+        #expect(row.presented.feedback.isEmpty)
     }
 
     @Test func failedVerificationCannotHideUnresolvedFeedback() throws {
@@ -304,7 +305,7 @@ struct MergeRequestBoardSnapshotTests {
         original.observedDiscussionFingerprint = snapshot == "missing-snapshot" ? nil : snapshot
         let row = try #require(self.snapshot(own: [original]).own.first)
         #expect(row.needsAttention && row.item.needsDiscussion && !row.item.feedback.isEmpty)
-        #expect(row.item.authorFeedbackStatus == nil)
+        #expect(row.presented.authorFeedbackStatus == nil)
     }
 
     @Test(arguments: [AuthorFeedbackStatus.Phase.checking, .failed, .waitingPublication], ["new-conversation", "missing-snapshot"])
@@ -313,8 +314,8 @@ struct MergeRequestBoardSnapshotTests {
         original.authorFeedbackStatus?.phase = phase
         original.observedDiscussionFingerprint = text == "missing-snapshot" ? nil : text
         let row = try #require(snapshot(own: [original]).own.first)
-        #expect(row.item.authorFeedbackStatus?.phase == phase)
-        #expect(row.item.needsDiscussion && row.item.feedback.map(\.id) == [40])
+        #expect(row.presented.authorFeedbackStatus?.phase == phase)
+        #expect(row.item.needsDiscussion && row.presented.feedback.map(\.id) == [40])
     }
 
     @Test func verdictForAnOlderSourceCannotHideFeedback() throws {
@@ -323,7 +324,7 @@ struct MergeRequestBoardSnapshotTests {
             findings: original.authorFeedbackStatus!.findings, addressedNoteIDs: [40])
         let row = try #require(snapshot(own: [original]).own.first)
         #expect(row.needsAttention && row.item.needsDiscussion && !row.item.feedback.isEmpty)
-        #expect(row.item.authorFeedbackStatus == nil)
+        #expect(row.presented.authorFeedbackStatus == nil)
     }
 
     @Test func waitingForReviewerDoesNotHideAnUnaddressedNoteOrMissingReply() throws {
@@ -332,11 +333,11 @@ struct MergeRequestBoardSnapshotTests {
             system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "Also cover the timeout.")
         original.feedback.append(unassessed)
         var row = try #require(snapshot(own: [original]).own.first)
-        #expect(row.needsAttention && row.item.feedback.map(\.id) == [41])
+        #expect(row.needsAttention && row.presented.feedback.map(\.id) == [41])
         original.feedback.removeLast()
         original.authorFeedbackStatus?.replyNoteIDs = [40]
         row = try #require(snapshot(own: [original]).own.first)
-        #expect(row.needsAttention && row.item.feedback.map(\.id) == [40])
+        #expect(row.needsAttention && row.presented.feedback.map(\.id) == [40])
     }
 
     @Test func reviewedDraftMRsStayLastEvenWhenTheyNeedAttention() {
@@ -365,15 +366,15 @@ struct MergeRequestBoardSnapshotTests {
     @Test func attentionReasonsAndJobStayOnMRCardInsteadOfOtherLane() {
         let request = item(42)
         var attention = MergeRequestAttentionMonitor.Item(id: request.id, title: request.title,
-            url: URL(string: request.url.absoluteString + "#note_40")!, draftCount: 2, canApprove: true,
-            needsPipelineHandoff: true)
-        attention.needsDiscussion = true
+            url: URL(string: request.url.absoluteString + "#note_40")!, drafts: attentionFixtureDrafts(2),
+            pipelineHandoffPending: true)
+        attention.discussionObservation = .unresolvedIncoming
         let job = job(42, state: .failed)
         let board = MergeRequestBoardSnapshot(own: [request], reviewed: [], todos: [todo(1)], attention: [attention],
             handoffs: [job], host: host, username: "me", routedTodoIDs: [1])
         #expect(board.own.count == 1)
         #expect(board.own.first?.item.draftCount == 2)
-        #expect(board.own.first?.item.canApprove == true)
+        #expect(board.own.first?.item.canApprove == false)
         #expect(board.own.first?.item.needsPipelineHandoff == true)
         #expect(board.own.first?.latestJob?.id == job.id)
         #expect(board.otherMergeRequests.isEmpty && board.otherTodos.isEmpty)

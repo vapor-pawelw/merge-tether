@@ -219,7 +219,7 @@ struct MRDependencyLoaderTests {
             title: child.title, url: child.webURL, mergeRequest: child, dependencies: summary)
         var attention = catalog
         attention.dependencies = nil
-        attention.needsMerge = true
+        attention.manualMergeAvailable = true
         let board = MergeRequestBoardSnapshot(own: [catalog], reviewed: [], todos: [], attention: [attention],
             handoffs: [], host: "gitlab.example.test", username: "author7")
         #expect(board.own.first?.item.dependencies == summary)

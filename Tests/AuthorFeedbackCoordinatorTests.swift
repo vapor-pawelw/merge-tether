@@ -337,11 +337,12 @@ struct AuthorFeedbackCoordinatorTests {
             let status = try #require(coordinator.status(projectID: 1, iid: 2))
             let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
             var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
-                url: request.webURL, humanActionRequired: false, approvalProgress: .init(completed: 0, required: 2),
+                url: request.webURL, approvalProgress: .init(completed: 0, required: 2),
                 mergeRequest: request, isAuthored: true)
             item.authorFeedbackStatus = status
             item.observedDiscussionFingerprint = status.fingerprint
-            let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+            let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [],
+                attentionPresentation: .init(evidence: item, humanActionRequired: false))
             let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row), allowsRemoval: false, assistantReady: true)
             #expect(model.status == "Feedback addressed, waiting for thread resolution from @alice · Needs 2 more approvals")
             #expect(!model.working && model.humanAction == nil)
@@ -951,12 +952,12 @@ struct AuthorFeedbackCoordinatorTests {
             #expect(fixture.settings.assistantHandoffs[0].execution?.state == state)
             #expect(!fixture.resolved)
 
-            item.hasConflict = true
+            item.catalogIssues.insert(.conflict)
             let conflict = MergeRequestBoardSnapshot.Row(item: item, latestJob: job, intents: [])
             #expect(conflict.needsAttention)
             #expect(MRHumanAction(row: conflict, assistantReady: true)?.kind == .intent)
 
-            item.hasConflict = false
+            item.catalogIssues.remove(.conflict)
             item.observedDiscussionFingerprint = "changed conversation"
             let stale = MergeRequestBoardSnapshot.Row(item: item, latestJob: job, intents: [])
             #expect(stale.stoppedJobNeedsAttention)
@@ -1255,7 +1256,7 @@ struct AuthorFeedbackCoordinatorTests {
             let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(requestJSON.utf8))
             let discussions = try fixture.discussions()
             var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
-                url: request.webURL, needsDiscussion: true, mergeRequest: request, isAuthored: true,
+                url: request.webURL, discussionObservation: .unresolvedIncoming, mergeRequest: request, isAuthored: true,
                 feedback: discussions.flatMap(\.notes).filter { $0.author?.id != 3 })
             item.observedDiscussionFingerprint = ReviewVerdict.fingerprint(discussions)
             item.authorFeedbackStatus = status
@@ -1286,11 +1287,12 @@ struct AuthorFeedbackCoordinatorTests {
             #expect(!fixture.resolved)
             let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
             var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
-                url: request.webURL, needsDiscussion: true, mergeRequest: request, isAuthored: true,
+                url: request.webURL, discussionObservation: .unresolvedIncoming, mergeRequest: request, isAuthored: true,
                 feedback: [try #require(fixture.discussions().first?.notes.first)])
             item.observedDiscussionFingerprint = ReviewVerdict.fingerprint(try fixture.discussions())
             item.authorFeedbackStatus = status
-            let row = MergeRequestBoardSnapshot.Row(item: item.presentingVerifiedAuthorFeedback(), latestJob: nil, intents: [])
+            let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [],
+                attentionPresentation: item.presentingVerifiedAuthorFeedback())
             #expect(row.needsAttention == requiresReply)
             #expect((MRHumanAction(row: row, assistantReady: true)?.action == .handleFeedback) == requiresReply)
         }
@@ -1671,7 +1673,7 @@ struct AuthorFeedbackCoordinatorTests {
             #expect(status.phase == .complete)
             #expect(status.replyNoteIDs == (missingReply ? [10] : []))
             var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
-                url: request.webURL, needsDiscussion: true, mergeRequest: request, isAuthored: true,
+                url: request.webURL, discussionObservation: .unresolvedIncoming, mergeRequest: request, isAuthored: true,
                 feedback: [try #require(fixture.discussions().first?.notes.first)])
             item.observedDiscussionFingerprint = ReviewVerdict.fingerprint(try fixture.discussions())
             item.authorFeedbackStatus = status

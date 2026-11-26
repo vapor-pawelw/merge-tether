@@ -107,7 +107,7 @@ extension MergeRequestAttentionMonitor.Item {
         guard isAuthored, let request = mergeRequest, request.isOpen,
               request.webURL == url, request.projectID == id.projectID, request.iid == id.iid else { return nil }
         let feedbackBlocker = mergeFeedbackBlocker(for: request)
-            ?? (presentingVerifiedAuthorFeedback().feedback.isEmpty ? nil : .unverifiedComments)
+            ?? (verifiedFeedback.outstandingNotes.isEmpty ? nil : .unverifiedComments)
         guard let blocker = feedbackBlocker else { return nil }
         let replyIDs: [Int]
         if blocker == .reply, let status = authorFeedbackStatus {
@@ -136,12 +136,12 @@ extension MergeRequestAttentionMonitor.Item {
         }
         guard let action = status.action else { return .capability }
         if let blocker = catalogMergeBlocker(request, action: action) { return blocker }
-        if requiresCommentReview || draftCount > 0 || !drafts.isEmpty { return .prerequisite(.commentReview) }
+        if requiresCommentReview || !drafts.isEmpty { return .prerequisite(.commentReview) }
         if let reason = mergeFeedbackBlocker(for: request) { return .feedback(reason) }
-        let verified = presentingVerifiedAuthorFeedback()
-        if !verified.feedback.isEmpty { return .feedback(.unverifiedComments) }
-        if verified.needsDiscussion || verified.hasOtherUnresolvedDiscussions { return .prerequisite(.discussions) }
-        if verified.needsChanges { return .prerequisite(.changesRequested) }
+        let verified = verifiedFeedback
+        if !verified.outstandingNotes.isEmpty { return .feedback(.unverifiedComments) }
+        if verified.discussionsRemainOpen || hasOtherUnresolvedDiscussions { return .prerequisite(.discussions) }
+        if verified.changesRemainRequested { return .prerequisite(.changesRequested) }
         if hasConflict { return .prerequisite(.conflicts) }
         if failedPipeline { return .prerequisite(.pipeline) }
         if needsPipelineHandoff { return .pipelineHandoff }
@@ -197,5 +197,47 @@ extension MergeRequestAttentionMonitor.Item {
         case .mergeRequestBlocked: return .prerequisite(.dependencies)
         default: return .prerequisite(.other)
         }
+    }
+}
+
+/// The checked merge decision used by Mac controls and by the phone snapshot.
+struct MRManualMergePresentation {
+    let status: AuthoredMergeRequestStatus?
+    let blocker: ManualMergeBlocker?
+    let action: MergeSubmissionAction?
+    let hasDiscussionBlock: Bool
+    let feedbackRecovery: ManualFeedbackRecovery?
+    let hasCurrentCatalog: Bool
+    let evidenceMatchesCatalogContext: Bool
+
+    static func candidate(for item: MergeRequestAttentionMonitor.Item,
+                          in statuses: [AuthoredMergeRequestStatus]) -> AuthoredMergeRequestStatus? {
+        guard let request = item.mergeRequest else { return nil }
+        return statuses.first { $0.matchesCurrentRequest(request) }
+            ?? statuses.first { $0.id == item.id }
+    }
+
+    init(item: MergeRequestAttentionMonitor.Item, candidate: AuthoredMergeRequestStatus?,
+         evidenceMatchesCatalogContext: Bool, hasCurrentCatalog: Bool) {
+        self.hasCurrentCatalog = hasCurrentCatalog
+        self.evidenceMatchesCatalogContext = evidenceMatchesCatalogContext
+        let current = evidenceMatchesCatalogContext && hasCurrentCatalog
+        let request = item.mergeRequest
+        status = current && request?.webURL == item.url
+            && request.map { candidate?.matchesCurrentRequest($0) == true } == true ? candidate : nil
+
+        if !evidenceMatchesCatalogContext {
+            blocker = .context
+        } else if !hasCurrentCatalog {
+            blocker = .checking
+        } else if candidate != nil && status == nil {
+            blocker = .context
+        } else {
+            blocker = item.manualMergeBlocker(using: status)
+        }
+        let owned = item.isAuthored && request?.isOpen == true
+        action = owned && blocker == nil && item.reReviewReadiness?.hasConcreteConcerns != true ? status?.action : nil
+        hasDiscussionBlock = status?.blockers.contains(.discussions) == true || request?.blockingDiscussionsResolved == false
+        feedbackRecovery = current ? item.manualFeedbackRecovery() : nil
     }
 }

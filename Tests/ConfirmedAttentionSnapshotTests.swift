@@ -57,16 +57,17 @@ struct ConfirmedAttentionSnapshotTests {
     @Test func cardsAndPhoneKeepTheConfirmedExplanationWhileShowingReadProgress() throws {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
             url: URL(string: "https://host/group/repo/-/merge_requests/2")!)
-        item.draftCount = 1
-        item.humanActionRequired = true
+        item.drafts = attentionFixtureDrafts(1)
         item.draftProofRecoveryFailure = "Missing test evidence"
-        let previous = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        let previous = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [],
+            attentionPresentation: .init(evidence: item, humanActionRequired: true, verifiesFeedback: false))
         let action = try #require(MRHumanAction(row: previous, assistantReady: true))
         var cache = ConfirmedAttentionSnapshot()
         cache.update(.init(account: account, candidates: [candidate(true)], humanActions: [id: action]))
         item.draftProofRecoveryFailure = nil
         item.authorFeedbackStatus = .init(head: "head", fingerprint: "notes", phase: .checking)
-        let checking = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        let checking = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [],
+            attentionPresentation: .init(evidence: item, humanActionRequired: true, verifiesFeedback: false))
         cache.update(.init(account: account, candidates: [candidate(false, working: true)], checkingIDs: [id]))
         let model = MRCardPresentation(row: checking, reviewingContext: ReviewingContext(row: checking),
             allowsRemoval: false, assistantReady: true, preservedHumanAction: cache.humanActions[id], isRefreshingAttention: true)
@@ -83,12 +84,13 @@ struct ConfirmedAttentionSnapshotTests {
     func readChecksShowProgressWhilePreservingAttentionAndRemoteActionFences(_ visible: Bool) throws {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
             url: URL(string: "https://host/group/repo/-/merge_requests/2")!)
-        item.draftCount = 1
-        item.humanActionRequired = true
-        let before = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        item.drafts = attentionFixtureDrafts(1)
+        let before = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [],
+            attentionPresentation: .init(evidence: item, humanActionRequired: true, verifiesFeedback: false))
         let action = try #require(MRHumanAction(row: before, assistantReady: true))
         item.authorFeedbackStatus = .init(head: "head", fingerprint: "notes", phase: .checking)
-        let checking = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        let checking = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [],
+            attentionPresentation: .init(evidence: item, humanActionRequired: true, verifiesFeedback: false))
         let model = MRCardPresentation(row: checking, reviewingContext: ReviewingContext(row: checking),
             allowsRemoval: false, assistantReady: true, preservedHumanAction: action, isRefreshingAttention: true,
             showsReadProgress: visible)

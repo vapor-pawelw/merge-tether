@@ -276,7 +276,7 @@ struct MRHumanAction {
     init?(row: MergeRequestBoardSnapshot.Row, assistantReady: Bool,
           confirmationState: MergeRequestAttentionMonitor.ConfirmationState? = nil,
           automaticallyPublishedDraftIDs: Set<Int> = [], automaticMergePolicyHold: LocalizedStringResource? = nil) {
-        let item = row.item
+        let item = row.presented
         guard row.needsAttention, row.latestJob?.operationalExecution?.state.isActive != true,
               !item.aiOriginChecking,
               item.authorFeedbackStatus?.phase != .checking || item.draftProofRecoveryChecking || row.isCheckingReadOnlyReconciliation,
@@ -308,7 +308,7 @@ struct MRHumanAction {
             return
         }
 
-        if item.requiresCommentReview, item.draftCount == 0, item.drafts.isEmpty {
+        if item.requiresCommentReview, item.drafts.isEmpty {
             self.init(kind: .commentReview, action: .reviewDrafts, message: .CommentReview.commentReviewPending)
             return
         }
@@ -324,7 +324,7 @@ struct MRHumanAction {
             return
         }
         if let failure = item.draftProofRecoveryFailure {
-            if let reply = PreparedReplyContext.rejected(in: item).first {
+            if let reply = PreparedReplyContext.rejected(in: item.evidence).first {
                 self.init(kind: .verificationFailure, action: .reviewDrafts,
                           message: .PreparedReplies.preparedRepliesNeedsReview,
                           detail: reply.reason, summary: reply.summary, preparedReply: reply)
@@ -337,7 +337,7 @@ struct MRHumanAction {
         }
 
         let knownAutomatic = automaticallyPublishedDraftIDs.intersection(Set(item.drafts.compactMap(\.id))).count
-        let count = max(item.draftCount, item.drafts.count, item.authorFeedbackStatus?.pendingDraftCount ?? 0) - knownAutomatic
+        let count = max(item.draftCount, item.authorFeedbackStatus?.pendingDraftCount ?? 0) - knownAutomatic
         let unchecked = item.awaitingRemoteVerification || item.requiresDiscussionRecheck || confirmationState == .changed
         // A draft repeating a published reply is deleted, not published; it never offers direct publication.
         let duplicates = item.duplicateDraftIDs.count
@@ -363,7 +363,7 @@ struct MRHumanAction {
             || item.authorFeedbackStatus?.needsAttention == true || item.autoApproveReady
         let hasOutstandingFeedback = item.authorFeedbackStatus?.needsAttention == true
             || item.needsChanges || !item.feedback.isEmpty || item.reReviewReadiness?.hasConcreteConcerns == true
-        if assistantReady, MRVerificationRetry.reReview.isAvailable(for: item), item.authorFeedbackStatus?.needsAttention != true {
+        if assistantReady, MRVerificationRetry.reReview.isAvailable(for: item.evidence), item.authorFeedbackStatus?.needsAttention != true {
             self.init(kind: .verificationFailure, action: .retryReReview, message: .MRHumanAction.mrHumanActionVerificationFailure)
         } else if item.canConfirmReReview, item.reReviewReadiness?.hasConcreteConcerns != true {
             self.init(kind: .reviewDecision, action: .reviewDecision, message: Self.reviewDecisionMessage(item),
@@ -418,8 +418,8 @@ struct MRHumanAction {
                 requiresPublishedReply = true
             } else if item.authorFeedbackStatus?.codeReviewRequests.isEmpty == false {
                 source = .privateCodeQuestion
-            } else if let blocker = Self.reReviewBlockers(item).first {
-                source = blocker.isPrivateCodeQuestion ? .privateCodeQuestion : .reReview(blocker, Self.reReviewEvidence(item))
+            } else if let blocker = Self.reReviewBlockers(item.evidence).first {
+                source = blocker.isPrivateCodeQuestion ? .privateCodeQuestion : .reReview(blocker, Self.reReviewEvidence(item.evidence))
             }
         }
     }
@@ -430,14 +430,14 @@ struct MRHumanAction {
         self.preparedReply = preparedReply
     }
 
-    private static func feedbackFinding(_ item: MergeRequestAttentionMonitor.Item) -> AuthorFeedbackPolicy.Finding? {
+    private static func feedbackFinding(_ item: MergeRequestAttentionMonitor.ItemPresentation) -> AuthorFeedbackPolicy.Finding? {
         item.authorFeedbackStatus?.primaryFinding
     }
 
-    private static func feedbackSummary(_ item: MergeRequestAttentionMonitor.Item) -> String? {
+    private static func feedbackSummary(_ item: MergeRequestAttentionMonitor.ItemPresentation) -> String? {
         if let finding = feedbackFinding(item) { return finding.summary }
         if item.authorFeedbackStatus?.replyNoteIDs.isEmpty == false { return nil }
-        return item.authorFeedbackStatus?.codeReviewRequests.first?.summary ?? reReviewBlockers(item).first?.summary
+        return item.authorFeedbackStatus?.codeReviewRequests.first?.summary ?? reReviewBlockers(item.evidence).first?.summary
     }
 
     private static func reReviewBlockers(_ item: MergeRequestAttentionMonitor.Item) -> [ReReviewReadiness.Blocker] {
@@ -447,11 +447,11 @@ struct MRHumanAction {
         }
     }
 
-    private static func feedbackAction(_ item: MergeRequestAttentionMonitor.Item) -> Action {
+    private static func feedbackAction(_ item: MergeRequestAttentionMonitor.ItemPresentation) -> Action {
         feedbackFinding(item)?.state == .needsVerification ? .reviewFeedback : .handleFeedback
     }
 
-    private static func feedbackMessage(_ item: MergeRequestAttentionMonitor.Item) -> LocalizedStringResource {
+    private static func feedbackMessage(_ item: MergeRequestAttentionMonitor.ItemPresentation) -> LocalizedStringResource {
         if let finding = feedbackFinding(item) {
             if finding.manualDecision != nil { return .AuthorFeedback.authorFeedbackManualDecision }
             if finding.state == .needsChanges { return .MRHumanAction.mrHumanActionFeedback }
@@ -482,16 +482,16 @@ struct MRHumanAction {
         return selectedStatus.primaryFinding
     }
 
-    private static func feedbackDetail(_ item: MergeRequestAttentionMonitor.Item) -> String? {
+    private static func feedbackDetail(_ item: MergeRequestAttentionMonitor.ItemPresentation) -> String? {
         if let finding = feedbackFinding(item) {
             guard let reason = finding.reason, !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
             return reason
         }
         if item.authorFeedbackStatus?.replyNoteIDs.isEmpty == false { return nil }
-        return item.authorFeedbackStatus?.codeReviewRequests.first?.question ?? reReviewBlockers(item).first?.reason
+        return item.authorFeedbackStatus?.codeReviewRequests.first?.question ?? reReviewBlockers(item.evidence).first?.reason
     }
 
-    private static func reviewDecisionMessage(_ item: MergeRequestAttentionMonitor.Item) -> LocalizedStringResource {
+    private static func reviewDecisionMessage(_ item: MergeRequestAttentionMonitor.ItemPresentation) -> LocalizedStringResource {
         switch item.reReviewReadiness {
         case .failed, .unavailable: .MRHumanAction.mrHumanActionVerificationFailure
         case .blocked: .MRHumanAction.mrHumanActionFeedback
