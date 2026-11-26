@@ -1,0 +1,55 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "crashReporting.decline" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {"stringUnit" : {"state" : "translated", "value" : "Continue without reporting"}},
+        "pl" : {"stringUnit" : {"state" : "translated", "value" : "Kontynuuj bez raportowania"}}
+      }
+    },
+    "crashReporting.details" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {"stringUnit" : {"state" : "translated", "value" : "Help the MergeTether maintainer diagnose crashes. If you opt in, MergeTether sends the crash time and type, app and system versions, MergeTether stack frames, and a random installation ID to Sentry. You can turn reporting off at any time in Settings."}},
+        "pl" : {"stringUnit" : {"state" : "translated", "value" : "Pomóż twórcy MergeTether diagnozować awarie. Jeśli wyrazisz zgodę, MergeTether wyśle do Sentry czas i typ awarii, wersję aplikacji i systemu, fragment śladu stosu dotyczący MergeTether oraz losowy identyfikator instalacji. Raportowanie możesz w każdej chwili wyłączyć w ustawieniach."}}
+      }
+    },
+    "crashReporting.enable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {"stringUnit" : {"state" : "translated", "value" : "Send crash reports"}},
+        "pl" : {"stringUnit" : {"state" : "translated", "value" : "Wysyłaj raporty o awariach"}}
+      }
+    },
+    "crashReporting.privacy" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {"stringUnit" : {"state" : "translated", "value" : "Crash reporting privacy"}},
+        "pl" : {"stringUnit" : {"state" : "translated", "value" : "Prywatność raportów o awariach"}}
+      }
+    },
+    "crashReporting.settings" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {"stringUnit" : {"state" : "translated", "value" : "Settings"}},
+        "pl" : {"stringUnit" : {"state" : "translated", "value" : "Ustawienia"}}
+      }
+    },
+    "crashReporting.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {"stringUnit" : {"state" : "translated", "value" : "Crash reporting"}},
+        "pl" : {"stringUnit" : {"state" : "translated", "value" : "Raportowanie awarii"}}
+      }
+    },
+    "crashReporting.unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {"stringUnit" : {"state" : "translated", "value" : "Crash reporting is unavailable in this build."}},
+        "pl" : {"stringUnit" : {"state" : "translated", "value" : "Raportowanie awarii jest niedostępne w tej kompilacji."}}
+      }
+    }
+  },
+  "version" : "1.0"
+}

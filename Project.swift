@@ -43,6 +43,15 @@ if !updateFeed.isEmpty || !updatePublicKey.isEmpty {
     }
 }
 
+func crashReportingDSN(_ setting: String) -> String {
+    let value = ProcessInfo.processInfo.environment[setting] ?? ""
+    let publicSentryDSN = #"\Ahttps://[a-fA-F0-9]{32}@o[0-9]+\.ingest(\.(us|de))?\.sentry\.io/[1-9][0-9]{0,19}\z"#
+    guard value.isEmpty || value.range(of: publicSentryDSN, options: .regularExpression) != nil else {
+        fatalError("\(setting) must be a public Sentry Cloud DSN. Never supply a token or a private service URL.")
+    }
+    return value
+}
+
 let project = Project(
     name: "MergeTether",
     options: .options(
@@ -77,6 +86,7 @@ let project = Project(
             infoPlist: .extendingDefault(with: [
                 "CFBundleDisplayName": .string("MergeTether"),
                 "MergeTetherRelayOrigin": .string(relayOrigin),
+                "MergeTetherCrashDSN": .string(crashReportingDSN("TUIST_MERGETETHER_IOS_CRASH_DSN")),
                 "CFBundleShortVersionString": .string("$(MARKETING_VERSION)"),
                 "CFBundleVersion": .string("$(CURRENT_PROJECT_VERSION)"),
                 "CFBundleURLTypes": .array([.dictionary([
@@ -100,7 +110,10 @@ let project = Project(
                       "Sources/Views/ApprovalBadgeColor.swift", "Sources/Views/InboxUpdateTimestamp.swift",
                       "Sources/Views/BoardInsertionDrag.swift", "Sources/Views/MRDependencyBadge.swift",
                       "Sources/Views/MRCardMetadataLayout.swift", "Sources/Views/ReviewerEditingControls.swift",
-                      "Sources/Views/MRIssueTag.swift"],
+                      "Sources/Views/MRIssueTag.swift", "Sources/Services/CrashConsent.swift",
+                      "Sources/Services/CrashReport.swift", "Sources/Services/CrashReporting.swift",
+                      "Sources/Services/CrashUpload.swift",
+                      "Sources/Views/Settings/CrashReportingSettingsSection.swift"],
             resources: ["Resources/MergeActions.xcstrings", "Resources/Remote.xcstrings", "Resources/Board.xcstrings",
                         "Resources/MRHumanAction.xcstrings", "Resources/AuthorFeedback.xcstrings", "Resources/MRDependencies.xcstrings",
                         "Resources/CommentReview.xcstrings", "Resources/FeedbackSuggestions.xcstrings", "Resources/DraftRegeneration.xcstrings",
@@ -108,6 +121,7 @@ let project = Project(
                         "Resources/AgentExplanation.xcstrings",
                         "Resources/AssistantContext.xcstrings", "Resources/MRFreshness.xcstrings",
                         "Resources/MRIssues.xcstrings", "Resources/ProviderGlyphs.xcassets",
+                        "Resources/CrashReporting.xcstrings", "Resources/PrivacyInfo.xcprivacy",
                         "iOS/Resources/**"],
             dependencies: [.target(name: "MergeTetherRemote")],
             settings: .settings(base: [
@@ -126,6 +140,7 @@ let project = Project(
                 "LSUIElement": .boolean(false),
                 "CFBundleDisplayName": .string("MergeTether"),
                 "MergeTetherRelayOrigin": .string(relayOrigin),
+                "MergeTetherCrashDSN": .string(crashReportingDSN("TUIST_MERGETETHER_MACOS_CRASH_DSN")),
                 "CFBundleName": .string("MergeTether"),
                 "CFBundleShortVersionString": .string("$(MARKETING_VERSION)"),
                 "CFBundleVersion": .string("$(CURRENT_PROJECT_VERSION)"),

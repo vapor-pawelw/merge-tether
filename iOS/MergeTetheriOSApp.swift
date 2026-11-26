@@ -2,6 +2,12 @@ import SwiftUI
 @main struct MergeTetheriOSApp: App {
     @State private var model = makeModel()
     @Environment(\.scenePhase) private var phase
+    private let crashReporting = CrashReporting.shared
+
+    init() {
+        crashReporting.startIfAllowed()
+    }
+
     @MainActor private static func makeModel() -> RemotePhoneModel {
         #if DEBUG
         if let preview = RemoteDemo.makeModel() { return preview }
@@ -10,7 +16,14 @@ import SwiftUI
     }
     var body: some Scene {
         WindowGroup {
-            RemoteBoardView(model: model)
+            Group {
+                if crashReporting.needsConsent {
+                    RemoteCrashReportingConsentView(reporting: crashReporting)
+                } else {
+                    RemoteBoardView(model: model)
+                }
+            }
+                .environment(crashReporting)
                 .environment(\.remoteAvatarThumbnails, model.avatarThumbnails)
                 .environment(\.codingProviderGlyph, model.state.board?.codingProvider.flatMap(CodingProviderGlyph.init(rawValue:)))
                 .onOpenURL { model.offerPairing($0.absoluteString) }

@@ -97,12 +97,19 @@ info = {'CFBundleShortVersionString': settings['MARKETING_VERSION'],
 if os.environ.get('WRONG_VERSION'): info['CFBundleShortVersionString'] = '0.1.0'
 if os.environ.get('WRONG_BUILD'): info['CFBundleVersion'] = '1'
 info_path.write_bytes(plistlib.dumps(info))
+if settings.get('DEBUG_INFORMATION_FORMAT') == 'dwarf-with-dsym' and not os.environ.get('NO_DSYM'):
+    symbol_root = pathlib.Path(args[args.index('-archivePath') + 1]) / 'dSYMs' if 'archive' in args else app.parent
+    symbols = symbol_root / (app.name + '.dSYM') / 'Contents/Resources/DWARF'
+    symbols.mkdir(parents=True)
+    (symbols / app.stem).write_bytes(b'private debug symbols')
 """)
         self.executable("ditto", """
-import pathlib, sys, zipfile
+import pathlib, shutil, sys, zipfile
 app, output = pathlib.Path(sys.argv[-2]), pathlib.Path(sys.argv[-1])
 if '-x' in sys.argv:
     with zipfile.ZipFile(app) as archive: archive.extractall(output)
+elif '-c' not in sys.argv:
+    shutil.copytree(app, output, dirs_exist_ok=True)
 else:
     with zipfile.ZipFile(output, 'w') as archive:
         for path in app.rglob('*'):
@@ -176,6 +183,46 @@ if os.environ.get('STAPLE_FAIL') and 'stapler' in sys.argv: sys.exit(1)
         calls = [json.loads(line) for line in (self.root / "notary-calls.jsonl").read_text().splitlines()]
         self.assertEqual(sum('submit' in call for call in calls), 2)
         self.assertEqual(sum('validate' in call for call in calls), 2)
+
+    def test_debug_symbols_are_exported_separately_from_public_artifacts(self):
+        symbols = self.root / "private-symbols"
+        self.env["MERGETETHER_CRASH_SYMBOLS_DIR"] = str(symbols)
+        result = self.run_script("build-release.sh", "9.8.7", "--platform", "all", "--unsigned")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        exported = symbols / "MergeTether-9.8.7-1-all"
+        self.assertEqual({path.name for path in exported.iterdir()}, {"MergeTether.app.dSYM", "MergeTetheriOS.app.dSYM"})
+        release = self.root / "release/unsigned"
+        self.assertFalse(list(release.rglob("*.dSYM")))
+        for path in release.glob("*.zip"):
+            with zipfile.ZipFile(path) as artifact:
+                self.assertFalse(any(".dSYM" in name for name in artifact.namelist()))
+
+    def test_debug_symbols_preserve_older_builds_and_refuse_to_replace_existing_build(self):
+        symbols = self.root / "private-symbols"
+        self.env["MERGETETHER_CRASH_SYMBOLS_DIR"] = str(symbols)
+        first = self.run_script("build-release.sh", "9.8.7", "--build-number", "1", "--unsigned")
+        self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+        dwarf = Path("MergeTether.app.dSYM/Contents/Resources/DWARF/MergeTether")
+        first_symbols = symbols / "MergeTether-9.8.7-1-macos" / dwarf
+        self.assertTrue(first_symbols.is_file())
+        first_symbols.write_bytes(b"symbols from the first build")
+
+        second = self.run_script("build-release.sh", "9.8.7", "--build-number", "2", "--unsigned")
+        self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+        self.assertTrue((symbols / "MergeTether-9.8.7-2-macos" / dwarf).is_file())
+
+        repeated = self.run_script("build-release.sh", "9.8.7", "--build-number", "1", "--unsigned")
+        self.assertNotEqual(repeated.returncode, 0)
+        self.assertIn("symbol output already exists", repeated.stderr)
+        self.assertEqual(first_symbols.read_bytes(), b"symbols from the first build")
+
+    def test_requested_debug_symbols_must_exist_before_packaging(self):
+        self.env["MERGETETHER_CRASH_SYMBOLS_DIR"] = str(self.root / "private-symbols")
+        self.env["NO_DSYM"] = "1"
+        result = self.run_script("build-release.sh", "9.8.7", "--unsigned")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("missing dSYM", result.stderr)
+        self.assertFalse(list((self.root / "release/unsigned").glob("*.zip")))
 
     def test_default_requires_release_credentials_before_building(self):
         result = self.run_script("build-release.sh", "9.8.7")

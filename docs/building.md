@@ -55,6 +55,32 @@ Use an empty `TUIST_MERGETETHER_RELAY_CONFIG_FILE` to generate without a relay.
 Distribution builds use their explicit release configuration. Keep personal
 relay files outside source control.
 
+## Crash reporting
+
+MergeTether can send reports to a private Sentry Cloud project. On macOS it reads the app's system crash reports after relaunch. On iOS it uses Apple's MetricKit. Create a dedicated project for macOS and another if you distribute a configured iOS build. For the public macOS workflow, set the following GitHub Actions configuration:
+
+| Setting | Location | Purpose |
+| --- | --- | --- |
+| `MERGETETHER_MACOS_CRASH_DSN` | Repository variable | Public client key and ingestion address embedded in the Mac app |
+| `MERGETETHER_SENTRY_ORG` | Repository variable | Sentry organization slug for symbol uploads |
+| `MERGETETHER_SENTRY_MACOS_PROJECT` | Repository variable | Sentry macOS project slug for symbol uploads |
+| `SENTRY_AUTH_TOKEN` | Repository secret | CI authentication to upload debug symbols |
+
+When the DSN is configured, the release workflow uploads the matching Mac dSYM before publishing. Keep the DSN limited to event intake, set a DSN rate limit in Sentry, and enable IP scrubbing there. Leave public issue sharing disabled. The relay and GitLab credentials are separate from Sentry configuration.
+
+For local builds, set `TUIST_MERGETETHER_MACOS_CRASH_DSN` or `TUIST_MERGETETHER_IOS_CRASH_DSN` when running `mise exec -- tuist generate --no-open` or a build script that generates the project. The values must be public Sentry Cloud DSNs. Empty values disable reporting for the respective target, including in forks by default. In a configured test build, use a Sentry project dedicated to testing and confirm an opted-in crash arrives from a Mac or physical iPhone with readable app frames. MetricKit delivery and timing are OS-dependent.
+
+For local releases made with `scripts/build-release.sh`, set `MERGETETHER_CRASH_SYMBOLS_DIR` to a private absolute directory to retain the corresponding dSYMs outside the distributable archives. The release script stores symbols in `MergeTether-<version>-<build>-<platform>/` and refuses to replace an existing directory. Upload the dSYM corresponding to the installed build using `sentry-cli debug-files upload --wait` with the token and the matching Sentry organization and project in the CLI environment. [Sentry symbol upload guide](https://docs.sentry.io/platforms/apple/guides/macos/dsym/)
+
+### Crash reporting privacy
+
+Reporting is optional and starts after you choose **Send crash reports**. If you opt in, MergeTether uses crash diagnostics made available by the operating system to help the [MergeTether maintainer](https://github.com/vapor-pawelw) fix crashes. Sentry processes those reports and keeps crash events for 30 or 90 days depending on the plan. The HTTPS connection also exposes your source IP to Sentry. [Sentry retention](https://www.sentry.help/en/articles/13964336-why-does-the-event-count-in-my-issue-not-match-up-with-the-count-in-the-all-events-tab-of-the-issue) · [Sentry privacy policy](https://sentry.io/privacy/)
+
+The report includes the crash time and type, the app and system versions, addresses and build symbols' identifiers for MergeTether's stack frames, and a random installation ID. The ID groups reports from the same installation. Raw OS reports, GitLab and relay details, agent output, and local paths are excluded from the upload.
+
+To withdraw consent, turn off **Send crash reports** in **Settings → General** on the Mac or open the gear menu on iPhone or iPad. MergeTether cancels pending uploads and removes the local identifier. Reports already received follow Sentry's retention period. [Contact the maintainer](https://github.com/vapor-pawelw) with questions about reporting or data requests. For a separately distributed build, the operator of its configured Sentry project handles those requests.
+
+
 ## Command-line build
 
 ```bash

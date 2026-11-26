@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Choose whether to send crash reports during setup or in Settings on Mac, iPhone and iPad. Reporting is off by default and is available in builds configured for Sentry.
+
 - Update MergeTether from the Mac toolbar or **Settings → General**. Keep working while the update is prepared, restart when it is ready, and see what changed after relaunch.
 
 - Apply coding agent changes from **Settings → Agent** with **Apply Changes**. A note under the picker explains when automation starts using the selected agent. Choose Codex or Claude, with recommended models for each role and an option to show all supported models.

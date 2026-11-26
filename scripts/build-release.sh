@@ -25,6 +25,7 @@ Signed builds require --relay-config (or a nonempty TUIST_MERGETETHER_RELAY_CONF
 or an explicit --no-relay. Without either, an unsigned build keeps the relay origin
 already configured for generation (for example the mise user default).
 Signing identities and credentials must already exist; this script creates neither.
+Set MERGETETHER_CRASH_SYMBOLS_DIR to a private absolute directory to retain matching dSYMs.
 HELP
 }
 
@@ -181,6 +182,14 @@ trap 'rm -rf "$SCRATCH"' EXIT
 mkdir -p "$SCRATCH/artifacts"
 ARTIFACTS=()
 COMMON_SETTINGS=("MARKETING_VERSION=${VERSION}" "CURRENT_PROJECT_VERSION=${BUILD_NUMBER}")
+SYMBOLS_ROOT="${MERGETETHER_CRASH_SYMBOLS_DIR:-}"
+if [[ -n "$SYMBOLS_ROOT" ]]; then
+    [[ "$SYMBOLS_ROOT" == /* ]] || fail "MERGETETHER_CRASH_SYMBOLS_DIR must be an absolute private directory"
+    SYMBOLS_DIR="${SYMBOLS_ROOT%/}/MergeTether-${VERSION}-${BUILD_NUMBER}-${PLATFORM}"
+    [[ ! -e "$SYMBOLS_DIR" && ! -L "$SYMBOLS_DIR" ]] || fail "symbol output already exists: $SYMBOLS_DIR"
+    mkdir "$SCRATCH/symbols"
+    COMMON_SETTINGS+=(DEBUG_INFORMATION_FORMAT=dwarf-with-dsym)
+fi
 echo "==> Generating project for ${VERSION} (${BUILD_NUMBER}), platform ${PLATFORM}"
 case "$RELAY_SOURCE" in
     config) TUIST_MERGETETHER_RELAY_CONFIG_FILE="$RELAY_CONFIG" tuist generate --no-open ;;
@@ -211,6 +220,11 @@ verify_signature() {
         [[ "$details" == *'(runtime)'* && "$details" == *'Timestamp='* ]] || fail "macOS distribution signature requires hardened runtime and secure timestamp"
     fi
 }
+collect_debug_symbols() {
+    [[ -n "$SYMBOLS_ROOT" ]] || return 0
+    [[ -d "$1" ]] || fail "missing dSYM for crash symbolication"
+    ditto "$1" "$SCRATCH/symbols/${1##*/}"
+}
 notarize() {
     local submission="$SCRATCH/notary-result.json"
     if ! xcrun notarytool submit "$1" --keychain-profile "$NOTARY_PROFILE" --wait --output-format json >"$submission"; then
@@ -234,6 +248,7 @@ if [[ "$MACOS" -eq 1 ]]; then
         "${COMMON_SETTINGS[@]}" "${SIGNING_SETTINGS[@]}" clean build
     APP="$SCRATCH/macOS/Build/Products/Release/MergeTether.app"
     validate_bundle "$APP/Contents/Info.plist" com.vaporpw.MergeTether
+    collect_debug_symbols "$APP.dSYM"
     if [[ "$UNSIGNED" -eq 0 ]]; then
         verify_signature "$APP" 'Developer ID Application: '
         ditto -c -k --keepParent "$APP" "$SCRATCH/notarization.zip"
@@ -262,6 +277,7 @@ if [[ "$IOS" -eq 1 ]]; then
             "${COMMON_SETTINGS[@]}" CODE_SIGN_IDENTITY= CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO clean build
         IOS_APP="$SCRATCH/iOS/Build/Products/Release-iphoneos/MergeTetheriOS.app"
         validate_bundle "$IOS_APP/Info.plist" com.vaporpw.MergeTether.iOS
+        collect_debug_symbols "$IOS_APP.dSYM"
         IOS_NAME="MergeTetheriOS-${VERSION}-unsigned-device.zip"
         ditto -c -k --keepParent "$IOS_APP" "$SCRATCH/artifacts/$IOS_NAME"
     else
@@ -271,6 +287,7 @@ if [[ "$IOS" -eq 1 ]]; then
             CODE_SIGN_STYLE=Manual "MERGETETHER_IOS_PROVISIONING_PROFILE=${IOS_PROFILE}" archive
         IOS_APP="$SCRATCH/iOS.xcarchive/Products/Applications/MergeTetheriOS.app"
         validate_bundle "$IOS_APP/Info.plist" com.vaporpw.MergeTether.iOS
+        collect_debug_symbols "$SCRATCH/iOS.xcarchive/dSYMs/MergeTetheriOS.app.dSYM"
         verify_signature "$IOS_APP" 'Apple Distribution: '
         xcodebuild -exportArchive -archivePath "$SCRATCH/iOS.xcarchive" -exportPath "$SCRATCH/export" -exportOptionsPlist "$IOS_EXPORT_OPTIONS"
         shopt -s nullglob
@@ -313,6 +330,14 @@ for name in names:
     'artifacts': artifacts,
 }, indent=2) + '\n')
 PY
+if [[ -n "$SYMBOLS_ROOT" ]]; then
+    mkdir -p "$SYMBOLS_ROOT"
+    (umask 077; mkdir "$SYMBOLS_DIR") || fail "could not create symbol output: $SYMBOLS_DIR"
+    if ! ditto "$SCRATCH/symbols" "$SYMBOLS_DIR"; then
+        rm -rf "$SYMBOLS_DIR"
+        fail "could not export debug symbols"
+    fi
+fi
 for name in "${ARTIFACTS[@]}"; do
     cp "$SCRATCH/artifacts/$name" "$SCRATCH/artifacts/$name.sha256" "$RELEASE_DIR/"
 done
