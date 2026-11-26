@@ -363,7 +363,7 @@ struct MRBoardProjector {
             assistantReady: input.assistantReady, assistantChecking: input.assistantChecking,
             draftAutomationAllowed: input.automation.hasEnabledAutomation && row.displayRequest.map {
                 input.automation.scope.permits($0, host: input.account?.host ?? "", username: input.account?.username ?? "")
-            } == true)
+            } == true, viewerUsername: input.account?.username)
     }
     private static func rowState(_ row: MergeRequestBoardSnapshot.Row, input: RowInput) -> BoardAttentionPresenter.RowState {
         .init(row: row, confirmationBusy: input.confirmationBusy,

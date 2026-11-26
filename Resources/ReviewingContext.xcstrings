@@ -409,6 +409,20 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Brak działań do wykonania. Trwa monitorowanie aktualizacji."}}
       }
     },
+    "reviewing.viewerApprovalPending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "You haven’t approved this revision."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Brakuje Twojej akceptacji tej wersji."}}
+      }
+    },
+    "reviewing.requiredApprovalsPending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Waiting for required approvals."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Oczekiwanie na wymagane akceptacje."}}
+      }
+    },
     "reviewing.viewDiscussions": {
       "extractionState": "manual",
       "localizations": {

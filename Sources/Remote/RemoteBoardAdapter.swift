@@ -725,9 +725,12 @@ import MergeTetherRemote
                 return jobProgress(card, job: job, intents: intents, conflictReceipts: conflictReceipts)
             }
         }
+        let viewerUsername = String(account.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false).first ?? "")
         return .init(hostSession: session, account: account, lanes: [
             .init(id: .own, cards: board.own.map { presentation(card($0.item, account: account), row: $0, allowsRemoval: false) }),
-            .init(id: .reviewed, cards: board.reviewed.map { presentation(card($0.item, account: account), row: $0, allowsRemoval: true) }),
+            .init(id: .reviewed, cards: board.reviewed.map {
+                presentation(card($0.item, account: account), row: $0, allowsRemoval: true, viewerUsername: viewerUsername)
+            }),
             .init(id: .other, cards: others),
         ])
     }
@@ -749,11 +752,12 @@ import MergeTetherRemote
 
     static func presentation(_ original: RemoteCard, row: MergeRequestBoardSnapshot.Row,
                              assistantReady: Bool = true, allowsRemoval: Bool? = nil,
+                             viewerUsername: String? = nil,
                              confirmationState: MergeRequestAttentionMonitor.ConfirmationState? = nil,
                              automaticallyPublishedDraftIDs: Set<Int> = [],
                              reviewing: ReviewingContext? = nil, busy: Bool = false) -> RemoteCard {
         let model = MRCardPresentation(row: row,
-            reviewingContext: reviewing ?? ReviewingContext(row: row, assistantReady: assistantReady),
+            reviewingContext: reviewing ?? ReviewingContext(row: row, assistantReady: assistantReady, viewerUsername: viewerUsername),
             allowsRemoval: allowsRemoval ?? !row.item.isAuthored, assistantReady: assistantReady,
             confirmationState: confirmationState, automaticallyPublishedDraftIDs: automaticallyPublishedDraftIDs,
             automaticConflictProgress: busy)

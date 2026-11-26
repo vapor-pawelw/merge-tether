@@ -242,7 +242,7 @@ struct MRCardPresentation {
         return reviewingContext.status == .activityUnknown ? reviewingContext.presenceMessage : reviewingContext.statusMessage
     }
     var reviewCompletionInDetailsOnly: Bool {
-        allowsRemoval && reviewingContext.isMonitoringCompletedReview && !working && !refreshFailed
+        allowsRemoval && reviewingContext.hasCompletedApprovals && !working && !refreshFailed
             && generalNeutralStatus == nil && humanAction == nil
     }
     var cardNeutralStatus: LocalizedStringResource? { reviewCompletionInDetailsOnly ? nil : neutralStatus }

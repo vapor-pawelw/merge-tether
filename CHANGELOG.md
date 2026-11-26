@@ -26,7 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Restore hidden reviews for three days while they are open. Add an expired open review again with **+**, which now explains when an MR is already merged or closed.
 
-- Keep the completed review summary in MR Details when nothing needs attention. Reviewing cards stay shorter on Mac and iOS.
+- Keep completed reviews compact on Mac and iOS once the required approvals, including yours, are in place. Reviewing cards show missing approvals and discussions that block merge.
 
 - Remember **Don't ask again** when hiding a merge request from the Reviewing menu on Mac.
 

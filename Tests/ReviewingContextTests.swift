@@ -5,8 +5,8 @@ import Testing
 
 @MainActor
 struct ReviewingContextTests {
-    private func request(draft: Bool = false) throws -> GitLabMergeRequest {
-        try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":7,"username":"alice","name":"Alice Author"},"title":"Example","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":\#(draft),"sha":"abc","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
+    private func request(draft: Bool = false, discussionsResolved: Bool? = nil) throws -> GitLabMergeRequest {
+        try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":7,"username":"alice","name":"Alice Author"},"title":"Example","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":\#(draft),"sha":"abc","source_branch":"feature","target_branch":"main","labels":[],"blocking_discussions_resolved":\#(discussionsResolved.map(String.init) ?? "null")}"#.utf8))
     }
     private func item() throws -> MergeRequestAttentionMonitor.Item {
         let request = try request()
@@ -402,11 +402,15 @@ struct ReviewingContextTests {
         var item = try item()
         item.reviewingProgress = .current
         item.humanActionRequired = false
+        item.approvalProgress = .init(completed: 2, required: 2, approvedBy: [
+            .init(id: 3, username: "user3", name: "Reviewer", avatarURL: nil),
+            .init(id: 4, username: "user4", name: "Other reviewer", avatarURL: nil)
+        ])
         let discussions: [GitLabMergeRequestDiscussion] = openThread
             ? [.init(id: "thread", notes: [note(1, user: 3)])] : []
         item.reviewingActivity = ReviewingActivity(discussions: discussions, reviewerID: 3, authorID: 7)
         let snapshot = row(item)
-        let model = MRCardPresentation(row: snapshot, reviewingContext: ReviewingContext(row: snapshot),
+        let model = MRCardPresentation(row: snapshot, reviewingContext: ReviewingContext(row: snapshot, viewerUsername: "user3"),
             allowsRemoval: true, assistantReady: true)
 
         #expect(model.status == (openThread ? "Open review thread from @user3" : "Review run completed"))
@@ -423,6 +427,51 @@ struct ReviewingContextTests {
         #expect(phone.boardStatus == (openThread ? model.status : nil))
         #expect(phone.boardNextStep == model.cardNextStep)
         #expect(phone.primaryCTA?.destination == (openThread ? .discussions : nil))
+    }
+
+    @Test func completedReviewShowsAnotherReviewersBlockingThreadOnBothBoards() throws {
+        var item = try item()
+        item.mergeRequest = try request(discussionsResolved: false)
+        item.approvalProgress = .init(completed: 0, required: 2)
+        item.reviewingProgress = .current
+        item.humanActionRequired = false
+        item.reviewingActivity = .init(discussions: [.init(id: "thread", notes: [note(1, user: 4)])],
+            reviewerID: 3, authorID: 7)
+        let snapshot = row(item)
+        let model = MRCardPresentation(row: snapshot, reviewingContext: ReviewingContext(row: snapshot),
+            allowsRemoval: true, assistantReady: true)
+        let phone = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "user3@host"), model: model)
+
+        #expect(model.cardNeutralStatus.map { String(localized: $0) } == "Open review thread from @user4")
+        #expect(model.cardNextStep == "No action needed. Waiting for other review threads to be resolved.")
+        #expect(phone.boardStatus == model.status)
+        #expect(phone.boardNextStep == model.cardNextStep)
+        #expect(phone.primaryCTA?.destination == .discussions)
+        #expect(phone.needsAttention == false)
+    }
+
+    @Test(arguments: [false, true])
+    func completedReviewKeepsPendingApprovalVisible(_ viewerApproved: Bool) throws {
+        var item = try item()
+        item.reviewingProgress = .current
+        item.humanActionRequired = false
+        let approvers: [Todo.Author] = viewerApproved ? [
+            .init(id: 3, username: "user3", name: "Reviewer", avatarURL: nil)
+        ] : [
+            .init(id: 4, username: "user4", name: "First reviewer", avatarURL: nil),
+            .init(id: 5, username: "user5", name: "Second reviewer", avatarURL: nil)
+        ]
+        item.approvalProgress = .init(completed: approvers.count, required: 2, approvedBy: approvers)
+        let snapshot = row(item)
+        let model = MRCardPresentation(row: snapshot, reviewingContext: ReviewingContext(row: snapshot, viewerUsername: "user3"),
+            allowsRemoval: true, assistantReady: true)
+        let phone = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "user3@host"), model: model)
+
+        #expect(model.cardNeutralStatus.map { String(localized: $0) } == "Review run completed")
+        #expect(model.cardNextStep == (viewerApproved ? "Waiting for required approvals."
+            : "You haven’t approved this revision."))
+        #expect(phone.boardStatus == model.status)
+        #expect(phone.boardNextStep == model.cardNextStep)
     }
 
     @Test func freshWaitingForOtherThreadsSupersedesAnOlderFailedWorkflow() throws {

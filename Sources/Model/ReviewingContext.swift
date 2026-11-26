@@ -80,9 +80,13 @@ struct ReviewingContext {
     enum NextStep: Equatable {
         case monitoring, runReview, viewDiscussions, reviewComments, automaticReview, verifying, viewRun, setupAgent
     }
+    private enum CompletedReviewApproval {
+        case unknown, waitingForViewer, waitingForRequired, complete
+    }
     private(set) var nextStep: NextStep = .viewDiscussions
     var isAutomaticProcessing: Bool { nextStep == .automaticReview || nextStep == .verifying }
     var isMonitoringCompletedReview: Bool { status == .reviewCompleted && nextStep == .monitoring }
+    var hasCompletedApprovals: Bool { completedReviewApproval == .complete }
     var nextStepMessage: LocalizedStringResource {
         switch nextStep {
         case .automaticReview: .ReviewingContext.reviewingAutomatic
@@ -96,6 +100,8 @@ struct ReviewingContext {
             if status == .waitingForReady { .ReviewingContext.reviewingWaitingReadyMessage }
             else if status == .waitingForOtherDiscussions { .ReviewingContext.reviewingWaitingOtherThreads }
             else if case .openThreads = status { .ReviewingContext.reviewingWaitingAuthor }
+            else if completedReviewApproval == .waitingForViewer { .ReviewingContext.reviewingViewerApprovalPending }
+            else if completedReviewApproval == .waitingForRequired { .ReviewingContext.reviewingRequiredApprovalsPending }
             else { .ReviewingContext.reviewingMonitoring }
         }
     }
@@ -129,10 +135,11 @@ struct ReviewingContext {
     var status: Status = .activityUnknown
     private let presenceActor: PersonIdentity?
     private let activity: ReviewingActivity?
+    private var completedReviewApproval: CompletedReviewApproval = .unknown
 
     init(row: MergeRequestBoardSnapshot.Row, workflowState: MergeWorkflowActivityState? = nil,
          assistantReady: Bool = true, assistantChecking: Bool = false,
-         draftAutomationAllowed: Bool = false) {
+         draftAutomationAllowed: Bool = false, viewerUsername: String? = nil) {
         let item = row.item
         if let request = row.displayRequest, request.projectID == item.id.projectID,
            request.iid == item.id.iid, request.webURL == row.displayURL,
@@ -160,8 +167,8 @@ struct ReviewingContext {
         let currentReview = review.flatMap { run in
             run.expectedHeadSHA != nil && run.expectedHeadSHA == item.mergeRequest?.sha ? run : nil
         }
-        let activity = item.reviewingActivity
-        self.activity = row.evidenceMatchesCatalogContext ? activity : nil
+        let activity = row.evidenceMatchesCatalogContext ? item.reviewingActivity : nil
+        self.activity = activity
         let drafts = max(item.draftCount, item.drafts.count)
         if review?.execution?.state.isActive == true { status = .running }
         else if drafts > 0 { status = .drafts(drafts) }
@@ -229,6 +236,32 @@ struct ReviewingContext {
             nextStep = readyAction(.runReview)
         }
 
+        if isMonitoringCompletedReview, row.evidenceMatchesCatalogContext {
+            let discussionsBlockMerge = row.displayRequest.map {
+                $0.blockingDiscussionsResolved == false || $0.detailedMergeStatus == "discussions_not_resolved"
+            } == true
+            if discussionsBlockMerge, let activity, activity.otherOpenThreadCount > 0 {
+                status = .waitingForOtherDiscussions
+            } else if let progress = row.displayItem.approvalProgress {
+                completedReviewApproval = Self.completedApproval(progress, viewerUsername: viewerUsername)
+            }
+        }
+    }
+
+    private static func completedApproval(_ progress: MergeRequestApprovalProgress,
+                                          viewerUsername: String?) -> CompletedReviewApproval {
+        if let viewerUsername, !viewerUsername.isEmpty {
+            if case .approved = progress.viewerApproval(username: viewerUsername, reviewers: [], isOwnMergeRequest: false) {
+                return progress.isSatisfied ? .complete : .waitingForRequired
+            }
+            if progress.userCanApprove != false, progress.completed == progress.approvedBy.count {
+                return .waitingForViewer
+            }
+        }
+        if progress.required > 0, !(progress.requirementsSatisfied ?? (progress.completed >= progress.required)) {
+            return .waitingForRequired
+        }
+        return .unknown
     }
 
     var presenceMessage: LocalizedStringResource {
