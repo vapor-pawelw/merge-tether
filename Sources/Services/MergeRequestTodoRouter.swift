@@ -9,6 +9,7 @@ final class MergeRequestTodoRouter {
     private let glab: GlabService
     private let canAutomate: @MainActor () async -> Bool
     private let launcher: Launcher?
+    private let jobCoordinator: AssistantJobCoordinator?
     private let proofDirectory: URL
     private let cancelJob: @MainActor (UUID, SettingsManager) -> Void
     private var processing = false
@@ -34,11 +35,13 @@ final class MergeRequestTodoRouter {
     init(settings: SettingsManager, glab: GlabService,
          canAutomate: @escaping @MainActor () async -> Bool, launcher: Launcher? = nil,
          proofDirectory: URL = ReviewVerdictStore.directory,
+         jobCoordinator: AssistantJobCoordinator? = nil,
          cancelJob: @escaping @MainActor (UUID, SettingsManager) -> Void = { AssistantAutomationRunner.cancel($0, settings: $1, origin: .policy) }) {
         self.settings = settings
         self.glab = glab
         self.canAutomate = canAutomate
         self.launcher = launcher
+        self.jobCoordinator = jobCoordinator
         self.proofDirectory = proofDirectory
         self.cancelJob = cancelJob
     }
@@ -398,7 +401,7 @@ final class MergeRequestTodoRouter {
             current.headSHA = head
             let jobID: UUID
             if let launcher { jobID = try await launcher(current, manual) }
-            else { jobID = try await launch(current, manual: manual) }
+            else { jobID = try await launch(current, manual: manual, previous: originalJob) }
             guard isCurrentRun(),
                   !settings.ignoredMergeRequests.contains(original.target),
                   !manual || original.kind != .review || reviewIsConfirmed(request),
@@ -881,7 +884,7 @@ final class MergeRequestTodoRouter {
         return (title.isEmpty ? intent.request.title : title, instructions)
     }
 
-    private func launch(_ intent: MRTodoIntent, manual: Bool) async throws -> UUID {
+    private func launch(_ intent: MRTodoIntent, manual: Bool, previous: AssistantAutomationRunner.Handoff?) async throws -> UUID {
         guard let iid = intent.target.iid else { throw CancellationError() }
         let work = AssistantAutomationRunner.MergeRequestWork(host: intent.target.host, projectID: intent.target.projectID, iid: iid)
         let workflow: AssistantAutomationRunner.MRWorkflow? = switch intent.kind {
@@ -916,6 +919,12 @@ final class MergeRequestTodoRouter {
         let reservation = try Self.reservePipeline(for: intent, manual: manual,
             treatAssignedMergeRequestsAsOwn: settings.treatAssignedMergeRequestsAsOwn)
         let foreignDiagnosis = intent.kind == .pipeline && workflow == .review
+        let retryOf: UUID? = if manual, intent.kind == .followUp, intent.state == .failed, let previous,
+            previous.key.work == work, previous.key.username == intent.target.username, previous.workflow == .followUp,
+            let state = previous.execution?.state, !state.isActive, state != .succeeded, state != .feedbackResolved,
+            !previous.isObsoleteReminder {
+            previous.id
+        } else { nil }
         var transferred = false
         defer { if !transferred, let reservation { try? ExistingPipelineWorkDetector().finishHandoff(for: reservation) } }
         let job = try await AssistantAutomationRunner.launch(settings.automation.assistant, title: configured.title,
@@ -923,8 +932,8 @@ final class MergeRequestTodoRouter {
             access: access, work: work, username: intent.target.username, settings: settings, allowsPush: conflictPush,
             pipelineReservation: reservation,
             feedbackNoteIDs: intent.noteIDs.sorted(), feedbackTodos: intent.sourceEvents, isReview: intent.kind == .review,
-            mrWorkflow: workflow, manual: manual, expectedHeadSHA: foreignDiagnosis ? intent.headSHA : nil,
-            glab: foreignDiagnosis ? glab.freshSession() : nil, taskIntent: taskIntent,
+            mrWorkflow: workflow, manual: manual, expectedHeadSHA: foreignDiagnosis ? intent.headSHA : nil, jobCoordinator: jobCoordinator,
+            glab: foreignDiagnosis ? glab.freshSession() : nil, retryOf: retryOf, taskIntent: taskIntent,
             foreignPipeline: foreignDiagnosis ? intent.request.headPipeline : nil, workflowEventKind: intent.workflowEventKind)
         transferred = true
         return job.id

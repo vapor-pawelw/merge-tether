@@ -418,6 +418,35 @@ import Testing
         #expect(launches == 0)
     }
 
+    @Test(arguments: [true, false])
+    func manualFollowUpRetryReceivesOnlyTheMatchingRunWorkspace(_ sameAccount: Bool) async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f, withReply: false)
+        let original = f.settings.assistantHandoffs[0]
+        let previous = AssistantAutomationRunner.Handoff(id: original.id,
+            key: .init(assistant: .codex, work: original.key.work,
+                username: sameAccount ? original.key.username : "other", workspace: "", access: .gitLabRead),
+            title: original.title, prompt: original.prompt, createdAt: original.createdAt, allowsPush: false,
+            execution: .init(state: .blocked, error: "Push failed", workingDirectory: f.root.path),
+            workflow: .followUp, expectedHeadSHA: original.expectedHeadSHA)
+        f.settings.assistantHandoffs[0] = previous
+        f.settings.mrActionIntents[0].state = .failed
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            .init(result: .init(status: .succeeded, summary: "Fixture"), output: "")
+        })
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true },
+            jobCoordinator: coordinator)
+
+        await router.run(f.settings.mrActionIntents[0].id, manual: true)
+        await coordinator.waitForTermination()
+
+        let replacementID = try #require(f.settings.mrActionIntents[0].jobID)
+        let replacement = try #require(f.settings.assistantHandoffs.first { $0.id == replacementID })
+        #expect(replacement.id != previous.id)
+        #expect(replacement.retryOf == (sameAccount ? previous.id : nil))
+        #expect(replacement.prompt.contains(f.root.path) == sameAccount)
+    }
+
     @Test func stoppedFollowUpDoesNotCompleteWhileUnpublishedRemoteWorkRemains() async throws {
         let f = try fixture(owned: true); defer { f.cleanup() }
         try completedFollowUp(f)

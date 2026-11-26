@@ -36,8 +36,8 @@ struct AssistantJobInvocationTests {
         #expect(instructions.contains("Follow applicable user skills and workflow instructions for reply wording"))
     }
 
-    @MainActor @Test(arguments: AutomationAssistant.allCases, [false, true])
-    func bothWorkersReceiveBoundedRequiredRuntimeRecoveryWithoutExtraPermissions(_ assistant: AutomationAssistant, _ authored: Bool) async throws {
+    @MainActor @Test(arguments: AutomationAssistant.allCases, ["reviewer", "author", "assignee", "co-assignee"])
+    func bothWorkersReceiveBoundedRequiredRuntimeRecoveryWithoutExtraPermissions(_ assistant: AutomationAssistant, _ role: String) async throws {
         // given
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -47,12 +47,21 @@ struct AssistantJobInvocationTests {
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsManager(defaults: defaults)
         settings.automation.applyPreset(.full, for: assistant)
+        settings.treatAssignedMergeRequestsAsOwn = true
         settings.automation.codexReviewModel = .astra
         settings.automation.codexReviewThinking = .high
         settings.automation.claudeCodingModel = .sonnet
         settings.automation.claudeCodingThinking = .xhigh
         let host = "gitlab-\(UUID().uuidString.lowercased()).example.test"
         let sha = String(repeating: "a", count: 40)
+        let authored = role == "author"
+        let assigned = role == "assignee" || role == "co-assignee"
+        let owned = authored || assigned
+        let assignees = switch role {
+        case "assignee": #"[{"id":1,"username":"me","name":"Me"}]"#
+        case "co-assignee": #"[{"id":3,"username":"another","name":"Another"},{"id":1,"username":"me","name":"Me"}]"#
+        default: "[]"
+        }
         let glab = folder.appending(path: "glab")
         try Data("""
             #!/bin/sh
@@ -60,7 +69,7 @@ struct AssistantJobInvocationTests {
               'config get host') printf '%s' '\(host)' ;;
               'auth status') printf '%s' 'Logged in to \(host) as me' >&2 ;;
               'api /user '*) printf '%s' '{"id":1,"username":"me"}' ;;
-              'api /projects/7/merge_requests/11 '*) printf '%s' '{"project_id":7,"iid":11,"author":{"id":\(authored ? 1 : 2),"username":"\(authored ? "me" : "other")","name":"Author"},"title":"Fixture","web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened","sha":"\(sha)","source_branch":"feature","target_branch":"main","labels":[]}' ;;
+              'api /projects/7/merge_requests/11 '*) printf '%s' '{"project_id":7,"iid":11,"author":{"id":\(authored ? 1 : 2),"username":"\(authored ? "me" : "other")","name":"Author"},"assignees":\(assignees),"title":"Fixture","web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened","sha":"\(sha)","source_branch":"feature","target_branch":"main","labels":[]}' ;;
               *) exit 20 ;;
             esac
             """.utf8).write(to: glab)
@@ -89,9 +98,9 @@ struct AssistantJobInvocationTests {
             title: "Verify assigned code", prompt: "Task: verify assigned code. This task does not authorize GitLab writes.",
             createdAt: Date(), allowsPush: false, codingModel: assistant == .codex ? .astra : nil,
             codingThinking: assistant == .codex ? .high : .xhigh,
-            claudeCodingModel: assistant == .claude ? .sonnet : nil, followUpPushAllowed: authored ? true : nil,
-            workflow: authored ? .followUp : .review,
-            manual: true, expectedHeadSHA: sha)
+            claudeCodingModel: assistant == .claude ? .sonnet : nil, followUpPushAllowed: owned ? true : nil,
+            workflow: owned ? .followUp : .review,
+            manual: true, expectedHeadSHA: sha, requiresSoleAssignment: assigned ? true : nil)
         let run = InstallationStorage.current.runs.appending(path: handoff.id.uuidString)
         defer { try? FileManager.default.removeItem(at: run) }
 
@@ -102,16 +111,18 @@ struct AssistantJobInvocationTests {
         #expect(outcome.result.status == .succeeded)
         let instructions = try String(contentsOf: URL(fileURLWithPath: cli.path + ".capture"), encoding: .utf8)
         #expect(instructions.contains(handoff.prompt))
+        #expect(instructions.contains("A current assignee qualifies even when someone else created the MR") == owned)
+        #expect(instructions.contains("Use this definition of ownership when applying local MR skills") == owned)
         #expect(instructions.contains("In generatedDrafts, list only private drafts you actually created"))
         #expect(instructions.contains("Do not list untouched, user-created or merely observed drafts"))
-        #expect(instructions.contains("If no incoming reviewer reply is owed, skip drafting and sealing") == authored)
-        #expect(instructions.contains("In a thread whose first non-system note was written by someone else") == !authored)
-        #expect(instructions.contains("only when direct evidence shows that a proposed solution, argument or factual claim is wrong") == !authored)
-        #expect(instructions.contains("could materially affect a technical or review decision") == !authored)
-        #expect(instructions.contains("Skip the reply if the thread already contains the correction") == !authored)
-        #expect(instructions.contains("Confirmations of fixes, acknowledgements, minor corrections and uncertain disagreements") == !authored)
-        #expect(instructions.contains("This limit applies to human and bot threads") == !authored)
-        if !authored { #expect(instructions.contains("save warranted private review findings")) }
+        #expect(instructions.contains("If no incoming reviewer reply is owed, skip drafting and sealing") == owned)
+        #expect(instructions.contains("In a thread whose first non-system note was written by someone else") == !owned)
+        #expect(instructions.contains("only when direct evidence shows that a proposed solution, argument or factual claim is wrong") == !owned)
+        #expect(instructions.contains("could materially affect a technical or review decision") == !owned)
+        #expect(instructions.contains("Skip the reply if the thread already contains the correction") == !owned)
+        #expect(instructions.contains("Confirmations of fixes, acknowledgements, minor corrections and uncertain disagreements") == !owned)
+        #expect(instructions.contains("This limit applies to human and bot threads") == !owned)
+        if !owned { #expect(instructions.contains("save warranted private review findings")) }
         #expect(instructions.contains("never replaces a follow-up seal"))
         #expect(instructions.contains("as {id,bodySHA256,extraContext,proposedSolution}"))
         #expect(instructions.contains("extraContext is optional app-only Markdown"))
@@ -132,11 +143,11 @@ struct AssistantJobInvocationTests {
         #expect(instructions.contains("Do not add reactions or resolve purely informational threads in this worker"))
         #expect(instructions.contains("Never read, print, copy or send credentials"))
         #expect(instructions.contains("Do not run `glab auth token` or `glab config get token`"))
-        // Only the authored follow-up carries push permission; the review run gets the Git push guard.
-        #expect(instructions.contains(AssistantJobExecutor.pushGuardInstructions) == !authored)
+        // Only an owned follow-up carries push permission; the review run gets the Git push guard.
+        #expect(instructions.contains(AssistantJobExecutor.pushGuardInstructions) == !owned)
         let gitConfig = try JSONDecoder().decode([String: String].self,
             from: Data(contentsOf: URL(fileURLWithPath: cli.path + ".env")))
-        #expect(gitConfig.values.contains("url.\(AgentProcessEnvironment.pushGuardScheme).pushInsteadOf") == !authored)
+        #expect(gitConfig.values.contains("url.\(AgentProcessEnvironment.pushGuardScheme).pushInsteadOf") == !owned)
         let arguments = try JSONDecoder().decode([String].self, from: Data(contentsOf: URL(fileURLWithPath: cli.path + ".args")))
         if assistant == .codex {
             #expect(arguments.contains("--dangerously-bypass-approvals-and-sandbox"))

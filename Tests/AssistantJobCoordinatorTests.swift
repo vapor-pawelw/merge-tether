@@ -441,9 +441,23 @@ import Testing
         #expect(recovered.output?.contains("commit was created") == true)
         let retryPrompt = AssistantAutomationRunner.retryTaskPrompt("Fix the assigned comment", previous: original)
         #expect(retryPrompt.contains(folder.path) && retryPrompt.contains("Re-fetch the current MR head"))
-        #expect(retryPrompt.contains("Never repeat an existing commit"))
+        #expect(retryPrompt.contains("Never repeat a delivered commit"))
         let repeated = AssistantAutomationRunner.retryTaskPrompt(retryPrompt, previous: original)
         #expect(repeated.components(separatedBy: "MergeTether retry context:").count == 2)
+    }
+
+    @Test func aFollowUpRetryReusesCommittedAndUncommittedChangesFromThePriorRun() {
+        var original = job(state: .blocked)
+        original.workflow = .followUp
+        original.execution?.workingDirectory = "/private/worker-run"
+
+        let prompt = AssistantAutomationRunner.retryTaskPrompt("Fix the assigned feedback", previous: original)
+
+        #expect(prompt.contains("/private/worker-run"))
+        #expect(prompt.contains("committed, staged, unstaged and untracked changes"))
+        #expect(prompt.contains("reuse applicable changes in a fresh isolated worktree"))
+        #expect(prompt.contains("Leave the previous worktree untouched"))
+        #expect(prompt.contains("Re-fetch the current MR head"))
     }
 
     @Test func aHoldDiscoveredDuringPreflightReturnsTheJobToTheQueue() async throws {

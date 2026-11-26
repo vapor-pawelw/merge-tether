@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Stop agent runs when required workspace directories disappear, record possible GitLab effects before retrying, and cap persistent worker output.
 
 - Use assignees to determine which MRs are yours, falling back to the author when nobody is assigned. Author follow-ups check the remote branch and discussions immediately before pushing or drafting to avoid duplicating another assignee's work.
+- Apply the same ownership rule in agent instructions for follow-up pushes. Give retried follow-ups access to prior worktrees so the agent can reuse local commits and uncommitted changes.
 - Allow automatic merging of MRs with other assignees by default in Max. Other profiles leave this choice off. Change it separately under **Merge when ready**.
 
 - Show **Review needed** again when new commits or a different target diff make your GitLab approval stale, including after restarting MergeTether.
