@@ -109,10 +109,49 @@ struct MRAutomationHistoryTests {
     }
 
     private func workflow(username: String = "me", host: String = "gitlab.example.test") throws -> MergeWorkflowActivityEntry {
-        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":7,"iid":13,"author":{"id":1,"username":"me","name":"Me"},"title":"Sample","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/13","state":"opened","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":7,"iid":13,"author":{"id":1,"username":"me","name":"Me"},"title":"Sample","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/13","state":"opened","source_branch":"feature","target_branch":"main","sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","labels":[]}"#.utf8))
         return .init(id: UUID().uuidString, event: .init(kind: .newDiscussion, mergeRequest: request,
             identity: "new-note", context: "Reviewer replied"), createdAt: start.addingTimeInterval(3),
             host: host, user: .init(id: 1, username: username), state: .failed)
+    }
+
+    @Test func reviewLaunchReasonsFollowTheExactRunAndSurvivePersistence() throws {
+        var entry = try workflow()
+        let request = entry.event.mergeRequest
+        var run = job(at: start, state: .running)
+        run.manual = false
+        run.workflow = .review
+        run.mergeRequestURL = request.webURL
+        run.expectedHeadSHA = request.sha
+
+        let legacy = MergeWorkflowEvent(kind: .reviewUpdate, mergeRequest: request,
+            identity: entry.id, context: "An older worker prompt")
+        let decoder = JSONDecoder()
+        let encoder = JSONEncoder()
+        #expect(try decoder.decode(MergeWorkflowEvent.self, from: encoder.encode(legacy)).reviewUpdateReasons == nil)
+        entry.event = .init(kind: .reviewUpdate, mergeRequest: request, identity: entry.id, context: legacy.context,
+            reviewUpdateReasons: [.headChanged, .authorReplied])
+        entry.preparedReviewJobID = run.id
+        entry = try decoder.decode(MergeWorkflowActivityEntry.self, from: encoder.encode(entry))
+        func reasons() -> [ReviewLaunchReason] {
+            MRAutomationHistory.reviewLaunchReasons(for: run, workflows: [entry], intents: [])
+        }
+        #expect(reasons() == [.headChanged, .authorReplied])
+        entry.assistantJobID = UUID()
+        #expect(reasons().isEmpty)
+        entry.assistantJobID = run.id
+        run.expectedHeadSHA = "other"
+        #expect(reasons().isEmpty)
+        run.expectedHeadSHA = request.sha
+        var recovery = MRTodoIntent(id: UUID(), target: target, kind: .review, state: .failed,
+            todoIDs: [], noteIDs: [], sourceEvents: [], request: request, headSHA: try #require(request.sha),
+            jobID: UUID(), updatedAt: start)
+        recovery.reviewRecoveryJobID = run.id
+        #expect(MRAutomationHistory.reviewLaunchReasons(for: run, workflows: [], intents: [recovery]) == [.unverifiedReview])
+        run.automaticRetryIdentity = .init(rootID: UUID(), reservationID: UUID(), attempt: 1)
+        #expect(reasons() == [.automaticRetry, .headChanged, .authorReplied])
+        run.manual = true
+        #expect(reasons().isEmpty)
     }
 
     @Test func chronologyIncludesApplicationFailureAfterSuccessfulWorkerAndKeepsAttemptNumbers() throws {

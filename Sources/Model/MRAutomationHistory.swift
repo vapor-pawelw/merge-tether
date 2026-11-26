@@ -67,6 +67,28 @@ struct MRAutomationHistory {
     }
     let entries: [Entry]
 
+    static func reviewLaunchReasons(for job: AssistantAutomationRunner.Handoff,
+                                    workflows: [MergeWorkflowActivityEntry], intents: [MRTodoIntent]) -> [ReviewLaunchReason] {
+        guard job.manual == false, AssistantAutomationRunner.recordsReviewVerdict(for: job),
+              let url = job.mergeRequestURL, let head = job.expectedHeadSHA else { return [] }
+        let work = job.key.work
+        let target = MRAutomationScope.Target(host: work.host, username: job.key.username, projectID: work.projectID, iid: work.iid)
+        if intents.contains(where: {
+            $0.reviewRecoveryJobID == job.id && $0.kind == .review && $0.target == target
+                && $0.request.webURL == url && $0.headSHA == head
+        }) {
+            return [.unverifiedReview]
+        }
+        let workflow = workflows.first {
+            let request = $0.event.mergeRequest
+            return ($0.assistantJobID ?? $0.preparedReviewJobID) == job.id && $0.event.kind == .reviewUpdate
+                && $0.host == work.host && $0.user.username == job.key.username
+                && request.projectID == work.projectID && request.iid == work.iid && request.webURL == url && request.sha == head
+        }
+        let trigger = workflow?.event.reviewUpdateReasons ?? []
+        return job.automaticRetryIdentity == nil ? trigger : [.automaticRetry] + trigger
+    }
+
     func associatedRuns(for entry: Entry) -> [AssistantAutomationRunner.Handoff] {
         let ids: [UUID]
         switch entry.source {

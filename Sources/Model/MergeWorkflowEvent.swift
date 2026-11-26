@@ -11,6 +11,32 @@ enum MergeWorkflowTrigger: String, Codable, CaseIterable, Hashable, Identifiable
     var id: String { rawValue }
 }
 
+enum ReviewLaunchReason: String, Codable, Sendable {
+    case headChanged, authorReplied, discussionsChanged, discussionCoverageMissing
+    case metadataChanged, metadataCoverageMissing, targetChanged, pushedDuringReview
+    case automaticRetry, unverifiedReview
+
+    private var label: LocalizedStringResource {
+        switch self {
+        case .headChanged: .AutomationProgress.reviewReasonHeadChanged
+        case .authorReplied: .AutomationProgress.reviewReasonAuthorReplied
+        case .discussionsChanged: .AutomationProgress.reviewReasonDiscussionsChanged
+        case .discussionCoverageMissing: .AutomationProgress.reviewReasonDiscussionCoverageMissing
+        case .metadataChanged: .AutomationProgress.reviewReasonMetadataChanged
+        case .metadataCoverageMissing: .AutomationProgress.reviewReasonMetadataCoverageMissing
+        case .targetChanged: .AutomationProgress.reviewReasonTargetChanged
+        case .pushedDuringReview: .AutomationProgress.reviewReasonPushedDuringReview
+        case .automaticRetry: .AutomationProgress.reviewReasonAutomaticRetry
+        case .unverifiedReview: .AutomationProgress.reviewReasonUnverifiedReview
+        }
+    }
+
+    static func message(for reasons: [Self]) -> String? {
+        guard !reasons.isEmpty else { return nil }
+        return reasons.map { String(localized: $0.label) }.joined(separator: " · ")
+    }
+}
+
 struct MergeWorkflowEvent: Codable, Sendable {
     let kind: MergeWorkflowTrigger
     let mergeRequest: GitLabMergeRequest
@@ -23,6 +49,7 @@ struct MergeWorkflowEvent: Codable, Sendable {
     var noteIDs: [Int] = []
     var failedPipelineJobIDs: [Int]? = nil
     var leftMergeTrain: Bool? = nil
+    var reviewUpdateReasons: [ReviewLaunchReason]? = nil
 
     var blockerDiagnosis: MergeBlockerDiagnosis? {
         guard kind == .blockerChange else { return nil }

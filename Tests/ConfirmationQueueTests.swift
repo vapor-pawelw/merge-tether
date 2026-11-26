@@ -2562,6 +2562,7 @@ import MergeTetherRemote
             enabled: [.reviewUpdate], reviewSLA: 3600) { updates.append($0) }
         #expect(updates.count == 1)
         #expect(updates.first?.context.contains("title and description") == true)
+        #expect(updates.first?.reviewUpdateReasons == (bound ? [.metadataChanged] : [.metadataCoverageMissing]))
         #expect(updates.first?.context.contains("Do not review again") == false)
         try harness.recordVerdict("classified_findings", head: head, findingLevels: [:])
         try await harness.poll()
@@ -2591,6 +2592,7 @@ import MergeTetherRemote
 
         #expect(updates.count == 1)
         #expect(updates.first?.context.contains("current diff") == true)
+        #expect(updates.first?.reviewUpdateReasons == [.targetChanged])
     }
 
     @Test func persistenceHoldStopsAutomaticApprovalButKeepsExplicitFreshApproval() async throws {

@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Match Mac card actions on iPhone and iPad when drafts need review or unresolved feedback blocks a merge.
 
+- Show why MergeTether started a re-review below the agent status in Mac MR Details and in the review update's Event log entry.
+
 - Size the ChatGPT and Claude action icons to fit native menus, including **Run review**.
 
 - Option-click a Mac board or Inbox card to open it in GitLab. The card menus show the gesture next to Open in GitLab.
