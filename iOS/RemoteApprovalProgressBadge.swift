@@ -10,6 +10,7 @@ struct RemoteApprovalProgressBadge: View {
     var personalApproval: RemotePersonalApprovalControl? = nil
     var reviewerEditing: ReviewerEditing? = nil
     var automaticApprovalOff = false
+    var readOnly = false
     @State private var showingPeople = false
     @State private var reviewerEditor = ReviewerEditorState()
 
@@ -46,37 +47,13 @@ struct RemoteApprovalProgressBadge: View {
     }
 
     var body: some View {
-        if personalApproval != nil || reviewerEditing != nil || automaticApprovalOff
+        if readOnly {
+            badgeLabel.accessibilityLabel(explanation)
+                .accessibilityIdentifier("remote.approvals.badge")
+        } else if personalApproval != nil || reviewerEditing != nil || automaticApprovalOff
             || (progress.map { $0.required > 0 || received > 0 } ?? true) || viewer != nil || assignedReviewerCount != nil {
             Button { showingPeople = true } label: {
-                HStack(spacing: 4) {
-                    HStack(spacing: 3) {
-                        Image(systemName: complete ? "checkmark.seal.fill" : "checkmark.seal")
-                        if let progress, progress.required == 0 { Text(verbatim: "\(received)") }
-                        else if let progress { Text(.Board.boardApprovalRatio(received, progress.required)) }
-                        else { Text(.Board.boardApprovalsUnknownRatio) }
-                        if let assignedReviewerCount {
-                            Text(.Board.boardApprovalsReviewerCountBadge(assignedReviewerCount))
-                        }
-                    }
-                    .font(.caption2).monospacedDigit().foregroundStyle(approvalColor)
-                    if let viewer {
-                        Divider().frame(height: 10)
-                        PersonAvatar(url: viewer.avatarURL, size: 16)
-                            .overlay(alignment: .bottomTrailing) {
-                                Image(systemName: viewer.status == .approved ? "checkmark.circle.fill" : "arrow.counterclockwise.circle.fill")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(.white, viewer.status == .approved ? Color.green : .orange)
-                                    .background(Circle().fill(.background).padding(-1))
-                                    .offset(x: 3, y: 2)
-                            }
-                            .padding(.trailing, 2)
-                    }
-                }
-                .fixedSize()
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-                .contentShape(Rectangle())
+                badgeLabel
             }
             .buttonStyle(.plain)
             .accessibilityLabel(explanation)
@@ -126,6 +103,37 @@ struct RemoteApprovalProgressBadge: View {
             .onDisappear { reviewerEditor.finishAdding() }
             .modifier(ReviewerSaveErrorAlert(state: reviewerEditor, editorClosed: !showingPeople))
         }
+    }
+
+    private var badgeLabel: some View {
+        HStack(spacing: 4) {
+            HStack(spacing: 3) {
+                Image(systemName: complete ? "checkmark.seal.fill" : "checkmark.seal")
+                if let progress, progress.required == 0 { Text(verbatim: "\(received)") }
+                else if let progress { Text(.Board.boardApprovalRatio(received, progress.required)) }
+                else { Text(.Board.boardApprovalsUnknownRatio) }
+                if let assignedReviewerCount {
+                    Text(.Board.boardApprovalsReviewerCountBadge(assignedReviewerCount))
+                }
+            }
+            .font(.caption2).monospacedDigit().foregroundStyle(approvalColor)
+            if let viewer {
+                Divider().frame(height: 10)
+                PersonAvatar(url: viewer.avatarURL, size: 16)
+                    .overlay(alignment: .bottomTrailing) {
+                        Image(systemName: viewer.status == .approved ? "checkmark.circle.fill" : "arrow.counterclockwise.circle.fill")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white, viewer.status == .approved ? Color.green : .orange)
+                            .background(Circle().fill(.background).padding(-1))
+                            .offset(x: 3, y: 2)
+                    }
+                    .padding(.trailing, 2)
+            }
+        }
+        .fixedSize()
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .contentShape(Rectangle())
     }
 
     private var popoverHeight: CGFloat {

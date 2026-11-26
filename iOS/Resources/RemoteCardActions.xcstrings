@@ -1,24 +1,24 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "remoteCardActions.hiddenReviews": {
+    "remoteCardActions.sectionExpanded": {
       "extractionState": "manual",
       "localizations": {
-        "en": {"stringUnit": {"state": "translated", "value": "Hidden merge requests"}},
-        "pl": {"stringUnit": {"state": "translated", "value": "Ukryte MR-y"}}
+        "en": {"stringUnit": {"state": "translated", "value": "Expanded"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Rozwinięta"}}
       }
     },
-    "remoteCardActions.hiddenReviewsEmpty": {
+    "remoteCardActions.sectionCollapsed": {
       "extractionState": "manual",
       "localizations": {
-        "en": {"stringUnit": {"state": "translated", "value": "No hidden merge requests."}},
-        "pl": {"stringUnit": {"state": "translated", "value": "Brak ukrytych MR-ów."}}
+        "en": {"stringUnit": {"state": "translated", "value": "Collapsed"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Zwinięta"}}
       }
     },
     "remoteCardActions.hideReviewExplanation": {
       "extractionState": "manual",
       "localizations": {
-        "en": {"stringUnit": {"state": "translated", "value": "Hide this merge request from Reviewing. You can restore it from Hidden merge requests in Reviewing while it’s open."}},
+        "en": {"stringUnit": {"state": "translated", "value": "Hide this merge request from Reviewing. You can restore it from Hidden in Reviewing while it’s open."}},
         "pl": {"stringUnit": {"state": "translated", "value": "Ukryj ten MR w kolumnie „Do przeglądu”. Dopóki jest otwarty, możesz go przywrócić z listy ukrytych MR-ów w tej kolumnie."}}
       }
     },

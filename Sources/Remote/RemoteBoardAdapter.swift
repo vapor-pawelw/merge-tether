@@ -65,17 +65,33 @@ import MergeTetherRemote
         }
     }
 
-    private static func hiddenAssignmentCard(_ review: HiddenReview, account: String, canRestore: Bool) -> RemoteCard {
+    private static func hiddenAssignmentCard(_ review: HiddenReview, account: String, monitor: TodoMonitorService,
+                                             includesCardActions: Bool = false) -> RemoteCard {
+        let display = monitor.hiddenReviewDisplay(review)
+        let request = display.request
         var card = RemoteCard(id: hiddenAssignmentCardID(review),
-            title: review.title, project: review.url.gitLabProjectPath, url: review.url, mergeRequestIID: review.target.iid)
-        if canRestore, let token = try? RemoteDigest.token([account, card.id, review.title, review.url.absoluteString,
-                                               review.hideID?.uuidString ?? ""]) {
+            title: request?.title ?? review.title, project: review.url.gitLabProjectPath, url: review.url,
+            mergeRequestIID: review.target.iid)
+        if let request {
+            card.presentation = .init(author: request.author.name, repository: card.project.split(separator: "/").last.map(String.init) ?? card.project,
+                authorUsername: request.author.username, authorAvatarURL: request.author.avatarURL,
+                assignedReviewerCount: MergeRequestApprovalProgress.assignedReviewerCount(request.reviewers))
+        }
+        card.approvals = display.approvals.flatMap {
+            .init(completed: min($0.completed, $0.required), required: $0.required,
+                received: $0.completed, requirementsSatisfied: $0.requirementsSatisfied)
+        }
+        if monitor.canRestoreHiddenReview(review), let token = try? RemoteDigest.token([account, card.id, card.title,
+                                               review.url.absoluteString, review.hideID?.uuidString ?? ""]) {
             card.actions = [.init(id: RemoteAction.restoreHiddenReviewID, kind: .markDone, token: token)]
+        }
+        if includesCardActions {
+            RemoteCardActionContext(hiddenReview: review, monitor: monitor)?.project(&card)
         }
         return card
     }
 
-    private static func hiddenAssignmentCardID(_ review: HiddenReview) -> String {
+    static func hiddenAssignmentCardID(_ review: HiddenReview) -> String {
         "hidden-review:\(review.target.projectID):\(review.target.iid ?? 0)"
     }
 
@@ -85,7 +101,7 @@ import MergeTetherRemote
               account == "\(username)@\(host)",
               let review = monitor.hiddenReviewAssignments.first(where: { hiddenAssignmentCardID($0) == card.id })
         else { return .changed }
-        let current = hiddenAssignmentCard(review, account: account, canRestore: monitor.canRestoreHiddenReview(review))
+        let current = hiddenAssignmentCard(review, account: account, monitor: monitor)
         guard current.hasSameActionContext(as: card), current.actions.contains(action) else { return .changed }
         return monitor.restoreReviewedMergeRequests([review]) ? .completed : .failed
     }
@@ -228,7 +244,7 @@ import MergeTetherRemote
         result.codingProvider = monitor.settings.automation.selectedAssistant?.rawValue
         if includesReviewBoard {
             result.hiddenReviews = monitor.hiddenReviewAssignments.filter { account == "\($0.target.username)@\($0.target.host)" }
-                .map { hiddenAssignmentCard($0, account: account, canRestore: monitor.canRestoreHiddenReview($0)) }
+                .map { hiddenAssignmentCard($0, account: account, monitor: monitor, includesCardActions: includesCardActions) }
         }
         var orderGroups: [String: RemoteBoardOrderGroup] = [:]
         if includesBoardOrder {

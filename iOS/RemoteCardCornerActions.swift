@@ -28,13 +28,7 @@ struct RemoteCardCornerActions: View {
         var change: RemoteCardChange { self == .hide ? .remove : .leaveReview }
     }
 
-    private var url: URL? {
-        guard card.id.hasPrefix("mr:") || card.mergeRequestIID != nil,
-              let url = card.url, let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let scheme = parts.scheme?.lowercased(), ["http", "https"].contains(scheme),
-              parts.host != nil, parts.user == nil, parts.password == nil else { return nil }
-        return url
-    }
+    private var url: URL? { card.gitLabActionURL }
     private var pinned: Bool { card.pinned ?? card.orderGroup?.pinned ?? false }
     private var canEdit: Bool {
         model?.state.canAct() == true && card.actions.contains { $0.kind == .editCard }
@@ -358,7 +352,7 @@ private struct RemoteCardAutomationPanel: View {
     }
 }
 
-private struct RemoteCardAssistantPanel: View {
+struct RemoteCardAssistantPanel: View {
     let model: RemotePhoneModel
     let card: RemoteCard
     let url: URL

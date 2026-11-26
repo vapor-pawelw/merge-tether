@@ -7,12 +7,20 @@ import MergeTetherRemote
     let url: URL
     let item: MergeRequestAttentionMonitor.Item?
     private let request: GitLabMergeRequest?
+    private let hiddenReview: HiddenReview?
     let isDraft: Bool
     let isFinished: Bool
     let isReviewed: Bool
     let monitor: TodoMonitorService
 
     init?(card: RemoteCard, board: MergeRequestBoardSnapshot, monitor: TodoMonitorService) {
+        if card.id.hasPrefix("hidden-review:") {
+            guard let review = monitor.hiddenReviewAssignments.first(where: {
+                card.id == RemoteBoardAdapter.hiddenAssignmentCardID($0) && card.url == $0.url
+            }), let context = Self(hiddenReview: review, monitor: monitor) else { return nil }
+            self = context
+            return
+        }
         let row = (board.own + board.reviewed + board.otherMergeRequests).first {
             card.id == "mr:\($0.id.projectID):\($0.id.iid)"
         }
@@ -26,9 +34,24 @@ import MergeTetherRemote
         self.url = url
         self.item = row?.item ?? proposal?.item
         self.request = request
+        self.hiddenReview = nil
         self.isDraft = row?.isDraft ?? (request?.isDraft ?? false)
         self.isFinished = request.map { $0.state != .opened } ?? false
         self.isReviewed = board.reviewed.contains { $0.id.projectID == projectID && $0.id.iid == iid }
+        self.monitor = monitor
+    }
+
+    init?(hiddenReview: HiddenReview, monitor: TodoMonitorService) {
+        guard monitor.isCurrentHiddenReview(hiddenReview) else { return nil }
+        let request = monitor.hiddenReviewDisplay(hiddenReview).request
+        self.target = hiddenReview.target
+        self.url = hiddenReview.url
+        self.item = nil
+        self.request = request
+        self.hiddenReview = hiddenReview
+        self.isDraft = request?.isDraft ?? false
+        self.isFinished = request.map { !$0.isOpen } ?? false
+        self.isReviewed = true
         self.monitor = monitor
     }
 
@@ -42,22 +65,39 @@ import MergeTetherRemote
     }
 
     func project(_ card: inout RemoteCard) {
-        card.pinned = pin.map { monitor.settings.boardPins.contains($0) }
-        if !isFinished, editor.isAvailable { card.automation = automation(editor) }
-        card.canRemoveFromBoard = canRemove ? true : nil
+        if hiddenReview == nil {
+            card.pinned = pin.map { monitor.settings.boardPins.contains($0) }
+            if !isFinished, editor.isAvailable { card.automation = automation(editor) }
+            card.canRemoveFromBoard = canRemove ? true : nil
+            card.canAcknowledgeFinished = item.flatMap { monitor.canAcknowledgeFinishedMergeRequest($0) ? true : nil }
+        }
         card.canLeaveReview = reviewToLeave == nil ? nil : true
-        card.canAcknowledgeFinished = item.flatMap { monitor.canAcknowledgeFinishedMergeRequest($0) ? true : nil }
-        guard let token = try? RemoteDigest.token([
+        guard let token = try? actionToken(for: card) else { return }
+        card.actions.append(.init(id: RemoteCardChange.actionID, kind: .editCard, token: token))
+    }
+
+    private func actionToken(for card: RemoteCard) throws -> String {
+        let context = [
             try RemoteDigest.token(target), card.url?.absoluteString ?? "", card.head ?? "",
             card.contextRevision ?? "", String(isDraft), String(isFinished),
             try RemoteDigest.token(card.pinned), try RemoteDigest.token(card.automation),
             try RemoteDigest.token(card.canRemoveFromBoard), try RemoteDigest.token(card.canLeaveReview),
             try RemoteDigest.token(card.canAcknowledgeFinished)
-        ]) else { return }
-        card.actions.append(.init(id: RemoteCardChange.actionID, kind: .editCard, token: token))
+        ]
+        guard let hiddenReview else { return try RemoteDigest.token(context) }
+        return try RemoteDigest.token(context + [hiddenReview.hideID?.uuidString ?? "", request?.sha ?? "",
+            try RemoteDigest.token(reviewToLeave.flatMap { monitor.selfReviewerRemoval(for: $0) })])
     }
 
     func execute(_ change: RemoteCardChange) async -> RemoteCommandResult.Status {
+        if let hiddenReview {
+            guard monitor.isCurrentHiddenReview(hiddenReview) else { return .changed }
+            switch change {
+            case .refresh: return await refreshHiddenReview(hiddenReview)
+            case .leaveReview, .openAssistant: break
+            default: return .changed
+            }
+        }
         let settings = monitor.settings
         switch change {
         case .pin(let pinned):
@@ -89,6 +129,30 @@ import MergeTetherRemote
         case .automation, .rule, .repository:
             guard !isFinished, editor.isAvailable, settings.automaticActionsAllowed else { return .changed }
             return await editAutomation(change, editor: editor)
+        }
+    }
+
+    private func refreshHiddenReview(_ review: HiddenReview) async -> RemoteCommandResult.Status {
+        guard let iid = target.iid else { return .changed }
+        let glab = monitor.glab
+        let revision = glab.accountRevision
+        let startedAt = Date()
+        do {
+            async let requestRead = glab.fetchMergeRequest(projectID: target.projectID, iid: iid, host: target.host)
+            async let userRead = glab.fetchAuthenticatedUser(host: target.host, expectedUsername: target.username)
+            async let approvalRead = try? glab.fetchMergeRequestApprovalProgress(projectID: target.projectID, iid: iid, host: target.host)
+            let (current, user, approvals) = try await (requestRead, userRead, approvalRead)
+            guard !Task.isCancelled, revision == glab.accountRevision, monitor.isCurrentHiddenReview(review),
+                  current.mergeRequestID == target.mergeRequestID, current.webURL == url,
+                  [.opened, .closed, .merged].contains(current.state) else { return .changed }
+            monitor.settings.reconcileHiddenReview(target, request: current, reviewerID: user.id, hideID: review.hideID)
+            monitor.recordHiddenReviewDisplay(review, request: current, approvals: approvals,
+                accountRevision: revision, readStartedAt: startedAt)
+            return .completed
+        } catch is CancellationError {
+            return .changed
+        } catch {
+            return .failed
         }
     }
 

@@ -6,7 +6,7 @@ struct RemoteLaneBoard: View {
     let onOpen: (RemoteCard) -> Void
     let onOpenCTA: (RemoteCard, RemoteCardCTA) -> Void
     let model: RemotePhoneModel
-    var onOpenHiddenReviews: (() -> Void)?
+    let hiddenReviews: [RemoteCard]
     var onRefresh: (() async -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -23,7 +23,16 @@ struct RemoteLaneBoard: View {
             let compact = geometry.size.width < 700
             let showsLaneSwitch = compact && lanes.count > 1
             VStack(spacing: 8) {
-                if showsLaneSwitch { laneSwitch }
+                if showsLaneSwitch {
+                    HStack(spacing: 8) {
+                        laneSwitch
+                        if let lane = visibleLane ?? lanes.first?.id {
+                            RemoteLaneFilterMenu(lane: lane, selection: filter(for: lane),
+                                supportsReviewBoard: supportsReviewBoard)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
                 GeometryReader { area in
                     laneScroll(size: area.size, compact: compact, showsLaneHeader: !showsLaneSwitch)
                 }
@@ -52,29 +61,31 @@ struct RemoteLaneBoard: View {
                 Button {
                     withAnimation(reduceMotion ? nil : .default) { visibleLane = lane.id }
                 } label: {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(lane.id.title)
-                            .font(.subheadline.weight(selected ? .bold : .medium))
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(visibleCount, format: .number)
-                            .font(.caption.monospacedDigit())
-                            .fixedSize()
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .background(selected ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.07),
-                                in: RoundedRectangle(cornerRadius: 12))
-                    .contentShape(Rectangle())
+                    lane.id.countedTitle(visibleCount)
+                        .font(.subheadline.weight(selected ? .bold : .medium))
+                        .monospacedDigit()
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(selected ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.07),
+                                    in: RoundedRectangle(cornerRadius: 12))
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(Text(lane.id.title))
-                .accessibilityValue(Text(visibleCount, format: .number))
+                .accessibilityLabel(lane.id.countedTitle(visibleCount))
                 .accessibilityAddTraits(selected ? .isSelected : [])
                 .accessibilityIdentifier("remote.lane.switch.\(lane.id.rawValue)")
             }
         }
-        .padding(.horizontal, 16)
+    }
+
+    private func filter(for lane: RemoteLaneID) -> Binding<RemoteBoardLaneFilter> {
+        Binding(get: { filters[lane] ?? .init() }, set: {
+            filters[lane] = $0
+            dragSession.finish()
+        })
     }
 
     private func laneScroll(size: CGSize, compact: Bool, showsLaneHeader: Bool) -> some View {
@@ -82,13 +93,9 @@ struct RemoteLaneBoard: View {
         return ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .top, spacing: 14) {
                 ForEach(lanes) { lane in
-                    let filter = Binding(get: { filters[lane.id] ?? .init() }, set: {
-                        filters[lane.id] = $0
-                        dragSession.finish()
-                    })
                     RemoteLaneView(lane: lane, showsHeader: showsLaneHeader, onOpen: onOpen, onOpenCTA: onOpenCTA,
-                        model: model, dragSession: dragSession, filter: filter, supportsReviewBoard: supportsReviewBoard,
-                        onOpenHiddenReviews: lane.id == .reviewed ? onOpenHiddenReviews : nil, onRefresh: onRefresh)
+                        model: model, dragSession: dragSession, filter: filter(for: lane.id), supportsReviewBoard: supportsReviewBoard,
+                        hiddenReviews: lane.id == .reviewed ? hiddenReviews : [], onRefresh: onRefresh)
                         .frame(width: laneWidth, height: max(1, size.height - 12))
                         .id(lane.id)
                 }
@@ -112,50 +119,28 @@ private struct RemoteLaneView: View {
     let dragSession: BoardDragSession<RemoteBoardOrderMove.Source>
     @Binding var filter: RemoteBoardLaneFilter
     let supportsReviewBoard: Bool
-    let onOpenHiddenReviews: (() -> Void)?
+    let hiddenReviews: [RemoteCard]
+    @State private var hiddenExpanded = false
     var onRefresh: (() async -> Void)? = nil
 
     var body: some View {
         let cards = lane.cards.filter(filter.matches)
         VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 12) {
-                if showsHeader {
-                    HStack(spacing: 8) {
-                        Text(lane.id.title).font(.headline)
-                        Text(cards.count, format: .number)
-                            .font(.caption.weight(.medium).monospacedDigit()).foregroundStyle(.secondary)
-                            .padding(.horizontal, 8).padding(.vertical, 4)
-                            .background(.secondary.opacity(0.08), in: Capsule())
-                    }
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("remote.lane.header.\(lane.id.rawValue)")
+            if showsHeader {
+                HStack(spacing: 12) {
+                    lane.id.countedTitle(cards.count).font(.headline).monospacedDigit()
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("remote.lane.header.\(lane.id.rawValue)")
+                    Spacer()
+                    RemoteLaneFilterMenu(lane: lane.id, selection: $filter, supportsReviewBoard: supportsReviewBoard)
                 }
-                Spacer()
-                if let onOpenHiddenReviews {
-                    Button(action: onOpenHiddenReviews) {
-                        Image(systemName: "eye.slash")
-                            .frame(minWidth: 44, minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(Text(.RemoteCardActions.remoteCardActionsHiddenReviews))
-                    .accessibilityIdentifier("remote.reviewed.hidden")
-                }
-                RemoteLaneFilterMenu(lane: lane.id, selection: $filter, supportsReviewBoard: supportsReviewBoard)
             }
             GeometryReader { viewport in
                 ScrollView(showsIndicators: false) {
-                    VStack(spacing: 0) {
-                        laneCards(cards)
-                        if let last = cards.last, last.orderGroup != nil {
-                            Spacer(minLength: 16)
-                                .frame(maxWidth: .infinity)
-                                .modifier(dropTarget(at: last.id, fixedInsertion: .after))
-                        }
-                    }
-                    .frame(minHeight: viewport.size.height, alignment: .top)
-                    .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: cards.map(\.dependencies))
-                    .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: cards.map(\.id))
+                    laneCards(cards)
+                        .frame(minHeight: viewport.size.height, alignment: .top)
+                        .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: cards.map(\.dependencies))
+                        .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: cards.map(\.id))
                 }
                 .scrollBounceBehavior(.always, axes: .vertical)
                 .refreshable { await onRefresh?() }
@@ -164,28 +149,72 @@ private struct RemoteLaneView: View {
         .padding(14)
         .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 22))
         .accessibilityIdentifier("remote.lane.\(lane.id.rawValue)")
+        .onChange(of: model.state.board?.hostSession) { _, _ in hiddenExpanded = false }
     }
 
     private func laneCards(_ cards: [RemoteCard]) -> some View {
-        LazyVStack(spacing: 0) {
-            if cards.isEmpty {
+        let inactiveCount = cards.count(where: isInactive)
+        let firstInactive = cards.firstIndex(where: isInactive)
+        return LazyVStack(spacing: 0) {
+            if cards.isEmpty && (hiddenReviews.isEmpty || filter.isActive) {
                 Text(filter.isActive ? .Board.boardFiltersEmpty : .Remote.remoteEmpty)
                     .foregroundStyle(.secondary).padding(.top, 30)
             }
             ForEach(Array(cards.enumerated()), id: \.element.id) { index, card in
-                if let group = card.orderGroup,
-                   index == 0 || cards[index - 1].orderGroup?.automationEnabled != group.automationEnabled {
-                    Text(group.automationEnabled ? .Remote.remoteBoardAutomationOn : .Remote.remoteBoardAutomationOff)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityAddTraits(.isHeader)
-                        .padding(.vertical, 6)
-                        .modifier(dropTarget(at: card.id, fixedInsertion: .before))
+                if index == firstInactive {
+                    sectionHeading(.BoardActivity.inactiveSection(inactiveCount), anchor: card)
+                } else if card.orderGroup?.automationEnabled == true,
+                          index == 0 || cards[index - 1].orderGroup?.automationEnabled != true {
+                    sectionHeading(.Remote.remoteBoardAutomationOn, anchor: card)
                 }
                 boardCard(card)
             }
+            if let last = cards.last, last.orderGroup != nil {
+                Spacer(minLength: 16)
+                    .frame(maxWidth: .infinity)
+                    .modifier(dropTarget(at: last.id, fixedInsertion: .after))
+            }
+            if !hiddenReviews.isEmpty {
+                Button {
+                    withAnimation(reduceMotion ? nil : .default) { hiddenExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: hiddenExpanded ? "chevron.down" : "chevron.right")
+                            .accessibilityHidden(true)
+                        Text(.BoardActivity.hiddenSection(hiddenReviews.count)).monospacedDigit()
+                        Rectangle().fill(.secondary.opacity(0.2)).frame(height: 1).accessibilityHidden(true)
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityValue(Text(hiddenExpanded ? .RemoteCardActions.remoteCardActionsSectionExpanded
+                    : .RemoteCardActions.remoteCardActionsSectionCollapsed))
+                .accessibilityIdentifier("remote.reviewed.hidden")
+                if hiddenExpanded {
+                    ForEach(hiddenReviews) { card in
+                        RemoteHiddenReviewCard(card: card, model: model)
+                            .padding(.vertical, 6)
+                    }
+                }
+            }
         }
+    }
+
+    private func isInactive(_ card: RemoteCard) -> Bool {
+        card.orderGroup.map { !$0.automationEnabled } ?? card.boardTraits?.isInactive ?? false
+    }
+
+    private func sectionHeading(_ title: LocalizedStringResource, anchor: RemoteCard) -> some View {
+        Text(title).font(.caption.weight(.medium)).monospacedDigit()
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
+            .padding(.vertical, 6)
+            .modifier(dropTarget(at: anchor.id, fixedInsertion: .before))
     }
 
     @ViewBuilder private func boardCard(_ card: RemoteCard) -> some View {
@@ -258,50 +287,6 @@ private struct RemoteLaneFilterMenu: View {
         } set: { enabled in
             if enabled { values.wrappedValue.insert(value) }
             else { values.wrappedValue.remove(value) }
-        }
-    }
-}
-
-struct RemoteHiddenReviewsView: View {
-    let model: RemotePhoneModel
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            let reviews = model.state.board?.hiddenReviews ?? []
-            List(reviews) { card in
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(verbatim: card.title).font(.headline)
-                        Text(verbatim: card.mergeRequestIID.map { "\(card.project) · !\($0)" } ?? card.project)
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if let action = card.actions.first(where: { $0.id == RemoteAction.restoreHiddenReviewID }) {
-                        Button(.Board.boardReviewAssignmentRestore) {
-                            Task { await model.perform(card: card, action: action) }
-                        }
-                        .buttonStyle(.bordered)
-                        .modifier(RemoteActionAvailability(state: model.state))
-                        .accessibilityIdentifier("remote.review.restore.\(card.id)")
-                    }
-                }
-            }
-            .overlay {
-                if reviews.isEmpty { Text(.RemoteCardActions.remoteCardActionsHiddenReviewsEmpty).foregroundStyle(.secondary) }
-            }
-            .navigationTitle(Text(.RemoteCardActions.remoteCardActionsHiddenReviews))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(.Remote.remoteClose) { dismiss() }
-                }
-            }
-            .alert(Text(model.resultTitle), isPresented: Binding(
-                get: { model.state.result != nil }, set: { if !$0 { model.state.acknowledgeResult() } }
-            )) {
-                Button(.Remote.remoteClose) { model.state.acknowledgeResult() }
-            }
         }
     }
 }

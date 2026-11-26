@@ -9,13 +9,15 @@ struct MRDisplayMetadataCache {
     }
     private struct Entry {
         let request: GitLabMergeRequest
+        let approvalProgress: MergeRequestApprovalProgress?
         let readStartedAt: Date
     }
     private var account: Account?
     private var entries: [MRAutomationScope.Target: Entry] = [:]
 
     mutating func record(_ request: GitLabMergeRequest, for target: MRAutomationScope.Target, url: URL,
-                         readStartedAt: Date, account: Account, currentAccount: Account) -> Bool {
+                         readStartedAt: Date, account: Account, currentAccount: Account,
+                         approvalProgress: MergeRequestApprovalProgress? = nil) -> Bool {
         guard account == currentAccount, target.host == account.host, target.username == account.username,
               let iid = target.iid, iid > 0, target.projectID > 0,
               request.projectID == target.projectID, request.iid == iid, request.webURL == url,
@@ -27,7 +29,7 @@ struct MRDisplayMetadataCache {
             self.account = account
         }
         guard entries[target].map({ readStartedAt >= $0.readStartedAt }) ?? true else { return false }
-        entries[target] = Entry(request: request, readStartedAt: readStartedAt)
+        entries[target] = Entry(request: request, approvalProgress: approvalProgress, readStartedAt: readStartedAt)
         return true
     }
 
@@ -35,6 +37,14 @@ struct MRDisplayMetadataCache {
         guard self.account == account, target.host == account.host, target.username == account.username,
               let request = entries[target]?.request, request.webURL == url else { return nil }
         return request
+    }
+
+    func approvalProgress(for target: MRAutomationScope.Target, request: GitLabMergeRequest,
+                          account: Account) -> MergeRequestApprovalProgress? {
+        guard self.account == account, let entry = entries[target],
+              entry.request.webURL == request.webURL, entry.request.sha == request.sha,
+              entry.request.targetBranch == request.targetBranch, entry.request.state == request.state else { return nil }
+        return entry.approvalProgress
     }
 
     func requests(account: Account) -> [GitLabMergeRequest] {

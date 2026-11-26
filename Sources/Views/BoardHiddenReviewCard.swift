@@ -91,6 +91,7 @@ struct BoardHiddenAssignmentCard: View {
         guard let iid = target.iid, glab.resolvedHost == target.host, glab.currentUsername == target.username else { return }
 
         let loadID = UUID()
+        let startedAt = Date()
         metadataLoadID = loadID
         request = nil
         approvals = nil
@@ -100,6 +101,8 @@ struct BoardHiddenAssignmentCard: View {
         guard !Task.isCancelled, revision == glab.accountRevision, metadataLoadID == loadID else { return }
         if let loadedRequest, loadedRequest.webURL == review.url {
             request = loadedRequest
+            monitor.recordHiddenReviewDisplay(review, request: loadedRequest, approvals: loadedApprovals,
+                accountRevision: revision, readStartedAt: startedAt)
         }
         approvals = loadedApprovals
     }

@@ -18,7 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Show **Review needed** again when new commits or a different target diff make your GitLab approval stale, including after restarting MergeTether.
 
-- Restore hidden merge requests from a collapsed **Hidden** section under **Reviewing** on Mac. Hidden cards use the same dimming as drafts and offer GitLab, conversation, and review actions from their **Actions** and right-click menus. The board shows counts beside lane and **Automation off** titles, with lane filters on the right.
+- Restore hidden merge requests from a collapsed **Hidden** section under **Reviewing** on Mac, iPhone, and iPad. Hidden cards use the same dimming as drafts and offer GitLab, conversation, and review actions from **Actions**, right-click, or touch and hold. The board shows counts beside lane and **Automation off** titles, with lane filters on the right.
 
 - Limit older successful transcripts and read-only review history after an MR merges or stays closed for 30 days. Active runs and records used for automation remain available.
 

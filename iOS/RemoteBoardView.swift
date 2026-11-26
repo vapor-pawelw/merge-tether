@@ -7,7 +7,6 @@ struct RemoteBoardView: View {
     @State private var pairingSheet = false
     @State private var selected: RemoteCardSelection?
     @State private var showingInbox = false
-    @State private var showingHiddenReviews = false
     @State private var showingSettings = false
     @State private var pendingInboxCard: RemoteCardSelection?
     @State private var regenerationPresentation: DraftRegenerationPresentation?
@@ -35,7 +34,7 @@ struct RemoteBoardView: View {
                         }
                         RemoteLaneBoard(lanes: board.lanes.filter { $0.id != .other }, onOpen: { selected = .init(card: $0) },
                             onOpenCTA: { selected = .init(card: $0, cta: $1) },
-                            model: model, onOpenHiddenReviews: board.hiddenReviews?.isEmpty == false ? { showingHiddenReviews = true } : nil,
+                            model: model, hiddenReviews: board.hiddenReviews ?? [],
                             onRefresh: { await model.refreshContent() })
                         if let updated = board.updatedAt {
                             HStack { Text(.Remote.remoteUpdated); Text(updated, style: .relative) }
@@ -119,16 +118,13 @@ struct RemoteBoardView: View {
                     .presentationDragIndicator(.visible)
             }
             .sheet(item: $regenerationPresentation) { model.draftRegenerationSheet($0) }
-            .sheet(isPresented: $showingHiddenReviews) { RemoteHiddenReviewsView(model: model) }
             .sheet(isPresented: $showingSettings) { RemoteCrashReportingSettingsView() }
             .onChange(of: model.pairingRevision) {
                 pairingSheet = false; selected = nil; showingInbox = false; pendingInboxCard = nil
-                showingHiddenReviews = false
                 regenerationPresentation = nil
             }
             .onChange(of: model.state.board?.account) { _, _ in
                 selected = nil
-                showingHiddenReviews = false
                 regenerationPresentation = nil
             }
             .popover(isPresented: $showingInbox, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
@@ -157,8 +153,8 @@ struct RemoteBoardView: View {
                     .presentationDragIndicator(.visible)
             }
             .alert(Text(model.resultTitle), isPresented: Binding(
-                get: { selected == nil && !showingInbox && !showingHiddenReviews && model.state.result != nil },
-                set: { if !$0, selected == nil, !showingInbox, !showingHiddenReviews { model.state.acknowledgeResult() } }
+                get: { selected == nil && !showingInbox && model.state.result != nil },
+                set: { if !$0, selected == nil, !showingInbox { model.state.acknowledgeResult() } }
             )) {
                 Button(.Remote.remoteClose) { model.state.acknowledgeResult() }
             } message: {
@@ -342,7 +338,8 @@ struct RemoteCardView: View {
     private var secondaryCTA: RemoteCardCTA? { card.presentation?.secondaryCTA.flatMap { $0.duplicatesCardTap ? nil : $0 } }
     private var inboxUpdateDate: Date? { expanded ? nil : card.completionObservedAt }
     private var showsDraftStyle: Bool { !expanded && card.presentation?.showsDraftStyle == true }
-    private var contentOpacity: Double { showsDraftStyle ? 0.5 : 1 }
+    static let dimmedOpacity = 0.5
+    private var contentOpacity: Double { showsDraftStyle ? Self.dimmedOpacity : 1 }
     private var draftBadgeTint: Color {
         colorScheme == .dark
             ? Color(red: 0.79, green: 0.70, blue: 0.92)
