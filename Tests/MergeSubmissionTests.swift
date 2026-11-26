@@ -1122,6 +1122,123 @@ import Testing
         }
     }
 
+    @Test(arguments: [false, true])
+    func automaticMergeAuthorRestrictionAppliesToExplicitOptIn(_ authorOnly: Bool) async throws {
+        try await fixture { glab, gitlab, _ in
+            let suite = "MergePromptAuthorOnly.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let settings = SettingsManager(defaults: defaults)
+            settings.onboardingCompleted = true
+            settings.treatAssignedMergeRequestsAsOwn = true
+            settings.automation.applyPreset(.full, for: .codex)
+            settings.automation.autoMergeAuthorOnly = authorOnly
+            settings.automation.requiresAssignmentClaim = false
+            settings.setAutoMergePreference(.on, for: .init(host: host, username: "me", projectID: 1, iid: 2))
+            gitlab.write("assigned-by-others")
+            gitlab.write("ordinary-project")
+            gitlab.write("outcome", "merged")
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in true })
+
+            monitor.refreshIfNeeded()
+            while monitor.isLoading { await Task.yield() }
+
+            #expect(gitlab.requests.filter { $0.method == "PUT" }.count == (authorOnly ? 0 : 1))
+            if authorOnly {
+                let item = try #require(monitor.requests.first)
+                #expect(item.mayMergeManually && !item.mayAutoMerge)
+                #expect(await monitor.mergeManually(item.request, action: .mergeNow) == .merged)
+            }
+        }
+    }
+
+    @Test func assignedMergeWaitsForAnExplicitClaimEvenWithAutoMergeOn() async throws {
+        try await fixture { glab, gitlab, _ in
+            let suite = "AwaitingAssignment.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let settings = SettingsManager(defaults: defaults)
+            settings.onboardingCompleted = true
+            settings.automation.applyPreset(.full, for: .codex)
+            settings.automation.requiresAssignmentClaim = true
+            let target = MRAutomationScope.Target(host: host, username: user.username, projectID: 1, iid: 2)
+            settings.setAutoMergePreference(.on, for: target)
+            gitlab.write("assigned-by-others")
+            gitlab.write("ordinary-project")
+            gitlab.write("outcome", "merged")
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in true })
+
+            monitor.refreshIfNeeded()
+            while monitor.isLoading { await Task.yield() }
+            let beforeClaim = try #require(monitor.requests.first)
+            #expect(!beforeClaim.mayAutoMerge && beforeClaim.mayMergeManually)
+            var boardInput = MRBoardProjector.Input(account: .init(host: host, username: user.username, revision: glab.accountRevision))
+            boardInput.authored = [beforeClaim]
+            boardInput.automation = settings.configuredAutomation
+            let waiting = try #require(MRBoardProjector(input: boardInput).board().own.first)
+            #expect(waiting.waitsForAssignmentClaim && waiting.needsAttention)
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+            #expect(settings.confirmAssignedOwnership(beforeClaim.request, target: target))
+            let restored = SettingsManager(defaults: defaults)
+            #expect(!restored.automation.scope.awaitsAssignmentClaim(beforeClaim.request, target: target))
+            boardInput.automation = restored.configuredAutomation
+            #expect(MRBoardProjector(input: boardInput).board().own.first?.waitsForAssignmentClaim == false)
+
+            monitor.refreshIfNeeded()
+            while monitor.isLoading { await Task.yield() }
+            #expect(gitlab.requests.filter { $0.method == "PUT" }.count == 1)
+        }
+    }
+
+    @Test(arguments: ["allow", "train", "deny", "unavailable", "off", "on", "ci", "changed"])
+    func mergePromptIsAnAdditionalGateForEligibleDefaults(_ scenario: String) async throws {
+        try await fixture { glab, gitlab, _ in
+            let suite = "MergePrompt.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let settings = SettingsManager(defaults: defaults)
+            settings.onboardingCompleted = true
+            settings.automation.applyPreset(.full, for: .codex)
+            settings.automation.autoMergeMode = .prompt
+            settings.automation.autoMergePrompt.criteria = "Do not merge changes to protected branches."
+            let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+            if scenario == "off" || scenario == "on" {
+                settings.setAutoMergePreference(scenario == "on" ? .on : .off, for: target)
+            }
+            if scenario != "train" { gitlab.write("ordinary-project") }
+            if scenario == "ci" { gitlab.write("pipeline-running") }
+            gitlab.write("outcome", scenario == "train" ? "train-only" : "merged")
+
+            var verifications = 0
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in true },
+                verifyActionPrompt: { input, _ in
+                    verifications += 1
+                    #expect(input.action == .merge && input.target == target)
+                    #expect(input.criteria == settings.automation.autoMergePrompt.criteria)
+                    #expect(settings.mergeSubmissions.isEmpty)
+                    if scenario == "changed" { gitlab.write("drift", "target") }
+                    if scenario == "unavailable" { throw AutomaticActionPromptVerifier.Failure.unavailable }
+                    return .init(decision: scenario == "deny" ? .deny : .allow, reason: "Checked the target branch.")
+                })
+
+            monitor.refreshIfNeeded()
+            while monitor.isLoading { await Task.yield() }
+            if scenario == "deny" || scenario == "unavailable" {
+                monitor.refreshIfNeeded()
+                while monitor.isLoading { await Task.yield() }
+            }
+
+            let invoked = !["off", "on", "ci"].contains(scenario)
+            let writes = gitlab.requests.filter { $0.method != "GET" }
+            #expect(verifications == (invoked ? 1 : 0))
+            #expect(writes.count == (["allow", "train", "on"].contains(scenario) ? 1 : 0))
+            #expect(settings.mergeSubmissions.count == writes.count)
+            let events = settings.automationEvents.filter { $0.action == .mergePrompt }
+            #expect(events.count == (invoked ? 1 : 0))
+            #expect(events.allSatisfy { $0.origin == .automatic && $0.message?.isEmpty == false })
+        }
+    }
+
     @Test(arguments: [false, true], ["mergeNow", "mergeTrain", "runningTrain"])
     func manualAndAutomaticSubmissionUseGitLabsCurrentApprovals(_ automatic: Bool, _ mode: String) async throws {
         try await fixture { glab, gitlab, request in
@@ -1193,8 +1310,12 @@ import Testing
         let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(raw.utf8))
         gitlab.handler = { call in
             let drift = gitlab.text("drift")
+            let owned = gitlab.has("assigned-by-others")
+                ? raw.replacingOccurrences(of: #""author":{"id":3,"username":"me","name":"Me"}"#,
+                    with: #""author":{"id":7,"username":"creator","name":"Creator"},"assignees":[{"id":3,"username":"me","name":"Me"}]"#)
+                : raw
             let listed = gitlab.has("current-head")
-                ? raw.replacingOccurrences(of: String(repeating: "a", count: 40), with: gitlab.text("current-head")) : raw
+                ? owned.replacingOccurrences(of: String(repeating: "a", count: 40), with: gitlab.text("current-head")) : owned
             switch call.endpoint {
             case "/user": return InMemoryGitLab.output(drift == "account" ? #"{"id":99,"username":"me"}"# : #"{"id":3,"username":"me"}"#)
             case "/version": return try InMemoryGitLab.json(["version": gitlab.has("version") ? gitlab.text("version") : "19.5.3-ee"])
@@ -1206,7 +1327,7 @@ import Testing
                 return InMemoryGitLab.output(["train", "train-only"].contains(gitlab.text("observed"))
                     ? #"[{"merge_request":{"project_id":1,"iid":2}}]"# : "[]")
             case "/projects/1/merge_requests/2":
-                var object = try #require(JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any])
+                var object = try #require(JSONSerialization.jsonObject(with: Data(listed.utf8)) as? [String: Any])
                 if gitlab.has("current-head") { object["sha"] = gitlab.text("current-head") }
                 if gitlab.has("pipeline-running") {
                     object["detailed_merge_status"] = "ci_still_running"

@@ -7,6 +7,25 @@ import Testing
 struct GlobalAutomationSwitchTests {
     private let host = "gitlab.example.test"
 
+    @Test func settingsExplainWhichGateBlocksAutomaticGitLabWrites() throws {
+        let settings = SettingsManager(defaults: try makeDefaults())
+        settings.automation.applyPreset(.trusted, for: .codex)
+        #expect(settings.save())
+        let editor = SettingsPolicyEditor(settings: settings)
+        #expect(editor.automaticWriteBlock(settings: settings) == nil)
+
+        editor.draft.allowAutomaticPublicActions = false
+        #expect(editor.automaticWriteBlock(settings: settings) == .privateMode)
+        #expect(editor.draft.permitsFollowUpPush(manual: true))
+        #expect(settings.acceptedAutomation.allowAutomaticPublicActions)
+
+        #expect(settings.setAutomationGloballyEnabled(false))
+        #expect(editor.automaticWriteBlock(settings: settings) == .globalPause)
+        #expect(settings.setAutomationGloballyEnabled(true))
+        editor.draft.packageDecision = .disabled
+        #expect(editor.automaticWriteBlock(settings: settings) == .automationDisabled)
+    }
+
     @Test func switchingOffOverridesPresetAndMRChoicesWithoutChangingThem() throws {
         // given
         let defaults = try makeDefaults()

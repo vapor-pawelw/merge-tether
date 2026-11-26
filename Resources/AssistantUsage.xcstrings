@@ -1,6 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "assistantUsage.purpose.automaticActionPrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic approval and merge criteria"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kryteria automatycznej akceptacji i scalania"
+          }
+        }
+      }
+    },
     "assistantUsagePurposeAuthorFeedback": {
       "extractionState": "manual",
       "localizations": {

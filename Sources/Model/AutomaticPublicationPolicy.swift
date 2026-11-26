@@ -216,7 +216,7 @@ extension AutomationSettings {
         var defaults = self
         defaults.applyPreset(preset, for: assistant)
         switch checkpoint {
-        case .approval: autoApproveEnabled = defaults.autoApproveEnabled
+        case .approval: autoApproveMode = defaults.autoApproveMode
         case .followUpPush: allowFollowUpPush = defaults.allowFollowUpPush
         case .pipelineOwnership: autoClaimPipelineFailures = defaults.autoClaimPipelineFailures
         case .startNewReviews: startNewReviewsAutomatically = defaults.startNewReviewsAutomatically

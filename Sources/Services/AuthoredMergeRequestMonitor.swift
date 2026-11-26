@@ -46,6 +46,8 @@ final class AuthoredMergeRequestMonitor {
     private let glab: GlabService
     private let canAutomate: @MainActor (AutomationAssistant) async -> Bool
     private let conflictLauncher: ConflictLauncher
+    private let actionPromptGate: AutomaticActionPromptGate
+    private struct MergePromptWithheld: Error {}
     private var isVisible = false
     private var wasWatchingWorkflow = false
     private var lastAccount: Account?
@@ -165,12 +167,14 @@ final class AuthoredMergeRequestMonitor {
     init(settings: SettingsManager, glab: GlabService,
          canAutomate: @escaping @MainActor (AutomationAssistant) async -> Bool = {
              await AssistantCLI.detect($0).isReady
-         }, conflictLauncher: @escaping ConflictLauncher = AuthoredMergeRequestMonitor.launchConflict) {
+         }, conflictLauncher: @escaping ConflictLauncher = AuthoredMergeRequestMonitor.launchConflict,
+         verifyActionPrompt: @escaping AutomaticActionPromptVerifier.Verify = AutomaticActionPromptVerifier.verify) {
         self.settings = settings
         self.glab = glab
         glab.ownershipSettings = settings
         self.canAutomate = canAutomate
         self.conflictLauncher = conflictLauncher
+        self.actionPromptGate = AutomaticActionPromptGate(verify: verifyActionPrompt)
         workflow = MergeWorkflowAutomation(settings: settings, glab: glab)
     }
 
@@ -274,9 +278,10 @@ final class AuthoredMergeRequestMonitor {
         for continuation in waiting { continuation.resume() }
     }
 
-    private func permitsAutomaticMerge(_ request: GitLabMergeRequest, account: Account) -> Bool {
-        settings.permitsAutomaticAction(.merge, for: request, target: .init(host: account.host,
-            username: account.username, projectID: request.projectID, iid: request.iid))
+    private func permitsAutomaticMerge(_ request: GitLabMergeRequest, account: Account, userID: Int) -> Bool {
+        (!settings.automation.autoMergeAuthorOnly || request.author.id == userID)
+            && settings.permitsAutomaticAction(.merge, for: request, target: .init(host: account.host,
+                username: account.username, projectID: request.projectID, iid: request.iid))
     }
 
     private func refresh(_ account: Account, revision: UInt64,
@@ -344,7 +349,7 @@ final class AuthoredMergeRequestMonitor {
             if status.mayAutoMerge, let policy = evaluation.policy, request.sha != nil,
                policy.usesMergeTrain || policy.action == .mergeNow,
                automaticMergeTarget == nil || (automaticMergeTarget?.projectID == request.projectID && automaticMergeTarget?.iid == request.iid),
-               isCurrent(account, revision: revision), permitsAutomaticMerge(request, account: account),
+               isCurrent(account, revision: revision), permitsAutomaticMerge(request, account: account, userID: user.id),
                !AssistantAutomationRunner.isWorking(on: work),
                !hasUnfinishedAssistantWork(on: work, username: user.username, currentRequest: request) {
                 let configuration = settings.automation
@@ -359,6 +364,8 @@ final class AuthoredMergeRequestMonitor {
                         trainRecovery: evaluation.trainRecovery)
                     if outcome == .merged { continue }
                     status.submissionState = outcome
+                } catch is MergePromptWithheld {
+                    status.mayAutoMerge = false
                 } catch is CancellationError {
                     if evaluation.trainRecovery != nil {
                         status.submissionState = submissionState(for: request, account: account)
@@ -512,16 +519,22 @@ final class AuthoredMergeRequestMonitor {
                                    trainRecovery: FailedTrainRecovery?,
                                    verificationAssistant: AutomationAssistant? = nil) async throws -> MergeSubmissionState {
         let work = AssistantAutomationRunner.MergeRequestWork(host: account.host, projectID: request.projectID, iid: request.iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: account.host, username: user.username,
+            projectID: request.projectID, iid: request.iid)
+        @MainActor func currentPromptPolicy() -> AutomaticActionPromptGate.Policy? {
+            automatic ? .init(.merge, target: target, settings: settings) : nil
+        }
+        let promptPolicy = currentPromptPolicy()
         let configurationID = configurationFingerprint()
         let participationRevision = settings.reviewParticipationPreferences.revision(host: account.host, username: account.username)
         let permits: @MainActor @Sendable () -> Bool = {
             self.isCurrent(account, revision: revision) && self.settings.automation == configuration
                 && self.configurationFingerprint() == configurationID
                 && self.settings.reviewParticipationPreferences.revision(host: account.host, username: account.username) == participationRevision
-                && (!automatic || self.permitsAutomaticMerge(request, account: account))
+                && (!automatic || self.permitsAutomaticMerge(request, account: account, userID: user.id))
+                && currentPromptPolicy() == promptPolicy
                 && !AssistantAutomationRunner.isWorking(on: work)
-                && !self.settings.pendingCommentReviews.contains(.init(host: account.host, username: account.username,
-                    projectID: request.projectID, iid: request.iid))
+                && !self.settings.pendingCommentReviews.contains(target)
         }
         func mayReplaceReceipt() -> Bool {
             if let trainRecovery { return self.receipt(for: request, account: account) == trainRecovery.receipt }
@@ -543,14 +556,23 @@ final class AuthoredMergeRequestMonitor {
             guard verificationAssistant == selected else { throw CancellationError() }
             let assessment = try await ManualFeedbackVerification.assess(request: request, discussions: discussions,
                 user: user, host: account.host, settings: settings, glab: glab)
-            let target = MRAutomationScope.Target.mergeRequest(host: account.host, username: user.username, projectID: request.projectID, iid: request.iid)
             guard assessment.hasNoRemainingAuthorWork(in: discussions, authorID: user.id,
                 ignoredSuggestions: settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target),
                 excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: account.host, username: user.username)) else { throw CancellationError() }
         }
+        let promptCandidate: AutomaticActionPromptGate.Candidate?
+        if let promptPolicy {
+            guard let candidate = AutomaticActionPromptGate.Candidate(action: .merge, mergeAction: action,
+                target: target, userID: user.id, accountRevision: revision, policy: promptPolicy,
+                request: request, discussions: discussions),
+                  await actionPromptGate.allows(candidate, request: request, discussions: discussions, settings: settings,
+                    accountIsCurrent: { self.isCurrent(account, revision: revision) }, isEligible: permits) else {
+                throw MergePromptWithheld()
+            }
+            promptCandidate = candidate
+        } else { promptCandidate = nil }
         guard permits() else { throw CancellationError() }
-        var receipt = MergeSubmissionReceipt(target: .init(host: account.host, username: user.username,
-            projectID: request.projectID, iid: request.iid), userID: user.id, context: .init(request),
+        var receipt = MergeSubmissionReceipt(target: target, userID: user.id, context: .init(request),
             semanticFingerprint: request.semanticContextFingerprint, discussionFingerprint: fingerprint,
             configuration: .init(settings), action: action, createdAt: Date())
         var didWrite = false
@@ -560,13 +582,17 @@ final class AuthoredMergeRequestMonitor {
                 headSHA: sha, host: account.host, expectedUser: user, expectedContext: .init(request),
                 expectedDiscussionFingerprint: fingerprint, expectedSemanticContextFingerprint: request.semanticContextFingerprint,
                 action: action, expectedPolicy: policy, expectedTrainRecoveryNoteIDs: trainRecovery?.noteIDs,
+                expectedPromptDiscussionDigest: promptCandidate?.discussionDigest,
                 onRecoveryQueueObserved: {
                     guard var previous = trainRecovery?.receipt, self.isCurrent(account), EvidenceContext.sameAccountRevision(revision, self.glab.accountRevision),
                           self.receipt(for: request, account: account) == previous else { return }
                     previous.observedReplacementQueue = true
                     _ = self.settings.saveMergeSubmission(previous)
                 },
-                permitsRequest: { !automatic || self.permitsAutomaticMerge($0, account: account) },
+                permitsRequest: { live in
+                    (!automatic || self.permitsAutomaticMerge(live, account: account, userID: user.id))
+                        && promptCandidate?.matches(live) != false
+                },
                 beforeWrite: { baseline in
                     receipt.trainNoteIDBeforeAttempt = baseline
                     guard permits(), mayReplaceReceipt(),
@@ -612,10 +638,12 @@ final class AuthoredMergeRequestMonitor {
         let host = account.host
         var request = request
         let target = MRAutomationScope.Target.mergeRequest(host: host, username: account.username, projectID: request.projectID, iid: request.iid)
-        let autoMergeEnabled = settings.automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath,
+        let automation = settings.automation
+        let autoMergeEnabled = automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath,
             optedIn: settings.autoMergePreference(for: target) == .on,
-            hasOtherAssignees: request.hasOtherAssignees(than: account.username))
-            && settings.automation.scope.permits(request, host: host, username: account.username)
+            hasOtherAssignees: request.hasOtherAssignees(than: account.username),
+            isAuthor: request.author.id == user.id)
+            && automation.scope.permits(request, host: host, username: account.username)
         let policy = try? await glab.fetchMergeActionPolicy(projectID: request.projectID, host: host, request: request)
         var trainState: MergeSubmissionState = .none
         if policy?.action == .enqueue, policy?.usesMergeTrain == true {

@@ -18,6 +18,159 @@
         }
       }
     },
+    "automationHistory.action.approvalPrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verifier checked automatic approval"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weryfikator ocenił automatyczną akceptację"
+          }
+        }
+      }
+    },
+    "automationHistory.action.mergePrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verifier checked automatic merge"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weryfikator ocenił automatyczne scalenie"
+          }
+        }
+      }
+    },
+    "automationHistory.promptAllowed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allowed. %@"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zezwolono. %@"
+          }
+        }
+      }
+    },
+    "automationHistory.promptDenied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Denied. %@"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Odmówiono. %@"
+          }
+        }
+      }
+    },
+    "automationHistory.promptUncertain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uncertain. %@"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Niepewna decyzja. %@"
+          }
+        }
+      }
+    },
+    "automationHistory.promptEmpty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic action withheld because the criteria are empty."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wstrzymano automatyczną akcję, ponieważ kryteria są puste."
+          }
+        }
+      }
+    },
+    "automationHistory.promptUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The configured verifier is unavailable."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skonfigurowany weryfikator jest niedostępny."
+          }
+        }
+      }
+    },
+    "automationHistory.promptFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The verifier did not return a usable decision."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weryfikator nie zwrócił prawidłowej decyzji."
+          }
+        }
+      }
+    },
+    "automationHistory.promptChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The assessment expired because the action context changed. %@"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ocena straciła ważność po zmianie kontekstu akcji. %@"
+          }
+        }
+      }
+    },
     "automationHistory.source.gitLab": {
       "extractionState": "manual",
       "localizations": {

@@ -51,7 +51,10 @@ struct ReviewParticipationSettingsSection: View {
             if failed { Text(.ReviewParticipation.reviewParticipationFailed).foregroundStyle(.red) }
             if persistenceFailed { Text(.ReviewParticipation.reviewParticipationSaveFailed).foregroundStyle(.red) }
         } header: { Text(.ReviewParticipation.reviewParticipationTitle) }
-        footer: { Text(.ReviewParticipation.reviewParticipationHelp) }
+        footer: {
+            Text(.ReviewParticipation.reviewParticipationHelp)
+            Text(.AutomationProfiles.savesImmediately)
+        }
 
         Section {
             HStack {
@@ -92,6 +95,9 @@ struct ReviewParticipationSettingsSection: View {
             if automationLookupFailed { Text(.ReviewParticipation.reviewParticipationFailed).foregroundStyle(.red) }
             if automationPersistenceFailed { Text(.ReviewParticipation.reviewParticipationAutomationSaveFailed).foregroundStyle(.red) }
         } header: { Text(.ReviewParticipation.reviewParticipationAutomationTitle) }
-        footer: { Text(.ReviewParticipation.reviewParticipationAutomationHelp) }
+        footer: {
+            Text(.ReviewParticipation.reviewParticipationAutomationHelp)
+            Text(.AutomationProfiles.savesImmediately)
+        }
     }
 }

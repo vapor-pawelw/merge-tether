@@ -2,6 +2,57 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "board.assignment.awaitingClaim": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation awaits your confirmation"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatyzacja czeka na przejęcie MR-a"
+          }
+        }
+      }
+    },
+    "board.assignment.claim": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claim merge request"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przejmij MR"
+          }
+        }
+      }
+    },
+    "board.assignment.claimFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not confirm the assignment. Refresh the request and try again."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się potwierdzić przypisania. Odśwież MR i spróbuj ponownie."
+          }
+        }
+      }
+    },
     "board.reviewAssignment.new": {
       "extractionState": "manual",
       "localizations": {

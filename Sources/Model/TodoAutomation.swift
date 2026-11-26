@@ -215,6 +215,19 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var workerExecutionTimeout = WorkerExecutionTimeout()
     var assistantWorkspace = ""
     var autoMergeEnabled = false
+    var autoMergePrompt = AutomaticActionPrompt()
+    var autoMergeMode: AutomaticActionMode {
+        get { autoMergePrompt.mode(enabled: autoMergeEnabled) }
+        set {
+            autoMergeEnabled = newValue != .off
+            autoMergePrompt.required = newValue == .prompt
+        }
+    }
+    var autoMergeAuthorOnly = true
+    var requiresAssignmentClaim: Bool {
+        get { scope.requiresAssignmentClaim }
+        set { scope.requiresAssignmentClaim = newValue }
+    }
     var autoMergeWithOtherAssignees = false
     var autoReReviewEnabled = false
     /// Stored publication flags stay compatible; the selected profile determines new defaults.
@@ -271,6 +284,14 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     }
     /// Off unless a delivering profile or the user turns it on; a review verdict alone never approves.
     var autoApproveEnabled = false
+    var autoApprovePrompt = AutomaticActionPrompt()
+    var autoApproveMode: AutomaticActionMode {
+        get { autoApprovePrompt.mode(enabled: autoApproveEnabled) }
+        set {
+            autoApproveEnabled = newValue != .off
+            autoApprovePrompt.required = newValue == .prompt
+        }
+    }
     /// The strictest threshold unless the user chose another one. Stored choices are preserved.
     var autoApprovalThreshold: AutoApprovalThreshold = .noMajorIssues
     var autoResolveOwnReviewThreads = true
@@ -381,6 +402,9 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         workerExecutionTimeout = (try? values.decode(WorkerExecutionTimeout.self, forKey: .workerExecutionTimeout)) ?? .init()
         assistantWorkspace = try values.decodeIfPresent(String.self, forKey: .assistantWorkspace) ?? assistantWorkspace
         autoMergeEnabled = try values.decodeIfPresent(Bool.self, forKey: .autoMergeEnabled) ?? false
+        autoMergePrompt = try values.decodeIfPresent(AutomaticActionPrompt.self, forKey: .autoMergePrompt) ?? .init()
+        autoApprovePrompt = try values.decodeIfPresent(AutomaticActionPrompt.self, forKey: .autoApprovePrompt) ?? .init()
+        let storedAuthorOnly = try values.decodeIfPresent(Bool.self, forKey: .autoMergeAuthorOnly)
         let storedSharedAutoMerge = try values.decodeIfPresent(Bool.self, forKey: .autoMergeWithOtherAssignees)
         autoReReviewEnabled = try values.decodeIfPresent(Bool.self, forKey: .autoReReviewEnabled) ?? false
         publishDraftsWithoutConfirmation = try values.decodeIfPresent(Bool.self, forKey: .publishDraftsWithoutConfirmation) ?? false
@@ -468,6 +492,8 @@ struct AutomationSettings: Codable, Equatable, Sendable {
                 var candidate = self
                 candidate.publicationMode = loadedPublicationMode
                 candidate.autoMergeWithOtherAssignees = storedSharedAutoMerge ?? (preset == .full)
+                candidate.autoMergeAuthorOnly = storedAuthorOnly ?? (preset != .full)
+                candidate.requiresAssignmentClaim = scope.assignedOwnershipConfirmation ?? (preset != .full)
                 candidate.publicationRestrictions.allowBotReplies = AutomaticPublicationRestrictions.defaults(for: preset).allowBotReplies
                 return candidate.matchingPreset == preset
             }
@@ -478,7 +504,10 @@ struct AutomationSettings: Codable, Equatable, Sendable {
             if botReplies != publicationRestrictions.allowBotReplies { publicationMode = loadedPublicationMode }
             publicationRestrictions.allowBotReplies = botReplies
         }
-        autoMergeWithOtherAssignees = storedSharedAutoMerge ?? (packageDecision == .enabled && selectedPreset == .full)
+        let maxProfile = packageDecision == .enabled && selectedPreset == .full
+        autoMergeWithOtherAssignees = storedSharedAutoMerge ?? maxProfile
+        autoMergeAuthorOnly = storedAuthorOnly ?? !maxProfile
+        requiresAssignmentClaim = scope.assignedOwnershipConfirmation ?? !maxProfile
     }
 
     func encode(to encoder: Encoder) throws {
@@ -487,6 +516,9 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         if assistantSelectionCleared { try values.encode(true, forKey: .assistantSelectionCleared) }
         try values.encodeIfPresent(assistantWorkspace, forKey: .assistantWorkspace)
         try values.encodeIfPresent(autoMergeEnabled, forKey: .autoMergeEnabled)
+        try values.encode(autoMergePrompt, forKey: .autoMergePrompt)
+        try values.encode(autoApprovePrompt, forKey: .autoApprovePrompt)
+        try values.encode(autoMergeAuthorOnly, forKey: .autoMergeAuthorOnly)
         try values.encodeIfPresent(autoMergeWithOtherAssignees, forKey: .autoMergeWithOtherAssignees)
         try values.encodeIfPresent(conflictTasksEnabled, forKey: .conflictTasksEnabled)
         try values.encodeIfPresent(reviewRequested, forKey: .reviewRequested)
@@ -531,7 +563,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case assistant, assistantSelectionCleared, assistantWorkspace, autoMergeEnabled, conflictTasksEnabled, reviewRequested, authorFeedback
-        case autoMergeWithOtherAssignees
+        case autoMergeWithOtherAssignees, autoMergeAuthorOnly, autoApprovePrompt, autoMergePrompt
         case requireReviewStartConfirmation
         case allowAssistantTools, assistantToolProjects, packageDecision, workflowRules, allowAutomaticPublicActions
         case autoApprovalThreshold
@@ -548,6 +580,8 @@ struct AutomationSettings: Codable, Equatable, Sendable {
 
     mutating func applyPreset(_ preset: AutomationPreset, for assistant: AutomationAssistant?) {
         selectedAssistant = assistant
+        autoMergeAuthorOnly = preset != .full
+        requiresAssignmentClaim = preset != .full
         autoMergeWithOtherAssignees = preset == .full
         if preset == .manual {
             let firstChoice = packageDecision == .undecided
@@ -561,8 +595,8 @@ struct AutomationSettings: Codable, Equatable, Sendable {
             allowAutomaticPublicActions = preset != .safe
             autoVerifyReReview = true
             autoReReviewEnabled = preset != .safe
-            autoApproveEnabled = delivers
-            autoMergeEnabled = preset == .full
+            autoApproveMode = delivers ? .on : .off
+            autoMergeMode = preset == .full ? .on : .off
             allowFollowUpPush = delivers
             autoResolveOwnReviewThreads = delivers
             autoResolveAcceptedFeedback = delivers
@@ -596,6 +630,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
 
     private func matchesPreset(_ preset: AutomationPreset) -> Bool {
         var actual = ignoringGlobalSuspension
+        actual.requiresAssignmentClaim = requiresAssignmentClaim
         var expected = actual
         expected.applyPreset(preset, for: selectedAssistant)
         expected.baselinePreset = baselinePreset
@@ -614,9 +649,10 @@ struct AutomationSettings: Codable, Equatable, Sendable {
 
     private mutating func removePublicPermissions() {
         publicationMode = .manual
-        autoMergeEnabled = false
+        autoMergeMode = .off
         autoMergeWithOtherAssignees = false
-        autoApproveEnabled = false
+        autoMergeAuthorOnly = true
+        autoApproveMode = .off
         autoReReviewEnabled = false
         allowFollowUpPush = false
         allowConflictPush = false
@@ -663,11 +699,11 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     mutating func disableAssistantPackage() {
         packageDecision = .disabled
         allowAutomaticPublicActions = false
-        autoMergeEnabled = false
+        autoMergeMode = .off
         autoReReviewEnabled = false
         publishDraftsWithoutConfirmation = false
         publishAIRepliesWithoutConfirmation = false
-        autoApproveEnabled = false
+        autoApproveMode = .off
         autoResolveAcceptedFeedback = false
         conflictTasksEnabled = false
         autoClaimPipelineFailures = false
@@ -714,6 +750,8 @@ struct AutomationSettings: Codable, Equatable, Sendable {
             (autoReReviewEnabled, current.autoReReviewEnabled),
             (autoMergeEnabled, current.autoMergeEnabled),
             (autoApproveEnabled, current.autoApproveEnabled),
+            (autoApproveMode == .prompt, current.autoApproveMode == .prompt),
+            (autoMergeMode == .prompt, current.autoMergeMode == .prompt),
             (publishDraftsWithoutConfirmation, current.publishDraftsWithoutConfirmation),
             (publishAIRepliesWithoutConfirmation, current.publishAIRepliesWithoutConfirmation)
         ]
@@ -727,11 +765,14 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     func preservingScope(from current: Self) -> Self {
         var updated = self
         updated.scope = current.scope
+        updated.scope.assignedOwnershipConfirmation = scope.assignedOwnershipConfirmation
         return updated
     }
 
-    func permitsAutoMerge(project: String, optedIn: Bool = false, hasOtherAssignees: Bool = false) -> Bool {
+    func permitsAutoMerge(project: String, optedIn: Bool = false, hasOtherAssignees: Bool = false,
+                          isAuthor: Bool = true) -> Bool {
         hasAutomaticPublicActionConsent
+            && (!autoMergeAuthorOnly || isAuthor)
             && (!hasOtherAssignees || (autoMergeEnabled && autoMergeWithOtherAssignees))
             && (optedIn || (autoMergeEnabled && matchesOptionalProjectRestriction(project, paths: autoMergeProjects)))
     }

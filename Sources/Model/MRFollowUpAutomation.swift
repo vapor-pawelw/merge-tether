@@ -1,7 +1,7 @@
 import Foundation
 
 enum MRFollowUpAutomationHold: Equatable {
-    case packageDisabled, ignored, closed, scopePaused, draftPaused, runnerUnsupported, notConfigured
+    case packageDisabled, ignored, closed, scopePaused, draftPaused, assignmentPending, runnerUnsupported, notConfigured
     case projectExcluded, workflowExcluded, ruleDisabled, assistantUnavailable, retryRequired, readinessUnknown, loginRequired, rateLimited
 
     var message: LocalizedStringResource {
@@ -11,6 +11,7 @@ enum MRFollowUpAutomationHold: Equatable {
         case .closed: .AutomationHold.automationHoldClosed
         case .scopePaused: .AutomationHold.automationHoldScopePaused
         case .draftPaused: .AutomationHold.automationHoldDraftPaused
+        case .assignmentPending: .Board.boardAssignmentAwaitingClaim
         case .runnerUnsupported: .AutomationHold.automationHoldRunnerUnsupported
         case .notConfigured: .AutomationHold.automationHoldNotConfigured
         case .projectExcluded: .AutomationHold.automationHoldProjectExcluded
@@ -33,6 +34,7 @@ extension AutomationSettings {
         if !hasAutomaticActionConsent { return .packageDisabled }
         if ignored { return .ignored }
         if !request.isOpen { return .closed }
+        if scope.awaitsAssignmentClaim(request, target: target) { return .assignmentPending }
         if !scope.resolve(target).active { return .scopePaused }
         let rule = authorFeedback
         let workflow = workflowRules[.newDiscussion]

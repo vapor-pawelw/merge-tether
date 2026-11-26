@@ -5,7 +5,7 @@ import Foundation
 struct UserAttentionSnapshot: Equatable, Sendable {
     enum Reason: String, Hashable, Sendable {
         case drafts, approval, discussion, pipeline, pipelineHandoff, conflict, merge
-        case review, reviewConfirmation, failedWork, proposal, otherEvent
+        case review, reviewConfirmation, failedWork, proposal, otherEvent, assignmentClaim
     }
     struct Action: Hashable, Sendable {
         let reason: Reason

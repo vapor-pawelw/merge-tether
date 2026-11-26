@@ -16,7 +16,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Auto-reply to comments based on style only after you confirm two AI comments from the same author and have marked none human. See author-trust publications in the MR Event log and manage trust in publication settings.
 - Use **Reply (AI)** or **It's human** on unconfirmed reply drafts in Mac, iPhone and iPad Details.
 
+- Organize Mac automation settings by task, with checkboxes, visible pause and permission states, and a clear distinction between immediate and pending changes.
+
 - Ask the configured agent about merge request status, automation decisions and how MergeTether works from the Mac toolbar. The read-only conversation can use the event log and public source for context.
+
+- Use verifier prompts for automatic approval and merge. The Event log records each decision and its reason.
+- Claim assigned merge requests from Needs Attention before automation starts. Outside Max, this confirmation is enabled by default and automatic merge is limited to merge requests you authored.
 
 - Show Play for active automation and Pause for suspended automation on the Mac and companion app.
 

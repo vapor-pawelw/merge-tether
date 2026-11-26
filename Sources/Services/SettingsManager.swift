@@ -348,6 +348,9 @@ final class SettingsManager {
     }
     var automation: AutomationSettings {
         didSet {
+            if automation.scope.treatsAssignedRequestsAsOwn != treatAssignedMergeRequestsAsOwn {
+                automation.scope.treatsAssignedRequestsAsOwn = treatAssignedMergeRequestsAsOwn
+            }
             if automation.isGloballySuspended == automationGloballyEnabled {
                 automation.isGloballySuspended = !automationGloballyEnabled
             }
@@ -360,7 +363,12 @@ final class SettingsManager {
     var keepMacAwakeDuringAgentTasks: Bool
     /// New review candidates go straight to Reviewing (marked NEW) instead of waiting in the inbox.
     var addNewReviewsToReviewed: Bool
-    var treatAssignedMergeRequestsAsOwn: Bool
+    var treatAssignedMergeRequestsAsOwn: Bool {
+        didSet {
+            automation.scope.treatsAssignedRequestsAsOwn = treatAssignedMergeRequestsAsOwn
+            acceptedAutomation.scope.treatsAssignedRequestsAsOwn = treatAssignedMergeRequestsAsOwn
+        }
+    }
 
     func owns(_ request: GitLabMergeRequest, userID: Int) -> Bool {
         request.isOwned(by: userID, includingAssignee: treatAssignedMergeRequestsAsOwn)
@@ -533,11 +541,13 @@ final class SettingsManager {
         confirmGlobalAutomationChanges = defaults.bool(forKey: Key.confirmGlobalAutomationChanges)
         keepMacAwakeDuringAgentTasks = defaults.bool(forKey: Key.keepMacAwakeDuringAgentTasks)
         addNewReviewsToReviewed = defaults.bool(forKey: Key.addNewReviewsToReviewed)
-        treatAssignedMergeRequestsAsOwn = defaults.bool(forKey: Key.treatAssignedMergeRequestsAsOwn)
+        let useAssigneesAsOwners = defaults.bool(forKey: Key.treatAssignedMergeRequestsAsOwn)
+        treatAssignedMergeRequestsAsOwn = useAssigneesAsOwners
         var runtimeAutomation = loadedAutomation
+        runtimeAutomation.scope.treatsAssignedRequestsAsOwn = useAssigneesAsOwners
         runtimeAutomation.isGloballySuspended = !globallyEnabled
         automation = runtimeAutomation
-        acceptedAutomation = loadedAutomation
+        acceptedAutomation = runtimeAutomation.ignoringGlobalSuspension
         boardGrouping = defaults.string(forKey: Key.boardGrouping).flatMap(MRBoardGrouping.init(rawValue:)) ?? .withoutAutomation
         ownAutomationOffExpanded = defaults.bool(forKey: Key.ownAutomationOffExpanded)
         reviewingAutomationOffExpanded = defaults.bool(forKey: Key.reviewingAutomationOffExpanded)

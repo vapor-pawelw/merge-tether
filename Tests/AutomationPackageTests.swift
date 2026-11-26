@@ -3,6 +3,60 @@ import Testing
 @testable import MergeTether
 
 struct AutomationPackageTests {
+    @Test func authorOnlyMergeDefaultsToTheProfileAndPreservesAnExplicitChoice() throws {
+        var settings = try JSONDecoder().decode(AutomationSettings.self, from: Data(#"{"autoMergeEnabled":true}"#.utf8))
+        #expect(settings.autoMergeAuthorOnly)
+        settings.applyPreset(.full, for: .codex)
+        #expect(!settings.autoMergeAuthorOnly && settings.matchingPreset == .full)
+        settings.autoMergeAuthorOnly = true
+        let snapshot = try #require(AutomationProfileSnapshot.custom(from: settings))
+        let restored = try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(settings))
+        #expect(restored.autoMergeAuthorOnly && restored.matchingPreset == nil)
+        settings.applyPreset(.full, for: .codex)
+        snapshot.apply(to: &settings)
+        #expect(settings.autoMergeAuthorOnly)
+    }
+
+    @Test func assignmentClaimDefaultsToTheProfileAndIsPreservedWithCustom() throws {
+        var settings = AutomationSettings()
+        settings.applyPreset(.trusted, for: .codex)
+        #expect(settings.requiresAssignmentClaim && settings.autoMergeAuthorOnly)
+        settings.applyPreset(.full, for: .codex)
+        #expect(!settings.requiresAssignmentClaim && !settings.autoMergeAuthorOnly)
+        var legacy = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any])
+        var scope = try #require(legacy["scope"] as? [String: Any])
+        scope.removeValue(forKey: "assignedOwnershipConfirmation")
+        legacy["scope"] = scope
+        legacy.removeValue(forKey: "autoMergeAuthorOnly")
+        let upgraded = try JSONDecoder().decode(AutomationSettings.self, from: JSONSerialization.data(withJSONObject: legacy))
+        #expect(!upgraded.requiresAssignmentClaim && !upgraded.autoMergeAuthorOnly && upgraded.matchingPreset == .full)
+
+        settings.requiresAssignmentClaim = true
+        let custom = try #require(AutomationProfileSnapshot.custom(from: settings))
+        settings.applyPreset(.full, for: .codex)
+        custom.apply(to: &settings)
+        #expect(settings.requiresAssignmentClaim && settings.matchingPreset == nil)
+    }
+
+    @Test func promptModesRoundTripAndSurvivePresetSwitching() throws {
+        var settings = AutomationSettings()
+        settings.applyPreset(.full, for: .codex)
+        let legacy = try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(settings))
+        #expect(legacy.autoApproveMode == .on && legacy.autoMergeMode == .on)
+        settings.autoApproveMode = .prompt
+        settings.autoApprovePrompt.criteria = "Approve documentation changes."
+        settings.autoMergeMode = .prompt
+        settings.autoMergePrompt.criteria = "Skip release branches."
+        let restored = try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(settings))
+        #expect(restored == settings && restored.matchingPreset == nil)
+        let snapshot = try #require(AutomationProfileSnapshot.custom(from: settings))
+        settings.applyPreset(.full, for: .codex)
+        #expect(settings.autoApproveMode == .on && settings.autoMergeMode == .on)
+        #expect(settings.matchingPreset == .full)
+        snapshot.apply(to: &settings)
+        #expect(settings == restored)
+    }
+
     @Test func autoMergeWithOtherAssigneesFollowsMaxAndPreservesCustomChoices() throws {
         var settings = AutomationSettings()
         #expect(!settings.autoMergeWithOtherAssignees)

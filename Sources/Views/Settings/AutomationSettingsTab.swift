@@ -1,3 +1,4 @@
+import AppKit
 import Observation
 import SwiftUI
 import UniformTypeIdentifiers
@@ -33,8 +34,29 @@ final class SettingsPolicyEditor {
         [draft.reviewRequested, draft.authorFeedback].contains { $0.isEnabled && !$0.isConfigured }
     }
 
+    enum AutomaticWriteBlock: Equatable {
+        case savedDataUnavailable, globalPause, automationDisabled, privateMode
+
+        var message: LocalizedStringResource {
+            switch self {
+            case .savedDataUnavailable: .AutomationProfiles.writesBlockedBySavedData
+            case .globalPause: .AutomationProfiles.writesBlockedByGlobalPause
+            case .automationDisabled: .AutomationProfiles.writesBlockedByProfile
+            case .privateMode: .AutomationProfiles.writesBlockedByPrivateMode
+            }
+        }
+    }
+
+    func automaticWriteBlock(settings: SettingsManager) -> AutomaticWriteBlock? {
+        if !settings.automaticActionsAllowed { return .savedDataUnavailable }
+        if !settings.automationGloballyEnabled { return .globalPause }
+        if !draft.hasAutomaticActionConsent { return .automationDisabled }
+        if !draft.hasAutomaticPublicActionConsent { return .privateMode }
+        return nil
+    }
+
     func updateScope(from settings: SettingsManager) {
-        draft.scope = settings.automation.ignoringGlobalSuspension.scope
+        draft = draft.preservingScope(from: settings.configuredAutomation)
         saveState.updateSavedScope(settings.acceptedAutomation.scope)
     }
 
@@ -100,6 +122,8 @@ struct SettingsPolicyFooter: View {
                 Text(.WorkerTimeout.invalidOverrides).foregroundStyle(.red).font(.caption)
             } else if editor.hasIncompleteRule {
                 Text(.Settings.settingsAutomationIncomplete).foregroundStyle(.red).font(.caption)
+            } else if hasUnappliedChanges {
+                Text(.AutomationProfiles.unsavedChanges).font(.caption).foregroundStyle(.secondary)
             }
 
             Spacer(minLength: 0)
@@ -116,9 +140,7 @@ struct SettingsPolicyFooter: View {
                     assistantToVerify = assistant
                 } else { editor.apply(monitor: monitor) }
             } label: { Text(.Settings.settingsAutomationApply) }
-            .disabled(!editor.saveState.canApply(draft: editor.draft, custom: editor.sessionCustom,
-                savedCustom: monitor.settings.automationProfileHistory.lastGood) || editor.hasIncompleteRule
-                || editor.draft.workerExecutionTimeout.hasInvalidOverrides)
+            .disabled(!hasUnappliedChanges || editor.hasIncompleteRule || editor.draft.workerExecutionTimeout.hasInvalidOverrides)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
@@ -130,6 +152,11 @@ struct SettingsPolicyFooter: View {
             }
         }
     }
+
+    private var hasUnappliedChanges: Bool {
+        editor.saveState.canApply(draft: editor.draft, custom: editor.sessionCustom,
+            savedCustom: monitor.settings.automationProfileHistory.lastGood)
+    }
 }
 
 struct AutomationSettingsTab: View {
@@ -137,7 +164,6 @@ struct AutomationSettingsTab: View {
     private var settings: SettingsManager { monitor.settings }
 
     @Bindable private var editor: SettingsPolicyEditor
-    @State private var trigger: Trigger = .reviewRequested
     @State private var page: Page = .checkpoints
     @State private var isChoosingWorkspace = false
     @State private var needsVerificationSetup = false
@@ -149,23 +175,19 @@ struct AutomationSettingsTab: View {
     }
 
     var body: some View {
-        // Keep detailed automation controls readable in the sidebar.
         HStack(spacing: 0) {
             List(selection: $page) {
-                ForEach(Page.allCases.filter { $0 != .scope || settings.configuredAutomation.hasEnabledAutomation }, id: \.self) { page in
+                ForEach(Page.allCases, id: \.self) { page in
                     Label { Text(page.title) } icon: { Image(systemName: page.symbol) }
                         .tag(page)
                 }
             }
             .listStyle(.sidebar)
-            .frame(width: 170)
+            .frame(width: 190)
 
             Divider()
 
             pageContent
-        }
-        .onChange(of: settings.configuredAutomation.hasEnabledAutomation) { _, enabled in
-            if !enabled, page == .scope { page = .checkpoints }
         }
         .sheet(isPresented: $needsVerificationSetup) {
             let assistant = editor.draft.assistant
@@ -179,6 +201,7 @@ struct AutomationSettingsTab: View {
     @ViewBuilder
     private var pageContent: some View {
         VStack(spacing: 0) {
+            globalStatus
             if page == .scope {
                 AutomationScopeSettingsView(monitor: monitor)
             } else {
@@ -186,11 +209,15 @@ struct AutomationSettingsTab: View {
                     switch page {
                     case .checkpoints:
                         packageFields
-                        checkpointFields
-                    case .workflow:
-                        MergeWorkflowSettingsSection(rules: $editor.draft.workflowRules)
                     case .todos:
-                        todoFields
+                        reviewFields
+                        feedbackFields
+                    case .workflow:
+                        MergeWorkflowSettingsSection(settings: $editor.draft, writeBlock: automaticWriteBlock)
+                        conflictFields
+                    case .publication:
+                        publicationFields
+                        mergeFields
                     case .advanced:
                         advancedFields
                     case .scope:
@@ -204,57 +231,139 @@ struct AutomationSettingsTab: View {
         }
     }
 
-    private var rule: Binding<AutomationRule> {
-        switch trigger {
-        case .reviewRequested: $editor.draft.reviewRequested
-        case .authorFeedback: $editor.draft.authorFeedback
-        }
+    private var automaticWriteBlock: SettingsPolicyEditor.AutomaticWriteBlock? {
+        editor.automaticWriteBlock(settings: settings)
     }
 
-    private var checkpointFields: some View {
-        Group {
-            Group {
-                preparationFields
-                MergeWorkflowPermissionSettingsSection(rules: $editor.draft.workflowRules,
-                    infrastructureRetryAvailable: editor.draft.canConfigureInfrastructureRetry)
-                publicationFields
+    @ViewBuilder
+    private var globalStatus: some View {
+        let paused = !settings.automationGloballyEnabled
+        if paused || (page == .checkpoints && settings.configuredAutomationAvailable && settings.automaticActionsAllowed) {
+            HStack(spacing: 12) {
+                Label {
+                    Text(paused ? .AutomationProfiles.globallyPaused : .AutomationProfiles.globallyEnabled)
+                } icon: {
+                    Image(systemName: paused ? "pause.fill" : "play.fill")
+                }
+                .fontWeight(.medium)
+                Spacer()
+                if settings.configuredAutomationAvailable {
+                    Button {
+                        monitor.requestGlobalAutomationToggle(confirm: confirmGlobalAutomationChange)
+                    } label: {
+                        Text(paused ? .CommandCenter.commandCenterAutomationSuspendedResume
+                            : .CommandCenter.commandCenterAutomationConfirmPauseAction)
+                    }
+                    .controlSize(.small)
+                }
             }
-            .disabled(!editor.draft.hasAutomaticActionConsent)
-            // Job permissions also govern jobs the user starts, so they stay editable in Manual.
-            deliveryFields
-            completionFields.disabled(!editor.draft.hasAutomaticActionConsent)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .background(paused ? Color.orange.opacity(0.1) : Color.secondary.opacity(0.06))
         }
+        PersistenceDegradedBanner(settings: settings)
     }
 
-    private var preparationFields: some View {
+    @ViewBuilder
+    private var reviewFields: some View {
         Section {
-            effectToggle($editor.draft.reviewRequested.isEnabled, .Settings.settingsAutomationReviewRequested,
+            effectToggle($editor.draft.reviewRequested.isEnabled, .AutomationProfiles.handleReviewRequests,
                          effect: editor.draft.reviewRequested.runner == .assistant ? .agent : nil)
-                .disabled(editor.draft.reviewRequested.runner == .shell)
+                .disabled(!editor.draft.hasAutomaticActionConsent || editor.draft.reviewRequested.runner == .shell)
             checkpointToggle($editor.draft.startNewReviewsAutomatically, .Settings.settingsAutomationStartNewReviews,
                              help: .Settings.settingsAutomationStartNewReviewsHelp, reset: .startNewReviews, effect: .agent)
-                .disabled(!editor.draft.reviewRequested.isEnabled || editor.draft.reviewRequested.runner != .assistant)
+                .disabled(!editor.draft.hasAutomaticActionConsent || !editor.draft.reviewRequested.isEnabled
+                    || editor.draft.reviewRequested.runner != .assistant)
             Text(.Settings.settingsAutomationStartNewReviewsHelp).font(.caption).foregroundStyle(.secondary)
-            effectToggle($editor.draft.authorFeedback.isEnabled, .Settings.settingsAutomationAuthorFeedback,
-                         effect: editor.draft.authorFeedback.runner == .assistant ? .agent : nil)
-                .disabled(editor.draft.authorFeedback.runner == .shell)
-            effectToggle(Binding(get: { editor.draft.autoVerifyReReview }, set: { enabled in
-                if enabled, let assistant = editor.draft.selectedAssistant,
-                   assistant == settings.acceptedAutomation.selectedAssistant { needsVerificationSetup = true }
-                else { editor.draft.autoVerifyReReview = enabled }
-            }), .Settings.settingsVerificationEnabled, effect: .aiCheck)
-            Text(.Settings.settingsVerificationHelp).font(.caption).foregroundStyle(.secondary)
-            checkpointToggle($editor.draft.autoClaimPipelineFailures, .Settings.settingsAutomationPipelineOwnership,
-                             help: .Settings.settingsAutomationPipelineOwnershipHelp, reset: .pipelineOwnership, effect: .agent)
-            VStack(alignment: .leading, spacing: 4) {
-                effectToggle($editor.draft.conflictTasksEnabled, .Settings.settingsAutomationConflictsToggle, effect: .agent)
+            AutomationRuleTemplateSettings(rule: $editor.draft.reviewRequested)
+        } header: { Text(.AutomationProfiles.reviewRequestsSection) }
 
-                Text(.EffectivePolicy.settingsConflictsHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        Section {
+            Group {
+                HStack {
+                    automaticActionPicker($editor.draft.autoApproveMode, .Settings.settingsAutomationCheckpointAutoApprove)
+                        .help(Text(.Settings.settingsAutomationCheckpointAutoApproveHelp))
+                    AutomationDefaultsResetButton(preset: editor.draft.baselinePreset) {
+                        editor.draft.resetCheckpoint(.approval, to: $0)
+                    }
+                }
+                if editor.draft.autoApproveMode == .prompt {
+                    actionPromptEditor($editor.draft.autoApprovePrompt.criteria, .Settings.settingsAutomationApprovalPrompt)
+                }
             }
-        } header: { Text(.EffectivePolicy.settingsPreparation) }
-        footer: { Text(.Settings.settingsAutomationAuthoredMergeRequestsPolling).font(.caption).foregroundStyle(.secondary) }
+            .disabled(!editor.draft.hasAutomaticActionConsent)
+            Picker(selection: $editor.draft.autoApprovalThreshold) {
+                Text(.Settings.settingsAutomationApprovalNoMajorIssues).tag(AutoApprovalThreshold.noMajorIssues)
+                Text(.Settings.settingsAutomationApprovalNoCodeIssues).tag(AutoApprovalThreshold.noCodeIssues)
+                Text(.Settings.settingsAutomationApprovalNoIssues).tag(AutoApprovalThreshold.noIssues)
+            } label: {
+                Text(.Settings.settingsAutomationApprovalThreshold)
+            }
+            .help(Text(.Settings.settingsAutomationApprovalThresholdHelp))
+            .disabled(!editor.draft.hasAutomaticActionConsent)
+            checkpointToggle($editor.draft.autoResolveOwnReviewThreads, .Settings.settingsAutomationResolveOwnReviewThreads,
+                             help: .Settings.settingsAutomationResolveOwnReviewThreadsHelp, reset: .ownThreadResolution)
+            if settings.automaticActionsAllowed, editor.draft.permitsOwnThreadResolution(manual: true),
+               automaticWriteBlock != nil {
+                Text(.AutomationProfiles.manualJobsCanResolveThreads).font(.caption).foregroundStyle(.secondary)
+            }
+            Toggle(isOn: $editor.draft.reviewRequested.markDoneOnSuccess) {
+                Text(.AutomationProfiles.reviewHandlerAcknowledgement)
+            }
+            .toggleStyle(.checkbox)
+            .disabled(!editor.draft.hasAutomaticActionConsent)
+        } header: { Text(.AutomationProfiles.reviewerActionsSection) }
+        footer: { automaticWriteNote }
+    }
+
+    @ViewBuilder
+    private var feedbackFields: some View {
+        Section {
+            effectToggle($editor.draft.authorFeedback.isEnabled, .AutomationProfiles.handleAuthorFeedback,
+                         effect: editor.draft.authorFeedback.runner == .assistant ? .agent : nil)
+                .disabled(!editor.draft.hasAutomaticActionConsent || editor.draft.authorFeedback.runner == .shell)
+            AutomationRuleTemplateSettings(rule: $editor.draft.authorFeedback)
+            checkpointToggle($editor.draft.allowFollowUpPush, .Settings.settingsAutomationFollowUpPush,
+                             help: .Settings.settingsAutomationFollowUpPushHelp, reset: .followUpPush)
+            if settings.automaticActionsAllowed, editor.draft.permitsFollowUpPush(manual: true), automaticWriteBlock != nil {
+                Text(.AutomationProfiles.manualJobsCanPush).font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text(.Settings.settingsAutomationFollowUpPushHelp).font(.caption).foregroundStyle(.secondary)
+            }
+            Toggle(isOn: $editor.draft.authorFeedback.markDoneOnSuccess) {
+                Text(.AutomationProfiles.feedbackHandlerAcknowledgement)
+            }
+            .toggleStyle(.checkbox)
+            .disabled(!editor.draft.hasAutomaticActionConsent)
+        } header: { Text(.AutomationProfiles.authorFeedbackSection) }
+        footer: { automaticWriteNote }
+
+        Section {
+            Group {
+                effectToggle(Binding(get: { editor.draft.autoVerifyReReview }, set: { enabled in
+                    if enabled, let assistant = editor.draft.selectedAssistant,
+                       assistant == settings.acceptedAutomation.selectedAssistant { needsVerificationSetup = true }
+                    else { editor.draft.autoVerifyReReview = enabled }
+                }), .Settings.settingsVerificationEnabled, effect: .aiCheck)
+                Text(.Settings.settingsVerificationHelp).font(.caption).foregroundStyle(.secondary)
+                Toggle(isOn: $editor.draft.autoReReviewEnabled) {
+                    Text(.Settings.settingsAutomationAutoReReviewToggle)
+                }
+                .toggleStyle(.checkbox)
+                Text(.Settings.settingsAutomationAutoReReviewHelp).font(.caption).foregroundStyle(.secondary)
+                checkpointToggle($editor.draft.autoResolveAcceptedFeedback, .AuthorFeedback.authorFeedbackSetting,
+                                 help: .AuthorFeedback.authorFeedbackSettingHelp, reset: .acceptedFeedbackResolution)
+            }
+            .disabled(!editor.draft.hasAutomaticActionConsent)
+        } header: { Text(.AutomationProfiles.authorReviewCompletionSection) }
+        footer: { automaticWriteNote }
+    }
+
+    @ViewBuilder
+    private var automaticWriteNote: some View {
+        if let automaticWriteBlock {
+            Text(automaticWriteBlock.message).font(.caption).foregroundStyle(.secondary)
+        }
     }
 
     private var publicationFields: some View {
@@ -274,16 +383,36 @@ struct AutomationSettingsTab: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             } header: { Text(.Settings.settingsAutomationPublicationTitle) }
+            footer: { automaticWriteNote }
             PublicationRestrictionsSettingsView(restrictions: $editor.draft.publicationRestrictions,
                 mode: editor.draft.publicationMode, glab: monitor.glab, settings: monitor.settings, preset: editor.draft.baselinePreset)
         }
+        .disabled(!editor.draft.hasAutomaticActionConsent)
     }
 
-    private var deliveryFields: some View {
+    private var conflictFields: some View {
         Section {
-            checkpointToggle($editor.draft.allowFollowUpPush, .Settings.settingsAutomationFollowUpPush,
-                             help: .Settings.settingsAutomationFollowUpPushHelp, reset: .followUpPush)
-            Text(.EffectivePolicy.settingsIndependentPush).font(.caption).foregroundStyle(.secondary)
+            effectToggle($editor.draft.conflictTasksEnabled, .Settings.settingsAutomationConflictsToggle, effect: .agent)
+                .disabled(!editor.draft.hasAutomaticActionConsent)
+            Toggle(isOn: $editor.draft.allowConflictPush) {
+                Text(.Settings.settingsAutomationConflictsAllowPush)
+            }
+            .toggleStyle(.checkbox)
+            .disabled(!editor.draft.allowAssistantTools)
+            if !editor.draft.allowAssistantTools {
+                Text(.AutomationProfiles.conflictPushNeedsProjectPermission).font(.caption).foregroundStyle(.secondary)
+            } else if settings.automaticActionsAllowed && editor.draft.allowConflictPush
+                && editor.draft.packageDecision != .undecided
+                && (automaticWriteBlock != nil || !editor.draft.conflictTasksEnabled) {
+                Text(.AutomationProfiles.manualConflictJobsCanPush).font(.caption).foregroundStyle(.secondary)
+            }
+            if editor.draft.allowConflictPush || !editor.draft.conflictPushProjects.isEmpty {
+                TextField(text: $editor.draft.conflictPushProjects) {
+                    Text(.Settings.settingsAutomationConflictsPushProjects)
+                }
+                .autocorrectionDisabled()
+                .disabled(!editor.draft.allowAssistantTools || !editor.draft.allowConflictPush)
+            }
             Divider()
             Toggle(isOn: $editor.draft.allowAssistantTools) {
                 Text(.Settings.settingsAutomationAssistantTools)
@@ -298,62 +427,24 @@ struct AutomationSettingsTab: View {
                 .disabled(!editor.draft.allowAssistantTools)
             }
             Text(.Settings.settingsAutomationAssistantToolsHelp).font(.caption).foregroundStyle(.secondary)
-            Toggle(isOn: $editor.draft.allowConflictPush) {
-                Text(.Settings.settingsAutomationConflictsAllowPush)
-            }
-            .toggleStyle(.checkbox)
-            .disabled(!editor.draft.allowAssistantTools)
-
-            if !editor.draft.allowAssistantTools || !editor.draft.conflictTasksEnabled {
-                Text(.EffectivePolicy.settingsConflictPushPrerequisites).font(.caption).foregroundStyle(.secondary)
-            }
-            if editor.draft.allowConflictPush || !editor.draft.conflictPushProjects.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                TextField(text: $editor.draft.conflictPushProjects) {
-                    Text(.Settings.settingsAutomationConflictsPushProjects)
-                }
-                .autocorrectionDisabled()
-                .disabled(!editor.draft.allowAssistantTools || !editor.draft.allowConflictPush)
-            }
-            Divider()
-            checkpointToggle($editor.draft.autoResolveOwnReviewThreads, .Settings.settingsAutomationResolveOwnReviewThreads,
-                             help: .Settings.settingsAutomationResolveOwnReviewThreadsHelp, reset: .ownThreadResolution)
-            Text(.EffectivePolicy.settingsJobPermissions).font(.caption).foregroundStyle(.secondary)
-        } header: { Text(.EffectivePolicy.settingsDelivery) }
-        footer: {
             Text(.Settings.settingsAutomationAuthoredMergeRequestsProjectsHelp).font(.caption).foregroundStyle(.secondary)
-        }
+        } header: { Text(.AutomationProfiles.conflictSection) }
+        footer: { automaticWriteNote }
     }
 
-    private var completionFields: some View {
+    private var mergeFields: some View {
         Section {
-            checkpointToggle($editor.draft.autoApproveEnabled, .Settings.settingsAutomationCheckpointAutoApprove,
-                             help: .Settings.settingsAutomationCheckpointAutoApproveHelp, reset: .approval)
-            Picker(selection: $editor.draft.autoApprovalThreshold) {
-                Text(.Settings.settingsAutomationApprovalNoMajorIssues).tag(AutoApprovalThreshold.noMajorIssues)
-                Text(.Settings.settingsAutomationApprovalNoCodeIssues).tag(AutoApprovalThreshold.noCodeIssues)
-                Text(.Settings.settingsAutomationApprovalNoIssues).tag(AutoApprovalThreshold.noIssues)
-            } label: {
-                Text(.Settings.settingsAutomationApprovalThreshold)
-            }
-            .help(Text(.Settings.settingsAutomationApprovalThresholdHelp))
-            checkpointToggle($editor.draft.autoResolveAcceptedFeedback, .AuthorFeedback.authorFeedbackSetting,
-                             help: .AuthorFeedback.authorFeedbackSettingHelp, reset: .acceptedFeedbackResolution)
             VStack(alignment: .leading, spacing: 4) {
-                Toggle(isOn: $editor.draft.autoReReviewEnabled) {
-                    Text(.Settings.settingsAutomationAutoReReviewToggle)
+                automaticActionPicker($editor.draft.autoMergeMode, .Settings.settingsAutomationAutoMergeToggle)
+
+                if editor.draft.autoMergeMode == .prompt {
+                    actionPromptEditor($editor.draft.autoMergePrompt.criteria, .Settings.settingsAutomationMergePrompt)
+                }
+                Toggle(isOn: $editor.draft.autoMergeAuthorOnly) {
+                    Text(.Settings.settingsAutomationMergeAuthorOnly)
                 }
                 .toggleStyle(.checkbox)
-
-                Text(.Settings.settingsAutomationAutoReReviewHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle(isOn: $editor.draft.autoMergeEnabled) {
-                    Text(.Settings.settingsAutomationAutoMergeToggle)
-                }
-                .toggleStyle(.checkbox)
+                .help(Text(.Settings.settingsAutomationMergeAuthorOnlyHelp))
 
                 Text(.Settings.settingsAutomationAutoMergeHelp)
                     .font(.caption)
@@ -371,20 +462,31 @@ struct AutomationSettingsTab: View {
                 }
             }
 
-            DisclosureGroup {
-                Toggle(isOn: $editor.draft.reviewRequested.markDoneOnSuccess) { Text(.AutomationProfiles.reviewHandlerAcknowledgement) }
-                    .toggleStyle(.checkbox)
-                Toggle(isOn: $editor.draft.authorFeedback.markDoneOnSuccess) { Text(.AutomationProfiles.feedbackHandlerAcknowledgement) }
-                    .toggleStyle(.checkbox)
-                Text(.AutomationProfiles.handlerAcknowledgementHelp).font(.caption).foregroundStyle(.secondary)
-            } label: { Text(.AutomationProfiles.handlerAcknowledgements) }
-
-        } header: { Text(.EffectivePolicy.settingsCompletion) }
+        } header: { Text(.AutomationProfiles.mergeSection) }
         footer: {
             VStack(alignment: .leading, spacing: 4) {
-                Text(.Settings.settingsAutomationProfilePermissionsHelp)
+                automaticWriteNote
                 if editor.draft.autoMergeEnabled { Text(.Settings.settingsAutomationAuthoredMergeRequestsProjectsHelp) }
-            }.font(.caption).foregroundStyle(.secondary)
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        }
+        .disabled(!editor.draft.hasAutomaticActionConsent)
+    }
+
+    private func automaticActionPicker(_ mode: Binding<AutomaticActionMode>, _ title: LocalizedStringResource) -> some View {
+        Picker(selection: mode) {
+            Text(.Settings.settingsAutomationActionOff).tag(AutomaticActionMode.off)
+            Text(.Settings.settingsAutomationActionOn).tag(AutomaticActionMode.on)
+            Text(.Settings.settingsAutomationActionByPrompt).tag(AutomaticActionMode.prompt)
+        } label: { Text(title) }
+        .pickerStyle(.segmented)
+    }
+
+    private func actionPromptEditor(_ criteria: Binding<String>, _ title: LocalizedStringResource) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            TextField(text: criteria, axis: .vertical) { Text(title) }
+                .lineLimit(3...8)
+            Text(.Settings.settingsAutomationActionPromptHelp).font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -424,7 +526,6 @@ struct AutomationSettingsTab: View {
     private var packageFields: some View {
         Section {
             VStack(alignment: .leading, spacing: 12) {
-                Text(.Settings.settingsAutomationPackageTitle).font(.headline)
                 AutomationSettingsProfilePicker(draft: $editor.draft, lastCustom: $editor.sessionCustom,
                     canUseAutomatic: editor.draft.selectedAssistant.map(monitor.availableAssistants.contains) ?? true)
                     .controlSize(.large)
@@ -444,9 +545,8 @@ struct AutomationSettingsTab: View {
             }
             .padding(12).frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-            PersistenceDegradedBanner(settings: settings)
             Toggle(isOn: Binding(get: { editor.draft.packageDecision == .enabled }, set: { editor.draft.packageDecision = $0 ? .enabled : .disabled })) {
-                Text(.AutomationProfiles.automationEnabled)
+                Text(.AutomationProfiles.enableProfileRules)
             }
             .toggleStyle(.checkbox)
             if !editor.draft.hasAutomaticActionConsent {
@@ -458,7 +558,21 @@ struct AutomationSettingsTab: View {
             .toggleStyle(.checkbox)
             .disabled(!editor.draft.hasAutomaticActionConsent)
             Text(.AutomationProfiles.privateHelp).font(.caption).foregroundStyle(.secondary)
-        }
+
+            Toggle(isOn: $editor.draft.requiresAssignmentClaim) {
+                Text(.Settings.settingsAutomationRequireAssignmentClaim)
+            }
+            .toggleStyle(.checkbox)
+            .disabled(!editor.draft.hasAutomaticActionConsent)
+            Text(.Settings.settingsAutomationRequireAssignmentClaimHelp).font(.caption).foregroundStyle(.secondary)
+        } header: { Text(.AutomationProfiles.profileRulesSection) }
+
+        Section {
+            Text(.AutomationProfiles.scopeOverview).font(.caption).foregroundStyle(.secondary)
+            Button {
+                page = .scope
+            } label: { Text(.AutomationProfiles.openScope) }
+        } header: { Text(.Settings.settingsAutomationPageScope) }
     }
 
     @ViewBuilder
@@ -473,8 +587,11 @@ struct AutomationSettingsTab: View {
             )) {
                 Text(.CommandCenter.commandCenterAutomationConfirmPreference)
             }
+            .toggleStyle(.checkbox)
         } header: {
             Text(.CommandCenter.commandCenterAutomationToggle)
+        } footer: {
+            Text(.AutomationProfiles.savesImmediately)
         }
         ReviewParticipationSettingsSection(monitor: monitor)
         Section {
@@ -517,63 +634,10 @@ struct AutomationSettingsTab: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        Section {
-            Text(.EffectivePolicy.settingsAdvancedRulesWarning).font(.caption).foregroundStyle(.secondary)
-        }
-        AutomationRuleTemplateSettings(rule: $editor.draft.reviewRequested, title: .Settings.settingsAutomationReviewRequested)
-        AutomationRuleTemplateSettings(rule: $editor.draft.authorFeedback, title: .Settings.settingsAutomationAuthorFeedback)
-    }
-
-    private var todoFields: some View {
-        Section {
-            Picker(selection: $trigger) {
-                Text(.Settings.settingsAutomationReviewRequested)
-                    .tag(Trigger.reviewRequested)
-                Text(.Settings.settingsAutomationAuthorFeedback)
-                    .tag(Trigger.authorFeedback)
-            } label: {
-                Text(.Settings.settingsAutomationTrigger)
-            }
-
-            Text(.AutomationProfiles.permissionsLocation).font(.caption).foregroundStyle(.secondary)
-
-            Picker(selection: rule.runner) {
-                Text(.Settings.settingsAutomationRunnerAssistant)
-                    .tag(AutomationRunner.assistant)
-                if rule.wrappedValue.runner == .shell {
-                    Text(.Settings.settingsAutomationRunnerShell).tag(AutomationRunner.shell)
-                }
-            } label: {
-                Text(.Settings.settingsAutomationRunner)
-            }
-
-            TextField(text: rule.projects) {
-                Text(.Settings.settingsAutomationTodoProjects)
-            }
-            .autocorrectionDisabled()
-
-            if rule.wrappedValue.runner == .shell {
-                Text(.Settings.settingsAutomationRunnerLegacyHelp)
-                    .font(.caption).foregroundStyle(.orange)
-                Text(.EffectivePolicy.settingsLegacyLocation).font(.caption).foregroundStyle(.secondary)
-            } else {
-                Text(.EffectivePolicy.settingsTemplatesLocation).font(.caption).foregroundStyle(.secondary)
-            }
-        } header: {
-            Text(.Settings.settingsAutomationTodoSection)
-        } footer: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(trigger.description)
-                Text(.Settings.settingsAutomationOutcome)
-                Text(.Settings.settingsAutomationTodoProjectsHelp)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
     }
 
     enum Page: CaseIterable {
-        case checkpoints, scope, todos, workflow, advanced
+        case checkpoints, scope, todos, workflow, publication, advanced
 
         var symbol: String {
             switch self {
@@ -581,6 +645,7 @@ struct AutomationSettingsTab: View {
             case .scope: "scope"
             case .todos: "tray"
             case .workflow: "play.fill"
+            case .publication: "arrow.up.forward"
             case .advanced: "slider.horizontal.3"
             }
         }
@@ -590,32 +655,51 @@ struct AutomationSettingsTab: View {
             case .checkpoints: .Settings.settingsAutomationPageCheckpoints
             case .scope: .Settings.settingsAutomationPageScope
             case .workflow: .Settings.settingsAutomationPageWorkflow
+            case .publication: .AutomationProfiles.publicationPage
             case .todos: .EffectivePolicy.settingsPreparationRules
             case .advanced: .Settings.settingsAutomationPageAdvanced
             }
         }
     }
 
-    private enum Trigger: Hashable {
-        case reviewRequested
-        case authorFeedback
-
-        var description: LocalizedStringResource {
-            switch self {
-            case .reviewRequested: .Settings.settingsAutomationReviewRequestedDescription
-            case .authorFeedback: .Settings.settingsAutomationAuthorFeedbackDescription
-            }
-        }
-    }
 }
 
-/// Editing retained templates never changes the rule's runner or its enablement.
+@MainActor
+func confirmGlobalAutomationChange(enabling: Bool) -> TodoMonitorService.GlobalAutomationConfirmation {
+    let alert = NSAlert()
+    alert.alertStyle = enabling ? .informational : .warning
+    alert.messageText = String(localized: enabling ? .CommandCenter.commandCenterAutomationConfirmResumeTitle
+        : .CommandCenter.commandCenterAutomationConfirmPauseTitle)
+    alert.informativeText = String(localized: enabling ? .CommandCenter.commandCenterAutomationConfirmResumeMessage
+        : .CommandCenter.commandCenterAutomationConfirmPauseMessage)
+    alert.showsSuppressionButton = true
+    alert.suppressionButton?.title = String(localized: .CommandCenter.commandCenterAutomationConfirmDontAskAgain)
+    let cancel = alert.addButton(withTitle: String(localized: .Menu.menuScopeCancel))
+    cancel.keyEquivalent = "\r"
+    alert.addButton(withTitle: String(localized: enabling ? .CommandCenter.commandCenterAutomationSuspendedResume
+        : .CommandCenter.commandCenterAutomationConfirmPauseAction))
+    guard alert.runModal() == .alertSecondButtonReturn else { return .cancel }
+    return alert.suppressionButton?.state == .on ? .confirmAndSkipFuturePrompts : .confirm
+}
+
 struct AutomationRuleTemplateSettings: View {
     @Binding var rule: AutomationRule
-    let title: LocalizedStringResource
 
     var body: some View {
-        Section {
+        if rule.runner == .shell {
+            Picker(selection: $rule.runner) {
+                Text(.Settings.settingsAutomationRunnerAssistant).tag(AutomationRunner.assistant)
+                Text(.Settings.settingsAutomationRunnerShell).tag(AutomationRunner.shell)
+            } label: { Text(.Settings.settingsAutomationRunner) }
+            Text(.Settings.settingsAutomationRunnerLegacyHelp).font(.caption).foregroundStyle(.orange)
+        }
+        DisclosureGroup {
+            TextField(text: $rule.projects) { Text(.Settings.settingsAutomationTodoProjects) }
+                .autocorrectionDisabled()
+            Text(.Settings.settingsAutomationTodoProjectsHelp).font(.caption).foregroundStyle(.secondary)
+            Divider()
+            TextField(text: $rule.titleTemplate) { Text(.Settings.settingsAutomationTitle) }
+                .autocorrectionDisabled()
             if rule.runner == .shell {
                 Text(rule.isEnabled ? .EffectivePolicy.settingsLegacyEnabled : .EffectivePolicy.settingsLegacyDisabled)
                     .font(.caption).foregroundStyle(.orange)
@@ -623,21 +707,13 @@ struct AutomationRuleTemplateSettings: View {
                 Text(verbatim: rule.command)
                     .font(.body.monospaced()).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Text(.Settings.settingsAutomationRunnerLegacyHelp).font(.caption).foregroundStyle(.secondary)
             } else {
-                Text(rule.isEnabled ? .EffectivePolicy.settingsTemplateActive : .EffectivePolicy.settingsTemplateInactive)
-                    .font(.caption).foregroundStyle(rule.isEnabled ? Color.orange : Color.secondary)
-            }
-            TextField(text: $rule.titleTemplate) { Text(.Settings.settingsAutomationTitle) }
-                .autocorrectionDisabled()
-            if rule.runner == .assistant {
                 TextField(text: $rule.promptTemplate, axis: .vertical) { Text(.Settings.settingsAutomationPrompt) }
                     .lineLimit(5...8)
             }
             Text(.Settings.settingsAutomationTemplateHelp).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-        } header: {
-            Text(rule.runner == .shell ? .EffectivePolicy.settingsLegacyTitle : .EffectivePolicy.settingsTemplateTitle)
-                + Text(" · ") + Text(title)
+        } label: {
+            Text(.AutomationProfiles.ruleDetails)
         }
     }
 }

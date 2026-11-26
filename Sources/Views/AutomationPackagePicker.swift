@@ -54,10 +54,13 @@ struct AutomationCustomProfileDescription: View {
         func status(_ enabled: Bool) -> String {
             String(localized: enabled ? .AutomationProfiles.automatic : .AutomationProfiles.manualAction)
         }
-        return .AutomationProfiles.customPublicSummary(status(configuration.autoApproveEnabled),
+        func status(_ mode: AutomaticActionMode) -> String {
+            mode == .prompt ? String(localized: .Settings.settingsAutomationActionByPrompt) : status(mode == .on)
+        }
+        return .AutomationProfiles.customPublicSummary(status(configuration.autoApproveMode),
             status(configuration.allowFollowUpPush),
             status(configuration.allowConflictPush && configuration.conflictTasksEnabled && configuration.allowAssistantTools),
-            status(configuration.autoMergeEnabled))
+            status(configuration.autoMergeMode))
     }
 
     var body: some View {

@@ -231,23 +231,6 @@ struct CommandCenterView: View {
             : active ? .CommandCenter.commandCenterAutomationHelpActive : .CommandCenter.commandCenterAutomationHelpSuspended))
     }
 
-    private func confirmGlobalAutomationChange(enabling: Bool) -> TodoMonitorService.GlobalAutomationConfirmation {
-        let alert = NSAlert()
-        alert.alertStyle = enabling ? .informational : .warning
-        alert.messageText = String(localized: enabling ? .CommandCenter.commandCenterAutomationConfirmResumeTitle
-            : .CommandCenter.commandCenterAutomationConfirmPauseTitle)
-        alert.informativeText = String(localized: enabling ? .CommandCenter.commandCenterAutomationConfirmResumeMessage
-            : .CommandCenter.commandCenterAutomationConfirmPauseMessage)
-        alert.showsSuppressionButton = true
-        alert.suppressionButton?.title = String(localized: .CommandCenter.commandCenterAutomationConfirmDontAskAgain)
-        let cancel = alert.addButton(withTitle: String(localized: .Menu.menuScopeCancel))
-        cancel.keyEquivalent = "\r"
-        alert.addButton(withTitle: String(localized: enabling ? .CommandCenter.commandCenterAutomationSuspendedResume
-            : .CommandCenter.commandCenterAutomationConfirmPauseAction))
-        guard alert.runModal() == .alertSecondButtonReturn else { return .cancel }
-        return alert.suppressionButton?.state == .on ? .confirmAndSkipFuturePrompts : .confirm
-    }
-
     @ViewBuilder
     private var statusBanners: some View {
         PersistenceDegradedBanner(settings: monitor.settings)

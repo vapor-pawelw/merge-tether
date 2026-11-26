@@ -739,6 +739,7 @@ extension GlabService {
         action: MergeSubmissionAction = .mergeNow,
         expectedPolicy: GitLabMergeActionPolicy? = nil,
         expectedTrainRecoveryNoteIDs: Set<Int>? = nil,
+        expectedPromptDiscussionDigest: String? = nil,
         onRecoveryQueueObserved: @MainActor () -> Void = {},
         permitsRequest: @escaping @MainActor @Sendable (GitLabMergeRequest) -> Bool = { _ in true },
         beforeWrite: @MainActor (Int?) throws -> Void = { _ in },
@@ -780,6 +781,8 @@ extension GlabService {
                 semanticContext: expectedEvidence.semanticContext == nil ? nil : live.semanticContextDigest
             )
             return expectedEvidence.binds(to: observed, policy: .mergeSubmissionEvidence)
+                && (expectedPromptDiscussionDigest == nil
+                    || AutomaticActionPromptVerifier.digest(discussions) == expectedPromptDiscussionDigest)
         }
         func checkedObservation(_ outcome: MergeSubmissionState, live: GitLabMergeRequest) throws -> MergeSubmissionState {
             guard glabPath == executable, EvidenceContext.sameAccountRevision(revision, accountRevision), resolvedHost == host,
@@ -810,6 +813,7 @@ extension GlabService {
             let policy = try await fetchMergeActionPolicy(projectID: projectID, host: host, request: current)
             guard policy == expectedPolicy, policy.action == action else { throw CancellationError() }
         }
+        guard permitsRequest(current) else { throw CancellationError() }
         if expectedPolicy != nil {
             let approvals = try await fetchMergeRequestApprovalState(projectID: projectID, iid: iid, host: host)
             guard approvals.allRequiredRulesApproved else { throw CancellationError() }
@@ -861,7 +865,7 @@ extension GlabService {
                   matchesSubmissionEvidence(checked, discussions: threads),
                   Set(threads.flatMap(\.notes).compactMap(\.id)) == expectedTrainRecoveryNoteIDs else { throw CancellationError() }
             replacementContext = checked
-        } else if expectedDiscussionFingerprint != nil || expectedSemanticContextFingerprint != nil {
+        } else if expectedDiscussionFingerprint != nil || expectedSemanticContextFingerprint != nil || expectedPromptDiscussionDigest != nil {
             async let discussions = fetchMergeRequestDiscussions(projectID: projectID, iid: iid, host: host)
             async let drafts = fetchOwnDraftNoteCount(projectID: projectID, iid: iid, host: host, userID: expectedUser.id)
             let (live, threads, pending) = try await (finalRequest, discussions, drafts)

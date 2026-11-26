@@ -1,6 +1,176 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "settings.automation.requireAssignmentClaim": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm assigned requests before starting automation"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Potwierdzaj przejęcie przypisanych MR-ów przed startem automatyzacji"
+          }
+        }
+      }
+    },
+    "settings.automation.requireAssignmentClaimHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When someone else authored an assigned merge request, it waits for you to claim it on the board before automation can run."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gdy ktoś przypisze Ci MR innego autora, karta czeka na przejęcie przed uruchomieniem automatyzacji."
+          }
+        }
+      }
+    },
+    "settings.automation.actionOff": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wyłączone"
+          }
+        }
+      }
+    },
+    "settings.automation.actionOn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Włączone"
+          }
+        }
+      }
+    },
+    "settings.automation.actionByPrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "By prompt"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Według promptu"
+          }
+        }
+      }
+    },
+    "settings.automation.approvalPrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic approval criteria"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kryteria automatycznej akceptacji"
+          }
+        }
+      }
+    },
+    "settings.automation.mergePrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic merge criteria"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kryteria automatycznego scalenia"
+          }
+        }
+      }
+    },
+    "settings.automation.actionPromptHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Describe which merge requests to allow or exclude. The verifier checks only eligible requests that use Default. Missing or uncertain decisions leave the action for you."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opisz, które MR-y dopuścić lub wykluczyć. Weryfikator sprawdza tylko gotowe MR-y z ustawieniem Domyślne. Przy braku pewnej decyzji akcja pozostaje do wykonania ręcznie."
+          }
+        }
+      }
+    },
+    "settings.automation.mergeAuthorOnly": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically merge only requests I authored"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scalaj automatycznie tylko MR-y mojego autorstwa"
+          }
+        }
+      }
+    },
+    "settings.automation.mergeAuthorOnlyHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This also applies when automatic merge is set to On for an individual request."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dotyczy również MR-ów z automatycznym scalaniem ustawionym na Włączone."
+          }
+        }
+      }
+    },
     "settings.codingAgentPreferences": {
       "extractionState": "manual",
       "localizations": {
@@ -1119,10 +1289,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Allow one infrastructure retry (listed projects only)"
+            "value": "Retry the job once after an infrastructure failure"
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Zezwól na jedną ponowną próbę po błędzie infrastruktury (tylko wybrane projekty)"}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponów raz zadanie po błędzie infrastruktury"}}
       }
     },
     "settings.automation.workflow.reviewUpdate": {
@@ -1706,10 +1876,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Scope changes are saved immediately. Other automation settings use Apply Changes."
+            "value": "Changes on this page save immediately."
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Zmiany zakresu zapisują się od razu. Pozostałe ustawienia automatyzacji zapisuje przycisk „Zastosuj zmiany”."}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Zmiany na tej stronie zapisują się od razu."}}
       }
     },
     "settings.automation.approval.threshold": {
@@ -1790,10 +1960,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Profile & permissions"
+            "value": "Profile & status"
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Profil i uprawnienia"}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Profil i stan"}}
       }
     },
     "settings.assistant.setup.title": {
@@ -2298,14 +2468,14 @@
       "extractionState": "manual",
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Start reviewing new merge requests automatically" } },
-        "pl": { "stringUnit": { "state": "translated", "value": "Automatycznie rozpoczynaj review nowych MR-ów" } }
+        "pl": { "stringUnit": { "state": "translated", "value": "Rozpoczynaj przegląd nowych MR-ów bez potwierdzenia" } }
       }
     },
     "settings.automation.startNewReviewsHelp": {
       "extractionState": "manual",
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "A new review request starts its review as soon as it reaches Reviewing, when your rules allow it. Turn off to start each one yourself; its automation stays paused until you do." } },
-        "pl": { "stringUnit": { "state": "translated", "value": "Nowa prośba o review rozpoczyna review od razu po trafieniu do Reviewing, jeśli pozwalają na to Twoje reguły. Wyłącz, aby startować każdą samodzielnie; jej automatyzacja pozostaje wstrzymana do tego czasu." } }
+        "pl": { "stringUnit": { "state": "translated", "value": "Przegląd ruszy po dodaniu MR-a do kolumny „Do przeglądu”, jeśli pozwalają na to reguły. Po wyłączeniu opcji automatyzacja nowego MR-a czeka, aż rozpoczniesz przegląd." } }
       }
     }
   },
