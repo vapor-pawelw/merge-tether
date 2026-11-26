@@ -31,10 +31,10 @@ enum PipelineJobReconciliation {
               let pipeline = request.headPipeline, let id = pipeline.id, id > 0,
               pipeline.projectID == nil || pipeline.projectID == request.projectID else { return false }
         if id == prior.pipelineID {
-            return ["success", "running", "pending", "created", "preparing", "waiting_for_resource"].contains(pipeline.status)
+            return [.success, .running, .pending, .created, .preparing, .waitingForResource].contains(pipeline.status)
         }
         guard id > prior.pipelineID else { return false }
-        return ["success", "failed", "running", "pending", "created", "preparing",
-                "waiting_for_resource", "canceled", "skipped"].contains(pipeline.status)
+        return [.success, .failed, .running, .pending, .created, .preparing,
+                .waitingForResource, .canceled, .skipped].contains(pipeline.status)
     }
 }

@@ -111,7 +111,7 @@ import Observation
         guard let host = glab.resolvedHost, let username = glab.currentUsername, !username.isEmpty,
               settings.automaticWritesAllowed, request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
               settings.automation.scope.permits(request, host: host, username: username) else { return }
-        let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
         let configuration = settings.automation, accountRevision = glab.accountRevision
         let invocation = UUID()
         latest[target] = invocation

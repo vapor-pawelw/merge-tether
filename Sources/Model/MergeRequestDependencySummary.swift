@@ -8,10 +8,10 @@ struct GitLabMRDependencySnapshot: Sendable {
     /// A hidden dependency cannot prove that a previously readable link disappeared.
     func retainingHiddenReferences(from previous: Self?) -> Self {
         guard hasHiddenDependency, let previous else { return self }
-        let visible = Set(requests.map { "\($0.projectID):\($0.iid)" })
-        var retained: [String: GitLabMergeRequest] = [:]
-        for request in previous.requests + previous.lastKnownRequests where request.state == "opened" {
-            let key = "\(request.projectID):\(request.iid)"
+        let visible = Set(requests.map(\.mergeRequestID))
+        var retained: [GitLabMergeRequestID: GitLabMergeRequest] = [:]
+        for request in previous.requests + previous.lastKnownRequests where request.isOpen {
+            let key = request.mergeRequestID
             if !visible.contains(key), retained[key] == nil { retained[key] = request }
         }
         var snapshot = self
@@ -67,8 +67,8 @@ struct MergeRequestDependencySummary: Equatable, Sendable {
               !request.sourceBranch.isEmpty, !request.targetBranch.isEmpty,
               dependencies.requests.allSatisfy({ valid($0, relativeTo: request)
                   && ($0.projectID != request.projectID || $0.iid != request.iid)
-                  && ["opened", "closed", "locked", "merged"].contains($0.state) }) else { return .unavailable }
-        if dependencies.requests.contains(where: { $0.state != "merged" })
+                  && [.opened, .closed, .locked, .merged].contains($0.state) }) else { return .unavailable }
+        if dependencies.requests.contains(where: { $0.state != .merged })
             || summary.predecessors.contains(where: { $0.sources.contains(.stack) }) {
             return .waitingForDependencies
         }
@@ -89,9 +89,9 @@ struct MergeRequestDependencySummary: Equatable, Sendable {
     init(request: GitLabMergeRequest, stack: MergeRequestStackSnapshot?, dependencies: GitLabMRDependencySnapshot?,
          unavailableSources: Set<Source> = []) {
         var issues: Set<Issue> = []
-        var references: [String: Predecessor] = [:]
+        var references: [GitLabMergeRequestID: Predecessor] = [:]
         func add(_ parent: GitLabMergeRequest, source: Source, isCurrent: Bool? = nil) {
-            let key = "\(parent.projectID):\(parent.iid)"
+            let key = parent.mergeRequestID
             let current = isCurrent ?? !unavailableSources.contains(source)
             if let previous = references[key] {
                 references[key] = Predecessor(projectID: parent.projectID, iid: parent.iid,
@@ -104,11 +104,11 @@ struct MergeRequestDependencySummary: Equatable, Sendable {
         }
         if dependencies == nil || unavailableSources.contains(.gitLab) { issues.insert(.dependenciesUnavailable) }
         if dependencies?.hasHiddenDependency == true { issues.insert(.hiddenDependency) }
-        for parent in dependencies?.lastKnownRequests ?? [] where parent.state == "opened" {
+        for parent in dependencies?.lastKnownRequests ?? [] where parent.isOpen {
             guard Self.valid(parent, relativeTo: request), parent.projectID != request.projectID || parent.iid != request.iid else { continue }
             add(parent, source: .gitLab, isCurrent: false)
         }
-        for parent in dependencies?.requests ?? [] where parent.state == "opened" {
+        for parent in dependencies?.requests ?? [] where parent.isOpen {
             guard Self.valid(parent, relativeTo: request), parent.projectID != request.projectID || parent.iid != request.iid else {
                 issues.insert(.dependenciesUnavailable)
                 continue
@@ -156,7 +156,7 @@ struct MergeRequestDependencySummary: Equatable, Sendable {
         let source: String
         let targetProjectID: Int?
         let target: String
-        let state: String
+        let state: GitLabMergeRequestState
         init(_ request: GitLabMergeRequest) {
             projectID = request.projectID; iid = request.iid; url = request.webURL; head = request.sha
             sourceProjectID = request.sourceProjectID; source = request.sourceBranch
@@ -176,9 +176,9 @@ private struct DependencyStack {
 
     init(request: GitLabMergeRequest, snapshot: MergeRequestStackSnapshot) {
         typealias Summary = MergeRequestDependencySummary
-        let requests = snapshot.requests.filter { $0.state == "opened" && $0.projectID == request.projectID
+        let requests = snapshot.requests.filter { $0.state == .opened && $0.projectID == request.projectID
             && Summary.valid($0, relativeTo: request) }
-        guard request.state == "opened", !snapshot.defaultBranch.isEmpty,
+        guard request.isOpen, !snapshot.defaultBranch.isEmpty,
               requests.contains(where: { Summary.Context($0) == Summary.Context(request) }) else {
             issues.insert(.stackUnavailable)
             return

@@ -98,7 +98,7 @@ final class DraftRegenerationCoordinator {
         guard let account else { return [] }
         return candidates().compactMap { candidate -> Candidate? in
             let request = candidate.request
-            guard request.state == "opened", request.projectID > 0, request.iid > 0,
+            guard request.isOpen, request.projectID > 0, request.iid > 0,
                   request.webURL.isGitLabMergeRequest(host: account.host, iid: request.iid),
                   let head = request.sha, GlabService.isFullGitSHA(head) else { return nil }
             let draftID: Int?
@@ -202,7 +202,7 @@ final class DraftRegenerationCoordinator {
     }
 
     private func target(_ id: MergeRequestAttentionMonitor.Item.ID, account: Account) -> MRAutomationScope.Target {
-        .init(host: account.host, username: account.username, projectID: id.projectID, iid: id.iid)
+        .mergeRequest(host: account.host, username: account.username, projectID: id.projectID, iid: id.iid)
     }
 
     private func active(_ id: UUID, _ account: Account) -> Bool {

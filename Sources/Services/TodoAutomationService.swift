@@ -30,7 +30,7 @@ final class TodoAutomationService {
     func cancelRunningScripts(outsideScope scope: MRAutomationScope? = nil) {
         for script in scriptTasks.values {
             if let scope {
-                let target = MRAutomationScope.Target(host: script.work.host, username: script.username,
+                let target = MRAutomationScope.Target.mergeRequest(host: script.work.host, username: script.username,
                     projectID: script.work.projectID, iid: script.work.iid)
                 guard !script.manual, !scope.resolve(target).active else { continue }
             }
@@ -127,7 +127,7 @@ final class TodoAutomationService {
         else { return false }
 
         let key = TodoAutomationReceipt(host: host, username: username, todoID: todo.id)
-        let target = MRAutomationScope.Target(host: host, username: username, projectID: todo.project.id, iid: iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: todo.project.id, iid: iid)
         guard manual || settings.automation.scope.resolve(target).active else { return false }
         let manualAcknowledgement = TodoActionAcknowledgement(host: host, username: username, todo: todo.feedbackIdentity)
         if settings.automationReceipts.contains(key) {
@@ -238,7 +238,7 @@ final class TodoAutomationService {
         guard rule.runner == .assistant, rule.isConfigured, shouldProceed() else { return .notAdmitted(.policyChanged) }
         let request = try await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: work.host)
         let project = request.webURL.gitLabProjectPath
-        guard request.state == "opened", request.author.username == username,
+        guard request.isOpen, request.author.username == username,
               request.webURL.isGitLabMergeRequest(host: work.host, iid: work.iid), rule.includes(project: project) else { return .notAdmitted(.inactiveRequest) }
         let discussions = try await glab.fetchMergeRequestDiscussions(projectID: work.projectID, iid: work.iid, host: work.host)
         if let verifiedFingerprint {
@@ -248,7 +248,7 @@ final class TodoAutomationService {
             guard verifiedFingerprint != nil,
                   verifiedResidual.semanticContextFingerprint == request.semanticContextFingerprint else { return .notAdmitted(.contextChanged) }
             let requests = verifiedResidual.codeReviewRequests
-            let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
+            let target = MRAutomationScope.Target.mergeRequest(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
             let ignored = settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target)
             guard requests.count <= 12, Set(requests.map(\.id)).count == requests.count,
                   requests.allSatisfy({ question in
@@ -278,7 +278,7 @@ final class TodoAutomationService {
                 $0.key.work == work && $0.key.username == username && $0.feedbackDecisionRevision == decisionContext
                     && $0.execution?.state != .feedbackResolved
             }
-            let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
+            let target = MRAutomationScope.Target.mergeRequest(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
             let attempted = Set(candidates.compactMap { note -> Int? in
                 guard let id = note.id else { return nil }
                 let receipt = AuthorFeedbackAttempt(target: target, noteID: id, revision: revision(note),
@@ -314,7 +314,7 @@ final class TodoAutomationService {
             let latest = try await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: work.host)
             let latestDiscussions = try await glab.fetchMergeRequestDiscussions(projectID: work.projectID, iid: work.iid, host: work.host)
             let activeIDs = Set(GitLabMergeRequestDiscussion.activeForReview(latestDiscussions).flatMap(\.notes).compactMap(\.id))
-            guard latest.sha == expectedHeadSHA, latest.state == "opened", latest.author == request.author,
+            guard latest.sha == expectedHeadSHA, latest.isOpen, latest.author == request.author,
                   ReviewVerdict.fingerprint(latestDiscussions) == verifiedFingerprint, Set(ids).isSubset(of: activeIDs) else { return .notAdmitted(.contextChanged) }
             if let verifiedResidual, verifiedResidual.semanticContextFingerprint != latest.semanticContextFingerprint { return .notAdmitted(.contextChanged) }
         }
@@ -381,7 +381,7 @@ final class TodoAutomationService {
                                   candidates: [GitLabMergeRequestDiscussion.Note], selectedIDs: Set<Int>,
                                   work: AssistantAutomationRunner.MergeRequestWork, username: String,
                                   settings: SettingsManager) -> FeedbackRecovery? {
-        let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
         let decisionContext = AssistantAutomationRunner.feedbackDecisionRevision(work: work, username: username, settings: settings)
         guard let residual, settings.automation.allowFollowUpPush, settings.automation.hasAutomaticActionConsent,
               settings.effectiveAutomationScope.permits(request, host: work.host, username: username),

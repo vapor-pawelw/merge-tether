@@ -35,7 +35,7 @@ final class AuthoredMergeRequestMonitor {
     /// Fresh authenticated observations, delivered before optional remote actions.
     var onObservedMergeRequests: (([GitLabMergeRequest], Date) -> Void)?
     func isMerging(_ request: GitLabMergeRequest) -> Bool {
-        let id = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
+        let id = request.mergeRequestID
         guard let progress = mergingRequests[id], progress.revision == glab.accountRevision,
               isCurrent(progress.account), progress.headSHA == request.sha else { return false }
         return true
@@ -79,7 +79,7 @@ final class AuthoredMergeRequestMonitor {
         let request = requestWithCurrentTrainEvidence(request)
         guard let host = glab.resolvedHost, let username = glab.currentUsername,
               settings.automation.hasAutomaticActionConsent, settings.automation.conflictTasksEnabled,
-              request.author.username == username, request.state == "opened",
+              request.author.username == username, request.isOpen,
               request.hasMergeConflict, let sha = request.sha, !sha.isEmpty,
               request.sourceProjectID != nil, request.targetProjectID != nil,
               request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
@@ -129,13 +129,13 @@ final class AuthoredMergeRequestMonitor {
 
     private func runtimePermits(_ work: AssistantAutomationRunner.MergeRequestWork, account: Account) -> Bool {
         guard let runtimeScope, runtimeScope.account == account, runtimeScope.revision == glab.accountRevision else { return true }
-        return runtimeScope.scope.resolve(.init(host: work.host, username: account.username,
+        return runtimeScope.scope.resolve(.mergeRequest(host: work.host, username: account.username,
             projectID: work.projectID, iid: work.iid)).active
     }
 
     func automationConfigurationChanged(outsideScope scope: MRAutomationScope? = nil) {
         let shouldCancel = preparingConflicts.keys.contains { work in
-            scope.map { !$0.resolve(.init(host: work.host, username: glab.currentUsername ?? "", projectID: work.projectID, iid: work.iid)).active } ?? true
+            scope.map { !$0.resolve(.mergeRequest(host: work.host, username: glab.currentUsername ?? "", projectID: work.projectID, iid: work.iid)).active } ?? true
         }
         if shouldCancel { conflictTask?.cancel() }
         failedPreparations.removeAll()
@@ -153,10 +153,7 @@ final class AuthoredMergeRequestMonitor {
             .max { $0.createdAt < $1.createdAt }
     }
 
-    private struct Account: Equatable {
-        let host: String
-        let username: String
-    }
+    private typealias Account = GitLabAccountIdentity
     private struct MergeProgress {
         let account: Account
         let revision: UInt64
@@ -287,7 +284,7 @@ final class AuthoredMergeRequestMonitor {
         guard isCurrent(account) else { return }
 
         let owned = listed.filter {
-            $0.state == "opened" && $0.author.id == user.id && $0.webURL.isGitLabMergeRequest(host: host, iid: $0.iid)
+            $0.state == .opened && $0.author.id == user.id && $0.webURL.isGitLabMergeRequest(host: host, iid: $0.iid)
         }
         guard glab.accountRevision == revision else { return }
         onObservedMergeRequests?(owned, readStartedAt)
@@ -303,7 +300,7 @@ final class AuthoredMergeRequestMonitor {
             if request.author.id == user.id {
                 onObservedMergeRequests?([request], detail == nil ? readStartedAt : detailReadStartedAt)
             }
-            guard request.state == "opened", request.author.id == user.id,
+            guard request.isOpen, request.author.id == user.id,
                   request.webURL.isGitLabMergeRequest(host: host, iid: request.iid)
             else { continue }
             let queueSnapshot = request.hasQueuedMerge ? request : summary
@@ -311,7 +308,7 @@ final class AuthoredMergeRequestMonitor {
                 rememberObservedQueue(.queued, for: queueSnapshot, account: account, user: user, revision: revision)
             }
 
-            let reviewTarget = MRAutomationScope.Target(host: host, username: user.username,
+            let reviewTarget = MRAutomationScope.Target.mergeRequest(host: host, username: user.username,
                 projectID: request.projectID, iid: request.iid)
             let reviewRevision = settings.commentReviewRevision(for: reviewTarget)
             async let approvalState = try? glab.fetchMergeRequestApprovalState(
@@ -493,7 +490,7 @@ final class AuthoredMergeRequestMonitor {
         }
         catch {
             let state = submissionState(for: expected, account: account)
-            if let index = requests.firstIndex(where: { $0.id == "\(expected.projectID)!\(expected.iid)" }) {
+            if let index = requests.firstIndex(where: { $0.id == expected.mergeRequestID }) {
                 requests[index].submissionState = state
             }
             return state == .uncertain ? .uncertain : .changed
@@ -522,7 +519,7 @@ final class AuthoredMergeRequestMonitor {
             return submissionState(for: request, account: account) == .none
         }
         guard permits(), let action = policy.action, let sha = request.sha, mayReplaceReceipt() else { throw CancellationError() }
-        let id = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
+        let id = request.mergeRequestID
         guard mergingRequests[id] == nil else { throw CancellationError() }
         mergingRequests[id] = .init(account: account, revision: revision, headSHA: sha)
         defer { mergingRequests.removeValue(forKey: id) }
@@ -537,7 +534,7 @@ final class AuthoredMergeRequestMonitor {
             guard verificationAssistant == selected else { throw CancellationError() }
             let assessment = try await ManualFeedbackVerification.assess(request: request, discussions: discussions,
                 user: user, host: account.host, settings: settings, glab: glab)
-            let target = MRAutomationScope.Target(host: account.host, username: user.username, projectID: request.projectID, iid: request.iid)
+            let target = MRAutomationScope.Target.mergeRequest(host: account.host, username: user.username, projectID: request.projectID, iid: request.iid)
             guard assessment.hasNoRemainingAuthorWork(in: discussions, authorID: user.id,
                 ignoredSuggestions: settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target),
                 excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: account.host, username: user.username)) else { throw CancellationError() }
@@ -604,7 +601,7 @@ final class AuthoredMergeRequestMonitor {
     ) async -> (status: AuthoredMergeRequestStatus, policy: GitLabMergeActionPolicy?, trainRecovery: FailedTrainRecovery?) {
         let host = account.host
         var request = request
-        let target = MRAutomationScope.Target(host: host, username: account.username, projectID: request.projectID, iid: request.iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: account.username, projectID: request.projectID, iid: request.iid)
         let autoMergeEnabled = settings.automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath,
             optedIn: settings.autoMergePreference(for: target) == .on)
             && settings.automation.scope.permits(request, host: host, username: account.username)
@@ -641,7 +638,7 @@ final class AuthoredMergeRequestMonitor {
         else { dependencyReadiness = .notChecked }
         var state = trainState.isDelegated ? trainState : submissionState(for: request, account: account)
         if state == .none, trainState == .uncertain { state = .uncertain }
-        let readyToRequeue = state == .changed && trainState == .none && canSubmit && request.headPipeline?.status == "success"
+        let readyToRequeue = state == .changed && trainState == .none && canSubmit && request.headPipeline?.status == .success
         let trainRecovery: FailedTrainRecovery? = if policy?.usesMergeTrain == true, policy?.action == .enqueue,
                                                      readyToRequeue || trainState.isDelegated {
             await failedTrainRecovery(for: request, activeQueue: trainState.isDelegated,
@@ -709,9 +706,9 @@ final class AuthoredMergeRequestMonitor {
     }
 
     private func pruneConflictReceipts(_ requests: [GitLabMergeRequest], account: Account, user: GitLabAuthenticatedUser) {
-        let keys = Set(requests.map { "\($0.projectID)!\($0.iid)" })
+        let keys = Set(requests.map(\.mergeRequestID))
         let remaining = settings.conflictReceipts.filter {
-            $0.host != account.host || $0.userID != user.id || keys.contains("\($0.projectID)!\($0.iid)")
+            $0.host != account.host || $0.userID != user.id || keys.contains(.init(projectID: $0.projectID, iid: $0.iid))
         }
         if remaining != settings.conflictReceipts {
             settings.conflictReceipts = remaining

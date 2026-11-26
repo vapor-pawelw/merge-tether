@@ -204,7 +204,7 @@ struct MRBoardProjectorTests {
         let pending = projector.pendingUserAttention
         let presenter = BoardAttentionPresenter()
         presenter.updateAttention(pending)
-        let attention = presenter.userAttention(account: account.presentationKey)
+        let attention = presenter.userAttention(account: account)
         #expect(attention.hasAttention)
         let row = try #require(projector.board(humanAttention: attention).own.first)
         let model = MRCardPresentation(row: row, reviewingContext: projector.reviewingContext(for: row),

@@ -4,7 +4,7 @@ extension TodoMonitorService {
     func canMarkMergeRequestReady(_ item: MergeRequestAttentionMonitor.Item) -> Bool {
         guard item.isAuthored, let request = item.mergeRequest,
               request.projectID == item.id.projectID, request.iid == item.id.iid,
-              request.state == "opened", request.draft == true,
+              request.isOpen, request.draft == true,
               request.author.username == glab.currentUsername,
               let host = glab.resolvedHost, request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
               let sha = request.sha, GlabService.isFullGitSHA(sha) else { return false }

@@ -71,7 +71,7 @@ struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, Additio
         return monitor.authoredMergeRequests.requests.first { $0.matchesCurrentRequest(request) }
     }
     private var owned: Bool {
-        item.isAuthored && item.mergeRequest?.state == "opened" && item.mergeRequest?.author.username == monitor.glab.currentUsername
+        item.isAuthored && item.mergeRequest?.state == .opened && item.mergeRequest?.author.username == monitor.glab.currentUsername
     }
     private var blocker: ManualMergeBlocker? {
         guard evidenceMatchesCatalogContext else { return .context }
@@ -114,7 +114,7 @@ struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, Additio
     private var feedbackRecheckRoute: ManualFeedbackRecheckRoute {
         guard let request = item.mergeRequest, let host = monitor.glab.resolvedHost,
               let username = monitor.glab.currentUsername else { return .review }
-        let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
         return .init(backgroundCheckAllowed: AuthorFeedbackCoordinator.permitsBackgroundCheck(for: request,
             configuration: monitor.settings.automation, host: host, username: username,
             mergeOptedIn: monitor.settings.autoMergePreference(for: target) == .on))

@@ -23,7 +23,7 @@ import Testing
         let state = ["closed", "merged", "unknown"].contains(scenario) ? scenario : "opened"
         let actualHead: String? = scenario == "missing" ? nil : (scenario == "invalid" ? "incomplete" : head)
         do {
-            let confirmed = try AssistantJobExecutor.validateMergeRequestContext(state: state, head: actualHead)
+            let confirmed = try AssistantJobExecutor.validateMergeRequestContext(state: .init(rawValue: state), head: actualHead)
             #expect(scenario == "current" && confirmed == head)
         } catch {
             #expect(scenario != "current")

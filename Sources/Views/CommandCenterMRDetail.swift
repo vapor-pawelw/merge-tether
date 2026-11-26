@@ -895,10 +895,10 @@ private struct CommandCenterMRDetailContent: View {
                             metadata(.CommandCenter.commandCenterTarget, value: request.targetBranch)
                             if let sha = request.sha { metadata(.CommandCenter.commandCenterCommit, value: sha, monospaced: true) }
                             metadata(.CommandCenter.commandCenterMergeState,
-                                value: request.detailedMergeStatus.map(Self.readableStatus)
+                                value: request.detailedMergeStatus.map { Self.readableStatus($0.rawValue) }
                                     ?? String(localized: .CommandCenter.commandCenterStatusUnavailable))
                             metadata(.CommandCenter.commandCenterPipeline,
-                                value: request.headPipeline.map { Self.readableStatus($0.status) }
+                                value: request.headPipeline.map { Self.readableStatus($0.status.rawValue) }
                                     ?? String(localized: .CommandCenter.commandCenterNoPipeline))
                         }
                     }
@@ -928,7 +928,7 @@ private struct CommandCenterMRDetailContent: View {
 
     /// Emergency action kept at the bottom of Details: discards incremental review state for a full fresh pass.
     @ViewBuilder private var reviewResetButton: some View {
-        if item.mergeRequest?.state == "opened" {
+        if item.mergeRequest?.state == .opened {
             Button { confirmReviewReset() } label: {
                 Label { Text(isResettingReview ? .ReviewReset.reviewResetRunning : .ReviewReset.reviewResetButton) }
                     icon: { Image(systemName: "arrow.counterclockwise") }

@@ -97,7 +97,7 @@ enum AssistantAutomationRunner {
         let access: Access
 
         var automationTarget: MRAutomationScope.Target {
-            .init(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
+            .mergeRequest(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
         }
     }
 
@@ -115,12 +115,12 @@ enum AssistantAutomationRunner {
             }
             guard let pipeline = request.headPipeline, let id = pipeline.id,
                   pipeline.projectID == projectID else {
-                throw HandoffError.pipelineState(pipelineID, "unknown")
+                throw HandoffError.pipelineState(pipelineID, .unknown("unknown"))
             }
             if id > pipelineID { throw HandoffError.pipelineSuperseded(pipelineID) }
-            guard id == pipelineID, pipeline.sha == sha else { throw HandoffError.pipelineState(pipelineID, "unknown") }
-            if pipeline.status == "success" { throw HandoffError.pipelinePassed(pipelineID) }
-            guard pipeline.status == "failed" else { throw HandoffError.pipelineState(pipelineID, pipeline.status) }
+            guard id == pipelineID, pipeline.sha == sha else { throw HandoffError.pipelineState(pipelineID, .unknown("unknown")) }
+            if pipeline.status == .success { throw HandoffError.pipelinePassed(pipelineID) }
+            guard pipeline.status == .failed else { throw HandoffError.pipelineState(pipelineID, pipeline.status) }
             _ = try await glab.verifiedFailedPipeline(for: request, host: host, expectedUser: user)
         }
     }
@@ -130,12 +130,12 @@ enum AssistantAutomationRunner {
             throw AssistantJobExecutor.ExecutionError.inactiveMergeRequest
         }
         guard let pipeline = request.headPipeline, let id = pipeline.id, id > 0 else {
-            throw HandoffError.pipelineState(reservation.pipelineID, "unknown")
+            throw HandoffError.pipelineState(reservation.pipelineID, .unknown("unknown"))
         }
         if id > reservation.pipelineID { throw HandoffError.pipelineSuperseded(reservation.pipelineID) }
-        guard id == reservation.pipelineID else { throw HandoffError.pipelineState(reservation.pipelineID, "unknown") }
-        if pipeline.status == "success" { throw HandoffError.pipelinePassed(reservation.pipelineID) }
-        guard pipeline.status == "failed" else { throw HandoffError.pipelineState(reservation.pipelineID, pipeline.status) }
+        guard id == reservation.pipelineID else { throw HandoffError.pipelineState(reservation.pipelineID, .unknown("unknown")) }
+        if pipeline.status == .success { throw HandoffError.pipelinePassed(reservation.pipelineID) }
+        guard pipeline.status == .failed else { throw HandoffError.pipelineState(reservation.pipelineID, pipeline.status) }
     }
 
     struct PipelineHandoffConfirmation: Codable, Equatable, Sendable {
@@ -235,13 +235,13 @@ enum AssistantAutomationRunner {
         case jobUnavailable
         case pipelinePassed(Int)
         case pipelineSuperseded(Int)
-        case pipelineState(Int, String)
+        case pipelineState(Int, GitLabPipelineStatus)
 
         var isObsoletePipelineRetry: Bool {
             switch self {
             case .pipelinePassed, .pipelineSuperseded: true
             case .pipelineState(_, let state):
-                ["running", "pending", "created", "preparing", "waiting_for_resource"].contains(state)
+                [.running, .pending, .created, .preparing, .waitingForResource].contains(state)
             default: false
             }
         }
@@ -259,7 +259,7 @@ enum AssistantAutomationRunner {
             case .jobUnavailable: String(localized: .AutomationRuntime.runtimeJobUnavailable)
             case .pipelinePassed(let id): String(localized: .MRFreshness.mrFreshnessPipelinePassed(id))
             case .pipelineSuperseded(let id): String(localized: .MRFreshness.mrFreshnessPipelineSuperseded(id))
-            case .pipelineState(let id, let state): String(localized: .MRFreshness.mrFreshnessPipelineState(id, state))
+            case .pipelineState(let id, let state): String(localized: .MRFreshness.mrFreshnessPipelineState(id, state.rawValue))
             }
         }
     }
@@ -291,7 +291,7 @@ enum AssistantAutomationRunner {
     }
 
     static func feedbackDecisionRevision(work: MergeRequestWork, username: String, settings: SettingsManager) -> String? {
-        let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
         let revision = settings.feedbackSuggestionDecisions.revision(for: target)
         return revision.isEmpty ? nil : revision
     }
@@ -366,7 +366,7 @@ enum AssistantAutomationRunner {
         let automaticConfiguration = configurationSnapshot ?? settings.automation
         let launchAccountRevision = glab?.accountRevision
         let pipelineClaims = ExistingPipelineWorkDetector()
-        let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
         func validateLaunchPolicy() throws {
             try AssistantJobExecutor.validatePersistence(settings)
             guard settings.automation.selectedAssistant != nil else { throw AssistantJobExecutor.ExecutionError.cliUnavailable }
@@ -706,8 +706,7 @@ enum AssistantAutomationRunner {
         let retryAccountRevision = glab?.accountRevision
         func validateAutomaticRetryAdmission() throws {
             guard !manual else { return }
-            let target = MRAutomationScope.Target(host: handoff.key.work.host, username: handoff.key.username,
-                projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
+            let target = handoff.key.automationTarget
             guard settings.automaticWritesAllowed, settings.automation == retryConfiguration,
                   glab?.accountRevision == retryAccountRevision,
                   settings.automation.scope.resolve(target).active,
@@ -744,12 +743,12 @@ enum AssistantAutomationRunner {
                 try AssistantJobExecutor.validateHeadSnapshot(expected: expectedHeadSHA, actual: request.sha)
             }
             guard let pipeline = request.headPipeline, let currentID = pipeline.id, currentID > 0 else {
-                throw HandoffError.pipelineState(prior.pipelineID, "unknown")
+                throw HandoffError.pipelineState(prior.pipelineID, .unknown("unknown"))
             }
             if currentID > prior.pipelineID { throw HandoffError.pipelineSuperseded(prior.pipelineID) }
-            guard currentID == prior.pipelineID else { throw HandoffError.pipelineState(prior.pipelineID, "unknown") }
-            if pipeline.status == "success" { throw HandoffError.pipelinePassed(prior.pipelineID) }
-            guard pipeline.status == "failed" else { throw HandoffError.pipelineState(prior.pipelineID, pipeline.status) }
+            guard currentID == prior.pipelineID else { throw HandoffError.pipelineState(prior.pipelineID, .unknown("unknown")) }
+            if pipeline.status == .success { throw HandoffError.pipelinePassed(prior.pipelineID) }
+            guard pipeline.status == .failed else { throw HandoffError.pipelineState(prior.pipelineID, pipeline.status) }
             _ = try await glab.verifiedFailedPipeline(for: request, host: handoff.key.work.host, expectedUser: user)
             try validateAutomaticRetryAdmission()
             guard manual || retryConfiguration.scope.permits(request, host: handoff.key.work.host,

@@ -113,6 +113,16 @@ struct Todo: Identifiable, Codable, Hashable, Sendable {
         case target
     }
 
+    var mergeRequestID: GitLabMergeRequestID? {
+        guard targetType == .mergeRequest, let iid = target.iid else { return nil }
+        return .init(projectID: project.id, iid: iid)
+    }
+
+    var mergeRequestState: GitLabMergeRequestState? {
+        guard targetType == .mergeRequest else { return nil }
+        return target.state.map(GitLabMergeRequestState.init(rawValue:))
+    }
+
     var isDraft: Bool {
         target.draft == true || target.workInProgress == true
     }

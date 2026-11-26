@@ -23,7 +23,7 @@ enum MRVerificationRetry: String, CaseIterable {
 
     @MainActor
     func isAvailable(for item: MergeRequestAttentionMonitor.Item, failedFollowUp: MRHumanAction.FailedFollowUp? = nil) -> Bool {
-        guard let request = item.mergeRequest, request.state == "opened", request.sha?.isEmpty == false else { return false }
+        guard let request = item.mergeRequest, request.isOpen, request.sha?.isEmpty == false else { return false }
         switch self {
         case .authorFeedback:
             return item.isAuthored && (failedFollowUp?.canVerify ?? (item.authorFeedbackStatus?.phase == .failed))
@@ -118,7 +118,7 @@ struct MRHumanAction {
                   if action == .retryRun { return retryJob.map { $0.id == candidate.jobID } == true }
                   return retryIntent?.id == candidate.id
               }),
-              let request = row.displayRequest, request.state == "opened",
+              let request = row.displayRequest, request.isOpen,
               intent.target.username == request.author.username,
               intent.target.projectID == request.projectID, intent.target.iid == request.iid,
               intent.request.webURL == request.webURL,

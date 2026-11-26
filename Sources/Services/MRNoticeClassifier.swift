@@ -54,7 +54,7 @@ enum MRNoticeClassifier {
                     model: String, executable: URL, expectedHost: String? = nil) async throws -> MRTodoMentionDisposition {
         let selected = discussions.flatMap(\.notes).filter { $0.id == noteID && $0.system != true }
         guard selected.count == 1, let body = selected.first?.body, !body.isEmpty,
-              request.state == "opened", let head = request.sha, !head.isEmpty, user.id > 0, !user.username.isEmpty,
+              request.isOpen, let head = request.sha, !head.isEmpty, user.id > 0, !user.username.isEmpty,
               let host = selectedHost(for: request, expectedHost: expectedHost),
               ReviewVerdict.fingerprint(discussions) != nil else { throw Failure.invalidEvidence }
         let input = Input(request: request, discussions: discussions, user: user, selectedNoteID: noteID)

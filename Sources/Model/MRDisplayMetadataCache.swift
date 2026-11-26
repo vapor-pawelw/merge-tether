@@ -21,7 +21,7 @@ struct MRDisplayMetadataCache {
               request.projectID == target.projectID, request.iid == iid, request.webURL == url,
               url.isGitLabMergeRequest(host: target.host, iid: iid),
               request.author.id > 0, !request.author.username.isEmpty,
-              ["opened", "merged", "closed"].contains(request.state) else { return false }
+              [.opened, .merged, .closed].contains(request.state) else { return false }
         if self.account != account {
             entries = [:]
             self.account = account

@@ -104,7 +104,7 @@ struct ManualFeedbackRecovery: Equatable {
 
 extension MergeRequestAttentionMonitor.Item {
     func manualFeedbackRecovery() -> ManualFeedbackRecovery? {
-        guard isAuthored, let request = mergeRequest, request.state == "opened",
+        guard isAuthored, let request = mergeRequest, request.isOpen,
               request.webURL == url, request.projectID == id.projectID, request.iid == id.iid else { return nil }
         let feedbackBlocker = mergeFeedbackBlocker(for: request)
             ?? (presentingVerifiedAuthorFeedback().feedback.isEmpty ? nil : .unverifiedComments)
@@ -171,7 +171,7 @@ extension MergeRequestAttentionMonitor.Item {
     }
 
     private func catalogMergeBlocker(_ request: GitLabMergeRequest, action: MergeSubmissionAction) -> ManualMergeBlocker? {
-        guard request.state == "opened" else { return .context }
+        guard request.isOpen else { return .context }
         if request.draft == true { return .prerequisite(.draft) }
         if request.canMerge == false { return .prerequisite(.permissions) }
         if request.hasMergeConflict { return .prerequisite(.conflicts) }
@@ -179,22 +179,22 @@ extension MergeRequestAttentionMonitor.Item {
         if request.blockingDiscussionsResolved == false { return .prerequisite(.discussions) }
         // List responses omit user permissions and pipeline details. The exact-context
         // authored status supplies those checks; explicit newer catalog blockers still veto.
-        if let pipeline = request.headPipeline, pipeline.status != "success",
-           !(action == .enqueue && ["created", "pending", "running", "preparing", "waiting_for_resource"].contains(pipeline.status)) {
+        if let pipeline = request.headPipeline, pipeline.status != .success,
+           !(action == .enqueue && [.created, .pending, .running, .preparing, .waitingForResource].contains(pipeline.status)) {
             return .prerequisite(.pipeline)
         }
         switch request.detailedMergeStatus {
-        case nil, "mergeable": return nil
-        case "ci_still_running" where action == .enqueue: return nil
-        case "draft_status": return .prerequisite(.draft)
-        case "not_approved": return .prerequisite(.approvals)
-        case "requested_changes": return .prerequisite(.changesRequested)
-        case "discussions_not_resolved": return .prerequisite(.discussions)
-        case "ci_must_pass", "ci_still_running", "security_policy_pipeline_check", "status_checks_must_pass":
+        case nil, .mergeable: return nil
+        case .ciStillRunning where action == .enqueue: return nil
+        case .draftStatus: return .prerequisite(.draft)
+        case .notApproved: return .prerequisite(.approvals)
+        case .requestedChanges: return .prerequisite(.changesRequested)
+        case .discussionsNotResolved: return .prerequisite(.discussions)
+        case .ciMustPass, .ciStillRunning, .securityPolicyPipelineCheck, .statusChecksMustPass:
             return .prerequisite(.pipeline)
-        case "approvals_syncing", "checking", "preparing", "unchecked": return .prerequisite(.checking)
+        case .approvalsSyncing, .checking, .preparing, .unchecked: return .prerequisite(.checking)
         // GitLab reports this status only for unmerged merge request dependencies.
-        case "merge_request_blocked": return .prerequisite(.dependencies)
+        case .mergeRequestBlocked: return .prerequisite(.dependencies)
         default: return .prerequisite(.other)
         }
     }

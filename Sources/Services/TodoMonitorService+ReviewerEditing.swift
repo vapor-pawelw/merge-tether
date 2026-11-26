@@ -4,7 +4,7 @@ import MergeTetherRemote
 extension TodoMonitorService {
     func canEditReviewers(of request: GitLabMergeRequest) -> Bool {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return false }
-        return request.state == "opened" && request.author.username == username
+        return request.isOpen && request.author.username == username
             && request.webURL.isGitLabMergeRequest(host: host, iid: request.iid)
     }
 
@@ -110,7 +110,7 @@ extension GlabService {
         guard shouldProceed(), live.projectID == displayed.projectID, live.iid == displayed.iid,
               live.webURL.isGitLabMergeRequest(host: host, iid: live.iid),
               live.webURL.gitLabProjectPath == displayed.webURL.gitLabProjectPath,
-              live.state == "opened", live.author.id == user.id, let reviewers = live.reviewers else {
+              live.isOpen, live.author.id == user.id, let reviewers = live.reviewers else {
             throw CancellationError()
         }
 

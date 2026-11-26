@@ -14,7 +14,7 @@ final class ReReviewCoordinator {
         let iid: Int
 
         var target: MRAutomationScope.Target {
-            .init(host: host, username: username, projectID: projectID, iid: iid)
+            .mergeRequest(host: host, username: username, projectID: projectID, iid: iid)
         }
     }
 
@@ -132,7 +132,7 @@ final class ReReviewCoordinator {
             let key = ReReviewReceipt.Key(host: context.host, authorID: authorID, projectID: context.projectID,
                                           iid: context.iid, reviewerID: id)
             guard id > 0, id != authorID, let username = reviewer.user.username, !username.isEmpty,
-                  reviewer.state == "unreviewed" || reviewer.state == "review_started",
+                  reviewer.state == .unreviewed || reviewer.state == .reviewStarted,
                   let receipt = settings.reReviewReceipts[key], receipt.requested == true, !receipt.unconfirmed,
                   receipt.covers(noteID: max(history.activities[id]?.noteID ?? 0, 1), headSHA: head) else { return nil }
             return username
@@ -281,7 +281,7 @@ final class ReReviewCoordinator {
         guard request.projectID == context.projectID, request.iid == context.iid, isCurrent(context) else { return }
         guard runtimePermitsReReview(context) else { return }
         guard settings.automation.hasAutomaticActionConsent, settings.automation.autoReReviewEnabled,
-              isCurrent(context), request.state == "opened", request.author.id == user.id,
+              isCurrent(context), request.isOpen, request.author.id == user.id,
               settings.effectiveAutomationScope.permits(request, host: context.host, username: context.username) else {
             reReviewTasks.removeValue(forKey: context)?.task.cancel()
             reReviewChecks.removeValue(forKey: context)
@@ -289,7 +289,7 @@ final class ReReviewCoordinator {
             return
         }
         let host = context.host
-        let target = MRAutomationScope.Target(host: host, username: context.username, projectID: request.projectID, iid: request.iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: context.username, projectID: request.projectID, iid: request.iid)
         guard reReviewsInProgress.insert(context).inserted else { return }
         defer { reReviewsInProgress.remove(context) }
         let baseline = settings.reReviewDraftBaselines[target]
@@ -372,7 +372,7 @@ final class ReReviewCoordinator {
         let history = MergeRequestReviewHistory(reviewers: reviewers, discussions: discussions, authorID: user.id)
         var reconciledReceipt = false
         if stillInScope, settings.automation.hasAutomaticActionConsent, settings.automation.autoReReviewEnabled {
-            for reviewer in reviewers where reviewer.state == "review_started" {
+            for reviewer in reviewers where reviewer.state == .reviewStarted {
                 let reviewerID = reviewer.user.id
                 let noteID = max(feedback.addressedByReviewer[reviewerID] ?? 0, history.activities[reviewerID]?.noteID ?? 0, 1)
                 let receiptKey = ReReviewReceipt.Key(host: host, authorID: user.id, projectID: request.projectID,
@@ -391,13 +391,13 @@ final class ReReviewCoordinator {
         }
         guard stillInScope,
               usedAssistant || observedPublication || manualReReviewApprovals[context] != nil
-                || (!onlyResolvedFeedback && sharedAssessment != nil) || reviewers.contains(where: { $0.state == "unapproved" }) else {
+                || (!onlyResolvedFeedback && sharedAssessment != nil) || reviewers.contains(where: { $0.state == .unapproved }) else {
             let removed = reReviewChecks.removeValue(forKey: context) != nil
             if invalidated || removed { notify(context, unanswered: feedback.hasUnansweredFeedback) }
             return
         }
         let earlierReviewers = Set(reviewers.filter {
-            $0.state == "reviewed" || $0.state == "unapproved"
+            $0.state == .reviewed || $0.state == .unapproved
                 || history.activities[$0.user.id]?.previouslyApproved == true
                 || history.activities[$0.user.id]?.commented == true
         }.map(\.user.id))
@@ -420,8 +420,8 @@ final class ReReviewCoordinator {
         for (reviewerID, noteID) in candidates {
             guard reviewerID != user.id, !approvers.contains(reviewerID),
                   !excludedReviewers(context, key: key, discussions: discussions, authorID: user.id).contains(reviewerID),
-                  !reviewers.contains(where: { $0.user.id == reviewerID && $0.state == "approved" }) else { continue }
-            if !reviewers.contains(where: { $0.user.id == reviewerID && $0.state == "unapproved" }),
+                  !reviewers.contains(where: { $0.user.id == reviewerID && $0.state == .approved }) else { continue }
+            if !reviewers.contains(where: { $0.user.id == reviewerID && $0.state == .unapproved }),
                authorProgress?.phase == .complete, authorProgress?.head == head, authorProgress?.fingerprint == fingerprint,
                authorProgress?.semanticContextFingerprint == request.semanticContextFingerprint,
                authorProgress?.acceptedReviewerIDs.contains(reviewerID) == true { continue }
@@ -601,7 +601,7 @@ final class ReReviewCoordinator {
                 async let threads = glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
                 async let drafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: user.id)
                 let (current, liveDiscussions, liveDraftCount) = try await (fresh, threads, drafts)
-                guard liveDraftCount == 0, !settings.pendingCommentReviews.contains(target), current.state == "opened", current.sha == head,
+                guard liveDraftCount == 0, !settings.pendingCommentReviews.contains(target), current.state == .opened, current.sha == head,
                       current.author.id == user.id, current.webURL.isGitLabMergeRequest(host: host, iid: current.iid),
                       ReviewVerdict.fingerprint(liveDiscussions) == fingerprint,
                       ReviewVerdict.fingerprint(GitLabMergeRequestDiscussion.activeForReview(liveDiscussions)) == activeFingerprint,
@@ -619,7 +619,7 @@ final class ReReviewCoordinator {
                       reReviewKey(current, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == key,
                       !excludedReviewers(context, key: key, discussions: liveDiscussions, authorID: user.id).contains(reviewerID),
                       let reviewer = liveReviewers.first(where: { $0.user.id == reviewerID }) else { continue }
-                if reviewer.state == "unreviewed" || reviewer.state == "review_started" {
+                if reviewer.state == .unreviewed || reviewer.state == .reviewStarted {
                     settings.reReviewReceipts[receiptKey] = ReReviewReceipt(noteID: noteID, requested: true, headSHA: head)
                     settings.save()
                     continue
@@ -649,7 +649,7 @@ final class ReReviewCoordinator {
                 guard settings.automaticPublicWritesAllowed, !Task.isCancelled, finalUser == user, isCurrent(context),
                       runtimePermitsReReview(context),
                       settings.automation == finalConfiguration, settings.automation.autoReReviewEnabled,
-                      checkedDraftCount == 0, !settings.pendingCommentReviews.contains(target), checkedMR.state == "opened",
+                      checkedDraftCount == 0, !settings.pendingCommentReviews.contains(target), checkedMR.isOpen,
                       checkedMR.sha == head, checkedMR.author.id == user.id,
                       checkedMR.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
                       ReviewVerdict.fingerprint(checkedThreads) == fingerprint,
@@ -666,10 +666,10 @@ final class ReReviewCoordinator {
                       reReviewChecks[context]?.key == key,
                       reReviewKey(checkedMR, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == key,
                       let checkedReviewer = checkedReviewers.first(where: { $0.user.id == reviewerID }),
-                      !checkedApprovers.contains(reviewerID), checkedReviewer.state != "approved",
+                      !checkedApprovers.contains(reviewerID), checkedReviewer.state != .approved,
                       !excludedReviewers(context, key: key, discussions: checkedThreads, authorID: user.id).contains(reviewerID),
                       currentReviewerIDs[context]?.contains(reviewerID) == true else { continue }
-                if checkedReviewer.state == "unreviewed" || checkedReviewer.state == "review_started" {
+                if checkedReviewer.state == .unreviewed || checkedReviewer.state == .reviewStarted {
                     settings.reReviewReceipts[receiptKey] = ReReviewReceipt(noteID: noteID, requested: true, headSHA: head)
                     settings.save()
                     continue

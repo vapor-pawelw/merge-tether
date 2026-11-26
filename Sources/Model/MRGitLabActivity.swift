@@ -9,7 +9,7 @@ struct MRGitLabActivity: Identifiable, Sendable {
     enum Kind: Sendable {
         case comment(noteID: Int, discussionID: String?)
         case systemNote(noteID: Int)
-        case state(String)
+        case state(GitLabMergeRequestState)
         case label(action: String?, name: String?)
         case milestone(action: String?, title: String?)
     }
@@ -36,11 +36,11 @@ struct MRGitLabActivity: Identifiable, Sendable {
         switch kind {
         case .comment: .AutomationHistory.automationHistoryComment
         case .systemNote: .AutomationHistory.automationHistorySystemNote
-        case .state("opened"): .AutomationHistory.automationHistoryOpened
-        case .state("reopened"): .AutomationHistory.automationHistoryReopened
-        case .state("closed"): .AutomationHistory.automationHistoryClosed
-        case .state("merged"): .AutomationHistory.automationHistoryMerged
-        case .state(let state): .AutomationHistory.automationHistoryStateChanged(state)
+        case .state(.opened): .AutomationHistory.automationHistoryOpened
+        case .state(.reopened): .AutomationHistory.automationHistoryReopened
+        case .state(.closed): .AutomationHistory.automationHistoryClosed
+        case .state(.merged): .AutomationHistory.automationHistoryMerged
+        case .state(let state): .AutomationHistory.automationHistoryStateChanged(state.rawValue)
         case .label("add", let name): .AutomationHistory.automationHistoryAddedLabel(name ?? "")
         case .label("remove", let name): .AutomationHistory.automationHistoryRemovedLabel(name ?? "")
         case .label(_, let name): .AutomationHistory.automationHistoryChangedLabel(name ?? "")
@@ -81,7 +81,7 @@ struct MRGitLabActivity: Identifiable, Sendable {
         let createdAt: String?
         let user: GitLabWorkflowUser?
         let action: String?
-        let state: String?
+        let state: GitLabMergeRequestState?
         let label: Label?
         let milestone: Milestone?
 
@@ -95,7 +95,7 @@ struct MRGitLabActivity: Identifiable, Sendable {
             let kind: Kind
             switch resource {
             case .state:
-                guard let state, !state.isEmpty else { return nil }
+                guard let state, !state.rawValue.isEmpty else { return nil }
                 kind = .state(state)
             case .label: kind = .label(action: action, name: label?.name)
             case .milestone: kind = .milestone(action: action, title: milestone?.title)

@@ -618,7 +618,7 @@ extension RemoteConnection: RemoteHostTransport {}
             }
             if let read, checked.status == .current, let digest, let details = checked.details,
                let host = monitor.glab.resolvedHost, let username = monitor.glab.currentUsername {
-                let target = MRAutomationScope.Target(host: host, username: username, projectID: source.projectID, iid: source.iid)
+                let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: source.projectID, iid: source.iid)
                 let noteIDs = Set(monitor.settings.automationEvents.lazy
                     .filter { $0.target == target && $0.action == .publication }.compactMap(\.publishedNoteID))
                 recentDetails[request.cardID] = .init(digest: digest, criteriaOverride: criteriaOverride, readAt: Date(),

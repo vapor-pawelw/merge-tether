@@ -24,8 +24,8 @@ import MergeTetherRemote
         self.target = target
         self.url = url
         self.item = row?.item ?? proposal?.item
-        self.isDraft = row?.isDraft ?? (request?.draft == true || request?.detailedMergeStatus == "draft_status")
-        self.isFinished = request.map { $0.state != "opened" } ?? false
+        self.isDraft = row?.isDraft ?? (request?.isDraft ?? false)
+        self.isFinished = request.map { $0.state != .opened } ?? false
         self.isReviewed = board.reviewed.contains { $0.id.projectID == projectID && $0.id.iid == iid }
         self.monitor = monitor
     }

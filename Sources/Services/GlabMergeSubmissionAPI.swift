@@ -11,7 +11,7 @@ extension GlabService {
     }
 
     func fetchMergeTrainPreparation(_ request: GitLabMergeRequest, host: String) async throws -> MergeTrainPreparationObservation {
-        guard request.state == "opened", !request.hasQueuedMerge,
+        guard request.isOpen, !request.hasQueuedMerge,
               request.webURL.isGitLabMergeRequest(host: host, iid: request.iid) else {
             return .init(latestNoteID: 0, conflict: nil)
         }
@@ -54,7 +54,7 @@ extension GlabService {
             let id: Int
             let projectID: Int
             let ref: String
-            let status: String
+            let status: GitLabPipelineStatus
             let createdAt: String
             let updatedAt: String
             enum CodingKeys: String, CodingKey {
@@ -75,7 +75,7 @@ extension GlabService {
                   let created = MergeRequestReviewHistory.date($0.createdAt) else { return false }
             return created >= admittedAt && created <= removedAt
         }
-        guard let failed = trainPipelines.max(by: { $0.id < $1.id }), failed.status == "failed",
+        guard let failed = trainPipelines.max(by: { $0.id < $1.id }), failed.status == .failed,
               let finishedAt = MergeRequestReviewHistory.date(failed.updatedAt), finishedAt <= removedAt else { return nil }
 
         // A source update drops the car from GitLab's train. Bind the single
@@ -115,11 +115,11 @@ extension GlabService {
     }
 
     func verifyReplacementPipeline(for request: GitLabMergeRequest, host: String) async throws -> GitLabMergeRequest.Pipeline {
-        guard let head = request.headPipeline, head.status == "success", let id = head.id, id > 0,
+        guard let head = request.headPipeline, head.status == .success, let id = head.id, id > 0,
               let project = head.projectID, project > 0, let sha = head.sha, Self.isFullGitSHA(sha),
               let source = request.sha else { throw CancellationError() }
         let pipeline: GitLabMergeRequest.Pipeline = try await mergeRequestAPI("/projects/\(project)/pipelines/\(id)", host: host)
-        guard pipeline.status == "success", pipeline.id == id, pipeline.projectID == project, pipeline.sha == sha,
+        guard pipeline.status == .success, pipeline.id == id, pipeline.projectID == project, pipeline.sha == sha,
               let ref = pipeline.ref, head.ref == nil || head.ref == ref else { throw CancellationError() }
         if ref == "refs/merge-requests/\(request.iid)/merge", project == request.targetProjectID {
             struct Commit: Decodable {
@@ -167,8 +167,8 @@ extension GlabService {
 
     func observedMergeSubmission(_ request: GitLabMergeRequest, action: MergeSubmissionAction,
                                  host: String, usesMergeTrain: Bool = true) async throws -> MergeSubmissionState {
-        if request.state == "merged" { return .merged }
-        guard request.state == "opened" else { return .changed }
+        if request.state == .merged { return .merged }
+        guard request.isOpen else { return .changed }
         if action == .enqueue, usesMergeTrain,
            try await fetchActiveMergeTrainIIDs(projectID: request.projectID, host: host).contains(request.iid) { return .inTrain }
         return request.hasQueuedMerge ? .queued : .none

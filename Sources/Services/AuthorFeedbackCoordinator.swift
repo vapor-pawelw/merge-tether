@@ -33,7 +33,7 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
               let state = job.operationalExecution?.state, [.failed, .interrupted, .cancelled, .blocked].contains(state),
               let selected = job.feedbackNoteIDs, !selected.isEmpty, selected.allSatisfy({ $0 > 0 }),
               job.key.work.projectID == request.projectID, job.key.work.iid == request.iid,
-              request.author.username == job.key.username, request.state == "opened",
+              request.author.username == job.key.username, request.isOpen,
               request.webURL.isGitLabMergeRequest(host: job.key.work.host, iid: request.iid) else { return false }
         return state != .blocked || (job.expectedHeadSHA == request.sha && job.draftRepair == nil
             && job.execution?.finishedAt != nil && blockedContext(for: job) != nil)
@@ -222,7 +222,7 @@ final class AuthorFeedbackCoordinator {
 
     func status(projectID: Int, iid: Int) -> AuthorFeedbackStatus? {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return nil }
-        return statuses[.init(host: host, username: username, projectID: projectID, iid: iid)]
+        return statuses[.mergeRequest(host: host, username: username, projectID: projectID, iid: iid)]
     }
 
     func assessment(for request: GitLabMergeRequest, fingerprint: String) -> ReReviewAssessment? {
@@ -231,7 +231,7 @@ final class AuthorFeedbackCoordinator {
               state.phase == .complete || state.phase == .waitingPublication,
               state.head == request.sha, state.fingerprint == fingerprint,
               state.semanticContextFingerprint == request.semanticContextFingerprint else { return nil }
-        let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
         guard state.feedbackDecisionRevision == settings.feedbackSuggestionDecisions.revision(for: target),
               state.reviewParticipationRevision == settings.reviewParticipationPreferences.revision(host: host, username: username) else { return nil }
         guard let stored = cache[target], stored.input.completedFollowUpJobID == completedFollowUpJob(for: request, target: target)?.id else { return nil }
@@ -246,7 +246,7 @@ final class AuthorFeedbackCoordinator {
 
     func assessmentInFlight(for request: GitLabMergeRequest, fingerprint: String, activeFingerprint: String) -> Bool {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return false }
-        let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
         guard let input = statusOwners[target], statuses[target]?.phase == .checking,
               input.request.sha == request.sha, input.request.draftProofRecoveryContextFingerprint == request.draftProofRecoveryContextFingerprint,
               input.fingerprint == fingerprint, input.activeFingerprint == activeFingerprint,
@@ -259,7 +259,7 @@ final class AuthorFeedbackCoordinator {
     func recordVerifiedPublication(draft: GitLabDraftNote, sourceNoteID: Int, request: GitLabMergeRequest,
                                    user: GitLabAuthenticatedUser, host: String, before: [GitLabMergeRequestDiscussion],
                                    after: [GitLabMergeRequestDiscussion]) -> Int? {
-        let target = MRAutomationScope.Target(host: host, username: user.username, projectID: request.projectID, iid: request.iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: user.username, projectID: request.projectID, iid: request.iid)
         guard let discussionID = draft.discussionID, let body = draft.note,
               let prior = cache[target], prior.verifiedInProcess, prior.input.user == user, liveContextMatches(prior.input),
               prior.input.request.sha == request.sha,
@@ -310,9 +310,9 @@ final class AuthorFeedbackCoordinator {
     /// `approvalRevision` identifies the observed approvals; without it an unchanged snapshot is always rechecked.
     func refresh(request: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion], drafts: Int,
                  host: String, user: GitLabAuthenticatedUser, approvalRevision: String? = nil, scopedRefresh: Bool = false) {
-        let target = MRAutomationScope.Target(host: host, username: user.username, projectID: request.projectID, iid: request.iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: user.username, projectID: request.projectID, iid: request.iid)
         let configuration = settings.automation
-        guard request.author.id == user.id, request.state == "opened", request.draft != nil,
+        guard request.author.id == user.id, request.isOpen, request.draft != nil,
               Self.permitsBackgroundCheck(for: request, configuration: configuration, host: host, username: user.username,
                   mergeOptedIn: settings.autoMergePreference(for: target) == .on),
               let fingerprint = ReviewVerdict.fingerprint(discussions), let head = request.sha else { return }
@@ -378,7 +378,7 @@ final class AuthorFeedbackCoordinator {
 
     func invalidate(projectID: Int, iid: Int) {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return }
-        let target = MRAutomationScope.Target(host: host, username: username, projectID: projectID, iid: iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: projectID, iid: iid)
         pending.removeValue(forKey: target)
         tasks[target]?.cancel()
         cache.removeValue(forKey: target)
@@ -393,7 +393,7 @@ final class AuthorFeedbackCoordinator {
     /// Emergency reset: forget every earlier pass and verify all feedback against the current MR from scratch.
     func resetAssessment(projectID: Int, iid: Int) {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return }
-        let target = MRAutomationScope.Target(host: host, username: username, projectID: projectID, iid: iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: projectID, iid: iid)
         invalidate(projectID: projectID, iid: iid)
         priorPasses.removeValue(forKey: target)
         if let assessmentDirectory { AuthorFeedbackAssessmentStore.remove(target, in: assessmentDirectory) }
@@ -748,7 +748,7 @@ final class AuthorFeedbackCoordinator {
         let current = try await glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
         guard isCurrent(input), current.sha == request.sha,
               current.semanticContextFingerprint == request.semanticContextFingerprint,
-              current.state == "opened", current.draft == request.draft, current.author.id == input.user.id,
+              current.state == .opened, current.draft == request.draft, current.author.id == input.user.id,
               current.webURL == request.webURL else { throw CancellationError() }
         if input.readOnly || !stoppedFollowUps.isEmpty || !input.ignoredSuggestions.isEmpty {
             async let liveThreads = glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
@@ -920,7 +920,7 @@ final class AuthorFeedbackCoordinator {
             let (live, discussions, user, count, liveApproved) = try await (currentMR, currentThreads, currentUser, drafts, approvals)
             approved = liveApproved
             guard settings.automaticPublicWritesAllowed else { break }
-            guard isCurrent(input), live.sha == request.sha, live.state == "opened",
+            guard isCurrent(input), live.sha == request.sha, live.isOpen,
                   live.semanticContextFingerprint == request.semanticContextFingerprint,
                   live.author.id == input.user.id, user == input.user, count == 0,
                   settings.automation.scope.permits(live, host: host, username: user.username),
@@ -1066,7 +1066,7 @@ final class AuthorFeedbackCoordinator {
         async let currentUser = glab.fetchAuthenticatedUser(host: host, expectedUsername: input.user.username)
         async let currentDrafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: input.user.id)
         let (live, discussions, user, count) = try await (currentMR, currentThreads, currentUser, currentDrafts)
-        guard settings.automaticPublicWritesAllowed, isCurrent(input), live.sha == request.sha, live.state == "opened",
+        guard settings.automaticPublicWritesAllowed, isCurrent(input), live.sha == request.sha, live.isOpen,
               live.semanticContextFingerprint == request.semanticContextFingerprint,
               live.author.id == input.user.id, user == input.user, count == 0, live.webURL == request.webURL,
               settings.automation.scope.permits(live, host: host, username: user.username),

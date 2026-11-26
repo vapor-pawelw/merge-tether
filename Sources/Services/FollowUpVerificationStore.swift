@@ -27,7 +27,7 @@ struct FollowUpVerification: Codable, Equatable, Sendable {
     /// Historical identity establishes ownership only; fresh verification must establish current truth.
     func owns(_ draft: GitLabDraftNote, request: GitLabMergeRequest, host: String, user: GitLabAuthenticatedUser) -> Bool {
         version == 1 && sealed && self.host == host && projectID == request.projectID && iid == request.iid
-            && username == user.username && userID == user.id && request.author.id == user.id && request.state == "opened"
+            && username == user.username && userID == user.id && request.author.id == user.id && request.isOpen
             && sourceProjectID == request.sourceProjectID && sourceBranch == request.sourceBranch
             && draft.authorID == user.id && !files.isEmpty && files.count <= 20
             && drafts.contains { $0.id == draft.id && $0.bodySHA256 == AICommentAssessmentStore.digest(draft.note ?? "") }
@@ -77,7 +77,7 @@ enum FollowUpVerificationStore {
               handoff.manual == true || configuration.allowAutomaticPublicActions,
               handoff.key.assistant == configuration.assistant else { return false }
         let work = handoff.key.work
-        let target = MRAutomationScope.Target(host: work.host, username: handoff.key.username,
+        let target = MRAutomationScope.Target.mergeRequest(host: work.host, username: handoff.key.username,
                                              projectID: work.projectID, iid: work.iid)
         return handoff.manual == true || configuration.scope.resolve(target).active
     }
@@ -86,7 +86,7 @@ enum FollowUpVerificationStore {
     static func register(_ handoff: AssistantAutomationRunner.Handoff, settings: SettingsManager, in directory: URL = directory) {
         guard handoff.followUpPushAllowed != nil else { return }
         let work = handoff.key.work
-        let target = MRAutomationScope.Target(host: work.host, username: handoff.key.username,
+        let target = MRAutomationScope.Target.mergeRequest(host: work.host, username: handoff.key.username,
             projectID: work.projectID, iid: work.iid)
         let record = Run(runID: handoff.id, host: work.host, projectID: work.projectID, iid: work.iid,
                          username: handoff.key.username, pushAllowed: canPush(handoff, configuration: settings.automation),
@@ -107,9 +107,9 @@ enum FollowUpVerificationStore {
 
     @MainActor
     static func synchronizeRuns(settings: SettingsManager, in directory: URL = directory) {
-        var newest: [String: AssistantAutomationRunner.Handoff] = [:]
+        var newest: [MRAutomationScope.Target: AssistantAutomationRunner.Handoff] = [:]
         for handoff in settings.assistantHandoffs where handoff.followUpPushAllowed != nil {
-            let key = "\(handoff.key.work.host)/\(handoff.key.work.projectID)/\(handoff.key.work.iid)/\(handoff.key.username)"
+            let key = handoff.key.automationTarget
             if newest[key].map({ $0.createdAt < handoff.createdAt }) ?? true { newest[key] = handoff }
         }
         for handoff in newest.values { register(handoff, settings: settings, in: directory) }

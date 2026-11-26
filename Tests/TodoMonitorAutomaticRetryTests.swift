@@ -213,9 +213,9 @@ struct TodoMonitorAutomaticRetryTests {
                 if change == "retry-busy" || change == "retry-child-busy" { throw AssistantAutomationRunner.HandoffError.mergeRequestBusy }
                 if change == "retry-permission" || change == "retry-child-permission" { throw AssistantJobExecutor.ExecutionError.disabledPermission }
                 if change == "retry-context" || change == "retry-child-context" { throw AssistantJobExecutor.ExecutionError.contextUnavailable }
-                if change.hasSuffix("pipeline-unknown") { throw AssistantAutomationRunner.HandoffError.pipelineState(10, "unknown") }
-                if change.hasSuffix("pipeline-pending") { throw AssistantAutomationRunner.HandoffError.pipelineState(10, "pending") }
-                if change.hasSuffix("pipeline-running") { throw AssistantAutomationRunner.HandoffError.pipelineState(10, "running") }
+                if change.hasSuffix("pipeline-unknown") { throw AssistantAutomationRunner.HandoffError.pipelineState(10, .unknown("unknown")) }
+                if change.hasSuffix("pipeline-pending") { throw AssistantAutomationRunner.HandoffError.pipelineState(10, .pending) }
+                if change.hasSuffix("pipeline-running") { throw AssistantAutomationRunner.HandoffError.pipelineState(10, .running) }
                 if change.hasSuffix("pipeline-passed") { throw AssistantAutomationRunner.HandoffError.pipelinePassed(10) }
                 if change.hasSuffix("pipeline-superseded") { throw AssistantAutomationRunner.HandoffError.pipelineSuperseded(10) }
                 if change == "retry-closed" { throw AssistantJobExecutor.ExecutionError.inactiveMergeRequest }

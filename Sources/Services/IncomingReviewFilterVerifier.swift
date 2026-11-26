@@ -35,7 +35,7 @@ enum IncomingReviewFilterVerifier {
         init?(id: UUID, request: GitLabMergeRequest, target: MRAutomationScope.Target, url: URL) {
             guard request.projectID == target.projectID, request.iid == target.iid, request.webURL == url,
                   request.webURL.isGitLabMergeRequest(host: target.host, iid: request.iid),
-                  request.state == "opened", let head = request.sha, !head.isEmpty,
+                  request.isOpen, let head = request.sha, !head.isEmpty,
                   request.author.username != target.username else { return nil }
             self.id = id
             projectID = request.projectID
