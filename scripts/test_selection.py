@@ -31,7 +31,7 @@ GROUPS = {
                      "RemoteHostDetailTests", "MRSettingsRecordTests"],
     "feedback": ["AuthorFeedbackPolicyTests", "AuthorFeedbackCoordinatorTests", "AuthorFeedbackMergeTests",
                  "ReReviewAssessmentTests", "ReReviewVerifierTests", "VerifiedAuthorFeedbackTests",
-                 "ConfirmationQueueTests", "MergeRequestTodoRoutingTests", "DraftProofRecoveryTests",
+                 "ConfirmationQueueTests", "MergeRequestTodoRoutingTests", "MRAutomationHistoryTests", "DraftProofRecoveryTests",
                  "FollowUpPushPermissionTests", "MRHumanActionTests", "RemoteBoardAdapterTests",
                  "MergeWorkflowExecutionTests", "TodoAutomationTests", "MRNoticeClassifierTests",
                  "FeedbackSuggestionDecisionsTests", "FeedbackSuggestionDecisionActionTests",
@@ -45,8 +45,7 @@ GROUPS = {
                  "MergeActionReadinessTests", "MergeRequestBoardSnapshotTests", "MergeSubmissionTests",
                  "ModelEvaluationTests", "PersonDirectoryTests", "ProposalMRContextTests", "ReReviewCoordinatorTests",
                  "RemoteMRControlsTests", "RemoteMRDetailLoaderTests", "ReviewingContextTests",
-                 "StalePipelineJobTests", "TodoMonitorPersistenceGuardTests", "MRSettingsRecordTests",
-                 "MRAutomationHistoryTests"],
+                 "StalePipelineJobTests", "TodoMonitorPersistenceGuardTests", "MRSettingsRecordTests"],
 }
 GROUPS["usage"] += ["AssistantCLIHealthTests", "AssistantJobCoordinatorTests", "MRNoticeClassifierTests"]
 
