@@ -1,6 +1,13 @@
 import Foundation
 import Observation
 
+extension GitLabMergeRequestDiscussion.Note {
+    func matchesOriginSource(_ current: Self) -> Bool {
+        EvidenceContext(commentText: body).binds(to: .init(commentText: current.body), policy: .commentText)
+            && author?.id == current.author?.id
+    }
+}
+
 @MainActor @Observable
 final class AICommentOriginCoordinator {
     typealias Note = GitLabMergeRequestDiscussion.Note
@@ -19,6 +26,13 @@ final class AICommentOriginCoordinator {
         var signature: String {
             ([directory.path] + notes.map { "\($0.id ?? 0):\($0.author?.id ?? 0):\(AICommentAssessmentStore.digest($0.body ?? ""))" }.sorted())
                 .joined(separator: "/")
+        }
+
+        var evidenceContext: EvidenceContext { .init(commentBatch: signature) }
+
+        func matches(_ current: Self) -> Bool {
+            evidenceContext.binds(to: current.evidenceContext, policy: .commentBatch)
+                && assistant == current.assistant && model == current.model && thinking == current.thinking
         }
     }
     private static var evaluations: [MRAutomationScope.Target: Int] = [:]
@@ -118,8 +132,7 @@ final class AICommentOriginCoordinator {
         guard !uncovered.isEmpty else { return }
         let request = Request(target: target, notes: uncovered, assistant: assistant, model: model, thinking: thinking,
             criteriaOverride: criteria, directory: candidate.directory)
-        if let prior = running[target]?.0, prior.signature == request.signature && prior.assistant == assistant && prior.model == model && prior.thinking == thinking { return }
-        if let prior = pending[target], prior.signature == request.signature && prior.assistant == assistant && prior.model == model && prior.thinking == thinking { return }
+        if running[target]?.0.matches(request) == true || pending[target]?.matches(request) == true { return }
         running[target]?.1.cancel()
         pending[target] = request
         updateChecking(); startNext()
@@ -219,7 +232,7 @@ final class AICommentOriginCoordinator {
                         guard !Task.isCancelled, self.requestIsCurrent(request) else { throw CancellationError() }
                         guard request.notes.allSatisfy({ original in
                             let matches = live.filter { $0.id == original.id }
-                            return matches.count == 1 && matches[0].body == original.body && matches[0].author?.id == original.author?.id
+                            return matches.count == 1 && original.matchesOriginSource(matches[0])
                         }) else { throw CancellationError() }
                         let written = try AICommentAssessmentStore.persist(result, target: target, notes: request.notes,
                             assistant: request.assistant, model: request.model, thinking: request.thinking, purpose: self.purpose, in: request.directory)

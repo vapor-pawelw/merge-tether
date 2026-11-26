@@ -557,13 +557,8 @@ final class SettingsManager {
     }
 
     func savePipelineClaimAssessmentAttempt(_ attempt: PipelineClaimAssessmentAttempt) -> Bool {
-        guard automaticActionsAllowed, !pipelineClaimAssessmentAttempts.contains(where: {
-            $0.target == attempt.target && $0.userID == attempt.userID && $0.lineage == attempt.lineage
-                && $0.pipelineID == attempt.pipelineID && $0.pipelineSHA == attempt.pipelineSHA
-                && $0.pipelineProjectID == attempt.pipelineProjectID
-                && $0.sourceProjectID == attempt.sourceProjectID && $0.sourceBranch == attempt.sourceBranch && $0.sourceSHA == attempt.sourceSHA
-                && $0.targetProjectID == attempt.targetProjectID && $0.targetBranch == attempt.targetBranch && $0.targetSHA == attempt.targetSHA
-        }) else { return false }
+        guard automaticActionsAllowed,
+              !pipelineClaimAssessmentAttempts.contains(where: { $0.matchesAttempt(attempt) }) else { return false }
         pipelineClaimAssessmentAttempts.append(attempt)
         save()
         return automaticActionsAllowed

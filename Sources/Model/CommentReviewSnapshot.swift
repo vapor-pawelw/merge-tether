@@ -6,6 +6,10 @@ struct CommentReviewSnapshot: Codable, Equatable, Sendable {
     let semanticContext: String
     let discussionFingerprint: String
 
+    var evidenceContext: EvidenceContext {
+        .init(head: headSHA, discussionContent: .init(discussionFingerprint), semanticContext: .init(semanticContext))
+    }
+
     init?(request: GitLabMergeRequest?, discussions: [GitLabMergeRequestDiscussion]?) {
         guard let request, request.isOpen, let head = request.sha, !head.isEmpty,
               let discussions, let fingerprint = ReviewVerdict.fingerprint(discussions) else { return nil }
@@ -23,9 +27,9 @@ struct CommentReviewSnapshot: Codable, Equatable, Sendable {
 
     func matches(_ request: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion],
                  publishedBodyDigests: [String], userID: Int) -> Bool {
-        guard request.isOpen, request.sha == headSHA,
-              request.semanticContextFingerprint == semanticContext else { return false }
-        if ReviewVerdict.fingerprint(discussions) == discussionFingerprint { return true }
+        guard covers(request) else { return false }
+        if evidenceContext.binds(to: .init(discussionContent: ReviewVerdict.discussionContentDigest(discussions)),
+                                 policy: .discussionContent) { return true }
         // Permit only the new own comments this publication actually sent.
         var bodies = Dictionary(grouping: publishedBodyDigests, by: { $0 }).mapValues(\.count)
         let ownPublished = discussions.flatMap(\.notes).compactMap { note -> (id: Int, digest: String)? in
@@ -39,12 +43,14 @@ struct CommentReviewSnapshot: Codable, Equatable, Sendable {
             guard let remaining = bodies[note.digest], remaining > 0 else { continue }
             bodies[note.digest] = remaining - 1
             excluded.insert(note.id)
-            if ReviewVerdict.fingerprint(discussions, excluding: excluded) == discussionFingerprint { return true }
+            let current = EvidenceContext(discussionContent: ReviewVerdict.discussionContentDigest(discussions, excluding: excluded))
+            if evidenceContext.binds(to: current, policy: .discussionContent) { return true }
         }
         return false
     }
 
     func covers(_ request: GitLabMergeRequest?) -> Bool {
-        request?.state == .opened && request?.sha == headSHA && request?.semanticContextFingerprint == semanticContext
+        guard let request, request.isOpen else { return false }
+        return evidenceContext.binds(to: request.evidenceContext(), policy: .requestText)
     }
 }

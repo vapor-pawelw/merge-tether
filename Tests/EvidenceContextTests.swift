@@ -5,10 +5,12 @@ import Testing
 struct EvidenceContextTests {
     private let evidence = EvidenceContext(
         account: .init(host: "gitlab.example.test", username: "reviewer"), accountRevision: 7,
-        mergeRequestID: .init(projectID: 1, iid: 2), head: "head",
+        mergeRequestID: .init(projectID: 1, iid: 2), head: "head", targetHead: "target head",
         target: .init(projectID: 1, branch: "main", base: "base"),
         discussionContent: .init("comments"), activeDiscussionContent: .init("active"),
-        discussionState: .init("note revisions"), semanticContext: .init("MR text"), recoveryContext: .init("recovery")
+        discussionState: .init("note revisions"), semanticContext: .init("MR text"), recoveryContext: .init("recovery"),
+        commentBody: .init("body digest"), commentText: "body", commentBatch: "batch",
+        reviewDiff: .init("diff"), savedVerdict: .init("verdict")
     )
 
     @Test(arguments: EvidenceContext.BindingPolicy.allCases)
@@ -19,26 +21,36 @@ struct EvidenceContextTests {
     @Test func comparesOnlyTheComponentsEachPolicyUses() {
         check(\.account, .init(host: "gitlab.example.test", username: "other"),
               rejects: [.accountIdentity, .accountSession, .accountAndRequest, .reReviewAssessment])
-        check(\.accountRevision, 8, rejects: [.accountSession, .reReviewAssessment])
+        check(\.accountRevision, 8, rejects: [.accountSession, .reReviewAssessment, .accountRevision])
         check(\.mergeRequestID, .init(projectID: 1, iid: 3), rejects: [.accountAndRequest, .reReviewAssessment])
         check(\.head, "new head", rejects: [.head, .requestText, .approvalTarget, .reviewContent,
             .feedbackProgress, .observedFeedback, .verifiedFeedback, .feedbackPresentation, .followUpPresentation,
-            .reReviewAssessment, .draftRecovery, .legacyFollowUpProof, .uncertainReReviewReceipt])
+            .reReviewAssessment, .draftRecovery, .legacyFollowUpProof, .uncertainReReviewReceipt, .sourceAndTargetHeads])
+        check(\.targetHead, "new target head", rejects: [.sourceAndTargetHeads])
         check(\.target, .init(projectID: 1, branch: "release", base: "base"), rejects: [.approvalTarget])
         check(\.target, .init(projectID: 1, branch: "main", base: "new base"), rejects: [.approvalTarget])
         check(\.target, .init(projectID: 3, branch: "main", base: "base"), rejects: [.approvalTarget])
         check(\.discussionContent, .init("edited comment"), rejects: [.discussionContent, .reviewContent,
-            .observedFeedback, .verifiedFeedback, .feedbackPresentation, .followUpPresentation, .reReviewAssessment])
+            .observedFeedback, .verifiedFeedback, .feedbackPresentation, .followUpPresentation, .reReviewAssessment,
+            .mergeSubmissionEvidence])
         check(\.activeDiscussionContent, .init("resolved"), rejects: [.reReviewAssessment])
         check(\.discussionState, .init("edited timestamp"), rejects: [.discussionState])
         check(\.semanticContext, .init("new title"), rejects: [.semanticText, .requestText, .feedbackProgress,
-            .observedFeedback, .verifiedFeedback, .feedbackPresentation, .reReviewAssessment, .legacyFollowUpProof])
-        check(\.recoveryContext, .init("new recovery context"), rejects: [.draftRecovery, .legacyFollowUpProof])
+            .observedFeedback, .verifiedFeedback, .feedbackPresentation, .reReviewAssessment, .legacyFollowUpProof,
+            .mergeSubmissionEvidence])
+        check(\.recoveryContext, .init("new recovery context"), rejects: [.draftRecovery, .legacyFollowUpProof, .recoveryDigest])
+        check(\.commentBody, .init("edited digest"), rejects: [.commentBody])
+        check(\.commentText, "edited text", rejects: [.commentText])
+        check(\.commentBatch, "different batch", rejects: [.commentBatch])
+        check(\.reviewDiff, .init("different diff"), rejects: [.reviewDiff])
+        check(\.savedVerdict, .init("different verdict"), rejects: [.savedVerdict])
     }
 
     @Test func missingEvidenceRequiresTheOriginalPolicyToAllowIt() {
         let empty = EvidenceContext()
-        let acceptsTwoEmptyContexts: Set<EvidenceContext.BindingPolicy> = [.head, .feedbackPresentation, .followUpPresentation]
+        let acceptsTwoEmptyContexts: Set<EvidenceContext.BindingPolicy> = [
+            .head, .feedbackPresentation, .followUpPresentation, .commentText, .mergeSubmissionEvidence,
+        ]
         for policy in EvidenceContext.BindingPolicy.allCases {
             #expect(empty.binds(to: empty, policy: policy) == acceptsTwoEmptyContexts.contains(policy))
         }
@@ -71,6 +83,29 @@ struct EvidenceContextTests {
         #expect(missingRevision.binds(to: evidence, policy: .accountIdentity))
     }
 
+    @Test func changingOnlyOneMissingComponentPreventsBinding() {
+        checkMissing(\.accountRevision, policy: .accountRevision)
+        checkMissing(\.head, policy: .sourceAndTargetHeads)
+        checkMissing(\.targetHead, policy: .sourceAndTargetHeads)
+        checkMissing(\.commentBody, policy: .commentBody)
+        checkMissing(\.commentText, policy: .commentText)
+        checkMissing(\.commentBatch, policy: .commentBatch)
+        checkMissing(\.recoveryContext, policy: .recoveryDigest)
+        checkMissing(\.reviewDiff, policy: .reviewDiff)
+        checkMissing(\.savedVerdict, policy: .savedVerdict)
+    }
+
+    @Test func mergeSubmissionChecksOnlyFingerprintsSpecifiedByTheCaller() {
+        var missingText = evidence
+        missingText.semanticContext = nil
+        var missingDiscussions = evidence
+        missingDiscussions.discussionContent = nil
+        for partial in [missingText, missingDiscussions, EvidenceContext()] {
+            #expect(partial.binds(to: evidence, policy: .mergeSubmissionEvidence))
+            #expect(!evidence.binds(to: partial, policy: .mergeSubmissionEvidence))
+        }
+    }
+
     @Test func discussionDigestsKeepTheirExistingSensitivity() throws {
         let open = try discussions(resolved: false)
         let closed = try discussions(resolved: true)
@@ -99,6 +134,7 @@ struct EvidenceContextTests {
         try assertWireValue(DiscussionStateDigest.self, #""note revisions""#)
         try assertWireValue(SemanticContextDigest.self, #""title and description""#)
         try assertWireValue(DraftRecoveryDigest.self, #""recovery""#)
+        try assertWireValue(CommentBodyDigest.self, #""body digest""#)
     }
 
     @Test func reviewVerdictDecodesBothLegacyAndBoundRecords() throws {
@@ -165,5 +201,13 @@ struct EvidenceContextTests {
         for policy in EvidenceContext.BindingPolicy.allCases {
             #expect(evidence.binds(to: current, policy: policy) == !rejects.contains(policy), "\(keyPath), \(policy)")
         }
+    }
+
+    private func checkMissing<Value>(_ keyPath: WritableKeyPath<EvidenceContext, Value?>,
+                                     policy: EvidenceContext.BindingPolicy) {
+        var partial = evidence
+        partial[keyPath: keyPath] = nil
+        #expect(!evidence.binds(to: partial, policy: policy))
+        #expect(!partial.binds(to: evidence, policy: policy))
     }
 }

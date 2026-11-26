@@ -20,11 +20,17 @@ enum DiscussionContentEvidence {}
 enum DiscussionStateEvidence {}
 enum SemanticContextEvidence {}
 enum DraftRecoveryEvidence {}
+enum CommentBodyEvidence {}
+enum ReviewDiffEvidence {}
+enum SavedVerdictEvidence {}
 
 typealias DiscussionContentDigest = EvidenceDigest<DiscussionContentEvidence>
 typealias DiscussionStateDigest = EvidenceDigest<DiscussionStateEvidence>
 typealias SemanticContextDigest = EvidenceDigest<SemanticContextEvidence>
 typealias DraftRecoveryDigest = EvidenceDigest<DraftRecoveryEvidence>
+typealias CommentBodyDigest = EvidenceDigest<CommentBodyEvidence>
+typealias ReviewDiffDigest = EvidenceDigest<ReviewDiffEvidence>
+typealias SavedVerdictDigest = EvidenceDigest<SavedVerdictEvidence>
 
 /// The evidence available from one record or observation. A binding policy selects the
 /// fields the caller needs. Authorization, draft identity, file proof and other workflow
@@ -40,12 +46,18 @@ struct EvidenceContext: Sendable {
     var accountRevision: UInt64?
     var mergeRequestID: GitLabMergeRequestID?
     var head: String?
+    var targetHead: String?
     var target: Target?
     var discussionContent: DiscussionContentDigest?
     var activeDiscussionContent: DiscussionContentDigest?
     var discussionState: DiscussionStateDigest?
     var semanticContext: SemanticContextDigest?
     var recoveryContext: DraftRecoveryDigest?
+    var commentBody: CommentBodyDigest?
+    var commentText: String?
+    var commentBatch: String?
+    var reviewDiff: ReviewDiffDigest?
+    var savedVerdict: SavedVerdictDigest?
 
     enum BindingPolicy: CaseIterable, Sendable {
         /// Account-scoped work with no captured session revision.
@@ -86,6 +98,24 @@ struct EvidenceContext: Sendable {
         case legacyFollowUpProof
         /// A legacy uncertain re-review write can still prevent replay if it did not record a head.
         case uncertainReReviewReceipt
+        /// A captured login revision alone must match. Callers retain their separate account checks.
+        case accountRevision
+        /// Conflict and pipeline refresh receipts bind both captured branch tip commits.
+        case sourceAndTargetHeads
+        /// A persisted origin assessment, override or provenance receipt requires the note's body digest.
+        case commentBody
+        /// In-flight origin assessments and publication provenance recheck optional text using Swift string equality.
+        case commentText
+        /// Origin scheduling coalesces identical batches, including their assessment directory.
+        case commentBatch
+        /// Merge submission checks each fingerprint the caller supplied. Missing expectations impose no check.
+        case mergeSubmissionEvidence
+        /// Comment-review publication uses the full recovery digest without separately comparing a head.
+        case recoveryDigest
+        /// Incremental review can recognize the same normalized diff across different heads.
+        case reviewDiff
+        /// A review update distinguishes the verdict previously observed or reported at a head.
+        case savedVerdict
     }
 
     /// The receiver is the recorded evidence. For legacy policies the direction matters.
@@ -131,7 +161,34 @@ struct EvidenceContext: Sendable {
                 && matchesIfRecorded(recoveryContext, current.recoveryContext)
         case .uncertainReReviewReceipt:
             return current.head != nil && matchesIfRecorded(head, current.head)
+        case .accountRevision:
+            return matches(accountRevision, current.accountRevision)
+        case .sourceAndTargetHeads:
+            return matches(head, current.head) && matches(targetHead, current.targetHead)
+        case .commentBody:
+            return matches(commentBody, current.commentBody)
+        case .commentText:
+            return commentText == current.commentText
+        case .commentBatch:
+            return matches(commentBatch, current.commentBatch)
+        case .mergeSubmissionEvidence:
+            return matchesIfRecorded(semanticContext, current.semanticContext)
+                && matchesIfRecorded(discussionContent, current.discussionContent)
+        case .recoveryDigest:
+            return matches(recoveryContext, current.recoveryContext)
+        case .reviewDiff:
+            return matches(reviewDiff, current.reviewDiff)
+        case .savedVerdict:
+            return matches(savedVerdict, current.savedVerdict)
         }
+    }
+
+    static func sameHead(_ recorded: String?, _ current: String?) -> Bool {
+        EvidenceContext(head: recorded).binds(to: .init(head: current), policy: .head)
+    }
+
+    static func sameAccountRevision(_ recorded: UInt64?, _ current: UInt64?) -> Bool {
+        EvidenceContext(accountRevision: recorded).binds(to: .init(accountRevision: current), policy: .accountRevision)
     }
 
     private func matches<Value: Equatable>(_ recorded: Value?, _ current: Value?) -> Bool {

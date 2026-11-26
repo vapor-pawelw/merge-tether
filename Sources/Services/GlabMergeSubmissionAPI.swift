@@ -26,7 +26,7 @@ extension GlabService {
         // A train base can be a synthetic result including other MRs. Only the actual
         // current target branch is evidence for this branch's conflict repair permission.
         let target = try await fetchBranchHeadSHA(projectID: project, branch: request.targetBranch, host: host)
-        return observation(target == conflict.targetSHA ? conflict : nil)
+        return observation(EvidenceContext.sameHead(conflict.targetSHA, target) ? conflict : nil)
     }
 
     func verifyFailedTrainPipeline(_ receipt: MergeSubmissionReceipt, replacement: GitLabMergeRequest,
@@ -97,9 +97,9 @@ extension GlabService {
             MergeRequestReviewHistory.date(version.createdAt).map { (head: version.head, date: $0) }
         }.sorted { $0.date < $1.date }
         guard history.count == versions.count,
-              let previous = history.last(where: { $0.date <= admittedAt }), previous.head == receipt.context.head,
-              history.filter({ $0.date >= previous.date && $0.date <= removedAt }).allSatisfy({ $0.head == previous.head }),
-              let current = history.last, current.date > removedAt, current.head == replacement.sha else { return nil }
+              let previous = history.last(where: { $0.date <= admittedAt }), receipt.context.evidenceContext.binds(to: .init(head: previous.head), policy: .head),
+              history.filter({ $0.date >= previous.date && $0.date <= removedAt }).allSatisfy({ EvidenceContext.sameHead(previous.head, $0.head) }),
+              let current = history.last, current.date > removedAt, EvidenceContext.sameHead(replacement.sha, current.head) else { return nil }
         if activeQueue {
             guard let event = trainEvents.last, let body = event.body,
                   Self.isTrainAdmission(body) || body.hasPrefix(Self.trainAutoAddNote),
@@ -119,7 +119,7 @@ extension GlabService {
               let project = head.projectID, project > 0, let sha = head.sha, Self.isFullGitSHA(sha),
               let source = request.sha else { throw CancellationError() }
         let pipeline: GitLabMergeRequest.Pipeline = try await mergeRequestAPI("/projects/\(project)/pipelines/\(id)", host: host)
-        guard pipeline.status == .success, pipeline.id == id, pipeline.projectID == project, pipeline.sha == sha,
+        guard pipeline.status == .success, pipeline.id == id, pipeline.projectID == project, EvidenceContext.sameHead(sha, pipeline.sha),
               let ref = pipeline.ref, head.ref == nil || head.ref == ref else { throw CancellationError() }
         if ref == "refs/merge-requests/\(request.iid)/merge", project == request.targetProjectID {
             struct Commit: Decodable {
@@ -130,13 +130,15 @@ extension GlabService {
             let commit: Commit = try await mergeRequestAPI("/projects/\(project)/repository/commits/\(sha)", host: host)
             // GitLab creates the merge result with target first and source second.
             // The train builds a new pipeline against the target it will merge into.
-            guard commit.id == sha, commit.parentIDs.count == 2, commit.parentIDs.last == source,
-                  let base = commit.parentIDs.first, base != source, Self.isFullGitSHA(base) else { throw CancellationError() }
+            guard EvidenceContext.sameHead(sha, commit.id), commit.parentIDs.count == 2,
+                  EvidenceContext.sameHead(source, commit.parentIDs.last),
+                  let base = commit.parentIDs.first, !EvidenceContext.sameHead(source, base),
+                  Self.isFullGitSHA(base) else { throw CancellationError() }
         } else {
             let sourceBranch = ref == request.sourceBranch && project == request.sourceProjectID
             let mrHead = ref == "refs/merge-requests/\(request.iid)/head"
                 && (project == request.sourceProjectID || project == request.targetProjectID)
-            guard sha == source, sourceBranch || mrHead else { throw CancellationError() }
+            guard EvidenceContext.sameHead(source, sha), sourceBranch || mrHead else { throw CancellationError() }
         }
         return pipeline
     }

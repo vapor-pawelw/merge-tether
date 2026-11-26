@@ -23,7 +23,8 @@ enum ConflictAutomationPolicy {
     static func isKnownPlan(_ job: AssistantAutomationRunner.Handoff, receipt: MergeConflictReceipt, username: String) -> Bool {
         guard job.key.work.host == receipt.host, job.key.work.projectID == receipt.projectID,
               job.key.work.iid == receipt.iid, job.key.username == username,
-              job.expectedHeadSHA == receipt.sourceSHA, !job.allowsPush, job.workflow == nil else { return false }
+              receipt.evidenceContext.binds(to: .init(head: job.expectedHeadSHA), policy: .head),
+              !job.allowsPush, job.workflow == nil else { return false }
         if receipt.allowsPush == false, receipt.jobID == job.id { return true }
         guard let taskPrompt = job.taskPrompt else { return false }
         let task = taskPrompt.components(separatedBy: "<gitlab-evidence>").first?

@@ -157,10 +157,20 @@ struct MergeRequestDependencySummary: Equatable, Sendable {
         let targetProjectID: Int?
         let target: String
         let state: GitLabMergeRequestState
+
+        var evidenceContext: EvidenceContext { .init(head: head) }
+
         init(_ request: GitLabMergeRequest) {
             projectID = request.projectID; iid = request.iid; url = request.webURL; head = request.sha
             sourceProjectID = request.sourceProjectID; source = request.sourceBranch
             targetProjectID = request.targetProjectID; target = request.targetBranch; state = request.state
+        }
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.projectID == rhs.projectID && lhs.iid == rhs.iid && lhs.url == rhs.url
+                && lhs.evidenceContext.binds(to: rhs.evidenceContext, policy: .head)
+                && lhs.sourceProjectID == rhs.sourceProjectID && lhs.source == rhs.source
+                && lhs.targetProjectID == rhs.targetProjectID && lhs.target == rhs.target && lhs.state == rhs.state
         }
     }
 

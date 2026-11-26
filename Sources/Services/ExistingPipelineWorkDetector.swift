@@ -18,6 +18,8 @@ struct ExistingPipelineWorkDetector: Sendable {
         let pipelineSHA: String
         let jobIDs: [Int]
 
+        var pipelineEvidenceContext: EvidenceContext { .init(head: pipelineSHA) }
+
         init?(request: GitLabMergeRequest, user: GitLabAuthenticatedUser, jobIDs: [Int]) {
             guard let pipeline = request.headPipeline, let projectID = pipeline.projectID,
                   let id = pipeline.id, let sha = pipeline.sha, !jobIDs.isEmpty else { return nil }
@@ -32,7 +34,8 @@ struct ExistingPipelineWorkDetector: Sendable {
         func supersedesRetriedJob(in original: Self) -> Bool {
             original.jobIDs.count == 1 && Set(original.jobIDs).isDisjoint(with: jobIDs)
                 && user == original.user && request == original.request && pipelineProjectID == original.pipelineProjectID
-                && pipelineID == original.pipelineID && pipelineSHA == original.pipelineSHA
+                && pipelineID == original.pipelineID
+                && original.pipelineEvidenceContext.binds(to: pipelineEvidenceContext, policy: .head)
         }
     }
 

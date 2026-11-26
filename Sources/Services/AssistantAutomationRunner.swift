@@ -118,7 +118,7 @@ enum AssistantAutomationRunner {
                 throw HandoffError.pipelineState(pipelineID, .unknown("unknown"))
             }
             if id > pipelineID { throw HandoffError.pipelineSuperseded(pipelineID) }
-            guard id == pipelineID, pipeline.sha == sha else { throw HandoffError.pipelineState(pipelineID, .unknown("unknown")) }
+            guard id == pipelineID, EvidenceContext.sameHead(sha, pipeline.sha) else { throw HandoffError.pipelineState(pipelineID, .unknown("unknown")) }
             if pipeline.status == .success { throw HandoffError.pipelinePassed(pipelineID) }
             guard pipeline.status == .failed else { throw HandoffError.pipelineState(pipelineID, pipeline.status) }
             _ = try await glab.verifiedFailedPipeline(for: request, host: host, expectedUser: user)
@@ -149,7 +149,7 @@ enum AssistantAutomationRunner {
             return target == .init(host: job.key.work.host, username: job.key.username,
                     projectID: job.key.work.projectID, iid: job.key.work.iid)
                 && pipelineID == reservation.pipelineID && reservationID == reservation.reservationID
-                && headSHA == job.expectedHeadSHA && headSHA == request.sha && GlabService.isFullGitSHA(headSHA)
+                && EvidenceContext.sameHead(headSHA, job.expectedHeadSHA) && EvidenceContext.sameHead(headSHA, request.sha) && GlabService.isFullGitSHA(headSHA)
                 && request.projectID == job.key.work.projectID && request.iid == job.key.work.iid
         }
     }

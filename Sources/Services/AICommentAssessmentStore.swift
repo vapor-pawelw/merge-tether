@@ -22,6 +22,7 @@ struct AICommentAssessment: Codable, Sendable, Equatable {
     var purpose: Purpose? = nil
 
     var qualifiesAsAI: Bool { classification == "ai_assisted" && ["high", "very_high"].contains(confidence) }
+    var evidenceContext: EvidenceContext { .init(commentBody: .init(bodySHA256)) }
 
     private enum CodingKeys: String, CodingKey {
         case version, host, projectID, iid, noteID, bodySHA256, confidence, evidence, classification, provider, model, criteriaVersion, username, authorID, thinking, purpose
@@ -60,7 +61,7 @@ struct AICommentAssessment: Codable, Sendable, Equatable {
 }
 
 enum AICommentAssessmentStore {
-    private struct PendingContext: Codable, Equatable, Sendable {
+    private struct PendingContext: Codable, Sendable {
         let target: MRAutomationScope.Target
         let noteID: Int
         let authorID: Int
@@ -70,6 +71,15 @@ enum AICommentAssessmentStore {
         let criteriaVersion: Int
         var thinking: VerificationThinking? = nil
         var purpose: AICommentAssessment.Purpose? = nil
+
+        var evidenceContext: EvidenceContext { .init(commentBody: .init(bodySHA256)) }
+
+        func matches(_ current: Self) -> Bool {
+            target == current.target && noteID == current.noteID && authorID == current.authorID
+                && provider == current.provider && model == current.model && criteriaVersion == current.criteriaVersion
+                && thinking == current.thinking && purpose == current.purpose
+                && evidenceContext.binds(to: current.evidenceContext, policy: .commentBody)
+        }
     }
 
     private struct PendingVerdict: Codable, Sendable {
@@ -127,7 +137,9 @@ enum AICommentAssessmentStore {
             guard data.count < 16384 else { throw AICommentOriginAssessor.AssessmentError.invalidEvidence }
             let payload = EvidenceSeal.open(data, context: pendingSealContext(for: path))
             let pending = try JSONDecoder().decode(PendingVerdict.self, from: payload ?? data)
-            guard pending.version == 1, pending.context == context else { throw AICommentOriginAssessor.AssessmentError.invalidEvidence }
+            guard pending.version == 1, pending.context.matches(context) else {
+                throw AICommentOriginAssessor.AssessmentError.invalidEvidence
+            }
             try AICommentOriginAssessor.validate(.init(notes: [pending.verdict]), noteIDs: [context.noteID])
             if payload == nil, requiresPendingSeal(pending.verdict, purpose: purpose) { continue }
             return pending.verdict
@@ -180,6 +192,10 @@ enum AICommentAssessmentStore {
 
     nonisolated static func digest(_ body: String) -> String {
         SHA256.hash(data: Data(body.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    nonisolated static func bodyEvidence(_ body: String?) -> EvidenceContext {
+        .init(commentBody: body.map { CommentBodyDigest(digest($0)) })
     }
 
     nonisolated static func fileURL(host: String, projectID: Int, iid: Int, noteID: Int, in directory: URL) -> URL {
@@ -277,7 +293,7 @@ enum AICommentAssessmentStore {
             && AICommentOriginAssessment.Confidence(rawValue: record.confidence) != nil
             && !record.evidence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && (record.authorID == nil || record.authorID == note.author?.id)
-            && record.bodySHA256 == digest(body)
+            && record.evidenceContext.binds(to: bodyEvidence(body), policy: .commentBody)
         else { return nil }
         return (record, payload != nil)
     }
@@ -369,7 +385,8 @@ enum AICommentAssessmentStore {
         for claim in claims {
             guard let matches = liveNotes[claim.noteID], matches.count == 1, let note = matches.first,
                   let body = note.body, !body.isEmpty, note.system != true, (note.author?.id ?? 0) > 0,
-                  note.author?.id != userID, digest(body) == claim.bodySHA256,
+                  note.author?.id != userID,
+                  EvidenceContext(commentBody: .init(claim.bodySHA256)).binds(to: bodyEvidence(body), policy: .commentBody),
                   reusable(note, target: target, in: directory) == nil else { continue }
             let verdict = AICommentOriginAssessment.Note(noteID: claim.noteID, classification: claim.classification,
                 confidence: claim.confidence, evidence: claim.evidence)

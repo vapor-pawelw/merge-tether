@@ -38,7 +38,7 @@ extension GlabService {
         guard let executable = glabPath else { throw GlabError.glabNotInstalled }
         let revision = accountRevision
         func checkSession() throws {
-            guard accountRevision == revision, glabPath == executable,
+            guard EvidenceContext.sameAccountRevision(revision, accountRevision), glabPath == executable,
                   resolvedHost == host, currentUsername == expectedUser.username else {
                 throw GlabError.notAuthenticated
             }
@@ -51,7 +51,7 @@ extension GlabService {
         try checkSession()
         let current = try await fetchMergeRequest(projectID: projectID, iid: iid, host: host)
         try checkSession()
-        guard current.author.id == expectedUser.id, current.state == .opened, current.sha == headSHA,
+        guard current.author.id == expectedUser.id, current.state == .opened, EvidenceContext.sameHead(headSHA, current.sha),
               current.webURL.isGitLabMergeRequest(host: host, iid: iid), let draft = current.draft else {
             throw CancellationError()
         }
@@ -84,7 +84,7 @@ extension GlabService {
         try checkSession()
         let updated = try await fetchMergeRequest(projectID: projectID, iid: iid, host: host)
         try checkSession()
-        guard updated.author.id == expectedUser.id, updated.isOpen, updated.sha == headSHA,
+        guard updated.author.id == expectedUser.id, updated.isOpen, EvidenceContext.sameHead(headSHA, updated.sha),
               updated.webURL == current.webURL, updated.draft == false else {
             throw GlabError.decoding("GitLab did not confirm the merge request is ready")
         }
@@ -133,7 +133,7 @@ extension GlabService {
         guard let target = request.evidenceTarget else { return nil }
         let versions: [Version] = try await mergeRequestAPI(
             "/projects/\(request.projectID)/merge_requests/\(request.iid)/versions?per_page=1", host: host)
-        guard let latest = versions.first, latest.head == request.sha, latest.base == target.base,
+        guard let latest = versions.first, EvidenceContext.sameHead(request.sha, latest.head), latest.base == target.base,
               request.diffRefs?.startSHA.map({ $0 == latest.start }) != false else { return nil }
         return MergeRequestReviewHistory.date(latest.createdAt)
     }
@@ -276,7 +276,7 @@ extension GlabService {
             "/projects/\(projectID)/repository/files/\(encoded)/raw?ref=\(anchor.revision)",
             host: target.host, decode: { $0 })
         try Task.checkCancellation()
-        guard accountRevision == revision else { throw GlabError.notAuthenticated }
+        guard EvidenceContext.sameAccountRevision(revision, accountRevision) else { throw GlabError.notAuthenticated }
         return anchor.excerpt(from: data)
     }
 
@@ -392,7 +392,7 @@ extension GlabService {
         let revision = accountRevision, username = currentUsername
         let account: Account = try await mergeRequestAPI("/users/\(userID)", host: host)
         guard account.id == userID, let username, resolvedHost == host, currentUsername == username,
-              accountRevision == revision, !Task.isCancelled else { return .unknown }
+              EvidenceContext.sameAccountRevision(revision, accountRevision), !Task.isCancelled else { return .unknown }
         let kind = AuthorFeedbackPolicy.AccountKind.classify(bot: account.bot, userType: account.userType)
         notifyFeedbackAccountKind(userID: userID, kind: kind, host: host, username: username, accountRevision: revision)
         return kind
@@ -455,7 +455,7 @@ extension GlabService {
             "/projects/\(projectID)/merge_requests/\(iid)/discussions?per_page=100",
             host: host, timeout: timeout
         )
-        if !Task.isCancelled, revision == accountRevision, executable == glabPath, host == resolvedHost, currentUsername != nil {
+        if !Task.isCancelled, EvidenceContext.sameAccountRevision(revision, accountRevision), executable == glabPath, host == resolvedHost, currentUsername != nil {
             rememberDiscussions(discussions, projectID: projectID, iid: iid, readAt: readAt)
         }
         return discussions
@@ -479,7 +479,7 @@ extension GlabService {
               let discussions = try? await fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: target.host),
               GitLabMergeRequestDiscussion.allResolved(noteIDs, in: discussions),
               let user = try? await fetchAuthenticatedUser(host: target.host, expectedUsername: target.username),
-              user.id == request.author.id, !Task.isCancelled, accountRevision == revision,
+              user.id == request.author.id, !Task.isCancelled, EvidenceContext.sameAccountRevision(revision, accountRevision),
               resolvedHost == target.host, currentUsername == target.username else { return false }
         return true
     }
@@ -503,7 +503,7 @@ extension GlabService {
         guard userID > 0, resolvedHost == host, let username = currentUsername else { return nil }
         let revision = accountRevision
         let user: Reviewer = try await mergeRequestAPI("/users/\(userID)", host: host)
-        guard !Task.isCancelled, resolvedHost == host, currentUsername == username, accountRevision == revision,
+        guard !Task.isCancelled, resolvedHost == host, currentUsername == username, EvidenceContext.sameAccountRevision(revision, accountRevision),
               user.id == userID, AuthorFeedbackPolicy.AccountKind.classify(bot: user.bot, userType: user.userType) == .regular,
               user.state == "active", !user.username.isEmpty else { return nil }
         return user.username
@@ -705,21 +705,34 @@ extension GlabService {
         let current = try await fetchMergeRequest(projectID: projectID, iid: iid, host: host)
         let context = MergeRequestDependencySummary.Context(current)
         guard current.projectID == projectID, current.iid == iid,
-              current.author.id == expectedUser.id, current.sha == headSHA,
+              current.author.id == expectedUser.id, EvidenceContext.sameHead(headSHA, current.sha),
               current.webURL.isGitLabMergeRequest(host: host, iid: iid),
               expectedContext == nil || expectedContext == context else { throw CancellationError() }
+        let expectedEvidence = EvidenceContext(
+            discussionContent: expectedDiscussionFingerprint.map(DiscussionContentDigest.init),
+            semanticContext: expectedSemanticContextFingerprint.map(SemanticContextDigest.init)
+        )
+        func matchesSubmissionEvidence(_ live: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion]) -> Bool {
+            let observed = EvidenceContext(
+                discussionContent: expectedEvidence.discussionContent == nil ? nil : ReviewVerdict.discussionContentDigest(discussions),
+                semanticContext: expectedEvidence.semanticContext == nil ? nil : live.semanticContextDigest
+            )
+            return expectedEvidence.binds(to: observed, policy: .mergeSubmissionEvidence)
+        }
         func checkedObservation(_ outcome: MergeSubmissionState, live: GitLabMergeRequest) throws -> MergeSubmissionState {
-            guard glabPath == executable, accountRevision == revision, resolvedHost == host,
+            guard glabPath == executable, EvidenceContext.sameAccountRevision(revision, accountRevision), resolvedHost == host,
                   currentUsername == expectedUser.username else { throw GlabError.notAuthenticated }
+            let expectedText = EvidenceContext(semanticContext: expectedEvidence.semanticContext)
             guard MergeRequestDependencySummary.Context(live) == context, live.author.id == expectedUser.id,
-                  expectedTrainRecoveryNoteIDs != nil || expectedSemanticContextFingerprint == nil
-                    || live.semanticContextFingerprint == expectedSemanticContextFingerprint else { throw CancellationError() }
+                  expectedTrainRecoveryNoteIDs != nil || expectedEvidence.semanticContext == nil
+                    || expectedText.binds(to: .init(semanticContext: live.semanticContextDigest), policy: .mergeSubmissionEvidence)
+            else { throw CancellationError() }
             try Task.checkCancellation()
             return outcome
         }
         func rememberRecoveryQueue(_ outcome: MergeSubmissionState) {
             if expectedTrainRecoveryNoteIDs != nil, outcome.isDelegated, glabPath == executable,
-               accountRevision == revision, resolvedHost == host, currentUsername == expectedUser.username {
+               EvidenceContext.sameAccountRevision(revision, accountRevision), resolvedHost == host, currentUsername == expectedUser.username {
                 onRecoveryQueueObserved()
             }
         }
@@ -782,20 +795,15 @@ extension GlabService {
                 return try checkedObservation(.queued, live: checked)
             }
             guard pending == 0,
-                  try await source == headSHA,
-                  expectedSemanticContextFingerprint == nil || checked.semanticContextFingerprint == expectedSemanticContextFingerprint,
-                  expectedDiscussionFingerprint == nil || ReviewVerdict.fingerprint(threads) == expectedDiscussionFingerprint,
+                  try await EvidenceContext.sameHead(headSHA, source),
+                  matchesSubmissionEvidence(checked, discussions: threads),
                   Set(threads.flatMap(\.notes).compactMap(\.id)) == expectedTrainRecoveryNoteIDs else { throw CancellationError() }
             replacementContext = checked
         } else if expectedDiscussionFingerprint != nil || expectedSemanticContextFingerprint != nil {
             async let discussions = fetchMergeRequestDiscussions(projectID: projectID, iid: iid, host: host)
             async let drafts = fetchOwnDraftNoteCount(projectID: projectID, iid: iid, host: host, userID: expectedUser.id)
             let (live, threads, pending) = try await (finalRequest, discussions, drafts)
-            guard pending == 0,
-                  expectedSemanticContextFingerprint == nil
-                    || live.semanticContextFingerprint == expectedSemanticContextFingerprint,
-                  expectedDiscussionFingerprint == nil
-                    || ReviewVerdict.fingerprint(threads) == expectedDiscussionFingerprint else {
+            guard pending == 0, matchesSubmissionEvidence(live, discussions: threads) else {
                 throw CancellationError()
             }
         }
@@ -806,14 +814,14 @@ extension GlabService {
         if action == .enqueue, expectedPolicy?.usesMergeTrain == false, final.isReadyForMergeSubmission(.mergeNow) {
             throw CancellationError()
         }
-        guard glabPath == executable, accountRevision == revision, resolvedHost == host,
+        guard glabPath == executable, EvidenceContext.sameAccountRevision(revision, accountRevision), resolvedHost == host,
               currentUsername == expectedUser.username else { throw GlabError.notAuthenticated }
         try Task.checkCancellation()
         guard shouldProceed() else { throw CancellationError() }
         if let recoveredPipeline {
             guard let headPipeline = final.headPipeline, headPipeline.status == .success,
                   headPipeline.id == recoveredPipeline.id, headPipeline.projectID == recoveredPipeline.projectID,
-                  headPipeline.sha == recoveredPipeline.sha,
+                  EvidenceContext.sameHead(recoveredPipeline.sha, headPipeline.sha),
                   headPipeline.ref == nil || headPipeline.ref == recoveredPipeline.ref else { throw CancellationError() }
         }
 
@@ -826,7 +834,7 @@ extension GlabService {
                 arguments: ["--method", usesTrain ? "POST" : "PUT", "--raw-field", "sha=\(headSHA)", "--field", "auto_merge=true"],
                 timeout: 30, shouldProceed: shouldProceed, decode: { $0 })
             let updated = try await fetchMergeRequest(projectID: projectID, iid: iid, host: host)
-            guard updated.projectID == projectID, updated.iid == iid, updated.sha == headSHA,
+            guard updated.projectID == projectID, updated.iid == iid, EvidenceContext.sameHead(headSHA, updated.sha),
                   updated.webURL == current.webURL, updated.sourceBranch == current.sourceBranch,
                   updated.targetBranch == current.targetBranch, updated.sourceProjectID == current.sourceProjectID,
                   updated.targetProjectID == current.targetProjectID else {

@@ -53,7 +53,7 @@ struct MergeTrainPreparationConflict: Error, Codable, Hashable, Sendable {
               let sourceRange = Range(match.range(at: 1), in: body),
               let targetRange = Range(match.range(at: 2), in: body),
               let iidRange = Range(match.range(at: 3), in: body),
-              String(body[sourceRange]) == request.sha, Int(body[iidRange]) == request.iid else { return nil }
+              EvidenceContext.sameHead(request.sha, String(body[sourceRange])), Int(body[iidRange]) == request.iid else { return nil }
         return .init(context: .init(request), noteID: id, sourceSHA: String(body[sourceRange]), targetSHA: String(body[targetRange]))
     }
 }
@@ -84,13 +84,13 @@ struct MergeSubmissionReceipt: Codable, Equatable {
 
     func mayReconsiderAfterTrainRepair(_ request: GitLabMergeRequest) -> Bool {
         guard let proof = confirmedTrainRejection, proof.context == context,
-              proof.sourceSHA == context.head, GlabService.isFullGitSHA(proof.targetSHA),
+              context.evidenceContext.binds(to: .init(head: proof.sourceSHA), policy: .head), GlabService.isFullGitSHA(proof.targetSHA),
               let baseline = trainNoteIDBeforeAttempt, baseline >= 0, proof.noteID > baseline else { return false }
         return isReplacementRevision(request)
     }
 
     private func isReplacementRevision(_ request: GitLabMergeRequest) -> Bool {
-        guard let head = request.sha, GlabService.isFullGitSHA(head), head != context.head else { return false }
+        guard let head = request.sha, GlabService.isFullGitSHA(head), !context.evidenceContext.binds(to: .init(head: head), policy: .head) else { return false }
         return request.projectID == context.projectID && request.iid == context.iid && request.webURL == context.url
             && request.sourceProjectID == context.sourceProjectID && request.sourceBranch == context.source
             && request.targetProjectID == context.targetProjectID && request.targetBranch == context.target
@@ -98,7 +98,8 @@ struct MergeSubmissionReceipt: Codable, Equatable {
     }
 
     func matchesContext(_ request: GitLabMergeRequest, configuration: MergeSubmissionConfiguration) -> Bool {
-        context == .init(request) && semanticFingerprint == request.semanticContextFingerprint
+        context == .init(request)
+            && EvidenceContext(semanticContext: .init(semanticFingerprint)).binds(to: request.evidenceContext(), policy: .semanticText)
             && self.configuration == configuration
     }
 }

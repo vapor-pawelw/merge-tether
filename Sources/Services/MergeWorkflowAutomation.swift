@@ -35,6 +35,18 @@ struct PipelineClaimAssessmentAttempt: Codable, Sendable {
     let pipelineID: Int
     let pipelineSHA: String
     let createdAt: Date
+
+    var evidenceContext: EvidenceContext { .init(head: sourceSHA, targetHead: targetSHA) }
+    var pipelineEvidenceContext: EvidenceContext { .init(head: pipelineSHA) }
+
+    func matchesAttempt(_ current: Self) -> Bool {
+        target == current.target && userID == current.userID && lineage == current.lineage
+            && pipelineID == current.pipelineID && pipelineProjectID == current.pipelineProjectID
+            && pipelineEvidenceContext.binds(to: current.pipelineEvidenceContext, policy: .head)
+            && sourceProjectID == current.sourceProjectID && sourceBranch == current.sourceBranch
+            && targetProjectID == current.targetProjectID && targetBranch == current.targetBranch
+            && evidenceContext.binds(to: current.evidenceContext, policy: .sourceAndTargetHeads)
+    }
 }
 
 struct MergeWorkflowReadFailure: Codable, Sendable {
@@ -124,7 +136,7 @@ final class MergeWorkflowAutomation {
     func hasReadOnlyFailure(for request: GitLabMergeRequest) -> Bool {
         let current = currentAdmissions.filter {
             $0.event.mergeRequest.projectID == request.projectID && $0.event.mergeRequest.iid == request.iid
-                && $0.event.mergeRequest.sha == request.sha
+                && EvidenceContext.sameHead($0.event.mergeRequest.sha, request.sha)
                 && ($0.event.kind != .pipelineFailure || $0.event.pipelineID == request.headPipeline?.id)
         }
         // A newer result for the same trigger supersedes its older admission failure.
@@ -165,14 +177,14 @@ final class MergeWorkflowAutomation {
         if settings.pipelineRefreshAttempts.contains(where: {
             $0.createdPipelineID != nil && $0.target.host == host && $0.target.username == username
                 && $0.userID == request.author.id && $0.target.projectID == request.projectID && $0.target.iid == request.iid
-                && $0.oldPipelineID == request.headPipeline?.id && $0.sourceSHA == request.sha
+                && $0.oldPipelineID == request.headPipeline?.id && $0.evidenceContext.binds(to: .init(head: request.sha), policy: .head)
                 && $0.sourceProjectID == request.sourceProjectID && $0.sourceBranch == request.sourceBranch
                 && $0.targetProjectID == request.targetProjectID && $0.targetBranch == request.targetBranch
         }) { return true }
         return projectedEntries().contains { entry in
             guard entry.host == host, entry.user.username == username,
                   entry.event.kind == .pipelineFailure, entry.event.mergeRequest.projectID == request.projectID,
-                  entry.event.mergeRequest.iid == request.iid, entry.event.mergeRequest.sha == request.sha else { return false }
+                  entry.event.mergeRequest.iid == request.iid, EvidenceContext.sameHead(entry.event.mergeRequest.sha, request.sha) else { return false }
             switch entry.state {
             case .queued, .running, .waitingForAssistant: return true
             case .alreadyRegistered:
@@ -211,7 +223,7 @@ final class MergeWorkflowAutomation {
                 let jobs = settings.assistantHandoffs.filter { $0.id == id }
                 if jobs.count == 1, let job = jobs.first, job.key.work == workKey(entry),
                    job.key.username == entry.user.username, job.manual != true, job.workflow == .review,
-                   job.workflowEventKind == .reviewUpdate, job.expectedHeadSHA == entry.event.mergeRequest.sha,
+                   job.workflowEventKind == .reviewUpdate, EvidenceContext.sameHead(job.expectedHeadSHA, entry.event.mergeRequest.sha),
                    job.execution != nil {
                     // The handoff may have reached disk before the workflow link.
                     settings.workflowActivity[index].assistantJobID = job.id
@@ -289,7 +301,7 @@ final class MergeWorkflowAutomation {
         for entry in currentAdmissions where entry.state == .awaitingPipelineHandoff || entry.state == .alreadyRegistered {
             let original = entry.event.mergeRequest
             let current = authored.first { $0.projectID == original.projectID && $0.iid == original.iid }
-            if current == nil || current?.sha != original.sha
+            if current == nil || !EvidenceContext.sameHead(original.sha, current?.sha)
                 || (current?.headPipeline.map { $0.id != entry.event.pipelineID || $0.status != .failed } == true) {
                 update(entry.id, .skipped)
             }
@@ -362,7 +374,7 @@ final class MergeWorkflowAutomation {
                   let current = authored.first(where: { $0.projectID == key.projectID && $0.iid == key.mergeRequestIID }),
                   current.state == .opened, current.author.id == user.id,
                   settings.effectiveAutomationScope.permits(current, host: entry.host, username: entry.user.username),
-                  let source = current.sha, GlabService.isFullGitSHA(source), source == entry.event.mergeRequest.sha,
+                  let source = current.sha, GlabService.isFullGitSHA(source), EvidenceContext.sameHead(entry.event.mergeRequest.sha, source),
                   current.headPipeline?.id == key.pipelineID, current.headPipeline?.status == .failed,
                   current.webURL.isGitLabMergeRequest(host: entry.host, iid: current.iid)
             else { continue }
@@ -618,13 +630,13 @@ final class MergeWorkflowAutomation {
         let latest: GitLabMergeRequest
         do {
             latest = try await ReadOnlyAssessmentRetry.run(isCurrent: {
-                self.shouldProceed(entry) && self.glab.accountRevision == assessmentAccountRevision
+                self.shouldProceed(entry) && EvidenceContext.sameAccountRevision(assessmentAccountRevision, self.glab.accountRevision)
                     && assessmentConfiguration.preservingScope(from: self.settings.automation) == self.settings.automation
             }, wait: retryWait) {
                 let authenticated = try await self.glab.fetchAuthenticatedUser(host: entry.host, expectedUsername: entry.user.username)
                 guard authenticated == entry.user else { throw CancellationError() }
                 let current = try await self.glab.fetchMergeRequest(projectID: original.projectID, iid: original.iid, host: entry.host)
-                guard current.state == .opened, current.sha == original.sha, current.sha != nil,
+                guard current.state == .opened, EvidenceContext.sameHead(original.sha, current.sha), current.sha != nil,
                       current.webURL.isGitLabMergeRequest(host: entry.host, iid: current.iid),
                       self.settings.effectiveAutomationScope.permits(current, host: entry.host, username: entry.user.username),
                       self.configuredRule(for: event)?.includes(current) == true, self.shouldProceed(entry)
@@ -657,7 +669,7 @@ final class MergeWorkflowAutomation {
                 guard let targetProject = latest.targetProjectID else { throw CancellationError() }
                 assessmentTargetSHA = try await glab.fetchBranchHeadSHA(projectID: targetProject, branch: latest.targetBranch, host: entry.host)
                 guard mayAssessClaim(entry, current: latest, configuration: assessmentConfiguration),
-                      glab.accountRevision == assessmentAccountRevision else { throw CancellationError() }
+                      EvidenceContext.sameAccountRevision(assessmentAccountRevision, glab.accountRevision) else { throw CancellationError() }
             } else if let jobs = failureJobs(entry, request: latest), detector.permitsDiagnosisAfterInfrastructureRetry(jobs, for: key) {
                 _ = try await glab.verifiedFailedPipeline(for: latest, host: entry.host, expectedUser: entry.user)
                 guard try await matchesFailedJobs(jobs.jobIDs, pipelineID: jobs.pipelineID,
@@ -669,7 +681,7 @@ final class MergeWorkflowAutomation {
                 let proof: StalePipelineTarget?
                 do {
                     proof = try await ReadOnlyAssessmentRetry.run(isCurrent: {
-                        self.shouldProceed(entry) && self.glab.accountRevision == assessmentAccountRevision
+                        self.shouldProceed(entry) && EvidenceContext.sameAccountRevision(assessmentAccountRevision, self.glab.accountRevision)
                             && assessmentConfiguration.preservingScope(from: self.settings.automation) == self.settings.automation
                     }, wait: retryWait) {
                         try await self.glab.staleFailedPipelineTarget(for: latest, host: entry.host, expectedUser: entry.user)
@@ -713,13 +725,13 @@ final class MergeWorkflowAutomation {
                 beforeRetry: {
                     let current = try await self.glab.fetchMergeRequest(projectID: latest.projectID, iid: latest.iid, host: entry.host)
                     guard current.state == .opened, current.author.id == entry.user.id,
-                          current.webURL == latest.webURL, current.sha == latest.sha,
+                          current.webURL == latest.webURL, EvidenceContext.sameHead(latest.sha, current.sha),
                           current.sourceProjectID == latest.sourceProjectID, current.sourceBranch == latest.sourceBranch,
                           current.targetProjectID == latest.targetProjectID, current.targetBranch == latest.targetBranch,
                           current.headPipeline?.id == latest.headPipeline?.id,
                           current.headPipeline?.projectID == latest.headPipeline?.projectID,
-                          current.headPipeline?.sha == latest.headPipeline?.sha, current.headPipeline?.status == .failed,
-                          self.glab.accountRevision == assessmentAccountRevision,
+                          EvidenceContext.sameHead(latest.headPipeline?.sha, current.headPipeline?.sha), current.headPipeline?.status == .failed,
+                          EvidenceContext.sameAccountRevision(assessmentAccountRevision, self.glab.accountRevision),
                           self.settings.effectiveAutomationScope.permits(current, host: entry.host, username: entry.user.username),
                           self.configuredRule(for: event)?.includes(current) == true else { throw CancellationError() }
                     if let expectedJobs = event.failedPipelineJobIDs {
@@ -729,7 +741,7 @@ final class MergeWorkflowAutomation {
                     }
                 },
                 shouldProceed: {
-                    self.glab.accountRevision == assessmentAccountRevision && self.settings.automaticPublicWritesAllowed
+                    EvidenceContext.sameAccountRevision(assessmentAccountRevision, self.glab.accountRevision) && self.settings.automaticPublicWritesAllowed
                         && self.shouldProceed(entry) && self.mayRetryInfrastructure(for: event)
                 }
             )
@@ -759,20 +771,20 @@ final class MergeWorkflowAutomation {
         if event.kind == .reviewUpdate {
             do {
                 current = try await ReadOnlyAssessmentRetry.run(isCurrent: {
-                    self.shouldProceed(entry) && self.glab.accountRevision == assessmentAccountRevision
+                    self.shouldProceed(entry) && EvidenceContext.sameAccountRevision(assessmentAccountRevision, self.glab.accountRevision)
                         && settingsBeforeLaunch.preservingScope(from: self.settings.automation) == self.settings.automation
                 }, wait: retryWait) {
                     try await self.glab.fetchMergeRequest(projectID: latest.projectID, iid: latest.iid, host: entry.host)
                 }
             } catch is CancellationError { throw CancellationError() }
             catch { throw PrelaunchReadFailure(cause: error, configuration: settingsBeforeLaunch) }
-            if current.state == .opened, current.sha != latest.sha {
+            if current.state == .opened, !EvidenceContext.sameHead(latest.sha, current.sha) {
                 throw AssistantJobExecutor.ExecutionError.headChanged
             }
         } else {
             current = try await glab.fetchMergeRequest(projectID: latest.projectID, iid: latest.iid, host: entry.host)
         }
-        guard current.state == .opened, current.sha == latest.sha,
+        guard current.state == .opened, EvidenceContext.sameHead(latest.sha, current.sha),
               settings.effectiveAutomationScope.permits(current, host: entry.host, username: entry.user.username),
               configuredRule(for: event)?.includes(current) == true,
               shouldProceed(entry), settingsBeforeLaunch.preservingScope(from: settings.automation) == settings.automation
@@ -808,12 +820,12 @@ final class MergeWorkflowAutomation {
                   let pipelineProject = pipeline.projectID, let pipelineID = pipeline.id, let pipelineSHA = pipeline.sha,
                   current.sourceProjectID == latest.sourceProjectID, current.sourceBranch == latest.sourceBranch,
                   current.targetProjectID == latest.targetProjectID, current.targetBranch == latest.targetBranch,
-                  current.headPipeline?.sha == latest.headPipeline?.sha,
+                  EvidenceContext.sameHead(latest.headPipeline?.sha, current.headPipeline?.sha),
                   mayAssessClaim(entry, current: current, configuration: assessmentConfiguration, reservation: reservation)
             else { throw CancellationError() }
             let finalTarget = try await glab.fetchBranchHeadSHA(projectID: targetProject, branch: current.targetBranch, host: entry.host)
             let finalUser = try await glab.fetchAuthenticatedUser(host: entry.host, expectedUsername: entry.user.username)
-            guard finalTarget == targetSHA, finalUser == entry.user, glab.accountRevision == assessmentAccountRevision,
+            guard EvidenceContext.sameHead(targetSHA, finalTarget), finalUser == entry.user, EvidenceContext.sameAccountRevision(assessmentAccountRevision, glab.accountRevision),
                   mayAssessClaim(entry, current: current, configuration: assessmentConfiguration, reservation: reservation)
             else { throw CancellationError() }
             let attempt = PipelineClaimAssessmentAttempt(
@@ -825,7 +837,7 @@ final class MergeWorkflowAutomation {
             guard settings.savePipelineClaimAssessmentAttempt(attempt) else { throw PipelineClaimAssessmentError.persistenceUnavailable }
             guard shouldProceed(entry), assessmentConfiguration.preservingScope(from: settings.automation) == settings.automation,
                   !settings.ignoredMergeRequests.contains(attempt.target), detector.ownsReservation(for: reservation),
-                  glab.accountRevision == assessmentAccountRevision else { throw CancellationError() }
+                  EvidenceContext.sameAccountRevision(assessmentAccountRevision, glab.accountRevision) else { throw CancellationError() }
             assessmentInstructions = """
                 This is a NEW current-state assessment, not a retry of an earlier worker. An old local pipeline claim has no recorded worker.
                 Do not replay any prior task, command, push, job retry, draft operation or claimed result.
@@ -865,7 +877,7 @@ final class MergeWorkflowAutomation {
             guard failureJobs(entry, request: current) == failureAfterInfrastructureRetry,
                   try await matchesFailedJobs(failureAfterInfrastructureRetry.jobIDs, pipelineID: handoff.pipelineID,
                                               projectID: failureAfterInfrastructureRetry.pipelineProjectID, host: entry.host),
-                  glab.accountRevision == assessmentAccountRevision, shouldProceed(entry), !hasActiveWorker(entry),
+                  EvidenceContext.sameAccountRevision(assessmentAccountRevision, glab.accountRevision), shouldProceed(entry), !hasActiveWorker(entry),
                   settingsBeforeLaunch.preservingScope(from: settings.automation) == settings.automation,
                   try detector.recordDiagnosisAfterInfrastructureRetry(failureAfterInfrastructureRetry, for: handoff)
             else { throw CancellationError() }
@@ -930,7 +942,7 @@ final class MergeWorkflowAutomation {
               skipped.host == entry.host, skipped.user == entry.user, skipped.assistantJobID == nil,
               (skipped.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               skipped.event.pipelineID == key.pipelineID, skipped.event.mergeRequest.projectID == current.projectID,
-              skipped.event.mergeRequest.iid == current.iid, skipped.event.mergeRequest.sha == current.sha,
+              skipped.event.mergeRequest.iid == current.iid, EvidenceContext.sameHead(skipped.event.mergeRequest.sha, current.sha),
               current.state == .opened, current.author.id == entry.user.id,
               settings.effectiveAutomationScope.permits(current, host: entry.host, username: entry.user.username),
               current.headPipeline?.id == key.pipelineID, current.headPipeline?.status == .failed,
@@ -992,7 +1004,7 @@ final class MergeWorkflowAutomation {
               MergeRequestDependencySummary.Context(entry.event.mergeRequest) == .init(request),
               entry.event.pipelineID == request.headPipeline?.id,
               entry.event.pipelineProjectID == request.headPipeline?.projectID,
-              entry.event.mergeRequest.headPipeline?.sha == request.headPipeline?.sha else { return nil }
+              EvidenceContext.sameHead(entry.event.mergeRequest.headPipeline?.sha, request.headPipeline?.sha) else { return nil }
         return .init(request: request, user: entry.user, jobIDs: jobIDs)
     }
 

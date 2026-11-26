@@ -1673,7 +1673,8 @@ final class MergeRequestAttentionMonitor {
             }
         }
         guard let verdict = ReviewVerdictStore.verdict(host: host, projectID: request.projectID, iid: request.iid, user: user, in: verdictDirectory),
-              verdict.version == 1, verdict.headSHA == head, let fingerprint = verdict.discussionFingerprint else { return false }
+              verdict.version == 1, verdict.evidenceContext.binds(to: .init(head: head), policy: .head),
+              let fingerprint = verdict.discussionFingerprint else { return false }
         // The same content check applies to reviews with findings, not just approval verdicts.
         return ReviewVerdict(version: 1, host: host, projectID: request.projectID, iid: request.iid,
             headSHA: head, verdict: .noObjections, discussionFingerprint: fingerprint)
@@ -1759,7 +1760,7 @@ final class MergeRequestAttentionMonitor {
             let verdict = ReviewVerdictStore.authenticatedVerdict(host: account.host, projectID: id.projectID,
                 iid: id.iid, user: user, settings: settings, in: verdictDirectory)
             let review = verdict.flatMap { verdict in
-                guard request?.sha == verdict.headSHA,
+                guard verdict.evidenceContext.binds(to: .init(head: request?.sha), policy: .head),
                       let reviewedDrafts = ReviewVerdictStore.authenticatedReviewDrafts(for: verdict, settings: settings) else { return nil as ReviewVerdictStore.Publication? }
                 return ReviewVerdictStore.capturePublication(drafts, verdict: verdict,
                     before: discussions, reviewedDrafts: reviewedDrafts, user: user, in: verdictDirectory)
@@ -2145,7 +2146,8 @@ final class MergeRequestAttentionMonitor {
         let target = commentReviewTarget(id, account: account)
         let generation = accountGeneration, revision = glab.accountRevision
         func current() -> Bool {
-            guard !Task.isCancelled, generation == accountGeneration, revision == glab.accountRevision,
+            guard !Task.isCancelled, generation == accountGeneration,
+                  EvidenceContext.sameAccountRevision(revision, glab.accountRevision),
                   isCurrent(account), self.user == user, !hasActiveWorker(for: id, account: account),
                   settings.commentReviewRevision(for: target) == reviewRevision else { return false }
             if case .automaticPublication(let receipt) = proof {
@@ -2232,8 +2234,9 @@ final class MergeRequestAttentionMonitor {
         }
         var remaining = selected
         var publicDrafts: [GitLabDraftNote] = []
-        if let previous = manualPublicationProgress[id], previous.accountRevision == revision,
-           previous.snapshot == snapshot, MRAttentionRecord.sameContext(previous.request, reviewedRequest) {
+        if let previous = manualPublicationProgress[id], EvidenceContext.sameAccountRevision(previous.accountRevision, revision),
+           previous.snapshot.evidenceContext.binds(to: snapshot.evidenceContext, policy: .feedbackPresentation),
+           MRAttentionRecord.sameContext(previous.request, reviewedRequest) {
             publicDrafts = previous.publicDrafts
         }
         func rememberPublicDraft(_ draft: GitLabDraftNote) {
@@ -2264,7 +2267,7 @@ final class MergeRequestAttentionMonitor {
                 guard ready(), MRAttentionRecord.sameContext(reviewedRequest, request),
                       request.projectID == target.projectID, request.iid == target.iid, request.webURL == target.url,
                       snapshot.matches(request, discussions: discussions, publishedDrafts: publicDrafts, userID: user.id),
-                      let checkedFingerprint = ReviewVerdict.fingerprint(discussions) else {
+                      let checkedDigest = ReviewVerdict.discussionContentDigest(discussions) else {
                     updateItem(id) {
                         $0.invalidateChangedDiscussionSnapshot(head: request.sha, fingerprint: ReviewVerdict.fingerprint(discussions),
                             semanticContextFingerprint: request.semanticContextFingerprint)
@@ -2279,8 +2282,10 @@ final class MergeRequestAttentionMonitor {
                 display(current)
                 let admitted: @MainActor @Sendable () -> Bool = {
                     guard !Task.isCancelled, ready(),
-                          let observed = self.openItems.first(where: { $0.id == id })?.observedDiscussionFingerprint else { return false }
-                    return observed == snapshot.discussionFingerprint || observed == checkedFingerprint
+                          let fingerprint = self.openItems.first(where: { $0.id == id })?.observedDiscussionFingerprint else { return false }
+                    let observed = EvidenceContext(discussionContent: .init(fingerprint))
+                    return snapshot.evidenceContext.binds(to: observed, policy: .discussionContent)
+                        || EvidenceContext(discussionContent: checkedDigest).binds(to: observed, policy: .discussionContent)
                 }
                 // A changed later selection must stop the first write too. Unselected changes are unrelated.
                 guard admitted(), remaining.allSatisfy({ expected in current.filter { $0.id == expected.id } == [expected] }),
@@ -2341,10 +2346,11 @@ final class MergeRequestAttentionMonitor {
                         return discussionID == thread.id
                     }
                     let notes = matchingThreads.flatMap(\.notes)
+                    let written = EvidenceContext(commentText: uncertainDraft.note)
                     let matches = notes.filter { note in
                         guard note.system != true, note.author?.id == user.id, note.author?.username == account.username,
                               let id = note.id, id > 0, !uncertainBeforeIDs.contains(id),
-                              note.body == uncertainDraft.note else { return false }
+                              written.binds(to: .init(commentText: note.body), policy: .commentText) else { return false }
                         guard let position = uncertainDraft.position else { return true }
                         return position == note.position
                     }
@@ -2482,7 +2488,8 @@ final class MergeRequestAttentionMonitor {
         let reviewRevision = settings.commentReviewRevision(for: commentReviewTarget(id, account: account))
         let participationRevision = settings.reviewParticipationPreferences.revision(host: account.host, username: account.username)
         let admitted: @MainActor @Sendable () -> Bool = {
-            !Task.isCancelled && generation == self.accountGeneration && revision == self.glab.accountRevision
+            !Task.isCancelled && generation == self.accountGeneration
+                && EvidenceContext.sameAccountRevision(revision, self.glab.accountRevision)
                 && self.isCurrent(account) && settings.automaticPublicWritesAllowed
                 && settings.automation == configuration
                 && settings.publicationPolicy(for: target) == policy
@@ -2693,7 +2700,8 @@ final class MergeRequestAttentionMonitor {
             async let currentDrafts = glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
             async let currentDiscussions = glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
             let (currentUser, currentMR, currentSource, freshDrafts, freshDiscussions) = try await (freshUser, freshMR, sourceHead, currentDrafts, currentDiscussions)
-            guard currentUser == user, currentSource == receipt.headSHA, freshDrafts.contains(draft),
+            guard currentUser == user, receipt.evidenceContext.binds(to: .init(head: currentSource), policy: .head),
+                  freshDrafts.contains(draft),
                   permitsParticipantReply(draft, request: currentMR, discussions: freshDiscussions, account: account),
                   Self.draftContextIsCurrent(request: currentMR, drafts: [draft], discussions: freshDiscussions,
                     host: account.host, user: currentUser, verdictDirectory: verdictDirectory,
@@ -2740,13 +2748,14 @@ final class MergeRequestAttentionMonitor {
             async let currentSource = glab.fetchBranchHeadSHA(projectID: project, branch: request.sourceBranch, host: host)
             async let currentDiscussions = glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: host)
             let (liveUser, live, head, discussions) = try await (currentUser, currentMR, currentSource, currentDiscussions)
-            guard isCurrent(account, revision: revision), liveUser == user, head == receipt.sourceHead,
+            guard isCurrent(account, revision: revision), liveUser == user, EvidenceContext.sameHead(receipt.sourceHead, head),
                   verifiedReplyDrafts?.receipt(for: draft, request: live, discussions: discussions, user: user, host: host) == receipt
             else { return false }
             let evidence = await publicationNoteEvidence(in: discussions, policy: policy, host: host,
                 projectID: id.projectID, iid: id.iid)
             let drafts = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: host, userID: user.id)
-            return isCurrent(account) && revision == glab.accountRevision && settings.publicationPolicy(for: target) == policy
+            return isCurrent(account) && EvidenceContext.sameAccountRevision(revision, glab.accountRevision)
+                && settings.publicationPolicy(for: target) == policy
                 && permitsAutomaticPublication(of: live, account: account) && !hasActiveWorker(for: id, account: account)
                 && drafts.filter { $0.id == draft.id || $0.discussionID == receipt.discussionID } == [draft]
                 && verifiedReplyDrafts?.receipt(for: draft, request: live, discussions: discussions, user: user, host: host) == receipt
@@ -2780,12 +2789,13 @@ final class MergeRequestAttentionMonitor {
         guard let settings, let account, isCurrent(account), let user, displayed.author.id != user.id,
               let head = displayed.sha, GlabService.isFullGitSHA(head), displayed.state == .opened,
               displayed.webURL.isGitLabMergeRequest(host: account.host, iid: id.iid),
-              accountRevision == glab.accountRevision, attentionRecordsRevision == accountRevision,
+              EvidenceContext.sameAccountRevision(accountRevision, glab.accountRevision),
+              EvidenceContext.sameAccountRevision(attentionRecordsRevision, accountRevision),
               !isConfirming(id) else { return .changed }
         let generation = accountGeneration
         let target = commentReviewTarget(id, account: account)
         let isCurrentSession: @MainActor @Sendable () -> Bool = {
-            generation == self.accountGeneration && accountRevision == self.glab.accountRevision
+            generation == self.accountGeneration && EvidenceContext.sameAccountRevision(accountRevision, self.glab.accountRevision)
                 && self.isCurrent(account) && !Task.isCancelled
         }
         let busy: ConfirmationState = action == .approve ? .approving : .removingApproval
@@ -2795,7 +2805,7 @@ final class MergeRequestAttentionMonitor {
         let previousPreference = settings.independentApprovalPreferences[target]
         var savedRemovalPreference = false
         defer {
-            if generation == accountGeneration, accountRevision == glab.accountRevision {
+            if generation == accountGeneration, EvidenceContext.sameAccountRevision(accountRevision, glab.accountRevision) {
                 if confirmationStates[id] == busy { confirmationStates[id] = nil }
                 if needsRefresh { requestFeedbackRefresh() }
             }
@@ -2887,13 +2897,14 @@ final class MergeRequestAttentionMonitor {
               expectedDrafts.allSatisfy({ $0.id != nil && $0.authorID == user.id }),
               Set(expectedDrafts.compactMap(\.id)).count == expectedDrafts.count,
               let displayed = items.first(where: { $0.id == id }), displayed.drafts == expectedDrafts,
-              let snapshot = displayed.commentReviewSnapshot, snapshot.headSHA == head else { return .changed }
+              let snapshot = displayed.commentReviewSnapshot,
+              snapshot.evidenceContext.binds(to: .init(head: head), policy: .head) else { return .changed }
         let publishable = displayed.publishAllDrafts
         guard !publishable.isEmpty else { return .changed }
         let generation = accountGeneration, revision = glab.accountRevision
         let reviewRevision = settings?.commentReviewRevision(for: commentReviewTarget(id, account: account)) ?? 0
         let currentContext: @MainActor @Sendable () -> Bool = {
-            generation == self.accountGeneration && revision == self.glab.accountRevision
+            generation == self.accountGeneration && EvidenceContext.sameAccountRevision(revision, self.glab.accountRevision)
                 && executable == self.glab.glabPath && self.isCurrent(account)
         }
         confirmationStates[id] = .publishing
@@ -2927,7 +2938,7 @@ final class MergeRequestAttentionMonitor {
                 let replies = DuplicateReplyDrafts.publishedReplies(in: discussions, userID: user.id)
                 // Read the exact bodies last, after identity checks that can suspend.
                 let drafts = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
-                guard currentContext(), request.isOpen, request.sha == head,
+                guard currentContext(), request.isOpen, EvidenceContext.sameHead(head, request.sha),
                       request.projectID == id.projectID, request.iid == id.iid, request.webURL == displayed.url,
                       snapshot.matches(request, discussions: discussions, publishedDrafts: published, userID: user.id),
                       drafts == remaining, let draftID = draft.id,
@@ -2965,7 +2976,7 @@ final class MergeRequestAttentionMonitor {
 
     func approveRemotely(_ id: Item.ID, expectedHead: String) async -> Bool {
         guard let item = (currentItems + currentOpenItems).first(where: { $0.id == id }), item.canApprove,
-              item.mergeRequest?.sha == expectedHead else { return false }
+              EvidenceContext.sameHead(expectedHead, item.mergeRequest?.sha) else { return false }
         return await performApproval(of: id, head: expectedHead, automatic: false)
     }
 
@@ -3042,7 +3053,7 @@ final class MergeRequestAttentionMonitor {
                     host: account.host, projectID: id.projectID, iid: id.iid, user: user,
                     settings: self.settings, in: self.verdictDirectory)))
                 && evidence.user == user && current.state == .opened && current.draft != nil
-                && current.sha == head && current.author.id != user.id && evidence.drafts.isEmpty
+                && EvidenceContext.sameHead(head, current.sha) && current.author.id != user.id && evidence.drafts.isEmpty
                 && covered
                 && (!automatic || self.autoApproveApplies(to: current, host: account.host, username: account.username))
                 // App-owned, model-independent proof re-checked against this fresh read, including the final one.
@@ -3205,10 +3216,12 @@ final class MergeRequestAttentionMonitor {
         for item in items where item.needsConfirmation && !isConfirming(item.id) {
             let target = commentReviewTarget(item.id, account: account)
             let reviewRevision = settings?.commentReviewRevision(for: target) ?? 0
-            guard !Task.isCancelled, generation == refreshGeneration, revision == glab.accountRevision else { return }
+            guard !Task.isCancelled, generation == refreshGeneration,
+                  EvidenceContext.sameAccountRevision(revision, glab.accountRevision) else { return }
             let read = await glab.fetchPendingDraftRead(projectID: item.id.projectID, iid: item.id.iid,
                 host: account.host, userID: user.id)
-            guard !Task.isCancelled, generation == refreshGeneration, revision == glab.accountRevision,
+            guard !Task.isCancelled, generation == refreshGeneration,
+                  EvidenceContext.sameAccountRevision(revision, glab.accountRevision),
                   isCurrent(account), !isLoading, !isConfirming(item.id),
                   let latest = items.first(where: { $0.id == item.id }), latest.drafts == item.drafts,
                   MRAttentionRecord.sameContext(latest.mergeRequest, item.mergeRequest),
@@ -3266,9 +3279,16 @@ final class MergeRequestAttentionMonitor {
                     semanticContextFingerprint: request?.semanticContextFingerprint)
                 $0.requiresDiscussionRecheck = !current.isEmpty && !contextCurrent
                 if !approvalCurrent { $0.approvalObservation = .unchecked }
-                if !contextMatches || request == nil || discussions == nil || request?.sha != item.mergeRequest?.sha
-                    || request?.semanticContextFingerprint != item.mergeRequest?.semanticContextFingerprint
-                    || ReviewVerdict.fingerprint(discussions ?? []) != item.reReviewFingerprint {
+                let reReviewMatches: Bool
+                if contextMatches, let request, let discussions {
+                    let recorded = item.mergeRequest?.evidenceContext(
+                        discussionContent: item.reReviewFingerprint.map(DiscussionContentDigest.init)) ?? .init()
+                    let live = request.evidenceContext(discussionContent: ReviewVerdict.discussionContentDigest(discussions))
+                    reReviewMatches = recorded.binds(to: live, policy: .feedbackPresentation)
+                } else {
+                    reReviewMatches = false
+                }
+                if !reReviewMatches {
                     $0.reReviewFeedbackChecked = false
                 }
             }
@@ -3284,7 +3304,7 @@ final class MergeRequestAttentionMonitor {
                                                  finishedCommentReview: Bool = false) async {
         let generation = accountGeneration, revision = glab.accountRevision
         func current() -> Bool {
-            !Task.isCancelled && generation == accountGeneration && revision == glab.accountRevision
+            !Task.isCancelled && generation == accountGeneration && EvidenceContext.sameAccountRevision(revision, glab.accountRevision)
                 && isCurrent(account) && self.user == user
         }
         defer { if finishedCommentReview, current() { onCommentReviewFinished?(id) } }

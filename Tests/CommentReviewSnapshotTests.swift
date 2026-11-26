@@ -4,6 +4,17 @@ import Testing
 
 @MainActor
 struct CommentReviewSnapshotTests {
+    @Test func storedSnapshotKeepsItsLegacyEncoding() throws {
+        let data = Data(#"{"discussionFingerprint":"comments","headSHA":"head","semanticContext":"text"}"#.utf8)
+        let snapshot = try JSONDecoder().decode(CommentReviewSnapshot.self, from: data)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        #expect(try encoder.encode(snapshot) == data)
+        #expect(snapshot.evidenceContext.head == "head")
+        #expect(snapshot.evidenceContext.semanticContext == .init("text"))
+        #expect(snapshot.evidenceContext.discussionContent == .init("comments"))
+    }
+
     @Test func anOlderDraftReadCannotReopenAFinishedCheckpoint() {
         let suite = "CommentReviewGeneration.\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
