@@ -265,7 +265,9 @@ enum AssistantAutomationRunner {
         }
     }
 
-    private static let coordinator = AssistantJobCoordinator()
+    private static let coordinator = AssistantJobCoordinator(cleanupAfterSuccess: { handoff, _ in
+        await AssistantRunReclamation.reclaimGeneratedFiles(after: handoff)
+    })
     static var onJobFinished: ((Handoff) -> Void)? {
         get { coordinator.onFinished }
         set { coordinator.onFinished = newValue }

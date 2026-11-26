@@ -11,10 +11,10 @@ struct AssistantWorkerAdmissionTests {
         let health = AssistantCLIHealthStore(defaults: f.defaults)
         health.record(.init(kind: .rateLimited), assistant: .codex, executable: f.cli, startedAt: .now)
         let hold = try #require(health.hold(for: .codex))
-        let queue = AssistantJobCoordinator(healthStore: health) { handoff, settings in
+        let queue = AssistantJobCoordinator(healthStore: health, execute: { handoff, settings in
             try await AssistantJobExecutor.execute(handoff, settings: settings, glab: f.glab,
                 pipelineWorkDetector: f.claims, detectCLI: { _ in .ready(f.cli) })
-        }
+        })
         var queued = f.handoff
         queued.execution = .init(state: .queued)
         queued.verifiedFeedbackNotes = [1: "note-revision"]
@@ -206,6 +206,21 @@ struct AssistantWorkerAdmissionTests {
         #expect(f.gitlab.requests.allSatisfy { $0.method == "GET" })
     }
 
+    @Test func missingResultHoldsManualRetryAfterAnUnavailableAudit() async throws {
+        let f = try Fixture(assistant: .codex, scenario: "manual-missing-result")
+        defer { f.clean() }
+        do {
+            _ = try await AssistantJobExecutor.execute(f.handoff, settings: f.settings, glab: f.glab,
+                pipelineWorkDetector: f.claims, detectCLI: { _ in .ready(f.cli) })
+            Issue.record("A worker without a result file cannot complete")
+        } catch let failure as AssistantJobFailure {
+            #expect(failure.description == AssistantJobExecutor.ExecutionError.missingResult.description)
+        }
+        let execution = f.settings.assistantHandoffs[0].execution
+        #expect(execution?.pendingWorkerAudit?.blocksManualWorker == true)
+        #expect(!AssistantJobJournal.hasCheckpoint(f.handoff.id))
+    }
+
     @Test(arguments: AutomationAssistant.allCases,
           ["current", "initial-claim", "late-claim", "manual-claim", "owned-pipeline", "stale-token", "owned-plus-legacy",
            "label-removed", "target-changed", "late-label", "late-target", "manual-no-rule", "legacy-no-rule", "late-pipeline-running", "late-pipeline-pending", "late-pipeline-passed", "late-pipeline-replaced", "late-pipeline-missing", "confirmed-pipeline", "unconfirmed-pipeline", "wrong-confirmation", "manual-provider", "new-discussion", "new-discussion-off"])
@@ -306,7 +321,8 @@ struct AssistantWorkerAdmissionTests {
                 result['sourceAssessments']=[{'noteID':40,'bodySHA256':hashlib.sha256(b'AI finding').hexdigest(),
                     'classification':'ai_assisted','confidence':'high','evidence':'Specific cross-file reasoning.'}]
             if args[0]=='exec':
-                json.dump(result,open(args[args.index('--output-last-message')+1],'w'))
+                if "\(scenario)" != "manual-missing-result":
+                    json.dump(result,open(args[args.index('--output-last-message')+1],'w'))
                 print(json.dumps({'type':'turn.completed'}))
             else:
                 print(json.dumps({'is_error':False,'structured_output':result}))
@@ -429,7 +445,8 @@ struct AssistantWorkerAdmissionTests {
                 }
                 if call.endpoint == "/projects/7/repository/branches/feature" { return try InMemoryGitLab.json(["commit":["id":head]]) }
                 if call.endpoint.hasSuffix("/approvals") {
-                    let auditOutage = ["audit-read-outage", "manual-workspace-loss"].contains(scenario) && !auditReadRecovered
+                    let auditOutage = ["audit-read-outage", "manual-workspace-loss", "manual-missing-result"]
+                        .contains(scenario) && !auditReadRecovered
                     if workerRan && (scenario == "audit-missing-approvals" || auditOutage) {
                         throw GlabError.timedOut
                     }

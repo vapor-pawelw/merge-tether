@@ -70,8 +70,16 @@ struct ReadOnlyReviewJob {
             let diagnostics = ProcessRunner.Output(stdout: Data(), stderr: output.stderr, exitCode: output.exitCode)
             throw AssistantJobFailure(error: AssistantJobResult.Error.assistantFailed, output: diagnostics)
         }
-        if assistant == .codex { try AssistantJobResult.validateCodexEvents(output.stdout) }
-        let data = assistant == .codex ? try Data(contentsOf: invocation.resultURL) : output.stdout
+        let data: Data
+        if assistant == .codex {
+            try AssistantJobResult.validateCodexEvents(output.stdout)
+            guard let result = try? Data(contentsOf: invocation.resultURL) else {
+                throw ProcessRunner.WorkerInterruption(reason: .resultUnavailable, output: output)
+            }
+            data = result
+        } else {
+            data = output.stdout
+        }
         let review = try ReadOnlyReviewResult.decode(data, assistant: assistant)
         guard !review.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw AssistantJobResult.Error.invalidResult

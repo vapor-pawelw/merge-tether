@@ -565,8 +565,9 @@ import Testing
             family: "pipeline", attempt: 1, reservedAt: .now)
         next.retryOf = prior
         next.automaticRetryIdentity = attempt.identity
-        let claim = try #require(detector.registerRun(for: .init(host: next.key.work.host,
-            projectID: next.key.work.projectID, mergeRequestIID: next.key.work.iid, pipelineID: 3)))
+        let reservation = try detector.registerRun(for: .init(host: next.key.work.host,
+            projectID: next.key.work.projectID, mergeRequestIID: next.key.work.iid, pipelineID: 3))
+        let claim = try #require(reservation)
         try detector.bindRun(next.id, to: claim)
         next.pipelineReservation = claim
         settings.assistantHandoffs = [next]

@@ -362,7 +362,9 @@ enum AssistantJobExecutor {
             capturedOutput = output
             guard output.exitCode == 0 else { throw CLIProcessError(exitCode: output.exitCode, diagnostic: output.stderr) }
             try AssistantJobResult.validateCodexEvents(output.stdout)
-            guard let data = try? Data(contentsOf: invocation.resultURL) else { throw ExecutionError.missingResult }
+            guard let data = try? Data(contentsOf: invocation.resultURL) else {
+                throw ProcessRunner.WorkerInterruption(reason: .resultUnavailable, output: output)
+            }
             result = try AssistantJobResult.codex(data)
         } else {
             let arguments = invocation.claudeArguments(model: handoff.claudeCodingModel, thinking: handoff.codingThinking)
@@ -431,6 +433,7 @@ enum AssistantJobExecutor {
         case .workspaceLost: error = .workspaceLost
         case .standardOutputLimitExceeded: error = .workerOutputTooLarge
         case .outputCaptureFailed: error = .workerOutputUnavailable
+        case .resultUnavailable: error = .missingResult
         }
         guard let output = interruption.output else { return error }
         let diagnostics = includeStandardOutput ? output

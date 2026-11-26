@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Keep hidden merge requests across restarts, closure and merge while you remain assigned as a reviewer. Restore open reviews at any time or leave the review in GitLab.
+- Reclaim reproducible worker files after a merge request closes or merges, and trim old raw logs.
+- Queue agent work based on free disk space on the Mac and show disk waits and failures on paired iPhones and iPads.
+- Stop agent runs when required workspace directories disappear, record possible GitLab effects before retrying, and cap persistent worker output.
+
 - Show **Review needed** again when new commits or a different target diff make your GitLab approval stale, including after restarting MergeTether.
 
 - Limit older successful transcripts and read-only review history after an MR merges or stays closed for 30 days. Active runs and records used for automation remain available.
