@@ -8,6 +8,7 @@ struct RemoteBoardView: View {
     @State private var selected: RemoteCardSelection?
     @State private var showingInbox = false
     @State private var showingHiddenReviews = false
+    @State private var showingSettings = false
     @State private var pendingInboxCard: RemoteCardSelection?
     @State private var regenerationPresentation: DraftRegenerationPresentation?
     var body: some View {
@@ -58,6 +59,11 @@ struct RemoteBoardView: View {
             }
             .navigationTitle(Text(.Remote.remoteTitle)).navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showingSettings = true } label: { Image(systemName: "gearshape") }
+                        .accessibilityLabel(Text(.CrashReporting.crashReportingSettings))
+                        .accessibilityIdentifier("remote.settings")
+                }
                 if model.paired {
                     ToolbarItem(placement: .topBarTrailing) {
                         HStack(spacing: 16) {
@@ -106,6 +112,7 @@ struct RemoteBoardView: View {
             }
             .sheet(item: $regenerationPresentation) { model.draftRegenerationSheet($0) }
             .sheet(isPresented: $showingHiddenReviews) { RemoteHiddenReviewsView(model: model) }
+            .sheet(isPresented: $showingSettings) { RemoteCrashReportingSettingsView() }
             .onChange(of: model.pairingRevision) {
                 pairingSheet = false; selected = nil; showingInbox = false; pendingInboxCard = nil
                 showingHiddenReviews = false

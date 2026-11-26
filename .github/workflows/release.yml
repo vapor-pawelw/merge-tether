@@ -132,11 +132,32 @@ jobs:
           IOS_RELEASE_IDENTITY: ${{ vars.IOS_RELEASE_IDENTITY }}
           TUIST_MERGETETHER_UPDATE_FEED: https://github.com/${{ github.repository }}/releases/latest/download/appcast.xml
           TUIST_MERGETETHER_UPDATE_PUBLIC_KEY: ${{ vars.MERGETETHER_SPARKLE_PUBLIC_KEY }}
+          TUIST_MERGETETHER_MACOS_CRASH_DSN: ${{ vars.MERGETETHER_MACOS_CRASH_DSN }}
+          MERGETETHER_CRASH_SYMBOLS_DIR: ${{ vars.MERGETETHER_MACOS_CRASH_DSN != '' && format('{0}/mergetether-crash-symbols', runner.temp) || '' }}
         run: |
           mise exec -- bash scripts/build-release.sh "$RELEASE_VERSION" --build-number "$RELEASE_BUILD_NUMBER" --platform all \
             --signing-identity "$MACOS_RELEASE_IDENTITY" --ios-signing-identity "$IOS_RELEASE_IDENTITY" \
             --team-id "$APPLE_TEAM_ID" --notary-profile mergetether-release --ios-export-options "$RUNNER_TEMP/ExportOptions.plist" \
             --relay-config "$RUNNER_TEMP/relay-build.json"
+
+      - name: Install the Sentry CLI
+        if: vars.MERGETETHER_MACOS_CRASH_DSN != ''
+        run: brew install getsentry/tools/sentry-cli
+
+      - name: Upload macOS crash symbols
+        if: vars.MERGETETHER_MACOS_CRASH_DSN != ''
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_BUILD_NUMBER: ${{ github.run_number }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.MERGETETHER_SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.MERGETETHER_SENTRY_MACOS_PROJECT }}
+        run: |
+          : "${SENTRY_AUTH_TOKEN:?Configure the Sentry CI token}"
+          : "${SENTRY_ORG:?Configure the Sentry organization}"
+          : "${SENTRY_PROJECT:?Configure the macOS Sentry project}"
+          SYMBOLS_DIR="$RUNNER_TEMP/mergetether-crash-symbols/MergeTether-${RELEASE_VERSION}-${RELEASE_BUILD_NUMBER}-all"
+          sentry-cli debug-files upload --wait "$SYMBOLS_DIR/MergeTether.app.dSYM"
 
       - name: Verify distribution inventory and retain stable macOS names
         id: inventory
