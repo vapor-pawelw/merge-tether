@@ -725,6 +725,7 @@ final class AuthorFeedbackCoordinator {
                 record.completedFollowUpJobID == input.completedFollowUpJobID,
                 (try? record.assessment.reviewers(in: input.discussions, authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions,
                     excludedReplyAuthorIDs: excludedReplyAuthors(input))) != nil {
+            // The cache key already binds the title and description, so a restored status can use the current MR text.
             assessment = record.assessment
             verifiedInProcess = false
             cache[input.target] = .init(key: key, evidenceKey: evidenceKey, assessment: assessment, input: input, verifiedInProcess: false)

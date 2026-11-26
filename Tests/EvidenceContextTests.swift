@@ -58,7 +58,7 @@ struct EvidenceContextTests {
         var legacyFeedback = evidence
         legacyFeedback.semanticContext = nil
         #expect(legacyFeedback.binds(to: evidence, policy: .feedbackProgress))
-        #expect(legacyFeedback.binds(to: evidence, policy: .observedFeedback))
+        #expect(!legacyFeedback.binds(to: evidence, policy: .observedFeedback))
         #expect(!legacyFeedback.binds(to: evidence, policy: .verifiedFeedback))
         #expect(!evidence.binds(to: legacyFeedback, policy: .observedFeedback))
 
@@ -70,7 +70,7 @@ struct EvidenceContextTests {
 
         var legacyReceipt = evidence
         legacyReceipt.head = nil
-        #expect(legacyReceipt.binds(to: evidence, policy: .uncertainReReviewReceipt))
+        #expect(!legacyReceipt.binds(to: evidence, policy: .uncertainReReviewReceipt))
         #expect(!legacyReceipt.binds(to: evidence, policy: .head))
         #expect(!legacyReceipt.binds(to: evidence, policy: .approvalTarget))
 

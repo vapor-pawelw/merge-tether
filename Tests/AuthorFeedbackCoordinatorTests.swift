@@ -2155,7 +2155,9 @@ struct AuthorFeedbackCoordinatorTests {
             let second = f.coordinator(assessmentDirectory: assessments)
             defer { second.cancel() }
             try await f.run(second)
-            #expect(second.status(projectID: 1, iid: 2)?.phase == .complete)
+            let restored = try #require(second.status(projectID: 1, iid: 2))
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
+            #expect(restored.phase == .complete && restored.semanticContextFingerprint == request.semanticContextFingerprint)
             #expect(f.inputs.count == 1)
 
             // Settings that do not shape the verifier keep the assessment.

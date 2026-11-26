@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Keep reviewer feedback and discussion blockers visible when a completed assessment cannot be matched to the merge request’s current title and description.
+
+- Let a new push reopen re-review eligibility after an older unconfirmed request, while still preventing duplicates on the first verified commit.
+
 - Show **Review needed** again when new commits or a different target diff make your GitLab approval stale, including after restarting MergeTether.
 
 - Limit older successful transcripts and read-only review history after an MR merges or stays closed for 30 days. Active runs and records used for automation remain available.

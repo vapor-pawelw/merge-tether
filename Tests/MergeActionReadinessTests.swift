@@ -191,6 +191,27 @@ struct MergeActionReadinessTests {
         #expect(try listed.manualMergeBlocker(using: status(blocker: "unknown")) == .prerequisite(.dependencyEvidence))
     }
 
+    @Test(arguments: ["missing", "changed", "matching", "checking"])
+    func onlyCompletedFeedbackWithMatchingMRTextClearsDisplayedBlockers(_ scenario: String) throws {
+        let checked = try status()
+        var listed = try item(checked)
+        listed.feedback = [try feedbackNote()]
+        listed.discussionObservation = .unresolvedIncoming
+        listed.observedDiscussionFingerprint = "conversation"
+        listed.authorFeedbackStatus = .init(head: checked.request.sha!, fingerprint: "conversation",
+            semanticContextFingerprint: scenario == "matching" ? checked.request.semanticContextFingerprint : scenario == "changed" ? "old" : nil,
+            phase: scenario == "checking" ? .checking : .complete, addressedNoteIDs: [5])
+
+        let verified = listed.verifiedFeedback
+        let displayed = MergeRequestAttentionMonitor.ItemPresentation(evidence: listed)
+        let clearsFeedback = scenario == "matching"
+        #expect(verified.outstandingNotes.isEmpty == clearsFeedback)
+        #expect(verified.discussionsRemainOpen != clearsFeedback)
+        #expect(displayed.feedback.isEmpty == clearsFeedback)
+        #expect(displayed.needsDiscussion != clearsFeedback)
+        #expect(verified.assessment?.phase == (clearsFeedback ? .complete : scenario == "checking" ? .checking : nil))
+    }
+
     @Test(arguments: ["addressed", "ignored", "uncovered", "reply", "head", "conversation", "semantic", "checking", "failed"])
     func feedbackReadinessUsesTheExactVerifiedNotesAndExplainsItsRemainingGate(_ scenario: String) throws {
         let checked = try status()
