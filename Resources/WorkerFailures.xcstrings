@@ -1,0 +1,34 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "assistant.jobs.error.workspaceLost": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "A required worker directory was deleted or replaced. Check the remaining run files and current GitLab state before retrying."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Wymagany katalog agenta został usunięty lub zastąpiony. Przed ponowną próbą sprawdź pozostałe pliki przebiegu i aktualny stan w GitLabie."}}
+      }
+    },
+    "assistant.jobs.error.workerOutputTooLarge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "The worker’s result stream exceeded the 16 MiB limit. Check the saved output and GitLab state before retrying."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Strumień wyników agenta przekroczył limit 16 MiB. Przed ponowną próbą sprawdź zapisane dane wyjściowe i stan w GitLabie."}}
+      }
+    },
+    "assistant.jobs.error.workerOutputUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "MergeTether could not capture the worker’s complete output. Check available disk space and the current GitLab state before retrying."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "MergeTether nie mógł zapisać pełnych danych wyjściowych agenta. Przed ponowną próbą sprawdź wolne miejsce na dysku i aktualny stan w GitLabie."}}
+      }
+    },
+    "assistant.jobs.error.workerAuditPending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "MergeTether still needs to reconcile a stopped worker’s changes with GitLab. Check the merge request while verification is pending."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "MergeTether musi jeszcze zweryfikować zmiany zatrzymanego agenta w GitLabie. Sprawdź merge request podczas oczekiwania na weryfikację."}}
+      }
+    }
+  },
+  "version": "1.0"
+}

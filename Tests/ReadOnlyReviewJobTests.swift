@@ -4,7 +4,7 @@ import Testing
 
 @MainActor
 struct ReadOnlyReviewJobTests {
-    @Test(arguments: AutomationAssistant.allCases, ["inline", "outside-scope", "changed-head"])
+    @Test(arguments: AutomationAssistant.allCases, ["inline", "outside-scope", "changed-head", "tmp-deleted"])
     func reviewUsesScopedToolAndOnlyTheAppCanSaveDrafts(_ assistant: AutomationAssistant, _ scenario: String) async throws {
         let suite = "ReadOnlyReview.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -73,7 +73,7 @@ struct ReadOnlyReviewJobTests {
         let finishedValue = String(decoding: try encoder.encode(finished.path), as: UTF8.self)
         try Data("""
             #!/usr/bin/python3
-            import json, pathlib, subprocess, sys
+            import json, os, pathlib, shutil, subprocess, sys
             values = sys.argv[1:]
             sys.stdin.read()
             for args in (["context"], ["diff"], ["discussions"], ["work-item", "show", "15"], ["change", "show", "21"]):
@@ -90,6 +90,8 @@ struct ReadOnlyReviewJobTests {
                 print(json.dumps({"type": "turn.completed"}))
             else:
                 print(json.dumps({"is_error": False, "structured_output": result}))
+            if "\(scenario)" == "tmp-deleted":
+                shutil.rmtree(os.environ["TMPDIR"])
             """.utf8).write(to: cli)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
         let target = try await glab.fetchMergeRequest(projectID: 3, iid: 7, host: host)
@@ -99,10 +101,19 @@ struct ReadOnlyReviewJobTests {
             outcome = try await ReadOnlyReviewJob(handoff: handoff, settings: settings, glab: glab, target: target,
                 user: user, invocation: invocation, executable: cli, timeout: 45,
                 expectedAccountRevision: glab.accountRevision).run()
+        } catch let interruption as ProcessRunner.WorkerInterruption {
+            #expect(scenario == "tmp-deleted")
+            if case .workspaceLost(let directory) = interruption.reason {
+                #expect(directory == invocation.temporaryDirectory)
+            } else { Issue.record("Expected workspace loss, got \(interruption.reason)") }
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+            #expect(!AssistantJobJournal.hasCheckpoint(handoff.id))
+            return
         } catch let failure as AssistantJobFailure {
             Issue.record("Fixture CLI error: \(failure.transcript)")
             return
         }
+        #expect(scenario != "tmp-deleted")
         let writes = gitlab.requests.filter { $0.method != "GET" }
         #expect(writes.map(\.endpoint) == (scenario == "inline" ? [base + "/draft_notes"] : []))
         #expect(outcome.result.status == (scenario == "inline" ? .succeeded : .blocked))

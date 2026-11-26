@@ -92,15 +92,78 @@ struct ProcessRunnerTests {
         #expect(output.stderr.isEmpty)
     }
 
-    @Test("returns the command output even when a background child inherits it")
-    func returnsWhileBackgroundChildIsRunning() async throws {
+    @Test(arguments: [false, true])
+    func losingTheWorkspaceStopsTheWorker(_ replaced: Bool) async throws {
+        let parent = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let workspace = parent.appendingPathComponent("workspace")
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let command = replaced ? "/bin/mv \"$WORK\" \"$WORK.old\"; /bin/mkdir \"$WORK\"" : "/bin/rm -rf \"$WORK\""
+        do {
+            _ = try await ProcessRunner.run(URL(fileURLWithPath: "/bin/sh"), arguments: ["-c",
+                "printf checkpoint; \(command); /bin/sleep 10"],
+                environment: ["WORK": workspace.path], currentDirectory: workspace, timeout: 1,
+                outputDirectory: workspace.appendingPathComponent("cli-output"))
+            Issue.record("The worker returned after losing its workspace")
+        } catch let interruption as ProcessRunner.WorkerInterruption {
+            guard case .workspaceLost(let lost) = interruption.reason else {
+                Issue.record("Expected workspace loss, got \(interruption.reason)")
+                return
+            }
+            #expect(lost == workspace)
+            #expect(interruption.output?.stdout == Data("checkpoint".utf8))
+        }
+    }
+
+    @Test func normalTemporaryChangesAndAtomicResultWritesLeaveTheWorkspaceUsable() async throws {
+        let workspace = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let output = try await ProcessRunner.run(URL(fileURLWithPath: "/bin/sh"), arguments: ["-c",
+            "printf stale > result.json; printf done > result.tmp; /bin/mv -f result.tmp result.json; /bin/sleep 0.2; printf complete"],
+            environment: [:], currentDirectory: workspace, timeout: 2,
+            outputDirectory: workspace.appendingPathComponent("cli-output"))
+        #expect(output.exitCode == 0)
+        #expect(String(decoding: output.stdout, as: UTF8.self) == "complete")
+        #expect(try String(contentsOf: workspace.appendingPathComponent("result.json"), encoding: .utf8) == "done")
+    }
+
+    @Test func oversizedPersistentOutputIsDrainedAndReported() async throws {
+        let workspace = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let outputs = workspace.appendingPathComponent("cli-output")
+        do {
+            _ = try await ProcessRunner.run(URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", """
+                /bin/dd if=/dev/zero bs=1048576 count=17 2>/dev/null
+                /bin/dd if=/dev/zero bs=1048576 count=2 1>&2 2>/dev/null
+                /usr/bin/touch complete
+                """], environment: [:], currentDirectory: workspace, timeout: 8, outputDirectory: outputs)
+            Issue.record("Oversized machine output was accepted")
+        } catch let interruption as ProcessRunner.WorkerInterruption {
+            guard case .standardOutputLimitExceeded = interruption.reason else {
+                Issue.record("Expected output limit failure, got \(interruption.reason)")
+                return
+            }
+            #expect(interruption.output?.stderr.contains("stderr exceeded its capture limit") == true)
+        }
+        #expect(FileManager.default.fileExists(atPath: workspace.appendingPathComponent("complete").path))
+        #expect(try Data(contentsOf: outputs.appendingPathComponent("stdout")).count == 16 * 1_048_576)
+        #expect(try Data(contentsOf: outputs.appendingPathComponent("stderr")).count == 1_048_576)
+    }
+
+    @Test("returns the command output even when a background child inherits it", arguments: [false, true])
+    func returnsWhileBackgroundChildIsRunning(_ persistent: Bool) async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
         let clock = ContinuousClock()
         let start = clock.now
         let output = try await ProcessRunner.run(
             URL(fileURLWithPath: "/bin/sh"),
             arguments: ["-c", "/bin/sleep 3 & printf ready; printf diagnostic >&2"],
             environment: [:],
-            timeout: 1
+            timeout: 1,
+            outputDirectory: persistent ? folder : nil
         )
 
         #expect(output.exitCode == 0)

@@ -14,7 +14,7 @@ enum AssistantUsageRunner {
 
     static func run(_ executable: URL, arguments: [String] = [], environment: [String: String],
                     currentDirectory: URL? = nil, timeout: TimeInterval = 30, input: Data? = nil,
-                    outputDirectory: URL? = nil,
+                    outputDirectory: URL? = nil, requiredWorkerDirectories: [URL] = [],
                     usage: Context, store: AssistantUsageStore = .shared,
                     healthStore: AssistantCLIHealthStore? = nil,
                     beforeLaunch: (@Sendable () async throws -> Void)? = nil,
@@ -44,7 +44,8 @@ enum AssistantUsageRunner {
         do {
             let output = try await AssistantPowerActivity.whileRunning {
                 try await ProcessRunner.run(executable, arguments: arguments, environment: environment,
-                    currentDirectory: currentDirectory, timeout: timeout, input: input, outputDirectory: outputDirectory, onOutput: {
+                    currentDirectory: currentDirectory, timeout: timeout, input: input, outputDirectory: outputDirectory,
+                    requiredWorkerDirectories: requiredWorkerDirectories, onOutput: {
                         capture.set(AssistantUsageParser.parse($0.stdout, assistant: usage.assistant, model: usage.model))
                         if let issue = AssistantCLIHealthIssue.parse($0, assistant: usage.assistant), healthCapture.recordFirst() {
                             let observedAt = Date()

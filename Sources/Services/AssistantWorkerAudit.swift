@@ -65,6 +65,14 @@ enum AssistantWorkerAudit {
         let userID: Int
         let sourceProjectID: Int?
         let sourceBranch: String
+        var blocksManualWorker: Bool? = nil
+    }
+
+    static func blocksNewWorker(_ handoff: AssistantAutomationRunner.Handoff, in settings: SettingsManager) -> Bool {
+        settings.assistantHandoffs.contains {
+            $0.key.automationTarget == handoff.key.automationTarget
+                && $0.execution?.pendingWorkerAudit?.blocksManualWorker == true
+        }
     }
 
     static func capture(for request: GitLabMergeRequest, host: String, user: GitLabAuthenticatedUser,
@@ -113,8 +121,22 @@ enum AssistantWorkerAudit {
     static func recordChanges(since baseline: Snapshot?, handoff: AssistantAutomationRunner.Handoff,
                               request: GitLabMergeRequest, user: GitLabAuthenticatedUser, accountRevision: UInt64,
                               glab: GlabService, settings: SettingsManager,
-                              retryDelay: Duration = .seconds(2)) async -> Verdict {
-        guard let baseline else { return .unavailable }
+                              retryDelay: Duration = .seconds(2), requireReconciliation: Bool = false) async -> Verdict {
+        guard let baseline = baseline ?? (requireReconciliation
+            ? Snapshot(head: nil, approved: nil, discussions: nil, userID: user.id) : nil) else { return .unavailable }
+        func affectedRunIndex() -> Int? {
+            activeRunIndex(handoff, in: settings) ?? (requireReconciliation ? settings.assistantHandoffs.firstIndex {
+                $0.id == handoff.id && $0.key == handoff.key && $0.expectedHeadSHA == handoff.expectedHeadSHA
+                    && $0.execution?.state == .interrupted
+            } : nil)
+        }
+        let pending = Pending(baseline: baseline, userID: user.id, sourceProjectID: request.sourceProjectID,
+            sourceBranch: request.sourceBranch, blocksManualWorker: requireReconciliation ? true : nil)
+        // Persist the hold before starting live reads, which may be cancelled or fail.
+        if requireReconciliation, let index = affectedRunIndex() {
+            settings.assistantHandoffs[index].execution?.pendingWorkerAudit = pending
+            settings.save()
+        }
         var live = await capture(for: request, host: handoff.key.work.host, user: user,
                                  accountRevision: accountRevision, glab: glab)
         var comparison = await compare(live, baseline: baseline, handoff: handoff, request: request, user: user, glab: glab)
@@ -127,21 +149,26 @@ enum AssistantWorkerAudit {
         guard !Task.isCancelled else { return .unavailable }
         let currentAccount = glab.accountRevision == accountRevision
         let verdict = currentAccount ? comparison.verdict : .unavailable
-        if let index = activeRunIndex(handoff, in: settings) {
+        if let index = affectedRunIndex() {
             if currentAccount, let change = comparison.sourceHeadChange {
                 settings.assistantHandoffs[index].execution?.sourceHeadChange = change
             }
             switch verdict {
             case .clean, .headChanged: break
             case .unavailable where handoff.manual != true:
-                settings.assistantHandoffs[index].execution?.pendingWorkerAudit = Pending(
-                    baseline: baseline, userID: user.id, sourceProjectID: request.sourceProjectID, sourceBranch: request.sourceBranch)
+                settings.assistantHandoffs[index].execution?.pendingWorkerAudit = pending
                 settings.save()
             case .unavailable: break
             case .unexpected(let effects):
                 settings.assistantHandoffs[index].execution?.remoteEffects = effects
             }
-            if currentAccount, comparison.sourceHeadChange != nil { settings.save() }
+            let clearedHold = requireReconciliation && verdict != .unavailable
+            if clearedHold {
+                // Apply any policy pause before lifting the temporary hold.
+                _ = enforce(verdict, handoff: handoff, settings: settings)
+                settings.assistantHandoffs[index].execution?.pendingWorkerAudit = nil
+            }
+            if clearedHold || (currentAccount && comparison.sourceHeadChange != nil) { settings.save() }
         }
         return verdict
     }
@@ -262,13 +289,17 @@ enum AssistantWorkerAudit {
             if case .unexpected(let effects) = verdict {
                 settings.assistantHandoffs[index].execution?.pendingWorkerAudit = nil
                 settings.assistantHandoffs[index].execution?.remoteEffects = effects
-                settings.assistantHandoffs[index].execution?.error = AssistantJobExecutor.ExecutionError.unexpectedRemoteEffects.rawValue
+                if audit.blocksManualWorker != true {
+                    settings.assistantHandoffs[index].execution?.error = AssistantJobExecutor.ExecutionError.unexpectedRemoteEffects.rawValue
+                }
                 _ = enforce(verdict, handoff: handoff, settings: settings)
             } else if verdict == .headChanged {
                 // Leave any checkpoint awaiting audit so the stale result cannot become a completion.
                 settings.assistantHandoffs[index].execution?.pendingWorkerAudit = nil
                 settings.assistantHandoffs[index].execution?.state = .failed
-                settings.assistantHandoffs[index].execution?.error = AssistantJobExecutor.ExecutionError.headChanged.rawValue
+                if audit.blocksManualWorker != true {
+                    settings.assistantHandoffs[index].execution?.error = AssistantJobExecutor.ExecutionError.headChanged.rawValue
+                }
                 settings.save()
             } else {
                 guard AssistantJobJournal.isKeyReady || !AssistantJobJournal.hasCheckpoint(handoff.id) else { continue }
