@@ -2,7 +2,7 @@ import Foundation
 import MergeTetherRemote
 
 @MainActor enum RemoteMRDetailSupplement {
-    /// Mirrors the Mac's lightning button: shown only for open MRs while some automation is configured.
+    /// Mirrors the Mac's Automation button: shown only for open MRs while some automation is configured.
     static func automationStatus(settings: SettingsManager, target: MRAutomationScope.Target,
                                  request: GitLabMergeRequest) -> RemoteAutomationStatus? {
         let automation = settings.configuredAutomation

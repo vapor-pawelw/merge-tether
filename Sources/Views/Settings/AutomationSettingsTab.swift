@@ -576,7 +576,7 @@ struct AutomationSettingsTab: View {
             case .checkpoints: "hand.raised"
             case .scope: "scope"
             case .todos: "tray"
-            case .workflow: "bolt"
+            case .workflow: "play.fill"
             case .advanced: "slider.horizontal.3"
             }
         }

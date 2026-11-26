@@ -53,7 +53,7 @@ struct AutomationToggleNoticeView: View {
 
     private var symbol: String {
         switch notice.kind {
-        case .global(let active), .mergeRequest(_, _, let active): active ? "bolt.fill" : "bolt.slash"
+        case .global(let active), .mergeRequest(_, _, let active): active ? "play.fill" : "pause.fill"
         case .approvalChanged(_, let removed): removed ? "minus.circle" : "checkmark.seal"
         }
     }

@@ -7,7 +7,7 @@ struct CommentReviewImpactView: View {
     var body: some View {
         if item.draftCount > 0 || item.requiresCommentReview {
             VStack(alignment: .leading, spacing: 6) {
-                Label { Text(.CommentReview.commentReviewBlocks) } icon: { Image(systemName: "pause.circle") }
+                Label { Text(.CommentReview.commentReviewBlocks) } icon: { Image(systemName: "pause.fill") }
                     .fontWeight(.medium)
                 if item.isAuthored {
                     if reReviewEnabled { Text(.CommentReview.commentReviewBeforeReReview) }

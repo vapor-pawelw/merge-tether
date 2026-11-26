@@ -133,7 +133,7 @@ struct AuthorFeedbackView: View {
         switch state {
         case .ready: "checkmark.circle"
         case .waitingAcceptance, .waitingPublication: "clock"
-        case .disabled: "pause.circle"
+        case .disabled: "pause.fill"
         case .needsChanges, .needsVerification, .needsReply: "exclamationmark.circle"
         }
     }

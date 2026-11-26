@@ -25,7 +25,7 @@ final class SettingsNavigation {
             case .mergeRequests: "arrow.triangle.pull"
             case .notifications: "bell"
             case .codingAgent: "sparkles"
-            case .automation: "bolt.circle"
+            case .automation: "play.fill"
             }
         }
     }

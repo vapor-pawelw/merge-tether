@@ -39,7 +39,7 @@ struct FollowUpAutomationHoldView: View {
     var body: some View {
         if let reason, reason != .retryRequired || showsRetryRequired {
             VStack(alignment: .leading, spacing: 6) {
-                Label { Text(.AutomationHold.automationHoldTitle) } icon: { Image(systemName: "pause.circle") }
+                Label { Text(.AutomationHold.automationHoldTitle) } icon: { Image(systemName: "pause.fill") }
                     .font(.subheadline.weight(.medium))
                 Text(reason.message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Button {

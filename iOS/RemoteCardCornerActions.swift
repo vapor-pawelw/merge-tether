@@ -48,7 +48,7 @@ struct RemoteCardCornerActions: View {
             }
             if let automation = card.automation {
                 Button { panel = .automation } label: {
-                    icon(automation.active && !automation.globallySuspended ? "bolt.fill" : "bolt.slash")
+                    icon(automation.active && !automation.globallySuspended ? "play.fill" : "pause.fill")
                         .foregroundStyle(automation.customized ? Color.orange : automation.active ? Color.accentColor : Color.secondary)
                 }
                 .buttonStyle(.plain)

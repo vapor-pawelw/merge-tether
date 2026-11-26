@@ -43,12 +43,12 @@ struct MRActionEffectTests {
         }
     }
 
-    @Test func deterministicActionsSaySoAndResumedAutomationShowsTheBolt() {
+    @Test func deterministicActionsSaySoAndResumedAutomationShowsPlay() {
         #expect(MRActionCTA.approve.symbol == nil)
         #expect(MRActionCTA.merge.symbol == nil)
         #expect(MRActionCTA.merge.effect == .gitLabWithAICheck)
-        #expect(MRActionCTA.markReady.symbol == "bolt")
-        #expect(MRActionCTA.finishCommentReview.symbol == "bolt")
+        #expect(MRActionCTA.markReady.symbol == "play.fill")
+        #expect(MRActionCTA.finishCommentReview.symbol == "play.fill")
         #expect(MRActionCTA.publishComments.effect == .gitLab)
         #expect(MRActionCTA.refreshFromGitLab.followUps == [.runsAllowedAutomation])
     }
