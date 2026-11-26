@@ -6,6 +6,14 @@ struct WhatsNewView: View {
     @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some View {
+        if updates.allowsWhatsNew {
+            releaseNotes
+        } else {
+            Color.clear.task { dismissWindow(id: "whats-new") }
+        }
+    }
+
+    private var releaseNotes: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
 

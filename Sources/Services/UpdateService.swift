@@ -22,17 +22,18 @@ final class UpdateService {
         self.previouslySeenVersion = defaults.string(forKey: Key.lastSeenVersion)
     }
 
-    /// Returns true when the bundled version differs from the last one the
-    /// user acknowledged. Used to decide whether to show the What's New UI.
+    var allowsWhatsNew: Bool { currentVersion != "2.0.0" }
+
+    /// Opens release notes when an eligible version differs from the version the user saw.
     var shouldShowWhatsNew: Bool {
-        guard let previouslySeenVersion else { return false }
+        guard allowsWhatsNew, let previouslySeenVersion else { return false }
         return previouslySeenVersion != currentVersion
     }
 
     /// Load + parse the changelog entry matching `currentVersion`. Called
     /// once on launch; safe to call again.
     func loadWhatsNew() {
-        guard let url = bundle.url(forResource: "CHANGELOG", withExtension: "md"),
+        guard allowsWhatsNew, let url = bundle.url(forResource: "CHANGELOG", withExtension: "md"),
               let contents = try? String(contentsOf: url, encoding: .utf8)
         else {
             whatsNewEntry = nil
@@ -49,10 +50,9 @@ final class UpdateService {
         previouslySeenVersion = currentVersion
     }
 
-    /// Call on first-ever launch to seed the stored version without showing
-    /// the What's New window — we don't know what the user has seen before.
+    /// Record a first launch or the MergeTether debut as the baseline for future updates.
     func seedIfNeeded() {
-        if previouslySeenVersion == nil {
+        if previouslySeenVersion != currentVersion && (previouslySeenVersion == nil || !allowsWhatsNew) {
             acknowledgeCurrentVersion()
         }
     }

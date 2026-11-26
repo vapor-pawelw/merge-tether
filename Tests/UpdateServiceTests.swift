@@ -5,7 +5,7 @@ import Testing
 
 @Suite("UpdateService")
 struct UpdateServiceTests {
-    @MainActor @Test func showsReleaseNotesOnFirstLaunchOfAnUpdatedVersion() throws {
+    @MainActor @Test func skipsReleaseNotesForTheRelaunchAndShowsThemOnTheNextUpdate() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let suite = "UpdateServiceTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -26,13 +26,22 @@ struct UpdateServiceTests {
             return try #require(Bundle(url: app))
         }
 
-        let oldBundle = try bundle(version: "2.0.0")
+        let oldBundle = try bundle(version: "1.2.0")
         let firstLaunch = UpdateService(defaults: defaults, bundle: oldBundle)
         #expect(!firstLaunch.shouldShowWhatsNew)
         firstLaunch.seedIfNeeded()
 
+        let relaunch = UpdateService(defaults: defaults, bundle: try bundle(version: "2.0.0"))
+        #expect(!relaunch.allowsWhatsNew)
+        #expect(!relaunch.shouldShowWhatsNew)
+        relaunch.loadWhatsNew()
+        #expect(relaunch.whatsNewEntry == nil)
+        relaunch.seedIfNeeded()
+
         let updatedBundle = try bundle(version: "2.0.1")
         let afterRestart = UpdateService(defaults: defaults, bundle: updatedBundle)
+        #expect(afterRestart.previouslySeenVersion == "2.0.0")
+        #expect(afterRestart.allowsWhatsNew)
         #expect(afterRestart.shouldShowWhatsNew)
         afterRestart.loadWhatsNew()
         #expect(afterRestart.whatsNewEntry?.body == "- Release notes.")

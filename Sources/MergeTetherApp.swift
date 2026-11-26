@@ -123,7 +123,9 @@ struct MergeTetherApp: App {
                 if appDelegate.updater.isEnabled {
                     CheckForAppUpdatesButton(updater: appDelegate.updater)
                 }
-                WhatsNewButton(updates: appDelegate.updates)
+                if appDelegate.updates.allowsWhatsNew {
+                    WhatsNewButton(updates: appDelegate.updates)
+                }
             }
             CommandGroup(replacing: .newItem) {
                 OpenMainWindowButton()
@@ -174,6 +176,7 @@ struct MergeTetherApp: App {
             WhatsNewView(updates: appDelegate.updates)
         }
         .windowResizability(.contentSize)
+        .commandsRemoved()
     }
 }
 
