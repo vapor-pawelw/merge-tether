@@ -16,7 +16,7 @@ final class GlabService {
     @ObservationIgnored weak var ownershipSettings: SettingsManager?
 
     func owns(_ request: GitLabMergeRequest, userID: Int) -> Bool {
-        request.isOwned(by: userID, includingSoleAssignee: ownershipSettings?.treatSoleAssigneeAsOwn == true)
+        request.isOwned(by: userID, includingAssignee: ownershipSettings?.treatAssignedMergeRequestsAsOwn == true)
     }
 
     var evidenceAccountContext: EvidenceContext {

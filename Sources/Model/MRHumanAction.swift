@@ -119,7 +119,7 @@ struct MRHumanAction {
                   return retryIntent?.id == candidate.id
               }),
               let request = row.displayRequest, request.isOpen,
-              request.isOwned(by: intent.target.username, includingSoleAssignee: row.displayItem.isAuthored),
+              request.isOwned(by: intent.target.username, includingAssignee: row.displayItem.isAuthored),
               intent.target.projectID == request.projectID, intent.target.iid == request.iid,
               intent.request.webURL == request.webURL,
               request.webURL.isGitLabMergeRequest(host: intent.target.host, iid: request.iid) else { return nil }
@@ -197,7 +197,7 @@ struct MRHumanAction {
                                       discussionContent: item.observedDiscussionFingerprint.map(DiscussionContentDigest.init))
         guard !ids.isEmpty, recorded.binds(to: current, policy: .followUpPresentation),
               intent.request.webURL == item.url, intent.target.projectID == item.id.projectID,
-              intent.target.iid == item.id.iid, intent.request.isOwned(by: intent.target.username, includingSoleAssignee: true),
+              intent.target.iid == item.id.iid, intent.request.isOwned(by: intent.target.username, includingAssignee: true),
               item.url.isGitLabMergeRequest(host: intent.target.host, iid: item.id.iid) else { return .unavailable(ids.first) }
         return .rawNotes(ids)
     }
@@ -467,7 +467,7 @@ struct MRHumanAction {
         guard let job = row.latestJob, job.workflow == .followUp,
               job.key.work.projectID == item.id.projectID, job.key.work.iid == item.id.iid,
               let request = item.mergeRequest,
-              request.isOwned(by: job.key.username, includingSoleAssignee: item.isAuthored),
+              request.isOwned(by: job.key.username, includingAssignee: item.isAuthored),
               item.url.isGitLabMergeRequest(host: job.key.work.host, iid: item.id.iid),
               let status = item.authorFeedbackStatus, status.phase == .complete,
               status.evidenceContext.binds(to: item.observedEvidenceContext, policy: .verifiedFeedback) else { return nil }

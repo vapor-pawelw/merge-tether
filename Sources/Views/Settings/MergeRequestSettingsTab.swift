@@ -7,11 +7,11 @@ struct MergeRequestSettingsTab: View {
         Form {
             Section {
                 Toggle(isOn: Binding(
-                    get: { monitor.settings.treatSoleAssigneeAsOwn },
-                    set: { monitor.setTreatSoleAssigneeAsOwn($0) }
-                )) { Text(.Settings.settingsSoleAssigneeToggle) }
+                    get: { monitor.settings.treatAssignedMergeRequestsAsOwn },
+                    set: { monitor.setTreatAssignedMergeRequestsAsOwn($0) }
+                )) { Text(.Settings.settingsAssignedOwnershipToggle) }
             } footer: {
-                Text(.Settings.settingsSoleAssigneeHelp)
+                Text(.Settings.settingsAssignedOwnershipHelp)
             }
 
             Section {

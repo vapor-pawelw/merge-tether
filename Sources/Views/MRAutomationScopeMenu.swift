@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Applies per-MR and repository scope changes for the popover, the bolt shortcut and the scope menu alike.
+/// Applies per-MR and repository scope changes for the popover, the Option-click shortcut and the scope menu alike.
 @MainActor
 struct MRAutomationScopeEditor {
     let monitor: TodoMonitorService
@@ -46,7 +46,7 @@ struct MRAutomationScopeEditor {
         }
     }
 
-    var boltColor: Color {
+    var stateColor: Color {
         guard choice == .default, !hasIndependentApprovalPreference else { return .orange }
         return summary.active ? .accentColor : .secondary
     }
@@ -162,7 +162,7 @@ struct MRAutomationScopeEditor {
     }
 }
 
-/// The bolt in card and Details headers: a click explains this MR's automation, Option-click switches it.
+/// The Automation button in card and Details headers: a click explains this MR's automation, Option-click switches it.
 struct BoardAutomationToggle: View {
     let monitor: TodoMonitorService
     let target: MRAutomationScope.Target
@@ -188,9 +188,9 @@ struct BoardAutomationToggle: View {
                     showingDetails.toggle()
                 }
             } label: {
-                Image(systemName: summary.active ? "bolt.fill" : "bolt.slash")
+                Image(systemName: summary.active ? "play.fill" : "pause.fill")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(editor.boltColor)
+                    .foregroundStyle(editor.stateColor)
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
@@ -253,8 +253,8 @@ struct MRAutomationPopover: View {
 
     private func header(_ summary: MRAutomationControl.Summary) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: summary.active ? "bolt.fill" : "bolt.slash")
-                .foregroundStyle(editor.boltColor)
+            Image(systemName: summary.active ? "play.fill" : "pause.fill")
+                .foregroundStyle(editor.stateColor)
             VStack(alignment: .leading, spacing: 2) {
                 Text(summary.active ? .Menu.menuScopeActive : .Menu.menuScopePaused).font(.headline)
                 Text(.Menu.menuScopePopoverSource(String(localized: MRAutomationControl.sourceLabel(summary.source))))
@@ -359,7 +359,7 @@ struct MRAutomationScopeMenu: View {
                 }
             } label: {
                 Label { Text(.Menu.menuScopeTitle) } icon: {
-                    Image(systemName: summary.active ? "bolt.circle" : "pause.circle")
+                    Image(systemName: summary.active ? "play.fill" : "pause.fill")
                 }
             }
             .menuStyle(.borderlessButton)

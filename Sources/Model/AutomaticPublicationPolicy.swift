@@ -63,7 +63,7 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
     let mode: AutomationPublicationMode
     let restrictions: AutomaticPublicationRestrictions
     var aiCommentCriteriaOverride: String? = nil
-    var treatSoleAssigneeAsOwn = true
+    var treatAssignedMergeRequestsAsOwn = true
 
     func allows(_ draft: GitLabDraftNote, request: GitLabMergeRequest,
                 discussions: [GitLabMergeRequestDiscussion]?, userID: Int, host: String,
@@ -71,7 +71,7 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
         guard couldAllow(draft, request: request, userID: userID, host: host) else { return false }
         if let discussionID = draft.discussionID,
            discussions?.contains(where: { $0.id == discussionID && $0.isResolvedForReview }) == true { return false }
-        guard requiresSources || request.isOwned(by: userID, includingSoleAssignee: treatSoleAssigneeAsOwn) else { return true }
+        guard requiresSources || request.isOwned(by: userID, includingAssignee: treatAssignedMergeRequestsAsOwn) else { return true }
         guard let sources = Self.sourceNotes(for: draft, discussions: discussions, userID: userID),
               !sources.isEmpty else { return false }
         if mode == .all { return true }
@@ -91,7 +91,7 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
               Self.safeForAutomaticPublication(draft), request.projectID > 0, request.iid > 0,
               request.author.id > 0, request.webURL.isGitLabMergeRequest(host: host, iid: request.iid) else { return false }
         // A standalone status report becomes an unresolved self-discussion in GitLab.
-        if request.isOwned(by: userID, includingSoleAssignee: treatSoleAssigneeAsOwn), draft.discussionID?.isEmpty != false { return false }
+        if request.isOwned(by: userID, includingAssignee: treatAssignedMergeRequestsAsOwn), draft.discussionID?.isEmpty != false { return false }
         return covers(request, host: host) && (!requiresSources || draft.discussionID.map { !$0.isEmpty } == true)
     }
 

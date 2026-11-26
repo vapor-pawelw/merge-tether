@@ -209,7 +209,9 @@ enum AssistantAutomationRunner {
         var blockerDiagnosis: MergeBlockerDiagnosis? = nil
         var accountUserID: Int? = nil
         var estimatedRepositoryBytes: Int64? = nil
+        // Keep the stored field for handoffs created by earlier versions.
         var requiresSoleAssignment: Bool? = nil
+        var dependsOnAssignment: Bool { requiresSoleAssignment == true }
 
         var deliveredFeedbackTodos: [Todo.FeedbackIdentity] {
             if let execution { return execution.state == .succeeded ? feedbackTodos ?? [] : [] }
@@ -447,7 +449,7 @@ enum AssistantAutomationRunner {
         var reviewer: GitLabAuthenticatedUser?
         var pipelineDiagnosis: ForeignPipelineDiagnosis?
         var estimatedRepositoryBytes: Int64?
-        var requiresSoleAssignment = false
+        var dependsOnAssignment = false
         if foreignDiagnosis || jobCoordinator == nil || configurationSnapshot != nil || blockerDiagnosis != nil
             || (reviewRetry != nil && glab != nil) {
             let service = glab ?? GlabService()
@@ -486,9 +488,9 @@ enum AssistantAutomationRunner {
                     throw AssistantJobExecutor.ExecutionError.disabledPermission
                 }
             }
-            requiresSoleAssignment = snapshot.request.author.id != snapshot.user.id
+            dependsOnAssignment = snapshot.request.author.id != snapshot.user.id
                 && settings.owns(snapshot.request, userID: snapshot.user.id)
-            if let retryOf, settings.assistantHandoffs.first(where: { $0.id == retryOf })?.requiresSoleAssignment == true {
+            if let retryOf, settings.assistantHandoffs.first(where: { $0.id == retryOf })?.dependsOnAssignment == true {
                 guard settings.owns(snapshot.request, userID: snapshot.user.id) else {
                     throw AssistantJobExecutor.ExecutionError.disabledPermission
                 }
@@ -653,7 +655,7 @@ enum AssistantAutomationRunner {
             readOnlyReview: usesReadOnlyReview ? true : nil,
             blockerDiagnosis: blockerDiagnosis,
             accountUserID: reviewer?.id ?? settings.authenticatedAccountID(host: work.host, username: username),
-            estimatedRepositoryBytes: estimatedRepositoryBytes, requiresSoleAssignment: requiresSoleAssignment ? true : nil
+            estimatedRepositoryBytes: estimatedRepositoryBytes, requiresSoleAssignment: dependsOnAssignment ? true : nil
         )
         for (noteID, revision) in verifiedFeedbackNotes ?? [:] {
             settings.authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision,

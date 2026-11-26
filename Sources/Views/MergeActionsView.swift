@@ -187,7 +187,7 @@ struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, Additio
         } else if displayedState.title == nil, let blocker = shownBlocker {
             statusLine(blocker.title, symbol: "lock")
             if feedbackRecovery?.recoveryAction == .verifyFeedback, feedbackRecheckRoute == .review {
-                statusLine(.MergeActions.mergeActionsFeedbackChecksPaused, symbol: "pause.circle")
+                statusLine(.MergeActions.mergeActionsFeedbackChecksPaused, symbol: "pause.fill")
             }
         }
         if showsDiscussionLine {

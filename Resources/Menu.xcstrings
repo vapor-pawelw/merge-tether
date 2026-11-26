@@ -1498,10 +1498,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tip: Option-click the bolt to switch automation without opening this panel."
+            "value": "Tip: Option-click the Automation button to switch automation without opening this panel."
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Wskazówka: kliknij błyskawicę z klawiszem Option, aby przełączyć automatyzację bez otwierania tego panelu."}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Wskazówka: kliknij przycisk Automatyzacja z klawiszem Option, aby przełączyć automatyzację bez otwierania tego panelu."}}
       }
     },
     "menu.scope.followRepository": {

@@ -178,10 +178,9 @@ struct CommandCenterView: View {
         let settings = monitor.settings
         let available = settings.configuredAutomationAvailable
         let active = settings.automationGloballyActive
-        // A plain toolbar button keeps the standard chrome; the bolt alone shows the state.
         return Button { monitor.requestGlobalAutomationToggle(confirm: confirmGlobalAutomationChange) } label: {
             Label { Text(.CommandCenter.commandCenterAutomationToggle) } icon: {
-                Image(systemName: active ? "bolt.fill" : "bolt.slash")
+                Image(systemName: active ? "play.fill" : "pause.fill")
                     .foregroundStyle(active ? Color.accentColor : Color.secondary)
             }
         }
@@ -214,7 +213,7 @@ struct CommandCenterView: View {
         if monitor.settings.configuredAutomationAvailable, !monitor.settings.automationGloballyEnabled {
             HStack(spacing: 10) {
                 Label { Text(.CommandCenter.commandCenterAutomationSuspendedBanner) } icon: {
-                    Image(systemName: "bolt.slash.fill")
+                    Image(systemName: "pause.fill")
                 }
                 Spacer()
                 Button { monitor.setAutomationGloballyEnabled(true) } label: {

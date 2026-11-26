@@ -2453,7 +2453,7 @@ import MergeTetherRemote
         let service = TodoMonitorService(settings: restarted, glab: harness.glab)
         defer { service.stopTimer() }
         let editor = MRAutomationScopeEditor(monitor: service, target: target)
-        #expect(editor.choice == .default && editor.boltColor == .orange)
+        #expect(editor.choice == .default && editor.stateColor == .orange)
         #expect(editor.displayedPreference(for: .approval) == .off && editor.canChoose(.approval))
         await editor.choose(.default, for: .approval)
         #expect(restarted.permitsAutomaticAction(.approval, for: request, target: target))

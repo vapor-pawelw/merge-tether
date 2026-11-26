@@ -116,10 +116,9 @@ enum MRActionCTA: String, CaseIterable, Sendable {
         }
     }
 
-    /// The effect icon. Sparkles are reserved for AI work, the bolt for resumed
-    /// automation; deterministic actions keep their own icon (`nil`).
+    /// Sparkles mark AI work. Play marks actions that resume automation.
     var symbol: String? {
-        effect.symbol ?? (followUps.contains(.resumesAutomation) ? "bolt" : nil)
+        effect.symbol ?? (followUps.contains(.resumesAutomation) ? "play.fill" : nil)
     }
 
     var summary: LocalizedStringResource {

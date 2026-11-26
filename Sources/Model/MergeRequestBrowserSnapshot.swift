@@ -7,10 +7,10 @@ struct MergeRequestBrowserSnapshot {
 
     init(openItems: [MergeRequestAttentionMonitor.Item], authored: [AuthoredMergeRequestStatus],
          host: String, username: String, scope: MRAutomationScope, ownCatalogIsAuthoritative: Bool = false,
-         draftsLast: Bool = true, treatSoleAssigneeAsOwn: Bool = true) {
+         draftsLast: Bool = true, treatAssignedMergeRequestsAsOwn: Bool = true) {
         let items = MRBoardProjector.browserItems(openItems: openItems, authored: authored,
             host: host, username: username, ownCatalogIsAuthoritative: ownCatalogIsAuthoritative, draftsLast: draftsLast,
-            treatSoleAssigneeAsOwn: treatSoleAssigneeAsOwn)
+            treatAssignedMergeRequestsAsOwn: treatAssignedMergeRequestsAsOwn)
         own = items.own
         reviewed = items.reviewed
     }

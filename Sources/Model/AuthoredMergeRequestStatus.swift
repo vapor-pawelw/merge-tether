@@ -50,7 +50,7 @@ struct AuthoredMergeRequestStatus: Identifiable {
             && request.evidenceContext().binds(to: current.evidenceContext(), policy: .semanticText)
             && request.draft == current.draft && request.author.id == current.author.id
             && request.author.username == current.author.username
-            && request.soleAssignee == current.soleAssignee
+            && request.assigneeIdentities == current.assigneeIdentities
     }
 
     static func orderedForMerge(_ statuses: [Self]) -> [Self] {

@@ -99,9 +99,9 @@ struct RemoteMRDetailContent: View {
                 }
                 if let automation = details.automation {
                     Divider()
-                    // Read-only, like the Mac's lightning panel header; switching stays on the Mac.
+                    // Read-only, like the Mac's Automation panel header; switching stays on the Mac.
                     Label { Text(verbatim: automation.summary) } icon: {
-                        Image(systemName: automation.active ? "bolt.fill" : "bolt.slash")
+                        Image(systemName: automation.active ? "play.fill" : "pause.fill")
                             .foregroundStyle(automation.active ? Color.accentColor : Color.secondary)
                     }
                     .font(.callout)

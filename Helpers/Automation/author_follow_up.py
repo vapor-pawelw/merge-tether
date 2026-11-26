@@ -85,11 +85,17 @@ class AuthorFollowUpVerifier:
         author = mr.get("author")
         assignees = mr.get("assignees")
         author_matches = isinstance(author, dict) and type(author.get("id")) is int and author["id"] == user_id
-        sole_assignee_matches = (run.get("soleAssigneeAllowed") is True and isinstance(assignees, list) and
-                                 len(assignees) == 1 and isinstance(assignees[0], dict) and
-                                 type(assignees[0].get("id")) is int and assignees[0]["id"] == user_id)
+        assignee_matches = False
+        if isinstance(assignees, list):
+            assignment_allowed = run.get("assigneeAllowed") is True
+            if "assigneeAllowed" not in run:
+                assignment_allowed = run.get("soleAssigneeAllowed") is True and len(assignees) == 1
+            assignee_matches = assignment_allowed and any(
+                isinstance(assignee, dict) and type(assignee.get("id")) is int and assignee["id"] == user_id
+                for assignee in assignees
+            )
         if (mr.get("project_id") != int(projectID) or mr.get("iid") != int(iid) or mr.get("state") != "opened" or
-                type(user_id) is not int or user_id <= 0 or not (author_matches or sole_assignee_matches) or
+                type(user_id) is not int or user_id <= 0 or not (author_matches or assignee_matches) or
                 type(mr.get("source_project_id")) is not int or not mr.get("source_branch")):
             raise ValueError("The open MR must belong to the authenticated user")
         if type(mr.get("draft")) is not bool:

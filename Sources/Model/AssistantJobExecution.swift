@@ -114,7 +114,7 @@ struct AssistantJobExecution: Codable, Equatable, Sendable {
                                   feedbackStatus: AuthorFeedbackStatus? = nil,
                                   discussionFingerprint: String? = nil) -> Bool {
         if let currentRequest, let feedbackStatus, !feedbackStatus.codeReviewRequests.isEmpty,
-           currentRequest.isOwned(by: username, includingSoleAssignee: true), currentRequest.projectID == work.projectID,
+           currentRequest.isOwned(by: username, includingAssignee: true), currentRequest.projectID == work.projectID,
            currentRequest.iid == work.iid, currentRequest.webURL.isGitLabMergeRequest(host: work.host, iid: work.iid),
            feedbackStatus.head == currentRequest.sha, feedbackStatus.fingerprint == discussionFingerprint,
            feedbackStatus.semanticContextFingerprint == currentRequest.semanticContextFingerprint {
