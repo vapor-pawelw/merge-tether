@@ -572,7 +572,8 @@ extension FollowUpVerificationStore {
         let origins = recoveryOrigins(work: work, username: username, input: input, in: directory)
         guard !origins.isEmpty else { return [] }
         let handoffs = input.handoffs.filter { input.owns($0, username: username) }
-        return input.authenticatedRecoveries.compactMap { name, data in
+        // Publication admission compares receipt lists, so their order must not depend on dictionary iteration.
+        return input.authenticatedRecoveries.sorted { $0.key < $1.key }.compactMap { name, data in
             guard let record = try? JSONDecoder().decode(RecoveryRecord.self, from: data),
                   [1, 2, 3].contains(record.version), name == "\(record.attemptID).json",
                   isHex(record.attemptID, lengths: [64]), origins.contains(record.origin),
