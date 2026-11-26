@@ -251,6 +251,32 @@ struct GlabMergeRequestAPITests {
         }
     }
 
+    @Test func anAccountSwitchDuringTheUserReadCancelsInsteadOfFailingAuthentication() async throws {
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: host, username: "alice")
+        gitlab.handler = { call in
+            guard call.endpoint == "/user" else { return try gitlab.unexpected(call) }
+            glab.currentUsername = "bob"
+            return InMemoryGitLab.output(#"{"id":7,"username":"alice"}"#)
+        }
+        await #expect(throws: CancellationError.self) {
+            try await glab.fetchAuthenticatedUser(host: host, expectedUsername: "alice")
+        }
+
+        glab.currentUsername = "alice"
+        let other = GitLabAccountIdentity(host: host, username: "alice", userID: 8)
+        #expect(glab.confirmAuthenticatedAccount(other, revision: glab.accountRevision))
+        gitlab.handler = { call in
+            guard call.endpoint == "/user" else { return try gitlab.unexpected(call) }
+            return InMemoryGitLab.output(#"{"id":7,"username":"alice"}"#)
+        }
+        // A different GitLab user behind the same session is still an authentication failure.
+        await #expect(throws: GlabError.notAuthenticated) {
+            try await glab.fetchAuthenticatedUser(host: host, expectedUsername: "alice")
+        }
+    }
+
     @Test func mergesOnlyAfterRecheckingAccountAndPinsSourceHead() async throws {
         try await withFakeGlab(expectMerge: true) { glab in
             let user = try await glab.fetchAuthenticatedUser(host: host, expectedUsername: "author")

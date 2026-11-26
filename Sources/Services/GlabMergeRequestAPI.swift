@@ -19,6 +19,10 @@ extension GlabService {
         guard user.username == expectedUsername else { throw GlabError.notAuthenticated }
         guard expectedUserID == nil || user.id == expectedUserID else { throw CancellationError() }
         if isDefaultAccount, !confirmAuthenticatedAccount(user.account(on: host), revision: revision) {
+            // A login switch during the read makes this evidence stale rather than unauthenticated.
+            if accountRevision != revision || resolvedHost != host || currentUsername != expectedUsername || Task.isCancelled {
+                throw CancellationError()
+            }
             throw GlabError.notAuthenticated
         }
         return user
