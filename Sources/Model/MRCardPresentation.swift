@@ -281,13 +281,22 @@ struct MRCardPresentation {
     private var checkingFollowUp: Bool {
         item.authorFeedbackStatus?.phase == .checking || row.attentionIntents.contains(where: \.isAwaitingFollowUpVerification)
     }
+    private var activeJob: AssistantAutomationRunner.Handoff? {
+        guard let job = row.latestJob, job.operationalExecution?.state.isActive == true else { return nil }
+        return job
+    }
     var activity: MRActivity? {
         guard working, let status else { return nil }
-        if let job = row.latestJob, job.operationalExecution?.state.isActive == true {
+        if let job = activeJob {
             return .init(status: status, jobID: job.id,
                 startedAt: job.execution?.state == .running ? job.execution?.startedAt ?? job.createdAt : job.createdAt)
         }
         return .init(status: status)
+    }
+    func reviewLaunchReason(workflows: [MergeWorkflowActivityEntry], intents: [MRTodoIntent]) -> String? {
+        guard working, let job = activeJob else { return nil }
+        return ReviewLaunchReason.message(for: MRAutomationHistory.reviewLaunchReasons(for: job,
+            workflows: workflows, intents: intents))
     }
     private var preservesConfirmedAttention: Bool {
         (isRefreshingAttention || refreshFailed) && row.needsAttention && preservedHumanAction != nil

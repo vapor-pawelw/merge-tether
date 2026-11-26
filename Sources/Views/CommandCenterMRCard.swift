@@ -225,7 +225,10 @@ private struct CommandCenterMRCardContent: View {
                         if showsWorkingStatus {
                             if let status = presentation.status {
                                 MRActivityStatus(status: status,
-                                    startedAt: monitor.activityStartedAt(for: item, activity: presentation.activity), effect: presentation.activityEffect)
+                                    startedAt: monitor.activityStartedAt(for: item, activity: presentation.activity),
+                                    effect: presentation.activityEffect,
+                                    detail: presentation.reviewLaunchReason(workflows: monitor.settings.workflowActivity,
+                                        intents: monitor.settings.mrActionIntents))
                             }
                         } else if presentation.refreshFailed {
                             Label { Text(verbatim: presentation.refreshFailureLabel ?? String(localized: .AutomationProgress.progressRefreshFailed)) }
