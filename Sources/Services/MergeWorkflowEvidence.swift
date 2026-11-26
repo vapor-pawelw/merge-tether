@@ -54,7 +54,7 @@ extension GlabService {
         struct Job: Decodable {
             struct Pipeline: Decodable { let id: Int }
             let id: Int
-            let status: String
+            let status: GitLabPipelineStatus
             let allow_failure: Bool?
             let failure_reason: String?
             let pipeline: Pipeline
@@ -62,7 +62,7 @@ extension GlabService {
 
         let path = "/projects/\(projectID)/jobs/\(jobID)"
         let job: Job = try await mergeRequestAPI(path, host: host)
-        guard job.id == jobID, job.pipeline.id == pipelineID, job.status == "failed",
+        guard job.id == jobID, job.pipeline.id == pipelineID, job.status == .failed,
               job.failure_reason == "runner_system_failure", job.allow_failure == false,
               shouldProceed()
         else { throw CancellationError() }

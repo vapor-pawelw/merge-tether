@@ -94,7 +94,7 @@ struct MergeSubmissionReceipt: Codable, Equatable {
         return request.projectID == context.projectID && request.iid == context.iid && request.webURL == context.url
             && request.sourceProjectID == context.sourceProjectID && request.sourceBranch == context.source
             && request.targetProjectID == context.targetProjectID && request.targetBranch == context.target
-            && request.state == "opened"
+            && request.isOpen
     }
 
     func matchesContext(_ request: GitLabMergeRequest, configuration: MergeSubmissionConfiguration) -> Bool {
@@ -106,12 +106,12 @@ struct MergeSubmissionReceipt: Codable, Equatable {
 extension GitLabMergeRequest {
     var hasQueuedMerge: Bool { mergeWhenPipelineSucceeds == true }
     func isReadyForMergeSubmission(_ action: MergeSubmissionAction) -> Bool {
-        guard state == "opened", draft == false, hasConflicts == false, !hasMergeConflict,
+        guard isOpen, draft == false, hasConflicts == false, !hasMergeConflict,
               !mergeTrainEvidenceUnavailable, canMerge == true,
               let sha, GlabService.isFullGitSHA(sha) else { return false }
-        if detailedMergeStatus == "mergeable", headPipeline == nil || headPipeline?.status == "success" { return true }
-        return action == .enqueue && ["mergeable", "ci_still_running"].contains(detailedMergeStatus ?? "")
-            && ["created", "pending", "running", "preparing", "waiting_for_resource"].contains(headPipeline?.status ?? "")
+        if detailedMergeStatus == .mergeable, headPipeline == nil || headPipeline?.status == .success { return true }
+        return action == .enqueue && [.mergeable, .ciStillRunning].contains(detailedMergeStatus)
+            && [.created, .pending, .running, .preparing, .waitingForResource].contains(headPipeline?.status)
     }
 }
 

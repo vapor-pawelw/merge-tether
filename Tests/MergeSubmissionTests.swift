@@ -635,7 +635,7 @@ import Testing
             if scenario == "newFeedback" {
                 #expect(assessedNoteIDs == [10])
                 #expect(writes.isEmpty)
-                #expect(monitor.requests.first?.request.headPipeline?.status == "success")
+                #expect(monitor.requests.first?.request.headPipeline?.status == .success)
                 #expect(monitor.requests.first?.submissionState == MergeSubmissionState.none)
                 #expect(settings.mergeSubmissions.isEmpty)
             } else {

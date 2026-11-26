@@ -66,7 +66,7 @@ struct IncomingReviewFilterLedger: Codable, Equatable, Sendable {
     static func target(for todo: Todo, host: String, username: String) -> Target? {
         guard todo.targetType == .mergeRequest, todo.project.id > 0, let iid = todo.target.iid, iid > 0,
               todo.targetURL.gitLabTodoMergeRequestURL(host: host, iid: iid) != nil else { return nil }
-        return .init(host: host, username: username, projectID: todo.project.id, iid: iid)
+        return .mergeRequest(host: host, username: username, projectID: todo.project.id, iid: iid)
     }
 
     func suppresses(_ target: Target) -> Bool {
@@ -108,7 +108,7 @@ struct IncomingReviewFilterLedger: Codable, Equatable, Sendable {
         var assigned = Set<Target>()
         for assignment in requests {
             let request = assignment.request
-            let target = Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
+            let target = Target.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
             assigned.insert(target)
             if entries[target] != nil {
                 // Keep the queued URL immutable so a moved MR fails open.

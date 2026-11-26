@@ -276,7 +276,7 @@ struct MRCatalogStalenessTests {
         try #require(!(path == "authored" ? authored.isLoading : h.monitor.isLoading))
         let latest = try #require(h.settings.mrLifecycleLedger.request(for: target))
         if state == "draft" { #expect(latest.draft == true) }
-        else { #expect(latest.state == "merged") }
+        else { #expect(latest.state == .merged) }
         #expect(h.settings.mrLifecycleLedger.takeTransitions(host: host, username: "me").map(\.kind.rawValue) == [state])
     }
 
@@ -463,7 +463,7 @@ struct MRCatalogStalenessTests {
         #expect(h.monitor.currentOpenItems.first { $0.id.iid == freshID }?.title == "Fresh title")
         if ownedFails {
             let retained = try #require(h.monitor.currentOpenItems.first { $0.id.iid == 1 })
-            #expect(retained.mergeRequest?.state == "opened")
+            #expect(retained.mergeRequest?.state == .opened)
             #expect(retained.url.absoluteString == "https://gitlab.example.org/g/p/-/merge_requests/1")
             let calls = h.gitlab.text("calls")
             #expect(calls.split(separator: "\n").contains("/projects/1/merge_requests/1"))
@@ -490,7 +490,7 @@ struct MRCatalogStalenessTests {
         try await h.poll()
         #expect(!h.monitor.hasError)
         #expect(h.monitor.currentOpenItems.isEmpty)
-        #expect(h.settings.mrLifecycleLedger.request(for: target)?.state == state)
+        #expect(h.settings.mrLifecycleLedger.request(for: target)?.state == .init(rawValue: state))
         #expect(h.settings.automation.scope[target] == .active)
         #expect(h.settings.automation.scope.isManaged(target))
         let restartedSettings = SettingsManager(defaults: h.defaults)
@@ -508,7 +508,7 @@ struct MRCatalogStalenessTests {
         try await h.poll()
         // The exact endpoint is deliberately unavailable in this fixture.
         #expect(h.monitor.hasError)
-        #expect(h.monitor.currentOpenItems.contains { $0.id.iid == 1 && $0.mergeRequest?.state == "opened" })
+        #expect(h.monitor.currentOpenItems.contains { $0.id.iid == 1 && $0.mergeRequest?.state == .opened })
         #expect(h.settings.mrLifecycleLedger.takeTransitions(host: host, username: "me").isEmpty)
     }
 

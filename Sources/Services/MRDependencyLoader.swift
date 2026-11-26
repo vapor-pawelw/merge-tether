@@ -38,7 +38,7 @@ final class MRDependencyLoader {
             !Task.isCancelled && generation == token && account == current
                 && glab.resolvedHost == host && glab.currentUsername == username && glab.accountRevision == current.revision
         }
-        let rows = Dictionary(requests.filter { $0.state == "opened" && $0.webURL.isGitLabMergeRequest(host: host, iid: $0.iid) }
+        let rows = Dictionary(requests.filter { $0.state == .opened && $0.webURL.isGitLabMergeRequest(host: host, iid: $0.iid) }
             .map { (ID(projectID: $0.projectID, iid: $0.iid), $0) }, uniquingKeysWith: { first, _ in first }).values
         let contexts = Set(rows.map(Context.init))
         dependencies = dependencies.filter { contexts.contains($0.key) }

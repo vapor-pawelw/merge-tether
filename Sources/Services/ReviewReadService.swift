@@ -36,7 +36,7 @@ struct ReviewReadService {
         async let identity = glab.fetchAuthenticatedUser(host: host, expectedUsername: user.username)
         async let request = glab.fetchMergeRequest(projectID: target.projectID, iid: target.iid, host: host)
         let (authenticated, live) = try await (identity, request)
-        guard isCurrent(), authenticated == user, live.state == "opened", live.webURL == target.webURL,
+        guard isCurrent(), authenticated == user, live.isOpen, live.webURL == target.webURL,
               live.sha == target.sha, live.semanticContextFingerprint == target.semanticContextFingerprint,
               live.sourceProjectID == target.sourceProjectID, live.sourceBranch == target.sourceBranch else { throw Error.changed }
         return live

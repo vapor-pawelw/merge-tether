@@ -185,8 +185,8 @@ struct MergeRequestBoardSnapshotTests {
             todos: [], attention: [oldAttention], handoffs: [], host: host, username: "me", pinnedCards: [pin],
             preservedOrder: [item(3).id: 0, item(1).id: 1])
         #expect(board.own.map(\.id.iid) == [2, 3, 1])
-        #expect(board.own.first?.displayRequest?.state == state)
-        #expect(board.own.first?.item.mergeRequest?.state == "opened")
+        #expect(board.own.first?.displayRequest?.state == .init(rawValue: state))
+        #expect(board.own.first?.item.mergeRequest?.state == .opened)
     }
 
     @Test func cancelledRemindersRemainHistoryWithoutOperationalAttentionOrStandaloneRetryCards() throws {

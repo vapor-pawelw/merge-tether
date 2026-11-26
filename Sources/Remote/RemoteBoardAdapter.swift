@@ -193,7 +193,7 @@ import MergeTetherRemote
             let approvals = RemoteApprovalDetails(progress: item.approvalProgress,
                 reviewers: item.mergeRequest?.reviewers ?? [], viewerUsername: username,
                 isOwnMergeRequest: item.isAuthored || item.mergeRequest == nil
-                    || item.mergeRequest?.author.username.lowercased() == username.lowercased())
+                    || item.mergeRequest.map { GitLabAccountIdentity.normalize($0.author.username) } == GitLabAccountIdentity.normalize(username))
             card.presentation = .init(repository: card.project.split(separator: "/").last.map(String.init) ?? card.project,
                 approvalPeople: approvals.people, viewerApprovalID: approvals.viewerApprovalID,
                 assignedReviewerCount: MergeRequestApprovalProgress.assignedReviewerCount(item.mergeRequest?.reviewers))
@@ -279,7 +279,7 @@ import MergeTetherRemote
                     if !issues.isEmpty { card.issues = issues }
                     if let head = card.head, let host = monitor.glab.resolvedHost,
                        let username = monitor.glab.currentUsername, account == "\(username)@\(host)" {
-                        let target = MRAutomationScope.Target(host: host, username: username, projectID: item.id.projectID, iid: item.id.iid)
+                        let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: item.id.projectID, iid: item.id.iid)
                         if monitor.settings.hasAutomaticApprovalWithOpenFindings(for: target, head: head) {
                             card.presentation?.approvedWithOpenFindings = true
                         }
@@ -287,7 +287,7 @@ import MergeTetherRemote
                             card.presentation?.automaticApprovalOff = true
                         }
                     }
-                    if row.displayRequest?.state == "merged" || row.displayRequest?.state == "closed" {
+                    if row.displayRequest?.state == .merged || row.displayRequest?.state == .closed {
                         card.actions = []
                         result.lanes[lane].cards[index] = card
                         continue
@@ -474,7 +474,7 @@ import MergeTetherRemote
     static func mergePresentation(_ original: RemoteCard, item: MergeRequestAttentionMonitor.Item,
                                   status: AuthoredMergeRequestStatus?, evidenceMatchesCatalogContext: Bool = true,
                                   hasCurrentCatalog: Bool = true, waitingStatus: MRWaitingStatus? = nil) -> RemoteCard {
-        guard item.isAuthored, let request = item.mergeRequest, request.state == "opened" else { return original }
+        guard item.isAuthored, let request = item.mergeRequest, request.isOpen else { return original }
         let checked = hasCurrentCatalog && evidenceMatchesCatalogContext && status?.matchesCurrentRequest(request) == true ? status : nil
         let title: LocalizedStringResource
         let detail: String?
@@ -510,7 +510,7 @@ import MergeTetherRemote
             card.presentation = .init(repository: String(repository))
         }
         let dependencyHold = waitingStatus?.hasCurrentDependencyHold == true
-            && checked?.request.detailedMergeStatus == "merge_request_blocked"
+            && checked?.request.detailedMergeStatus == .mergeRequestBlocked
         let knownMergeFailure = checked?.blockers.contains { reason in
             switch reason {
             case .draft, .unpublishedDrafts, .commentReview, .conflictTaskFailed, .conflicts, .pipeline,
@@ -574,7 +574,7 @@ import MergeTetherRemote
                              evidenceMatchesCatalogContext: Bool = true) -> RemoteCard {
         var card = original
         guard item.isAuthored, item.mergeRequest?.author.username == monitor.glab.currentUsername,
-              let request = item.mergeRequest, request.state == "opened",
+              let request = item.mergeRequest, request.isOpen,
               let token = try? RemoteDigest.token([account, try RemoteDigest.token(request),
                   item.observedDiscussionFingerprint ?? "", try MergeSubmissionFingerprint.configuration(monitor.settings)]) else { return card }
         if evidenceMatchesCatalogContext, let status, item.canOfferManualMerge(using: status), let action = status.action {
@@ -595,7 +595,7 @@ import MergeTetherRemote
     /// while the card is busy; the command names its comments and the host re-reads GitLab to match them.
     static func commentOriginControl(item: MergeRequestAttentionMonitor.Item, monitor: TodoMonitorService,
                                      account: String) -> RemoteAction? {
-        guard let request = item.mergeRequest, request.state == "opened",
+        guard let request = item.mergeRequest, request.isOpen,
               monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) != nil,
               let token = try? RemoteDigest.token([account, "commentOrigin", String(request.projectID), String(request.iid)])
         else { return nil }
@@ -606,7 +606,7 @@ import MergeTetherRemote
     /// automation settings, so any change since the phone's snapshot rejects the command as changed.
     static func mrControls(item: MergeRequestAttentionMonitor.Item, row: MergeRequestBoardSnapshot.Row,
                            monitor: TodoMonitorService, account: String, busy: Bool) -> [RemoteAction] {
-        guard let request = item.mergeRequest, request.state == "opened", row.evidenceMatchesCatalogContext,
+        guard let request = item.mergeRequest, request.isOpen, row.evidenceMatchesCatalogContext,
               let base = try? RemoteDigest.token([account, try RemoteDigest.token(request),
                   item.observedDiscussionFingerprint ?? "", try RemoteDigest.token(monitor.settings.automation)]) else { return [] }
         func token(_ parts: [String]) -> String? { try? RemoteDigest.token([base] + parts) }

@@ -66,7 +66,7 @@ import MergeTetherRemote
             else { MergeRequestReviewHistory(reviewers: reviewers ?? [], discussions: discussions ?? [], authorID: request.author.id) }
         progress?.reviewHistory = history
         let approvals = RemoteApprovalDetails(progress: progress, reviewers: request.reviewers ?? [], viewerUsername: username,
-            isOwnMergeRequest: request.author.username.lowercased() == username.lowercased(),
+            isOwnMergeRequest: GitLabAccountIdentity.normalize(request.author.username) == GitLabAccountIdentity.normalize(username),
             rules: rules?.projected, requirementsSatisfied: rules?.requirementsSatisfied,
             historyAvailable: reviewers != nil && discussions != nil, reviewHistory: history)
         let metadata: [RemoteDetailField] = [
@@ -75,8 +75,8 @@ import MergeTetherRemote
             .init(label: String(localized: .CommandCenter.commandCenterSource), value: request.sourceBranch),
             .init(label: String(localized: .CommandCenter.commandCenterTarget), value: request.targetBranch),
             .init(label: String(localized: .CommandCenter.commandCenterCommit), value: request.sha ?? String(localized: .CommandCenter.commandCenterStatusUnavailable)),
-            .init(label: String(localized: .CommandCenter.commandCenterMergeState), value: request.detailedMergeStatus?.replacingOccurrences(of: "_", with: " ") ?? String(localized: .CommandCenter.commandCenterStatusUnavailable)),
-            .init(label: String(localized: .CommandCenter.commandCenterPipeline), value: request.headPipeline?.status.replacingOccurrences(of: "_", with: " ") ?? String(localized: .CommandCenter.commandCenterNoPipeline)),
+            .init(label: String(localized: .CommandCenter.commandCenterMergeState), value: request.detailedMergeStatus?.rawValue.replacingOccurrences(of: "_", with: " ") ?? String(localized: .CommandCenter.commandCenterStatusUnavailable)),
+            .init(label: String(localized: .CommandCenter.commandCenterPipeline), value: request.headPipeline?.status.rawValue.replacingOccurrences(of: "_", with: " ") ?? String(localized: .CommandCenter.commandCenterNoPipeline)),
         ]
         let threads = discussions.map {
             MRDiscussionSnapshot(discussions: $0, drafts: drafts, origins: origins).threads.map { thread in
@@ -165,7 +165,7 @@ struct RemoteMRGitLabHistory: Sendable {
         history.resources = resources.mapValues { events in
             let events = sorted(events)
             let olderMerges = events.dropFirst(retainedCount).lazy.filter {
-                if case .state("merged") = $0.kind { return true }
+                if case .state(.merged) = $0.kind { return true }
                 return false
             }.prefix(2)
             return Array(events.prefix(retainedCount)) + Array(olderMerges)

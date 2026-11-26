@@ -2,11 +2,20 @@ import CryptoKit
 import Foundation
 
 struct MRDiscussionTarget: Hashable, Sendable {
-    let host: String
-    let username: String
-    let projectID: Int
-    let iid: Int
+    private let account: GitLabAccountIdentity
+    let mergeRequestID: GitLabMergeRequestID
     let url: URL
+
+    var host: String { account.host }
+    var username: String { account.username }
+    var projectID: Int { mergeRequestID.projectID }
+    var iid: Int { mergeRequestID.iid }
+
+    init(host: String, username: String, projectID: Int, iid: Int, url: URL) {
+        account = .init(host: host, username: username)
+        mergeRequestID = .init(projectID: projectID, iid: iid)
+        self.url = url
+    }
 }
 
 /// A read-only conversation projection. Origin evidence belongs to a single current note.

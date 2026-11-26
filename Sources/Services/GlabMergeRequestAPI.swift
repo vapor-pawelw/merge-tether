@@ -51,7 +51,7 @@ extension GlabService {
         try checkSession()
         let current = try await fetchMergeRequest(projectID: projectID, iid: iid, host: host)
         try checkSession()
-        guard current.author.id == expectedUser.id, current.state == "opened", current.sha == headSHA,
+        guard current.author.id == expectedUser.id, current.state == .opened, current.sha == headSHA,
               current.webURL.isGitLabMergeRequest(host: host, iid: iid), let draft = current.draft else {
             throw CancellationError()
         }
@@ -84,7 +84,7 @@ extension GlabService {
         try checkSession()
         let updated = try await fetchMergeRequest(projectID: projectID, iid: iid, host: host)
         try checkSession()
-        guard updated.author.id == expectedUser.id, updated.state == "opened", updated.sha == headSHA,
+        guard updated.author.id == expectedUser.id, updated.isOpen, updated.sha == headSHA,
               updated.webURL == current.webURL, updated.draft == false else {
             throw GlabError.decoding("GitLab did not confirm the merge request is ready")
         }
@@ -409,7 +409,7 @@ extension GlabService {
         if let requestToUnapprove {
             // GitLab accepts a SHA for approval only, so read the revision again before removal.
             let current = try await fetchMergeRequest(projectID: projectID, iid: iid, host: host)
-            guard current.state == "opened", MRAttentionRecord.sameContext(current, requestToUnapprove) else {
+            guard current.state == .opened, MRAttentionRecord.sameContext(current, requestToUnapprove) else {
                 throw CancellationError()
             }
         }
@@ -452,7 +452,7 @@ extension GlabService {
     func areFeedbackThreadsResolved(_ noteIDs: Set<Int>, request: GitLabMergeRequest,
                                     target: MRAutomationScope.Target) async -> Bool {
         let revision = accountRevision
-        guard !Task.isCancelled, !noteIDs.isEmpty, request.state == "opened",
+        guard !Task.isCancelled, !noteIDs.isEmpty, request.isOpen,
               request.author.username == target.username, request.projectID == target.projectID, request.iid == target.iid,
               request.webURL.isGitLabMergeRequest(host: target.host, iid: request.iid),
               resolvedHost == target.host, currentUsername == target.username,
@@ -665,7 +665,7 @@ extension GlabService {
         struct MergeResult: Decodable {
             let projectID: Int
             let iid: Int
-            let state: String
+            let state: GitLabMergeRequestState
 
             enum CodingKeys: String, CodingKey {
                 case projectID = "project_id"
@@ -791,7 +791,7 @@ extension GlabService {
         try Task.checkCancellation()
         guard shouldProceed() else { throw CancellationError() }
         if let recoveredPipeline {
-            guard let headPipeline = final.headPipeline, headPipeline.status == "success",
+            guard let headPipeline = final.headPipeline, headPipeline.status == .success,
                   headPipeline.id == recoveredPipeline.id, headPipeline.projectID == recoveredPipeline.projectID,
                   headPipeline.sha == recoveredPipeline.sha,
                   headPipeline.ref == nil || headPipeline.ref == recoveredPipeline.ref else { throw CancellationError() }
@@ -826,7 +826,7 @@ extension GlabService {
             arguments: ["--method", "PUT", "--raw-field", "sha=\(headSHA)"],
             timeout: 30, shouldProceed: shouldProceed
         )
-        guard result.projectID == projectID, result.iid == iid, result.state == "merged" else {
+        guard result.projectID == projectID, result.iid == iid, result.state == .merged else {
             throw GlabError.decoding("GitLab did not confirm the merge")
         }
         return .merged

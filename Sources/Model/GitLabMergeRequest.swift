@@ -46,9 +46,9 @@ struct MergeRequestApprovalProgress: Equatable, Sendable {
 
     func viewerApproval(username: String?, reviewers: [Todo.Author], isOwnMergeRequest: Bool) -> ViewerApproval? {
         guard !isOwnMergeRequest,
-              let username = username?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              let username = username.map({ GitLabAccountIdentity.normalize($0.trimmingCharacters(in: .whitespacesAndNewlines)) }),
               !username.isEmpty,
-              let viewer = participants(reviewers: reviewers).first(where: { $0.author.username.lowercased() == username })
+              let viewer = participants(reviewers: reviewers).first(where: { GitLabAccountIdentity.normalize($0.author.username) == username })
         else { return nil }
         switch viewer.status {
         case .approved: return .approved(viewer.author)
@@ -162,14 +162,14 @@ struct GitLabMergeRequest: Codable, Sendable {
     let title: String
     let description: String?
     let webURL: URL
-    let state: String
+    let state: GitLabMergeRequestState
     let draft: Bool?
     let sha: String?
     let sourceProjectID: Int?
     let sourceBranch: String
     let targetProjectID: Int?
     let targetBranch: String
-    let detailedMergeStatus: String?
+    let detailedMergeStatus: GitLabDetailedMergeStatus?
     let hasConflicts: Bool?
     let labels: [String]
     let blockingDiscussionsResolved: Bool?
@@ -182,6 +182,14 @@ struct GitLabMergeRequest: Codable, Sendable {
     // Derived live evidence is deliberately excluded from the persisted REST payload.
     var mergeTrainConflict: MergeTrainPreparationConflict? = nil
     var mergeTrainEvidenceUnavailable = false
+
+    var mergeRequestID: GitLabMergeRequestID { .init(projectID: projectID, iid: iid) }
+    var isOpen: Bool { state == .opened }
+    var isDraft: Bool { isDraft(fallback: false) }
+
+    func isDraft(fallback: Bool) -> Bool {
+        detailedMergeStatus == .draftStatus || (draft ?? fallback)
+    }
 
     var canMerge: Bool? { user?.canMerge }
 
@@ -206,7 +214,7 @@ struct GitLabMergeRequest: Codable, Sendable {
     struct Pipeline: Codable, Sendable {
         let id: Int?
         let projectID: Int?
-        let status: String
+        let status: GitLabPipelineStatus
         let sha: String?
         var ref: String? = nil
 

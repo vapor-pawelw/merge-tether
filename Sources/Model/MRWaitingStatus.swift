@@ -23,15 +23,15 @@ import MergeTetherRemote
     init?(row: MergeRequestBoardSnapshot.Row) {
         let item = row.item
         guard item.isAuthored, row.evidenceMatchesCatalogContext,
-              let request = row.displayRequest, request.state == "opened", request.draft == false,
+              let request = row.displayRequest, request.isOpen, request.draft == false,
               request.sha?.isEmpty == false, MRAttentionRecord.sameContext(item.mergeRequest, request) else { return nil }
         let dependencies = row.displayItem.dependencies
-        let dependencyHold = request.detailedMergeStatus == "merge_request_blocked"
+        let dependencyHold = request.detailedMergeStatus == .mergeRequestBlocked
             && dependencies?.issues.isDisjoint(with: [.dependenciesUnavailable, .hiddenDependency]) == true
             && dependencies?.predecessors.contains(where: { $0.isCurrent && $0.sources.contains(.gitLab) }) == true
         guard !request.hasQueuedMerge, !request.hasMergeConflict, !request.mergeTrainEvidenceUnavailable,
-              request.canMerge != false, request.headPipeline.map({ $0.status == "success" }) ?? true,
-              dependencyHold || [nil, "mergeable", "not_approved", "requested_changes", "discussions_not_resolved"].contains(request.detailedMergeStatus),
+              request.canMerge != false, request.headPipeline.map({ $0.status == .success }) ?? true,
+              dependencyHold || [nil, .mergeable, .notApproved, .requestedChanges, .discussionsNotResolved].contains(request.detailedMergeStatus),
               !row.hasIndependentStoppedWork, row.latestJob?.operationalExecution?.state.isActive != true,
               !row.attentionIntents.contains(where: { $0.state == .pending && !$0.isDeferredReview }),
               item.draftCount == 0, item.drafts.isEmpty, !item.requiresCommentReview,

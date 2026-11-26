@@ -45,7 +45,7 @@ enum DraftReplyRepair {
         }
         func matches(_ snapshot: DraftProofRecoveryCoordinator.Snapshot, configuration: AutomationSettings? = nil) -> Bool {
             snapshot.request.sha == headSHA && snapshot.branchHead == headSHA
-                && snapshot.request.state == "opened"
+                && snapshot.request.isOpen
                 && (configuration.map { $0.scope.permits(snapshot.request, host: snapshot.host, username: snapshot.user.username) }
                     ?? (snapshot.request.draft == false))
                 && snapshot.request.draftProofRecoveryContextFingerprint == recoveryContextFingerprint
@@ -360,7 +360,7 @@ enum DraftReplyRepair {
         }
         if AssistantAutomationRunner.isWorking(on: snapshot.work) { return nil }
         let configuration = settings.automation
-        let target = MRAutomationScope.Target(host: snapshot.host, username: snapshot.user.username,
+        let target = MRAutomationScope.Target.mergeRequest(host: snapshot.host, username: snapshot.user.username,
             projectID: snapshot.request.projectID, iid: snapshot.request.iid)
         func policyIsCurrent() -> Bool {
             configuration.preservingScope(from: settings.automation) == settings.automation

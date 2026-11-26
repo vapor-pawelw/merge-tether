@@ -75,7 +75,7 @@ import MergeTetherRemote
 
     func enqueueIssueMetadataRefresh(projectID: Int, iid: Int, host: String, username: String) {
         guard settings.findMergeRequestIssues, mergeRequestIssues != nil else { return }
-        let target = MRAutomationScope.Target(host: host, username: username, projectID: projectID, iid: iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: projectID, iid: iid)
         let revision = glab.accountRevision
         Task(priority: .utility) { [weak self] in
             guard let self, settings.findMergeRequestIssues, let mergeRequestIssues,
@@ -91,7 +91,7 @@ import MergeTetherRemote
 
     private func permitsIssueAssessment(for request: GitLabMergeRequest, target: MRAutomationScope.Target) -> Bool {
         // Draft action restrictions do not apply to read-only board metadata.
-        settings.findMergeRequestIssues && request.state == "opened"
+        settings.findMergeRequestIssues && request.isOpen
             && settings.automaticWritesAllowed && settings.automation.scope.resolve(target).active
     }
 

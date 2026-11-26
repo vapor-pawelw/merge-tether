@@ -7,7 +7,7 @@ struct CommentReviewSnapshot: Codable, Equatable, Sendable {
     let discussionFingerprint: String
 
     init?(request: GitLabMergeRequest?, discussions: [GitLabMergeRequestDiscussion]?) {
-        guard let request, request.state == "opened", let head = request.sha, !head.isEmpty,
+        guard let request, request.isOpen, let head = request.sha, !head.isEmpty,
               let discussions, let fingerprint = ReviewVerdict.fingerprint(discussions) else { return nil }
         headSHA = head
         semanticContext = request.semanticContextFingerprint
@@ -23,7 +23,7 @@ struct CommentReviewSnapshot: Codable, Equatable, Sendable {
 
     func matches(_ request: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion],
                  publishedBodyDigests: [String], userID: Int) -> Bool {
-        guard request.state == "opened", request.sha == headSHA,
+        guard request.isOpen, request.sha == headSHA,
               request.semanticContextFingerprint == semanticContext else { return false }
         if ReviewVerdict.fingerprint(discussions) == discussionFingerprint { return true }
         // Permit only the new own comments this publication actually sent.
@@ -45,6 +45,6 @@ struct CommentReviewSnapshot: Codable, Equatable, Sendable {
     }
 
     func covers(_ request: GitLabMergeRequest?) -> Bool {
-        request?.state == "opened" && request?.sha == headSHA && request?.semanticContextFingerprint == semanticContext
+        request?.state == .opened && request?.sha == headSHA && request?.semanticContextFingerprint == semanticContext
     }
 }

@@ -119,7 +119,7 @@ enum ManualDiscussionResolution {
         let participationRevision = settings.reviewParticipationPreferences.revision(host: host, username: username)
         let user = try await glab.fetchAuthenticatedUser(host: host, expectedUsername: username)
         let request = try await glab.fetchMergeRequest(projectID: expected.projectID, iid: expected.iid, host: host)
-        guard request.author.id == user.id, request.state == "opened",
+        guard request.author.id == user.id, request.isOpen,
               request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
               MergeRequestDependencySummary.Context(request) == .init(expected),
               request.semanticContextFingerprint == expected.semanticContextFingerprint else { throw CancellationError() }
@@ -133,7 +133,7 @@ enum ManualDiscussionResolution {
             assessment = try await ManualFeedbackVerification.assess(request: request, discussions: threads,
                 user: user, host: host, settings: settings, glab: glab)
         }
-        let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
         let plan = plan(discussions: threads, assessment: assessment, authorID: user.id, pendingDraftCount: drafts,
             ignoredSuggestions: settings.feedbackSuggestionDecisions.applicable(in: threads, for: target),
             excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: username))
@@ -167,7 +167,7 @@ enum ManualDiscussionResolution {
                 let drafts = try await glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid,
                     host: prepared.host, userID: prepared.user.id)
                 let threads = try await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: prepared.host)
-                guard user == prepared.user, live.author.id == user.id, live.state == "opened", drafts == 0,
+                guard user == prepared.user, live.author.id == user.id, live.isOpen, drafts == 0,
                       MergeRequestDependencySummary.Context(live) == .init(request),
                       live.semanticContextFingerprint == request.semanticContextFingerprint,
                       checked.matches(threads), let thread = threads.first(where: { $0.id == id }),

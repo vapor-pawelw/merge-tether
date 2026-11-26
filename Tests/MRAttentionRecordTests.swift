@@ -18,8 +18,8 @@ struct MRAttentionRecordTests {
         catalog.reviewingActivity = .init(discussions: threads, reviewerID: 7, authorID: 9)
         var record = MRAttentionRecord(evidence: item, catalog: catalog)
         let visible = try #require(record.catalogItem)
-        #expect(visible.mergeRequest?.headPipeline?.status == "failed")
-        #expect(visible.mergeRequest?.detailedMergeStatus == "ci_must_pass")
+        #expect(visible.mergeRequest?.headPipeline?.status == .failed)
+        #expect(visible.mergeRequest?.detailedMergeStatus == .ciMustPass)
         #expect(visible.title == "Current catalog label")
         #expect(visible.reviewingActivity?.publishedCommentCount == 1)
         #expect(visible.drafts == item.drafts && visible.commentReviewSnapshot == item.commentReviewSnapshot)
@@ -27,7 +27,7 @@ struct MRAttentionRecordTests {
         refreshed.reviewingActivity = .init(discussions: [], reviewerID: 7, authorID: 9)
         record.replaceEvidence(refreshed)
         #expect(record.catalogItem?.reviewingActivity?.publishedCommentCount == 0)
-        #expect(record.catalogItem?.mergeRequest?.headPipeline?.status == "failed")
+        #expect(record.catalogItem?.mergeRequest?.headPipeline?.status == .failed)
     }
 
     @Test func aCompatibleCatalogReadsTheCurrentDraftsFromTheSingleEvidenceEnvelope() throws {
