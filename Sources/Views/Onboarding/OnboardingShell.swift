@@ -2,6 +2,8 @@ import SwiftUI
 
 struct OnboardingShell<Content: View>: View {
     let step: OnboardingView.Step
+    let index: Int
+    let total: Int
     let onBack: () -> Void
     let onSkip: () -> Void
     let onContinue: () -> Void
@@ -30,7 +32,7 @@ struct OnboardingShell<Content: View>: View {
                 .font(.title2.weight(.semibold))
             Spacer()
             if step != .done {
-                Text(.Onboarding.onboardingStepOf(step.index, OnboardingView.Step.totalUserFacing))
+                Text(.Onboarding.onboardingStepOf(index, total))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
@@ -54,20 +56,17 @@ struct OnboardingShell<Content: View>: View {
             Spacer()
 
             if step.isSkippable {
-                Button {
-                    onSkip()
-                } label: {
-                    Text(.Onboarding.onboardingSkip)
-                }
+                Button(step == .crashReporting ? .CrashReporting.crashReportingDecline : .Onboarding.onboardingSkip,
+                       action: onSkip)
             }
 
-            Button {
-                onContinue()
-            } label: {
-                Text(step == .done ? .Onboarding.onboardingFinish : .Onboarding.onboardingContinue)
+            if step == .crashReporting {
+                Button(.CrashReporting.crashReportingEnable, action: onContinue)
+            } else {
+                Button(step == .done ? .Onboarding.onboardingFinish : .Onboarding.onboardingContinue, action: onContinue)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!continueEnabled)
             }
-            .keyboardShortcut(.defaultAction)
-            .disabled(!continueEnabled)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 14)

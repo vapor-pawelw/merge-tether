@@ -28,6 +28,7 @@ enum MergeTetherMain {
         do {
             guard let lock = try SingleInstanceLock.acquire() else { return }
             withExtendedLifetime(lock) {
+                CrashReporting.shared.startIfAllowed()
                 do { try InstallationStorage.current.moveAutomationEvidence() }
                 catch {
                     Log.monitor.error("Cannot move automation evidence: \(error.localizedDescription, privacy: .private)")
@@ -163,12 +164,13 @@ struct MergeTetherApp: App {
 
         Settings {
             SettingsView(monitor: appDelegate.monitor, updates: appDelegate.updates, updater: appDelegate.updater)
+                .environment(CrashReporting.shared)
                 .environment(\.codingProviderGlyph, appDelegate.monitor.settings.automation.selectedAssistant?.glyph)
         }
         .windowResizability(.contentMinSize)
 
         Window(String(localized: .Onboarding.onboardingWindowTitle), id: "onboarding") {
-            OnboardingView(monitor: appDelegate.monitor)
+            OnboardingView(monitor: appDelegate.monitor, crashReporting: .shared)
         }
         .windowResizability(.contentSize)
 

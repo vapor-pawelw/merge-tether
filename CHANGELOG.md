@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Match Mac card actions on iPhone and iPad when drafts need review or unresolved feedback blocks a merge.
 
+- Choose whether to send crash reports during setup or in Settings on Mac, iPhone and iPad. Reporting is off by default and is available in builds configured for Sentry.
+
 - Show why MergeTether started a re-review below the agent status on Mac board cards and in MR Details, and in the review update's Event log entry.
 
 - Size the ChatGPT and Claude action icons to fit native menus, including **Run review**.

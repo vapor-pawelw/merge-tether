@@ -50,6 +50,8 @@ struct GeneralSettingsTab: View {
             } header: {
                 Text(.AppUpdates.appUpdateSectionTitle)
             }
+
+            CrashReportingSettingsSection()
         }
         .formStyle(.grouped)
         .task {

@@ -2,6 +2,8 @@ import SwiftUI
 
 struct OnboardingView: View {
     let monitor: TodoMonitorService
+    let crashReporting: CrashReporting
+    private let steps: [Step]
 
     @Environment(\.dismissWindow) private var dismissWindow
     @State private var step: Step = .glabInstall
@@ -9,8 +11,10 @@ struct OnboardingView: View {
     @State private var assistant: AutomationAssistant?
     @State private var assistantSetup: AutomationAssistant?
 
-    init(monitor: TodoMonitorService) {
+    init(monitor: TodoMonitorService, crashReporting: CrashReporting) {
         self.monitor = monitor
+        self.crashReporting = crashReporting
+        steps = Step.allCases.filter { $0 != .crashReporting || crashReporting.needsConsent }
         let automation = monitor.settings.automation
         _assistant = State(initialValue: automation.selectedAssistant)
         _automationChoice = State(initialValue: AutomationPreset.onboardingDefault(for: automation.packageDecision))
@@ -27,14 +31,13 @@ struct OnboardingView: View {
         case glabAuth
         case notifications
         case launchAtLogin
+        case crashReporting
         case automation
         case done
 
-        var index: Int { rawValue + 1 }
-        static var totalUserFacing: Int { allCases.count - 1 }
         var isSkippable: Bool {
             switch self {
-            case .notifications, .launchAtLogin: true
+            case .notifications, .launchAtLogin, .crashReporting: true
             default: false
             }
         }
@@ -43,8 +46,10 @@ struct OnboardingView: View {
     var body: some View {
         OnboardingShell(
             step: step,
+            index: (steps.firstIndex(of: step) ?? 0) + 1,
+            total: steps.count - 1,
             onBack: goBack,
-            onSkip: goNext,
+            onSkip: skip,
             onContinue: goNext,
             continueEnabled: canContinue
         ) {
@@ -57,6 +62,8 @@ struct OnboardingView: View {
                 NotificationsStep(monitor: monitor)
             case .launchAtLogin:
                 LaunchAtLoginStep(monitor: monitor)
+            case .crashReporting:
+                CrashReportingExplanation()
             case .automation:
                 AutomationPackageStep(
                     monitor: monitor, assistant: $assistant, selection: $automationChoice
@@ -80,7 +87,7 @@ struct OnboardingView: View {
         case .automation:
             monitor.settings.automation.packageDecision != .undecided || effectiveAutomationChoice == .manual
                 || (effectiveAutomationChoice?.requiresCLI == true && assistant.map(monitor.availableAssistants.contains) == true)
-        case .notifications, .launchAtLogin, .done: true
+        case .notifications, .launchAtLogin, .crashReporting, .done: true
         }
     }
 
@@ -89,8 +96,18 @@ struct OnboardingView: View {
     }
 
     private func goBack() {
-        guard let previous = Step(rawValue: step.rawValue - 1) else { return }
-        step = previous
+        guard let index = steps.firstIndex(of: step), index > 0 else { return }
+        step = steps[index - 1]
+    }
+
+    private func advance() {
+        guard let index = steps.firstIndex(of: step), index + 1 < steps.count else { return }
+        step = steps[index + 1]
+    }
+
+    private func skip() {
+        if step == .crashReporting { crashReporting.setEnabled(false) }
+        advance()
     }
 
     private func goNext() {
@@ -98,11 +115,14 @@ struct OnboardingView: View {
         switch step {
         case .done:
             finish()
+        case .crashReporting:
+            crashReporting.setEnabled(true)
+            advance()
         case .automation where monitor.settings.automation.packageDecision == .undecided
             && effectiveAutomationChoice?.requiresCLI == true:
             assistantSetup = assistant
         default:
-            if let next = Step(rawValue: step.rawValue + 1) { step = next }
+            advance()
         }
     }
 

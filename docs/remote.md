@@ -28,8 +28,9 @@ later without moving GitLab credentials into the phone or Worker.
 ## Connection
 
 Both apps initiate outbound HTTPS/WebSocket connections to a Cloudflare Worker.
-The relay is the iOS app's only automatic network destination. The Mac handles
-GitLab reads and writes and sends the resulting data through the encrypted relay.
+The Mac handles GitLab reads and writes and sends the resulting data through the
+encrypted relay. A configured iOS build can also send crash reports to Sentry
+after the user opts in. [Crash reporting privacy](building.md#crash-reporting-privacy)
 Explicit links can open GitLab in the browser when tapped. Markdown images are
 never loaded by the iOS app.
 There is no system VPN, local network discovery, open inbound port or VPS. A company
