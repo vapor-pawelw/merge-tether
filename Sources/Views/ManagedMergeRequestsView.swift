@@ -92,7 +92,7 @@ struct ManagedMergeRequestsView: View {
     private func list(_ rows: [Row], repositories: [MRAutomationScope.Target], missing: [MRAutomationScope.Target], scope: MRAutomationScope) -> some View {
         if rows.isEmpty && repositories.isEmpty && missing.isEmpty {
             ContentUnavailableView {
-                Label { Text(.Menu.menuScopeEmpty) } icon: { Image(systemName: "bolt.circle") }
+                Label { Text(.Menu.menuScopeEmpty) } icon: { Image(systemName: "play.fill") }
             } description: {
                 Text(.Menu.menuScopeEmptyHelp)
             }

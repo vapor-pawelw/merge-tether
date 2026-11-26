@@ -171,7 +171,7 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
             .disabled(isBusy)
             additionalActions
             if let onManage {
-                Button(action: onManage) { Label { Text(.Menu.menuScopeAddManaged) } icon: { Image(systemName: "bolt.badge.plus") } }
+                Button(action: onManage) { Label { Text(.Menu.menuScopeAddManaged) } icon: { Image(systemName: "play.fill") } }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
             }

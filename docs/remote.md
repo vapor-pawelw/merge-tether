@@ -11,8 +11,8 @@ GitLab credentials and automation settings remain on the Mac.
 
 On an iPhone MR card, **…** offers link actions and the commands supported by the
 paired Mac. A filled pin shows the Mac's saved pin state in both ordering modes
-and is a shortcut to unpin. The lightning button shows the current MR policy and
-lets you confirm changes to the MR or its repository defaults on the Mac. With an
+and is a shortcut to unpin. Play or Pause shows the MR's automation state. Tap the
+icon to view the policy or change it for the MR or repository on the Mac. With an
 older Mac or a disconnected phone, link actions still work for the last board.
 
 ## Architecture decision
