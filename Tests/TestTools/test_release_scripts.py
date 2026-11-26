@@ -23,7 +23,7 @@ class ReleaseScriptFixture(unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         (self.root / "scripts").mkdir()
-        for name in ["build-release.sh", "release-interactive.sh", "sync-version-from-tag.sh"]:
+        for name in ["build-release.sh", "package-ios-ipa.sh", "release-interactive.sh", "sync-version-from-tag.sh"]:
             shutil.copyfile(REPO / "scripts" / name, self.root / "scripts" / name)
         shutil.copyfile(REPO / "Project.swift", self.root / "Project.swift")
         self.env = dict(os.environ, PATH=f"{self.bin}:/usr/bin:/bin", HOME=str(self.root),
@@ -96,17 +96,27 @@ info = {'CFBundleShortVersionString': settings['MARKETING_VERSION'],
         'MergeTetherRelayOrigin': os.environ.get('WRONG_RELAY_ORIGIN', pathlib.Path('generated-origin').read_text())}
 if os.environ.get('WRONG_VERSION'): info['CFBundleShortVersionString'] = '0.1.0'
 if os.environ.get('WRONG_BUILD'): info['CFBundleVersion'] = '1'
+if ios:
+    info.update(CFBundleExecutable='MergeTetheriOS', CFBundleSupportedPlatforms=['iPhoneOS'])
+    binary = app / 'MergeTetheriOS'
+    binary.write_bytes(b'device executable fixture')
+    binary.chmod(0o755)
+    (app / '._Info.plist').write_bytes(b'AppleDouble fixture')
 info_path.write_bytes(plistlib.dumps(info))
+if settings.get('DEBUG_INFORMATION_FORMAT') == 'dwarf-with-dsym' and not os.environ.get('NO_DSYM'):
+    symbol_root = pathlib.Path(args[args.index('-archivePath') + 1]) / 'dSYMs' if 'archive' in args else app.parent
+    symbols = symbol_root / (app.name + '.dSYM') / 'Contents/Resources/DWARF'
+    symbols.mkdir(parents=True)
+    (symbols / app.stem).write_bytes(b'private debug symbols')
 """)
         self.executable("ditto", """
-import pathlib, sys, zipfile
+import os, pathlib, sys, zipfile
 app, output = pathlib.Path(sys.argv[-2]), pathlib.Path(sys.argv[-1])
-if '-x' in sys.argv:
-    with zipfile.ZipFile(app) as archive: archive.extractall(output)
-else:
-    with zipfile.ZipFile(output, 'w') as archive:
-        for path in app.rglob('*'):
-            if path.is_file(): archive.write(path, str(path.relative_to(app.parent)))
+if '-c' not in sys.argv or '--norsrc' in sys.argv:
+    os.execv('/usr/bin/ditto', sys.argv)
+with zipfile.ZipFile(output, 'w') as archive:
+    for path in app.rglob('*'):
+        if path.is_file(): archive.write(path, str(path.relative_to(app.parent)))
 """)
         self.executable("hdiutil", """
 import json, pathlib, plistlib, sys
@@ -115,8 +125,10 @@ app = pathlib.Path(args[args.index('-srcfolder') + 1])
 pathlib.Path(args[-1]).write_text(json.dumps(plistlib.loads((app / 'Contents/Info.plist').read_bytes())))
 """)
         self.executable("codesign", """
-import os, sys
+import os, pathlib, sys
 if os.environ.get('SIGNATURE_FAIL'): sys.exit(1)
+if '--verify' in sys.argv and pathlib.Path(sys.argv[-1]).parts[-3:] == ('verify', 'Payload', 'MergeTetheriOS.app'):
+    if os.environ.get('IOS_IPA_SIGNATURE_FAIL'): sys.exit(1)
 if '--display' in sys.argv:
     print('Authority=' + ('Apple Distribution' if 'MergeTetheriOS.app' in sys.argv[-1] else 'Developer ID Application') + ': Fixture (TEAM123)', file=sys.stderr)
     print('TeamIdentifier=' + ('OTHER' if os.environ.get('WRONG_TEAM') else 'TEAM123'), file=sys.stderr)
@@ -126,6 +138,8 @@ if '--display' in sys.argv:
         self.executable("spctl", "import os, sys; sys.exit(1 if os.environ.get('GATEKEEPER_FAIL') else 0)")
         self.executable("xcrun", """
 import json, os, pathlib, sys
+if sys.argv[1] == 'lipo': print('arm64'); sys.exit(0)
+if sys.argv[1] == 'vtool': print('  platform IOS'); sys.exit(0)
 with pathlib.Path('notary-calls.jsonl').open('a') as f: f.write(json.dumps(sys.argv[1:]) + '\\n')
 if 'history' in sys.argv and os.environ.get('NOTARY_CREDENTIAL_FAIL'): sys.exit(1)
 if 'submit' in sys.argv and os.environ.get('NOTARY_SUBMIT_FAIL'): sys.exit(1)
@@ -176,6 +190,26 @@ if os.environ.get('STAPLE_FAIL') and 'stapler' in sys.argv: sys.exit(1)
         calls = [json.loads(line) for line in (self.root / "notary-calls.jsonl").read_text().splitlines()]
         self.assertEqual(sum('submit' in call for call in calls), 2)
         self.assertEqual(sum('validate' in call for call in calls), 2)
+
+    def test_debug_symbols_are_exported_separately_from_public_artifacts(self):
+        symbols = self.root / "private-symbols"
+        self.env["MERGETETHER_CRASH_SYMBOLS_DIR"] = str(symbols)
+        result = self.run_script("build-release.sh", "9.8.7", "--platform", "all", "--unsigned")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual({path.name for path in symbols.iterdir()}, {"MergeTether.app.dSYM", "MergeTetheriOS.app.dSYM"})
+        release = self.root / "release/unsigned"
+        self.assertFalse(list(release.rglob("*.dSYM")))
+        for path in release.glob("*.zip"):
+            with zipfile.ZipFile(path) as artifact:
+                self.assertFalse(any(".dSYM" in name for name in artifact.namelist()))
+
+    def test_requested_debug_symbols_must_exist_before_packaging(self):
+        self.env["MERGETETHER_CRASH_SYMBOLS_DIR"] = str(self.root / "private-symbols")
+        self.env["NO_DSYM"] = "1"
+        result = self.run_script("build-release.sh", "9.8.7", "--unsigned")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("missing dSYM", result.stderr)
+        self.assertFalse(list((self.root / "release/unsigned").glob("*.zip")))
 
     def test_default_requires_release_credentials_before_building(self):
         result = self.run_script("build-release.sh", "9.8.7")
@@ -264,6 +298,35 @@ if os.environ.get('STAPLE_FAIL') and 'stapler' in sys.argv: sys.exit(1)
         self.assertIn("MERGETETHER_IOS_PROVISIONING_PROFILE=Fixture Profile", archive)
         self.assertFalse(any(arg.startswith("PROVISIONING_PROFILE_SPECIFIER=") for arg in archive))
 
+    def test_sideload_release_packages_the_device_app_with_matching_metadata(self):
+        result = self.signed_build("--platform", "all", "--ios-sideload")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        release = self.root / "release"
+        ipa = release / "MergeTetheriOS-9.8.7-Sideload.ipa"
+        manifest = json.loads((release / "release-manifest.json").read_text())
+        self.assertTrue(manifest["distributable"])
+        self.assertEqual({entry["name"] for entry in manifest["artifacts"]},
+                         {ipa.name, "MergeTether-9.8.7.dmg", "MergeTether-9.8.7.zip"})
+        with zipfile.ZipFile(ipa) as archive:
+            info = plistlib.loads(archive.read("Payload/MergeTetheriOS.app/Info.plist"))
+            self.assertNotIn("Payload/MergeTetheriOS.app/._Info.plist", archive.namelist())
+            self.assertIsNone(archive.testzip())
+        self.assertEqual(info["CFBundleShortVersionString"], "9.8.7")
+        self.assertEqual(info["CFBundleVersion"], "456")
+        self.assertEqual(info["MergeTetherRelayOrigin"], self.packaged_info("9.8.7")["MergeTetherRelayOrigin"])
+        calls = [json.loads(line) for line in (self.root / "build-calls.jsonl").read_text().splitlines()]
+        ios_build = next(call for call in calls if "MergeTetheriOS" in call)
+        self.assertIn("CODE_SIGNING_ALLOWED=NO", ios_build)
+        self.assertIn("generic/platform=iOS", ios_build)
+        self.assertFalse(any("archive" in call or "-exportArchive" in call for call in calls))
+
+    def test_sideload_signature_failure_prevents_release_inventory(self):
+        self.env["IOS_IPA_SIGNATURE_FAIL"] = "1"
+        result = self.signed_build("--platform", "all", "--ios-sideload")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("IPA signature verification failed", result.stderr)
+        self.assertEqual(list((self.root / "release").iterdir()), [])
+
     def test_unsigned_ios_device_zip_is_explicitly_not_installable(self):
         result = self.run_script("build-release.sh", "9.8.7", "--platform", "all", "--unsigned")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -328,9 +391,11 @@ if os.environ.get('STAPLE_FAIL') and 'stapler' in sys.argv: sys.exit(1)
         self.assertFalse((self.root / "build-calls.jsonl").exists())
 
     def test_explicit_no_relay_builds_macos_with_an_empty_origin(self):
+        self.env["TUIST_MERGETETHER_RELAY_ORIGIN"] = "https://user-default.example.test"
         result = self.signed_build_without_relay("--no-relay")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads((self.root / "generation-environment.json").read_text())["config_file"], "")
+        self.assertEqual(self.packaged_info("9.8.7")["MergeTetherRelayOrigin"], "")
         for arguments in [("--no-relay", "--relay-config", str(self.relay_config)),
                           ("--no-relay", "--platform", "all")]:
             with self.subTest(arguments=arguments):
@@ -429,7 +494,7 @@ elif a[:2] == ['run', 'watch']: sys.exit(1 if os.environ.get('WATCH_FAIL') else 
 elif a[:2] == ['run', 'view']: print('456')
 elif a[:2] == ['release', 'view']:
     if os.environ.get('ASSET_ERROR'): sys.exit(1)
-    assets = os.environ.get('ASSETS', 'MergeTether-9.8.7.dmg,MergeTether-9.8.7.zip,MergeTetheriOS-9.8.7.ipa')
+    assets = os.environ.get('ASSETS', 'MergeTether-9.8.7.dmg,MergeTether-9.8.7.zip')
     print(json.dumps({'tagName': os.environ.get('RELEASE_TAG', 'v9.8.7'),
                       'isDraft': bool(os.environ.get('RELEASE_DRAFT')),
                       'url': os.environ.get('RELEASE_URL', 'https://github.com/fixture/release/releases/tag/v9.8.7'),
@@ -440,7 +505,7 @@ elif a[:2] == ['release', 'view']:
 elif a[:2] == ['release', 'download']:
     if os.environ.get('NO_MANIFEST'): sys.exit(1)
     target = pathlib.Path(a[a.index('--dir') + 1]) / 'release-manifest.json'
-    assets = os.environ.get('ASSETS', 'MergeTether-9.8.7.dmg,MergeTether-9.8.7.zip,MergeTetheriOS-9.8.7.ipa').split(',')
+    assets = os.environ.get('ASSETS', 'MergeTether-9.8.7.dmg,MergeTether-9.8.7.zip').split(',')
     target.write_text(json.dumps({'version': os.environ.get('MANIFEST_VERSION', '9.8.7'), 'build': os.environ.get('MANIFEST_BUILD', '456'),
                                  'distributable': not bool(os.environ.get('MANIFEST_UNSIGNED')),
                                  'artifacts': [{'name': name, 'sha256': 'a' * 64} for name in assets]}))
@@ -525,13 +590,13 @@ else: sys.exit('unexpected gh fixture call: ' + repr(a))
         self.assertNotIn("Release complete.", result.stdout)
 
     def test_versioned_assets_remain_supported(self):
-        self.env["ASSETS"] = "MergeTether-9.8.7.dmg,MergeTether-9.8.7.zip,MergeTetheriOS-9.8.7.ipa"
+        self.env["ASSETS"] = "MergeTether-9.8.7.dmg,MergeTether-9.8.7.zip"
         result = self.publish()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Release complete.", result.stdout)
 
-    def test_stable_mac_assets_with_separate_versioned_ipa_remain_supported(self):
-        self.env["ASSETS"] = "MergeTether.dmg,MergeTether.zip,MergeTetheriOS-9.8.7.ipa"
+    def test_stable_mac_assets_remain_supported(self):
+        self.env["ASSETS"] = "MergeTether.dmg,MergeTether.zip"
         result = self.publish()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
@@ -564,17 +629,19 @@ else: sys.exit('unexpected gh fixture call: ' + repr(a))
                 self.assertNotIn("Release complete.", result.stdout)
                 self.env.pop(key)
 
-    def test_missing_ios_distribution_artifact_is_not_complete(self):
-        self.env["ASSETS"] = "MergeTether-9.8.7.dmg,MergeTether-9.8.7.zip"
-        result = self.publish()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("MergeTetheriOS-9.8.7.ipa", result.stderr)
+    def test_public_release_rejects_ios_artifacts(self):
+        for asset in ["MergeTetheriOS-9.8.7-Sideload.ipa", "MergeTetheriOS-9.8.7-unsigned-device.zip", "other.ipa"]:
+            with self.subTest(asset=asset):
+                self.env["ASSETS"] = f"MergeTether.dmg,MergeTether.zip,{asset}"
+                result = self.publish()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("The public release contains iOS assets", result.stderr)
 
-    def test_unsigned_ios_zip_is_not_an_installable_release_artifact(self):
-        self.env["ASSETS"] = "MergeTether-9.8.7.dmg,MergeTether-9.8.7.zip,MergeTetheriOS-9.8.7-unsigned-device.zip"
-        result = self.publish()
+    def test_publication_refuses_ios_before_git_mutation(self):
+        result = self.run_script("release-interactive.sh", "--version", "9.8.7", "--yes", "--platform", "all")
         self.assertNotEqual(result.returncode, 0)
-        self.assertNotIn("Release complete.", result.stdout)
+        self.assertIn("Public releases support macOS only", result.stderr)
+        self.assertFalse((self.root / "git-calls.jsonl").exists())
 
     def test_noninteractive_version_is_required_before_any_git_mutation(self):
         result = self.run_script("release-interactive.sh", "--yes")
@@ -704,9 +771,9 @@ class ReleaseWorkflowTests(ReleaseScriptFixture):
                               env=self.env, capture_output=True, text=True, timeout=20)
 
     def test_missing_ci_distribution_configuration_fails_without_exposing_values(self):
-        names = ["APPLE_CERTIFICATES_P12_BASE64", "APPLE_CERTIFICATES_PASSWORD", "IOS_PROFILE_BASE64",
+        names = ["APPLE_CERTIFICATES_P12_BASE64", "APPLE_CERTIFICATES_PASSWORD",
                  "NOTARY_API_PRIVATE_KEY", "NOTARY_KEY_ID", "NOTARY_ISSUER_ID", "APPLE_TEAM_ID",
-                 "MACOS_RELEASE_IDENTITY", "IOS_RELEASE_IDENTITY", "IOS_EXPORT_METHOD", "MERGETETHER_RELAY_CONFIG_JSON",
+                 "MACOS_RELEASE_IDENTITY",
                  "MERGETETHER_SPARKLE_PUBLIC_KEY", "MERGETETHER_SPARKLE_PRIVATE_KEY"]
         private_value = "fixture-private-value-never-log"
         for missing_name in names:
@@ -722,23 +789,38 @@ class ReleaseWorkflowTests(ReleaseScriptFixture):
                     self.assertIn(missing_name, result.stdout, result.stderr)
                     self.assertNotIn(private_value, result.stdout + result.stderr)
 
-    def test_ci_passes_metadata_and_both_platforms_without_mutating_source(self):
+    def test_ci_does_not_require_private_relay_or_ios_distribution_configuration(self):
+        self.env.update(APPLE_CERTIFICATES_P12_BASE64="fixture", APPLE_CERTIFICATES_PASSWORD="fixture",
+                        NOTARY_API_PRIVATE_KEY="fixture", NOTARY_KEY_ID="fixture", NOTARY_ISSUER_ID="fixture",
+                        APPLE_TEAM_ID="TEAM123", MACOS_RELEASE_IDENTITY="Fixture Mac",
+                        MERGETETHER_SPARKLE_PUBLIC_KEY="fixture",
+                        MERGETETHER_SPARKLE_PRIVATE_KEY="fixture")
+        for name in ["MERGETETHER_RELAY_CONFIG_JSON", "IOS_PROFILE_BASE64", "IOS_RELEASE_IDENTITY", "IOS_EXPORT_METHOD"]:
+            self.env.pop(name, None)
+        result = self.run_step("Check distribution configuration")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_ci_builds_only_mac_without_a_relay_and_preserves_source_metadata(self):
         self.executable("mise", """
 import json, pathlib, sys
 pathlib.Path('mise-arguments.json').write_text(json.dumps(sys.argv[1:]))
 """)
         self.env.update(RELEASE_VERSION="9.8.7", RELEASE_BUILD_NUMBER="456", APPLE_TEAM_ID="TEAM123",
-                        MACOS_RELEASE_IDENTITY="Fixture Mac", IOS_RELEASE_IDENTITY="Fixture iOS",
+                        MACOS_RELEASE_IDENTITY="Fixture Mac",
                         RUNNER_TEMP=str(self.root))
         original = (self.root / "Project.swift").read_bytes()
-        result = self.run_step("Build separate macOS and iOS distribution artifacts")
+        result = self.run_step("Build macOS distribution artifacts without a relay")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         args = json.loads((self.root / "mise-arguments.json").read_text())
         self.assertEqual(args[:5], ["exec", "--", "bash", "scripts/build-release.sh", "9.8.7"])
         self.assertEqual(args[args.index("--build-number") + 1], "456")
-        self.assertEqual(args[args.index("--platform") + 1], "all")
+        self.assertEqual(args[args.index("--platform") + 1], "macos")
+        self.assertIn("--no-relay", args)
+        self.assertNotIn("--ios-sideload", args)
+        self.assertNotIn("--ios-signing-identity", args)
+        self.assertNotIn("--ios-export-options", args)
         self.assertNotIn("--unsigned", args)
-        self.assertEqual(args[args.index("--relay-config") + 1], str(self.root / "relay-build.json"))
+        self.assertNotIn("--relay-config", args)
         self.assertEqual((self.root / "Project.swift").read_bytes(), original)
 
     def prepare_inventory(self):
@@ -746,11 +828,11 @@ pathlib.Path('mise-arguments.json').write_text(json.dumps(sys.argv[1:]))
         release = self.root / "release"
         release.mkdir()
         artifacts = []
-        for name in ["MergeTether-9.8.7.dmg", "MergeTether-9.8.7.zip", "MergeTetheriOS-9.8.7.ipa"]:
+        for name in ["MergeTether-9.8.7.dmg", "MergeTether-9.8.7.zip"]:
             content = ("fixture: " + name).encode()
             (release / name).write_bytes(content)
             artifacts.append({"name": name, "sha256": hashlib.sha256(content).hexdigest(),
-                              "platform": "ios" if name.startswith("MergeTetheriOS") else "macos"})
+                              "platform": "macos"})
         manifest = {"version": "9.8.7", "build": "456", "distributable": True, "artifacts": artifacts}
         (release / "release-manifest.json").write_text(json.dumps(manifest))
         return release, manifest
@@ -761,7 +843,7 @@ pathlib.Path('mise-arguments.json').write_text(json.dumps(sys.argv[1:]))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         manifest = json.loads((release / "release-manifest.json").read_text())
         self.assertEqual({a["name"] for a in manifest["artifacts"]},
-                         {"MergeTether.dmg", "MergeTether.zip", "MergeTetheriOS-9.8.7.ipa"})
+                         {"MergeTether.dmg", "MergeTether.zip"})
         for name in ["MergeTether.dmg", "MergeTether.zip"]:
             digest = hashlib.sha256((self.root / name).read_bytes()).hexdigest()
             self.assertEqual((release / (name + ".sha256")).read_text(), digest + "  " + name + "\n")
@@ -776,12 +858,12 @@ pathlib.Path('mise-arguments.json').write_text(json.dumps(sys.argv[1:]))
 
     def test_ci_rejects_changed_artifact_digest(self):
         release, _ = self.prepare_inventory()
-        (release / "MergeTetheriOS-9.8.7.ipa").write_bytes(b"unexpected payload")
+        (release / "MergeTether-9.8.7.dmg").write_bytes(b"unexpected payload")
         result = self.run_step("Verify distribution inventory and retain stable macOS names")
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.root / "MergeTether.dmg").exists())
 
-    def test_ci_publishes_only_after_attaching_the_update_feed_and_platform_archives(self):
+    def test_ci_publishes_only_after_attaching_the_update_feed_and_mac_archives(self):
         self.env.update(APP_NAME="MergeTether", RELEASE_REPO="fixture/release", TAG="v9.8.7", VERSION="9.8.7")
         (self.root / "CHANGELOG.md").write_text("## 9.8.7 - 2026-01-01\n\n- Fixture release.\n")
         self.executable("gh", """
@@ -789,6 +871,9 @@ import json, os, pathlib, sys
 args = sys.argv[1:]
 with pathlib.Path('release-arguments.jsonl').open('a') as calls: calls.write(json.dumps(args) + '\\n')
 if args[:2] == ['release', 'view']:
+    if 'assets' in args:
+        print(os.environ.get('DRAFT_HAS_IOS_ASSETS', 'false'))
+        sys.exit(0)
     status = os.environ.get('RELEASE_STATUS')
     if status is None: sys.exit(1)
     print(status)
@@ -802,15 +887,24 @@ if args[:2] == ['release', 'view']:
                 result = self.run_step("Create GitHub Release")
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
-                args = calls[-2]
+                args = calls[-3]
                 self.assertEqual(args[:3], ["release", command, "v9.8.7"])
                 if command == "create":
                     self.assertIn("--draft", args)
-                self.assertEqual(args[-8:], ["MergeTether.dmg", "MergeTether.zip",
-                                            "release/MergeTetheriOS-9.8.7.ipa", "release/release-manifest.json", "release/appcast.xml",
-                                            "release/MergeTether.dmg.sha256", "release/MergeTether.zip.sha256",
-                                            "release/MergeTetheriOS-9.8.7.ipa.sha256"])
+                self.assertEqual(args[-6:], ["MergeTether.dmg", "MergeTether.zip",
+                                            "release/release-manifest.json", "release/appcast.xml",
+                                            "release/MergeTether.dmg.sha256", "release/MergeTether.zip.sha256"])
+                self.assertEqual(calls[-2][:7],
+                                 ["release", "view", "v9.8.7", "--repo", "fixture/release", "--json", "assets"])
                 self.assertEqual(calls[-1], ["release", "edit", "v9.8.7", "--repo", "fixture/release", "--draft=false", "--latest"])
+
+        calls_path.write_text("")
+        self.env["DRAFT_HAS_IOS_ASSETS"] = "true"
+        result = self.run_step("Create GitHub Release")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("The draft contains iOS assets", result.stdout)
+        calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
+        self.assertFalse(any("--draft=false" in args for args in calls))
 
         calls_path.write_text("")
         self.env["RELEASE_STATUS"] = "false"
@@ -878,37 +972,31 @@ print(hashlib.sha256(open(sys.argv[1], 'rb').read()).hexdigest() + '  ' + sys.ar
                     self.env[key] = saved
 
     def test_ci_prepares_and_removes_only_temporary_distribution_credentials(self):
-        self.env.update(RUNNER_TEMP=str(self.root), APPLE_TEAM_ID="TEAM123", IOS_EXPORT_METHOD="release-testing",
+        self.env.update(RUNNER_TEMP=str(self.root),
                         APPLE_CERTIFICATES_P12_BASE64="Zml4dHVyZQ==", APPLE_CERTIFICATES_PASSWORD="fixture-only",
                         NOTARY_API_PRIVATE_KEY="fixture-private-key", NOTARY_KEY_ID="fixture-id",
-                        NOTARY_ISSUER_ID="fixture-issuer", MERGETETHER_RELAY_CONFIG_JSON=json.dumps({"origin": "https://relay.example.test"}))
-        import base64
-        profile = {"UUID": "FIXTURE-UUID", "Name": "Fixture Distribution", "TeamIdentifier": ["TEAM123"]}
-        self.env["IOS_PROFILE_BASE64"] = base64.b64encode(plistlib.dumps(profile)).decode()
+                        NOTARY_ISSUER_ID="fixture-issuer")
         self.executable("openssl", "print('fixture-random-password')")
         self.executable("security", """
 import pathlib, sys
-if sys.argv[1] == 'cms': sys.stdout.buffer.write(pathlib.Path(sys.argv[-1]).read_bytes())
+if sys.argv[1] == 'create-keychain': pathlib.Path(sys.argv[-1]).touch()
+if sys.argv[1] == 'delete-keychain': pathlib.Path(sys.argv[-1]).unlink()
 """)
         self.executable("xcrun", "")
-        result = self.run_step("Prepare temporary distribution keychain and provisioning")
+        result = self.run_step("Prepare temporary macOS distribution keychain")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        options = plistlib.loads((self.root / "ExportOptions.plist").read_bytes())
-        self.assertEqual(options["teamID"], "TEAM123")
-        self.assertEqual(json.loads((self.root / "relay-build.json").read_text()), {"origin": "https://relay.example.test"})
-        self.assertEqual((self.root / "relay-build.json").stat().st_mode & 0o777, 0o600)
-        self.assertEqual(options["provisioningProfiles"], {"com.vaporpw.MergeTether.iOS": "Fixture Distribution"})
+        self.assertFalse((self.root / "relay-build.json").exists())
+        keychain = self.root / "release-signing.keychain-db"
+        self.assertTrue(keychain.exists())
         self.assertFalse((self.root / "notary-key.p8").exists())
         self.assertFalse((self.root / "distribution.p12").exists())
-        if not Path("/usr/libexec/PlistBuddy").exists():
-            return
         unrelated = self.root / "Library/MobileDevice/Provisioning Profiles/keep.mobileprovision"
+        unrelated.parent.mkdir(parents=True)
         unrelated.touch()
         cleanup = self.run_step("Remove temporary distribution credentials")
         self.assertEqual(cleanup.returncode, 0, cleanup.stdout + cleanup.stderr)
         self.assertTrue(unrelated.exists())
-        self.assertFalse(unrelated.with_name("FIXTURE-UUID.mobileprovision").exists())
-        self.assertFalse((self.root / "ExportOptions.plist").exists())
+        self.assertFalse(keychain.exists())
         self.assertFalse((self.root / "relay-build.json").exists())
 
 

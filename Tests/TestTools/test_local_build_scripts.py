@@ -96,7 +96,7 @@ if operation == "launch" and os.environ.get("FAIL_LAUNCH"): sys.exit(1)
         self.assertTrue(plistlib.loads(original.read_bytes()).get("NewBuild"))
         self.assertEqual(plistlib.loads(original.read_bytes())["CFBundleExecutable"], "MergeTether")
 
-    def test_sidestore_verifies_extracted_payload_before_publishing(self):
+    def test_ios_ipa_verifies_extracted_payload_before_publishing(self):
         subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
         subprocess.run(["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
                         "-c", "core.hooksPath=/dev/null",
@@ -117,6 +117,10 @@ binary = bundle / "MergeTetheriOS"
 binary.write_bytes(b"device executable fixture")
 binary.chmod(0o755)
 (bundle / "._Info.plist").write_bytes(b"AppleDouble fixture")
+if "DEBUG_INFORMATION_FORMAT=dwarf-with-dsym" in args:
+    symbols = bundle.with_suffix(".app.dSYM") / "Contents/Resources/DWARF"
+    symbols.mkdir(parents=True)
+    (symbols / "MergeTetheriOS").write_bytes(b"private debug symbols")
 """)
         self.executable("xcrun", """import sys
 print("arm64" if sys.argv[1] == "lipo" else "  platform IOS")
@@ -127,34 +131,40 @@ if "--verify" in sys.argv:
     assert pathlib.Path(sys.argv[-1]).parents[1].name == "verify"
     if os.environ.get("REJECT_SIGNATURE"): sys.exit(1)
 """)
-        out = self.root / "release/sidestore"
-        out.mkdir(parents=True)
-        previous = out / "previous.ipa"
+        out = self.root / "release/ios"
+        legacy = self.root / "release/sidestore"
+        legacy.mkdir(parents=True)
+        previous = legacy / "previous.ipa"
         with zipfile.ZipFile(previous, "w") as archive:
             archive.writestr("Payload/MergeTetheriOS.app/Info.plist", plistlib.dumps(
                 {"CFBundleIdentifier": "com.vaporpw.MergeTether.iOS", "CFBundleVersion": "34"}))
 
         self.env["REJECT_SIGNATURE"] = "1"
-        result = self.run_script("build-sidestore-ipa.sh")
+        result = self.run_script("build-ios-ipa.sh")
         self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(list(out.iterdir()), [previous])
+        self.assertEqual(list(out.iterdir()), [])
+        self.assertTrue(previous.is_file())
 
         del self.env["REJECT_SIGNATURE"]
         commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"],
                                          cwd=self.root, text=True).strip()
-        blocked_output = out / f"MergeTether-1.2.0-35-{commit}-dirty-SideStore.ipa"
+        blocked_output = out / f"MergeTetheriOS-1.2.0-35-{commit}-dirty.ipa"
         blocked_output.mkdir()
-        result = self.run_script("build-sidestore-ipa.sh")
+        result = self.run_script("build-ios-ipa.sh")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("output already exists", result.stderr)
-        self.assertEqual(set(out.iterdir()), {previous, blocked_output})
+        self.assertEqual(set(out.iterdir()), {blocked_output})
         blocked_output.rmdir()
 
-        result = self.run_script("build-sidestore-ipa.sh")
+        symbols = self.root / "private-symbols"
+        self.env["MERGETETHER_CRASH_SYMBOLS_DIR"] = str(symbols)
+        result = self.run_script("build-ios-ipa.sh")
         self.assertEqual(result.returncode, 0, result.stderr)
-        ipa, = out.glob("*-SideStore.ipa")
+        ipa, = out.glob("MergeTetheriOS-*.ipa")
+        self.assertTrue((symbols / (ipa.stem + ".app.dSYM") / "Contents/Resources/DWARF/MergeTetheriOS").is_file())
         with zipfile.ZipFile(ipa) as archive:
             self.assertNotIn("Payload/MergeTetheriOS.app/._Info.plist", archive.namelist())
+            self.assertFalse(any(".dSYM" in name for name in archive.namelist()))
             self.assertIsNone(archive.testzip())
         manifest = json.loads(ipa.with_suffix(".json").read_text())
         self.assertEqual(manifest["build"], "35")

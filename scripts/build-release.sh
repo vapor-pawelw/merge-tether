@@ -12,6 +12,7 @@ Usage: scripts/build-release.sh [X.Y.Z] [options]
   --no-relay                  Explicitly build macOS without a relay origin
   --signing-identity NAME|SHA  Developer ID Application identity for macOS
   --ios-signing-identity NAME|SHA  Apple Distribution identity for iOS
+  --ios-sideload              Package a device IPA for signing before installation
   --team-id ID                Distribution team for the selected platforms
   --notary-profile NAME       Existing notarytool Keychain profile for macOS
   --ios-export-options FILE   Manual distribution ExportOptions.plist for iOS
@@ -25,19 +26,21 @@ Signed builds require --relay-config (or a nonempty TUIST_MERGETETHER_RELAY_CONF
 or an explicit --no-relay. Without either, an unsigned build keeps the relay origin
 already configured for generation (for example the mise user default).
 Signing identities and credentials must already exist; this script creates neither.
+Set MERGETETHER_CRASH_SYMBOLS_DIR to a private absolute directory to retain matching dSYMs.
 HELP
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
-VERSION="" BUILD_NUMBER="" PLATFORM="macos" UNSIGNED=0
+VERSION="" BUILD_NUMBER="" PLATFORM="macos" UNSIGNED=0 IOS_SIDELOAD=0
 SIGNING_IDENTITY="" IOS_SIGNING_IDENTITY="" TEAM_ID="" NOTARY_PROFILE="" IOS_EXPORT_OPTIONS=""
 RELAY_CONFIG="${TUIST_MERGETETHER_RELAY_CONFIG_FILE:-}" NO_RELAY=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --help|-h) usage; exit 0 ;;
         --unsigned) UNSIGNED=1; shift ;;
+        --ios-sideload) IOS_SIDELOAD=1; shift ;;
         --no-relay) NO_RELAY=1; shift ;;
         --build-number|--platform|--signing-identity|--ios-signing-identity|--team-id|--notary-profile|--ios-export-options|--relay-config)
             [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || fail "missing value for $1 (see --help)"
@@ -65,6 +68,10 @@ BUILD_NUMBER="${BUILD_NUMBER:-$(project_setting CURRENT_PROJECT_VERSION)}"
 MACOS=0 IOS=0
 [[ "$PLATFORM" == ios ]] || MACOS=1
 [[ "$PLATFORM" == macos ]] || IOS=1
+if [[ "$IOS_SIDELOAD" -eq 1 ]]; then
+    [[ "$IOS" -eq 1 && "$UNSIGNED" -eq 0 ]] || fail "--ios-sideload requires --platform ios or all and cannot be combined with --unsigned"
+    [[ -z "$IOS_SIGNING_IDENTITY$IOS_EXPORT_OPTIONS" ]] || fail "--ios-sideload cannot be combined with iOS distribution credentials or export options"
+fi
 for tool in tuist xcodebuild python3 ditto shasum; do
     command -v "$tool" >/dev/null 2>&1 || fail "missing $tool; run mise install and use mise exec -- bash scripts/build-release.sh"
 done
@@ -136,9 +143,12 @@ if [[ "$IOS" -eq 1 && "$UNSIGNED" -eq 0 && -z "$RELAY_CONFIG" ]]; then
     fail "iOS distribution requires --relay-config with your own relay origin; use --unsigned only for explicit inspection"
 fi
 if [[ "$UNSIGNED" -eq 0 ]]; then
-    [[ -n "$TEAM_ID" ]] || fail "--team-id is required for distribution"
-    [[ "$RELAY_SOURCE" != inherit ]] || fail "signed builds require --relay-config with your own relay origin, or an explicit --no-relay for macOS"
-    for tool in security codesign xcrun; do command -v "$tool" >/dev/null 2>&1 || fail "missing $tool"; done
+    if [[ "$MACOS" -eq 1 || "$IOS_SIDELOAD" -eq 0 ]]; then
+        [[ -n "$TEAM_ID" ]] || fail "--team-id is required for distribution"
+        command -v security >/dev/null 2>&1 || fail "missing security"
+    fi
+    [[ "$RELAY_SOURCE" != inherit ]] || fail "release builds require --relay-config with your own relay origin, or an explicit --no-relay for macOS"
+    for tool in codesign xcrun; do command -v "$tool" >/dev/null 2>&1 || fail "missing $tool"; done
     if [[ "$MACOS" -eq 1 ]]; then
         [[ -n "$SIGNING_IDENTITY" ]] || fail "--signing-identity Developer ID Application is required; use --unsigned only for local inspection"
         [[ -n "$NOTARY_PROFILE" ]] || fail "--notary-profile is required; configure an existing notarytool Keychain profile"
@@ -148,7 +158,7 @@ if [[ "$UNSIGNED" -eq 0 ]]; then
             fail "notarytool could not authenticate the supplied --notary-profile; configure it outside this script before building"
         fi
     fi
-    if [[ "$IOS" -eq 1 ]]; then
+    if [[ "$IOS" -eq 1 && "$IOS_SIDELOAD" -eq 0 ]]; then
         [[ -n "$IOS_SIGNING_IDENTITY" ]] || fail "--ios-signing-identity Apple Distribution is required for an installable iOS export"
         IOS_SIGNING_IDENTITY="$(resolve_identity "$IOS_SIGNING_IDENTITY" 'Apple Distribution: ')"
         [[ -f "$IOS_EXPORT_OPTIONS" ]] || fail "--ios-export-options must name an existing manual distribution ExportOptions.plist"
@@ -181,6 +191,12 @@ trap 'rm -rf "$SCRATCH"' EXIT
 mkdir -p "$SCRATCH/artifacts"
 ARTIFACTS=()
 COMMON_SETTINGS=("MARKETING_VERSION=${VERSION}" "CURRENT_PROJECT_VERSION=${BUILD_NUMBER}")
+SYMBOLS_DIR="${MERGETETHER_CRASH_SYMBOLS_DIR:-}"
+if [[ -n "$SYMBOLS_DIR" ]]; then
+    [[ "$SYMBOLS_DIR" == /* ]] || fail "MERGETETHER_CRASH_SYMBOLS_DIR must be an absolute private directory"
+    mkdir "$SCRATCH/symbols"
+    COMMON_SETTINGS+=(DEBUG_INFORMATION_FORMAT=dwarf-with-dsym)
+fi
 echo "==> Generating project for ${VERSION} (${BUILD_NUMBER}), platform ${PLATFORM}"
 case "$RELAY_SOURCE" in
     config) TUIST_MERGETETHER_RELAY_CONFIG_FILE="$RELAY_CONFIG" tuist generate --no-open ;;
@@ -211,6 +227,11 @@ verify_signature() {
         [[ "$details" == *'(runtime)'* && "$details" == *'Timestamp='* ]] || fail "macOS distribution signature requires hardened runtime and secure timestamp"
     fi
 }
+collect_debug_symbols() {
+    [[ -n "$SYMBOLS_DIR" ]] || return 0
+    [[ -d "$1" ]] || fail "missing dSYM for crash symbolication"
+    ditto "$1" "$SCRATCH/symbols/${1##*/}"
+}
 notarize() {
     local submission="$SCRATCH/notary-result.json"
     if ! xcrun notarytool submit "$1" --keychain-profile "$NOTARY_PROFILE" --wait --output-format json >"$submission"; then
@@ -234,6 +255,7 @@ if [[ "$MACOS" -eq 1 ]]; then
         "${COMMON_SETTINGS[@]}" "${SIGNING_SETTINGS[@]}" clean build
     APP="$SCRATCH/macOS/Build/Products/Release/MergeTether.app"
     validate_bundle "$APP/Contents/Info.plist" com.vaporpw.MergeTether
+    collect_debug_symbols "$APP.dSYM"
     if [[ "$UNSIGNED" -eq 0 ]]; then
         verify_signature "$APP" 'Developer ID Application: '
         ditto -c -k --keepParent "$APP" "$SCRATCH/notarization.zip"
@@ -256,14 +278,20 @@ if [[ "$MACOS" -eq 1 ]]; then
     ARTIFACTS+=("$ZIP_NAME" "$DMG_NAME")
 fi
 if [[ "$IOS" -eq 1 ]]; then
-    if [[ "$UNSIGNED" -eq 1 ]]; then
+    if [[ "$UNSIGNED" -eq 1 || "$IOS_SIDELOAD" -eq 1 ]]; then
         xcodebuild -project MergeTether.xcodeproj -scheme MergeTetheriOS -configuration Release \
             -destination 'generic/platform=iOS' -derivedDataPath "$SCRATCH/iOS" \
-            "${COMMON_SETTINGS[@]}" CODE_SIGN_IDENTITY= CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO clean build
+            "${COMMON_SETTINGS[@]}" ARCHS=arm64 CODE_SIGN_IDENTITY= CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO clean build
         IOS_APP="$SCRATCH/iOS/Build/Products/Release-iphoneos/MergeTetheriOS.app"
         validate_bundle "$IOS_APP/Info.plist" com.vaporpw.MergeTether.iOS
-        IOS_NAME="MergeTetheriOS-${VERSION}-unsigned-device.zip"
-        ditto -c -k --keepParent "$IOS_APP" "$SCRATCH/artifacts/$IOS_NAME"
+        collect_debug_symbols "$IOS_APP.dSYM"
+        if [[ "$IOS_SIDELOAD" -eq 1 ]]; then
+            IOS_NAME="MergeTetheriOS-${VERSION}-Sideload.ipa"
+            bash "$SCRIPT_DIR/package-ios-ipa.sh" "$IOS_APP" "$SCRATCH/artifacts/$IOS_NAME"
+        else
+            IOS_NAME="MergeTetheriOS-${VERSION}-unsigned-device.zip"
+            ditto -c -k --keepParent "$IOS_APP" "$SCRATCH/artifacts/$IOS_NAME"
+        fi
     else
         xcodebuild -project MergeTether.xcodeproj -scheme MergeTetheriOS -configuration Release \
             -destination 'generic/platform=iOS' -derivedDataPath "$SCRATCH/iOS" -archivePath "$SCRATCH/iOS.xcarchive" \
@@ -271,6 +299,7 @@ if [[ "$IOS" -eq 1 ]]; then
             CODE_SIGN_STYLE=Manual "MERGETETHER_IOS_PROVISIONING_PROFILE=${IOS_PROFILE}" archive
         IOS_APP="$SCRATCH/iOS.xcarchive/Products/Applications/MergeTetheriOS.app"
         validate_bundle "$IOS_APP/Info.plist" com.vaporpw.MergeTether.iOS
+        collect_debug_symbols "$SCRATCH/iOS.xcarchive/dSYMs/MergeTetheriOS.app.dSYM"
         verify_signature "$IOS_APP" 'Apple Distribution: '
         xcodebuild -exportArchive -archivePath "$SCRATCH/iOS.xcarchive" -exportPath "$SCRATCH/export" -exportOptionsPlist "$IOS_EXPORT_OPTIONS"
         shopt -s nullglob
@@ -313,6 +342,10 @@ for name in names:
     'artifacts': artifacts,
 }, indent=2) + '\n')
 PY
+if [[ -n "$SYMBOLS_DIR" ]]; then
+    mkdir -p "$SYMBOLS_DIR"
+    ditto "$SCRATCH/symbols" "$SYMBOLS_DIR"
+fi
 for name in "${ARTIFACTS[@]}"; do
     cp "$SCRATCH/artifacts/$name" "$SCRATCH/artifacts/$name.sha256" "$RELEASE_DIR/"
 done

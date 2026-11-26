@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: scripts/build-ios-ipa.sh [--build-number NUMBER]
+
+Build MergeTether Release for iPhoneOS and package it for signing before installation.
+Outputs go to release/ios along with a SHA-256 checksum and manifest.
+The default build number follows the highest existing local IPA build.
+Run scripts/setup-relay.sh to configure the local relay before building.
+An explicit TUIST_MERGETETHER_RELAY_CONFIG_FILE takes precedence.
+Set MERGETETHER_CRASH_SYMBOLS_DIR to a private absolute directory to retain the matching dSYM.
+USAGE
+}
+
+fail() { echo "error: $*" >&2; exit 1; }
+plist() { /usr/libexec/PlistBuddy -c "Print :$2" "$1"; }
+
+build=""
+case "${1:-}" in
+  --help|-h) usage; exit 0 ;;
+  --build-number)
+    [[ $# == 2 && "$2" =~ ^[1-9][0-9]*$ ]] || fail "--build-number requires a positive integer"
+    build="$2"
+    ;;
+  "") [[ $# == 0 ]] || fail "expected --build-number NUMBER" ;;
+  *) usage >&2; exit 2 ;;
+esac
+for tool in mise xcodebuildmcp python3 codesign xcrun; do
+  if [[ "$tool" == xcodebuildmcp ]]; then
+    command -v "$tool" >/dev/null || fail "missing xcodebuildmcp: install the XcodeBuildMCP CLI separately (mise.toml pins only Tuist)"
+  fi
+  command -v "$tool" >/dev/null || fail "missing $tool"
+done
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+out="$PWD/release/ios"
+mkdir -p "$out"
+scratch="$(mktemp -d "$out/.build.XXXXXX")"
+locked=0
+cleanup() {
+  local result=$? artifact
+  trap - EXIT
+  if [[ "$result" != 0 && -n "${ipa:-}" ]]; then
+    for artifact in "$ipa" "$ipa.sha256" "$name.json"; do
+      if [[ "$scratch/$artifact" -ef "$out/$artifact" ]]; then
+        rm -f -- "$out/$artifact"
+      fi
+    done
+  fi
+  rm -rf -- "$scratch"
+  [[ "$locked" == 0 ]] || rm -f -- "$lock"
+  exit "$result"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+mkdir -p build
+lock="$PWD/build/.local-build.lock"
+shlock -f "$lock" -p "$$" || fail "another local build is in progress in this checkout"
+locked=1
+
+commit="$(git rev-parse HEAD)"
+source_label="$(git rev-parse --short HEAD)"
+dirty=false
+if [[ -n "$(git status --porcelain)" ]]; then
+  dirty=true
+  source_label="$source_label-dirty"
+fi
+if [[ -z "$build" ]]; then
+  build="$(python3 - "$out" "$PWD/release/sidestore" <<'PY'
+from pathlib import Path
+from itertools import chain
+import plistlib
+import sys
+import zipfile
+
+latest = 0
+for path in chain.from_iterable(Path(folder).glob("*.ipa") for folder in sys.argv[1:]):
+    if not path.is_file():
+        continue
+    try:
+        with zipfile.ZipFile(path) as archive:
+            info = plistlib.loads(archive.read("Payload/MergeTetheriOS.app/Info.plist"))
+        if info.get("CFBundleIdentifier") == "com.vaporpw.MergeTether.iOS":
+            latest = max(latest, int(info["CFBundleVersion"]))
+    except (zipfile.BadZipFile, KeyError, ValueError, plistlib.InvalidFileException):
+        sys.exit(f"error: cannot read build number from {path.name}; use --build-number")
+print(latest + 1)
+PY
+)"
+fi
+
+mise exec -- tuist generate --no-open
+origin="$(plist Derived/InfoPlists/MergeTetheriOS-Info.plist MergeTetherRelayOrigin)"
+mac_origin="$(plist Derived/InfoPlists/MergeTether-Info.plist MergeTetherRelayOrigin)"
+[[ -n "$origin" && "$origin" == "$mac_origin" ]] ||
+  fail "configure the same external origin-only relay for both apps before building the IPA"
+
+echo "Building MergeTetheriOS (Release, build $build)..."
+symbols_dir="${MERGETETHER_CRASH_SYMBOLS_DIR:-}"
+build_settings=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO "CURRENT_PROJECT_VERSION=$build" ARCHS=arm64)
+if [[ -n "$symbols_dir" ]]; then
+  [[ "$symbols_dir" == /* ]] || fail "MERGETETHER_CRASH_SYMBOLS_DIR must be an absolute private directory"
+  build_settings+=(DEBUG_INFORMATION_FORMAT=dwarf-with-dsym)
+fi
+xcodebuildmcp device build --project-path MergeTether.xcodeproj --scheme MergeTetheriOS \
+  --configuration Release --derived-data-path "$scratch/DerivedData" --prefer-xcodebuild \
+  --extra-args "${build_settings[@]}"
+
+app="$scratch/DerivedData/Build/Products/Release-iphoneos/MergeTetheriOS.app"
+bundle_id="com.vaporpw.MergeTether.iOS"
+info="$app/Info.plist"
+version="$(plist "$info" CFBundleShortVersionString)"
+[[ "$version" =~ ^[0-9]+([.][0-9]+)*$ ]] || fail "unexpected IPA version"
+[[ "$(plist "$info" CFBundleIdentifier)" == "$bundle_id" &&
+   "$(plist "$info" CFBundleVersion)" == "$build" &&
+   "$(plist "$info" MergeTetherRelayOrigin)" == "$origin" ]] ||
+  fail "built app has unexpected bundle identity, build number or relay origin"
+
+name="MergeTetheriOS-$version-$build-$source_label"
+ipa="$name.ipa"
+bash scripts/package-ios-ipa.sh "$app" "$scratch/$ipa"
+
+(
+  cd "$scratch"
+  shasum -a 256 "$ipa" > "$ipa.sha256"
+  python3 - "$ipa" "$name.json" "$bundle_id" "$version" "$build" "$commit" "$dirty" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+ipa, manifest, bundle, version, build, commit, dirty = sys.argv[1:]
+sha = Path(ipa + ".sha256").read_text().split()[0]
+Path(manifest).write_text(json.dumps({
+    "artifact": ipa, "sha256": sha, "bundle_identifier": bundle, "version": version,
+    "build": build, "commit": commit, "dirty": dirty == "true", "platform": "iPhoneOS",
+    "signature": "ad hoc, verified after extracting IPA", "device_installation": "not tested",
+}, indent=2) + "\n", encoding="utf-8")
+PY
+)
+artifacts=("$ipa.sha256" "$name.json" "$ipa")
+for artifact in "${artifacts[@]}"; do
+  [[ ! -e "$out/$artifact" && ! -L "$out/$artifact" ]] || fail "output already exists: $out/$artifact"
+done
+if [[ -n "$symbols_dir" ]]; then
+  symbols="$symbols_dir/$name.app.dSYM"
+  [[ -d "$app.dSYM" ]] || fail "missing dSYM for crash symbolication"
+  [[ ! -e "$symbols" && ! -L "$symbols" ]] || fail "output already exists: $symbols"
+  mkdir -p "$symbols_dir"
+  ditto "$app.dSYM" "$symbols"
+fi
+for artifact in "${artifacts[@]}"; do
+  ln -h "$scratch/$artifact" "$out/$artifact" || fail "could not publish $out/$artifact"
+done
+echo "iOS IPA: $out/$ipa"

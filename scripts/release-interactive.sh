@@ -14,7 +14,7 @@
 #   --version X.Y.Z  Skip the interactive prompt.
 #   --yes, -y        Non-interactive; assume yes to confirmations. Still
 #                    requires a clean 'main' that matches origin.
-#   --platform all|macos  Required release inventory (default: all).
+#   --platform macos  Optional for compatibility.
 #
 # Before any commit, tag or push, HEAD must match the remote branch and have a
 # passing full verification report (scripts/run-tests.py --full) in
@@ -310,7 +310,7 @@ wait_for_release_run_id() {
 
 # Verify the release record itself, then the required per-platform inventory.
 verify_release_asset() {
-  local owner_repo="$1" tag="$2" version="$3" platform="$4" expected_build="$5" evidence
+  local owner_repo="$1" tag="$2" version="$3" expected_build="$4" evidence
   evidence="$(mktemp -d)"
   if ! gh release view "$tag" --repo "$owner_repo" --json tagName,isDraft,url,assets >"$evidence/release.json"; then
     rm -rf "$evidence"
@@ -323,27 +323,30 @@ verify_release_asset() {
     return 1
   fi
   local result=0
-  python3 - "$evidence" "$owner_repo" "$tag" "$version" "$platform" "$expected_build" <<'PYTHON' || result=$?
+  python3 - "$evidence" "$owner_repo" "$tag" "$version" "$expected_build" <<'PYTHON' || result=$?
 import json, pathlib, re, sys
 root = pathlib.Path(sys.argv[1])
 with (root / 'release.json').open() as source:
     release = json.load(source)
 with (root / 'release-manifest.json').open() as source:
     manifest = json.load(source)
-repo, tag, version, platform, expected_build = sys.argv[2:]
+repo, tag, version, expected_build = sys.argv[2:]
 expected_url = 'https://github.com/' + repo + '/releases/tag/' + tag
 if release.get('tagName') != tag or release.get('isDraft') is not False or release.get('url') != expected_url:
     sys.exit('Release is missing, still a draft, or does not match the requested repository/tag URL.')
 if manifest.get('version') != version or manifest.get('distributable') is not True or manifest.get('build') != expected_build:
     sys.exit('Release manifest does not describe a distributable artifact set for the requested version/build.')
 assets = release.get('assets', [])
+if any(asset.get('name', '').lower().endswith('.ipa') or
+       asset.get('name', '').lower().startswith('mergetetherios-') for asset in assets):
+    sys.exit('The public release contains iOS assets. The companion is built locally.')
 appcast = [asset for asset in assets if asset.get('name') == 'appcast.xml']
 if len(appcast) != 1 or not isinstance(appcast[0].get('size'), int) or appcast[0]['size'] <= 0:
     sys.exit('Expected exactly one nonempty release asset: appcast.xml')
-required = [(['MergeTether-' + version + '.dmg', 'MergeTether.dmg']),
-            (['MergeTether-' + version + '.zip', 'MergeTether.zip'])]
-if platform == 'all':
-    required.append(['MergeTetheriOS-' + version + '.ipa'])
+required = [
+    ['MergeTether-' + version + '.dmg', 'MergeTether.dmg'],
+    ['MergeTether-' + version + '.zip', 'MergeTether.zip'],
+]
 selected = []
 for alternatives in required:
     matches = [asset for asset in assets if asset.get('name') in alternatives]
@@ -421,7 +424,7 @@ wait_for_homebrew_update() {
 }
 
 main() {
-  local version_arg="" platform="all"
+  local version_arg="" platform="macos"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --version|--platform)
@@ -431,16 +434,16 @@ main() {
         if [[ "$1" == --version ]]; then version_arg="${2#v}"; else platform="$2"; fi
         shift 2 ;;
       --help|-h)
-        echo "Usage: $0 --version X.Y.Z [--platform all|macos] [--yes]"
-        echo "Publishes a changelog commit and tag; requires prior authorization. Default verifies macOS and iOS assets."
+        echo "Usage: $0 --version X.Y.Z [--yes]"
+        echo "Publishes a changelog commit and tag with macOS assets. Requires prior authorization."
         return 0 ;;
       --yes|-y) NON_INTERACTIVE=1; shift ;;
       *) echo "Unknown argument: $1" >&2; echo "Usage: $0 [--version X.Y.Z] [--yes]" >&2; exit 1 ;;
     esac
   done
 
-  if [[ "$platform" != all && "$platform" != macos ]]; then
-    echo "--platform must be all or macos." >&2; exit 1
+  if [[ "$platform" != macos ]]; then
+    echo "Public releases support macOS only. Use --platform macos or omit the option." >&2; exit 1
   fi
   if [[ -z "$version_arg" && ( "$NON_INTERACTIVE" -eq 1 || ! -t 0 ) ]]; then
     echo "--version X.Y.Z is required without an interactive terminal." >&2; exit 1
@@ -615,8 +618,7 @@ main() {
   echo "- Current source commit: $commit (must match origin/${branch})"
   echo "- Require a passing full verification for this commit (runs scripts/run-tests.py --full if missing)"
   echo "- Watch workflow in ${source_repo}: $RELEASE_WORKFLOW_NAME"
-  echo "- Verify published release in ${release_repo} contains macOS .dmg/.zip and appcast.xml (platform: ${platform})"
-  [[ "$platform" != all ]] || echo "- Verify separate MergeTetheriOS-${version}.ipa distribution artifact"
+  echo "- Verify published release in ${release_repo} contains macOS .dmg/.zip and appcast.xml"
   if [[ -n "$tap_repo" ]]; then
     echo "- Verify Homebrew tap ${tap_repo} points to version ${version}"
   fi
@@ -714,7 +716,7 @@ main() {
   fi
   echo "Verifying GitHub release assets in ${release_repo}..."
   local release_url
-  if ! release_url="$(verify_release_asset "$release_repo" "$tag" "$version" "$platform" "$expected_build")"; then
+  if ! release_url="$(verify_release_asset "$release_repo" "$tag" "$version" "$expected_build")"; then
     report_incomplete_release
     exit 1
   fi

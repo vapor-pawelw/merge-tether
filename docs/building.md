@@ -55,6 +55,31 @@ Use an empty `TUIST_MERGETETHER_RELAY_CONFIG_FILE` to generate without a relay.
 Distribution builds use their explicit release configuration. Keep personal
 relay files outside source control.
 
+## Crash reporting
+
+MergeTether can send reports to a private Sentry Cloud project. On macOS it reads the app's system crash reports after relaunch. On iOS it uses Apple's MetricKit. Create a dedicated project for macOS and another if you distribute a configured iOS build. For the public macOS workflow, set the following GitHub Actions configuration:
+
+| Setting | Location | Purpose |
+| --- | --- | --- |
+| `MERGETETHER_MACOS_CRASH_DSN` | Repository variable | Public client key and ingestion address embedded in the Mac app |
+| `MERGETETHER_SENTRY_ORG` | Repository variable | Sentry organization slug for symbol uploads |
+| `MERGETETHER_SENTRY_MACOS_PROJECT` | Repository variable | Sentry macOS project slug for symbol uploads |
+| `SENTRY_AUTH_TOKEN` | Repository secret | CI authentication to upload debug symbols |
+
+When the DSN is configured, the release workflow uploads the matching Mac dSYM before publishing. Keep the DSN limited to event intake, set a DSN rate limit in Sentry, and enable IP scrubbing there. Leave public issue sharing disabled. The relay and GitLab credentials are separate from Sentry configuration.
+
+For local builds, set `TUIST_MERGETETHER_MACOS_CRASH_DSN` or `TUIST_MERGETETHER_IOS_CRASH_DSN` when running `mise exec -- tuist generate --no-open` or a build script that generates the project. The values must be public Sentry Cloud DSNs. Empty values disable reporting for the respective target, including in forks by default. In a configured test build, use a Sentry project dedicated to testing and confirm an opted-in crash arrives from a Mac or physical iPhone with readable app frames. MetricKit delivery and timing are OS-dependent.
+
+For local releases and sideload builds made with `scripts/build-release.sh` or `scripts/build-ios-ipa.sh`, set `MERGETETHER_CRASH_SYMBOLS_DIR` to a private absolute directory to retain the corresponding dSYMs outside the distributable archives. Upload the dSYM corresponding to the installed build using `sentry-cli debug-files upload --wait` with the token and the matching Sentry organization and project in the CLI environment. [Sentry symbol upload guide](https://docs.sentry.io/platforms/apple/guides/macos/dsym/)
+
+### Crash reporting privacy
+
+Reporting is optional and starts after you choose **Send crash reports**. If you opt in, MergeTether uses crash diagnostics made available by the operating system to help the [MergeTether maintainer](https://github.com/vapor-pawelw) fix crashes. Sentry processes those reports and keeps crash events for 30 or 90 days depending on the plan. The HTTPS connection also exposes your source IP to Sentry. [Sentry retention](https://www.sentry.help/en/articles/13964336-why-does-the-event-count-in-my-issue-not-match-up-with-the-count-in-the-all-events-tab-of-the-issue) · [Sentry privacy policy](https://sentry.io/privacy/)
+
+The report includes the crash time and type, the app and system versions, addresses and build symbols' identifiers for MergeTether's stack frames, and a random installation ID. The ID groups reports from the same installation. Raw OS reports, GitLab and relay details, agent output, and local paths are excluded from the upload.
+
+To withdraw consent, turn off **Send crash reports** in **Settings → General** on the Mac or open the gear menu on iPhone or iPad. MergeTether cancels pending uploads and removes the local identifier. Reports already received follow Sentry's retention period. [Contact the maintainer](https://github.com/vapor-pawelw) with questions about reporting or data requests. For a separately distributed build, the operator of its configured Sentry project handles those requests.
+
 ## Command-line build
 
 ```bash
@@ -96,19 +121,18 @@ paths or to select a particular installation. An existing installation supplies
 its bundle ID and signing identity. Keep that identity available in Keychain so
 the rebuild retains access to existing settings and pairing.
 
-### Build an IPA for SideStore
+### Build an iOS IPA
 
 ```bash
-./scripts/build-sidestore-ipa.sh
-./scripts/build-sidestore-ipa.sh --build-number 35
+./scripts/build-ios-ipa.sh
+./scripts/build-ios-ipa.sh --build-number 35
 ```
 
 With the [local relay configured](#local-relay-configuration), the script builds
-Release for iPhoneOS and uses the next build number found in `release/sidestore`
+Release for iPhoneOS and uses the next build number from existing local iOS IPAs
 unless you supply one. It writes the IPA, SHA-256 checksum and build manifest to
-that directory. The IPA contains an ad-hoc signed app for SideStore to re-sign
-on import. The script verifies the device executable and signature after
-extracting the final archive.
+`release/ios`. The script verifies the device executable and signature after
+extracting the final archive. You can sign the IPA yourself before installing it.
 
 ## Installation-specific runtime data
 
@@ -335,29 +359,30 @@ identifier to keep that installation's preferences and permissions.
 
 `Project.swift` supplies shared `MARKETING_VERSION` (`2.0.0`) and `CURRENT_PROJECT_VERSION` (`1`) defaults. Both app targets bind their Info.plist version fields to these settings. The release script passes the selected version and build number to every build/archive without rewriting source files or signed bundles. Regenerate the project deliberately when integrating this project configuration. The local `sync-version-from-tag.sh vX.Y.Z` helper updates the shared `MARKETING_VERSION` while preserving both plist bindings; it changes `CURRENT_PROJECT_VERSION` only with an explicit `--build-number N`. Distribution build numbers come from the Release workflow run number. The helper does not touch `CHANGELOG.md`, commit or tag; `release-interactive.sh` owns changelog promotion and the annotated tag.
 
-`scripts/build-release.sh --help` lists the options. Run it through the pinned toolchain. Its default is a signed, notarized **macOS** release; `--platform all` additionally exports a separate iOS distribution IPA. Distribution credentials must already be installed and valid. The script does not issue certificates or create a notary credential profile.
+`scripts/build-release.sh --help` lists the options. Run it through the pinned toolchain. Its default is a signed, notarized **macOS** release. The GitHub workflow uses `--platform macos --no-relay`. For private builds with your own relay, use `--platform all --ios-sideload` with `--relay-config FILE`. Distribution credentials must already be installed and valid. The script does not issue certificates or create a notary credential profile.
 
 ```bash
-mise exec -- bash scripts/build-release.sh 1.2.0 --build-number 1 --platform all \
+mise exec -- env TUIST_MERGETETHER_RELAY_CONFIG_FILE= \
+  bash scripts/build-release.sh 2.0.0 --build-number 1 --platform macos --no-relay \
   --signing-identity 'Developer ID Application: Example (TEAMID)' \
-  --ios-signing-identity 'Apple Distribution: Example (TEAMID)' \
-  --team-id TEAMID --notary-profile existing-notary-profile \
-  --ios-export-options /absolute/path/ExportOptions.plist \
-  --relay-config /absolute/private/relay-build.json
+  --team-id TEAMID --notary-profile existing-notary-profile
 ```
 
 The signed macOS path **uploads the ZIP and DMG to Apple for notarization**. Run it only after that upload is authorized. It checks the available Developer ID identity and notary credentials before building, enables hardened runtime and a secure timestamp, verifies bundle metadata and signatures, requires an Accepted notarization result, staples and validates tickets, and checks Gatekeeper. A local Apple Development identity supports development and stable pairing; it cannot replace Developer ID distribution signing. Missing identities, rejected notarization, invalid signatures or Gatekeeper failures exit nonzero before new artifacts are copied to the release directory.
 
-Signed builds require a relay origin source: `--relay-config FILE` (or a nonempty `TUIST_MERGETETHER_RELAY_CONFIG_FILE`), or an explicit `--no-relay` for a macOS-only build without iPhone pairing. The script then checks that `MergeTetherRelayOrigin` in the Mac app, the iOS archive and the exported IPA equals the normalized configured origin (or is empty with `--no-relay`) without printing it. An unsigned build without either option leaves the generation environment untouched, so the saved user relay or an explicit origin-only override still applies.
+Release builds require a relay origin source: `--relay-config FILE` (or a nonempty `TUIST_MERGETETHER_RELAY_CONFIG_FILE`), or an explicit `--no-relay` for a macOS-only build without iPhone pairing. The script then checks that `MergeTetherRelayOrigin` in the Mac app and the iOS bundle equals the normalized configured origin (or is empty with `--no-relay`) without printing it. An unsigned build without either option leaves the generation environment untouched, so the saved user relay or an explicit origin-only override still applies.
 
-The iOS path requires an existing Apple Distribution identity and installed distribution provisioning profile for `com.vaporpw.MergeTether.iOS`. Supply a real `ExportOptions.plist` with matching `teamID`, `signingStyle=manual`, a `provisioningProfiles` entry for that bundle, and an explicit method: `app-store-connect`, `release-testing`, or `enterprise`. These methods require the corresponding Apple program and provisioning eligibility; an App Store Connect IPA is for upload, and release-testing/enterprise eligibility determines who can install the export. The script checks metadata in both the archive and exported IPA, verifies their team and distribution signature, and rejects zero or multiple exported IPAs. Xcode export supplies the provisioning validation; the script never downloads or creates profiles automatically.
+With `--ios-sideload`, the script builds for arm64 iPhoneOS, packages an ad-hoc signed IPA, and verifies the executable and signature from the final ZIP. You can sign the IPA yourself before installing it. The flag also works with `--platform ios` to build the companion on its own without distribution credentials or notarization.
+
+For a separately provisioned Apple export, omit `--ios-sideload`. That iOS path requires an existing Apple Distribution identity and installed distribution provisioning profile for `com.vaporpw.MergeTether.iOS`. Supply a real `ExportOptions.plist` with matching `teamID`, `signingStyle=manual`, a `provisioningProfiles` entry for that bundle, and an explicit method: `app-store-connect`, `release-testing`, or `enterprise`. These methods require the corresponding Apple program and provisioning eligibility; an App Store Connect IPA is for upload, and release-testing/enterprise eligibility determines who can install the export. The script checks metadata in both the archive and exported IPA, verifies their team and distribution signature, and rejects zero or multiple exported IPAs. Xcode export supplies the provisioning validation; the script never downloads or creates profiles automatically.
 
 The selected artifact inventory is exactly two macOS archives, one iOS archive, or three for `--platform all`:
 
 | Platform | Distribution artifacts |
 | --- | --- |
 | macOS | `MergeTether-<version>.dmg`, `MergeTether-<version>.zip` |
-| iOS | `MergeTetheriOS-<version>.ipa` |
+| iOS for sideloading | `MergeTetheriOS-<version>-Sideload.ipa` |
+| iOS for Apple distribution | `MergeTetheriOS-<version>.ipa` |
 
 Each artifact has a `.sha256` file. `release/release-manifest.json` records the version, build, platform inventory and SHA-256 hashes after every selected platform passes. The script uses and removes an owned `.release-build.*` scratch directory, preserving other build directories and previous artifacts. Read the command exit status and manifest version/build before using outputs; preserved artifacts from an earlier run are not evidence that a failed run succeeded.
 
@@ -373,17 +398,14 @@ These outputs go under `release/unsigned`, with `distributable=false` in their m
 
 Releases are tag-driven: pushing a `v*` tag triggers the Release workflow. Configure these GitHub secrets before an authorized publication:
 
-- `APPLE_CERTIFICATES_P12_BASE64`: an exported PKCS#12 containing the existing Developer ID Application and Apple Distribution identities and their private keys.
+- `APPLE_CERTIFICATES_P12_BASE64`: an exported PKCS#12 containing the existing Developer ID Application identity and its private key.
 - `APPLE_CERTIFICATES_PASSWORD`: that PKCS#12 password.
-- `IOS_PROFILE_BASE64`: the existing distribution `.mobileprovision` for the iOS bundle.
 - `NOTARY_API_PRIVATE_KEY`, `NOTARY_KEY_ID`, `NOTARY_ISSUER_ID`: an eligible App Store Connect notarization API key and its identifiers.
 - `MERGETETHER_SPARKLE_PRIVATE_KEY`: the Sparkle EdDSA private key. Generate a dedicated key once with Sparkle 2.10.1's `bin/generate_keys --account mergetether-release`. Save its public key as the `MERGETETHER_SPARKLE_PUBLIC_KEY` repository variable. Use `bin/generate_keys --account mergetether-release -x` with a private temporary file to transfer the private key to this secret. Remove the temporary file after the transfer and keep a protected backup of the key.
 
-Configure repository variables `APPLE_TEAM_ID`, `MACOS_RELEASE_IDENTITY`, `IOS_RELEASE_IDENTITY` (exact certificate names or SHA-1 fingerprints), and `IOS_EXPORT_METHOD` (one of the supported distribution methods). The workflow fails with the missing configuration name without printing its value. It imports only into its temporary runner keychain, derives export options from the configured profile, injects the tag version and workflow run number through build settings, verifies the three-artifact inventory and hashes, and removes temporary credential files/keychain on exit. It publishes `MergeTether.dmg` and `MergeTether.zip` on GitHub with matching names in the manifest and checksums. Before the build job touches any secret, the Release workflow runs the reusable Verify workflow (`.github/workflows/verify.yml`) on the tagged commit: it installs the pinned toolchain, Node.js from the relay package's `engines` field and the locked relay dependencies, generates the project without a relay origin, and runs `python3 scripts/run-tests.py --full`. The same workflow runs on pull requests and pushes to `main`.
+Configure repository variables `APPLE_TEAM_ID` and `MACOS_RELEASE_IDENTITY` (the exact certificate name or SHA-1 fingerprint). The workflow fails with the missing configuration name without printing its value. It imports only into its temporary runner keychain, injects the tag version and workflow run number through build settings, verifies the two macOS archives and their hashes, and removes temporary credential files/keychain on exit. It publishes `MergeTether.dmg` and `MergeTether.zip` on GitHub with matching names in the manifest and checksums, alongside the signed `appcast.xml`. The public Mac app has an empty relay origin. Pairing uses local builds of both apps with your own relay. Before the build job touches any secret, the Release workflow runs the reusable Verify workflow (`.github/workflows/verify.yml`) on the tagged commit: it installs the pinned toolchain, Node.js from the relay package's `engines` field and the locked relay dependencies, generates the project without a relay origin, and runs `python3 scripts/run-tests.py --full`. The same workflow runs on pull requests and pushes to `main`.
 
-The `update-cask` job of the Release workflow publishes the `mergetether` cask and registers the previous token as an upgrade alias. It runs only when the repository variable `HOMEBREW_TAP_ENABLED` is `true` and then needs the `HOMEBREW_TAP_TOKEN` secret with push access to the tap. It downloads the published DMG with HTTP failure detection and retries, and refuses to update the cask unless its SHA-256 matches the digest recorded by the build job. The iOS IPA remains a separate versioned asset. Relay deployment is separate from both app artifacts.
-
-`scripts/release-interactive.sh` is a **publication command**: it promotes Unreleased notes, commits and pushes them, and pushes an annotated tag. Run it only when publication is explicitly requested. Before any commit, tag or push, HEAD must equal the remote branch head, `CHANGELOG.md` must have no local edits, and `.test-results` must hold a passing, clean `--full` report for HEAD; when none exists the script runs `python3 scripts/run-tests.py --full` and stops on failure. With `--yes`, a branch other than `main` or any uncommitted change is a hard failure rather than a confirmation. If the changelog push fails, the local changelog commit is removed. Noninteractive invocation requires both `--version X.Y.Z` and `--yes`; `--platform all` is the default release inventory, while `--platform macos` supports an explicitly macOS-only release. It waits for the workflow and verifies a matching, published release record, its repository/tag URL, exactly one nonempty required asset per platform, a signed `appcast.xml`, and a matching distributable `release-manifest.json` with the selected version, successful workflow run number, artifact inventory and SHA-256 evidence. A draft release, missing IPA, missing release or pushed tag alone is incomplete and exits nonzero with a release URL and inspection command. Inspect the existing tag/run before retrying; do not restart publication by pushing the tag again. Optional Homebrew verification remains controlled by `MERGETETHER_HOMEBREW_TAP_REPO`.
+The `update-cask` job of the Release workflow publishes the `mergetether` cask and registers the previous token as an upgrade alias. It runs only when the repository variable `HOMEBREW_TAP_ENABLED` is `true` and then needs the `HOMEBREW_TAP_TOKEN` secret with push access to the tap. It downloads the published DMG with HTTP failure detection and retries, and refuses to update the cask unless its SHA-256 matches the digest recorded by the build job.
 
 ### Mac in-app updates
 
@@ -392,3 +414,5 @@ The release build embeds the public Sparkle key and the repository's `releases/l
 The Mac app checks for updates in the background when enabled under **Settings → General**. A download and preparation happen with the app open. The restart action waits for active automation so it can finish and save its results. After relaunch, the app opens the bundled **What's New** for the installed version. A prepared update can also install on ordinary Quit.
 
 Local builds opt into an update feed by supplying `TUIST_MERGETETHER_UPDATE_FEED` and `TUIST_MERGETETHER_UPDATE_PUBLIC_KEY` together when generating through `mise`. Use an isolated HTTPS feed and signing key for update verification. Confirm the first build can find, stage, install and relaunch into a higher build, and check the What's New content and the relay origin after relaunch. Install the first Sparkle-enabled public release through the DMG or Homebrew to receive future updates.
+
+`scripts/release-interactive.sh` is a **publication command**: it promotes Unreleased notes, commits and pushes them, and pushes an annotated tag. Run it only when publication is explicitly requested. Before any commit, tag or push, HEAD must equal the remote branch head, `CHANGELOG.md` must have no local edits, and `.test-results` must hold a passing, clean `--full` report for HEAD; when none exists the script runs `python3 scripts/run-tests.py --full` and stops on failure. With `--yes`, a branch other than `main` or any uncommitted change is a hard failure rather than a confirmation. If the changelog push fails, the local changelog commit is removed. Noninteractive invocation requires both `--version X.Y.Z` and `--yes`. Every published release requires both macOS archives and the signed `appcast.xml`. It waits for the workflow and verifies a matching, published release record, its repository/tag URL, exactly one nonempty copy of each required asset, and a matching distributable `release-manifest.json` with the selected version, successful workflow run number, artifact inventory and SHA-256 evidence. A draft release, missing asset, missing release or pushed tag alone is incomplete and exits nonzero with a release URL and inspection command. Inspect the existing tag/run before retrying; do not restart publication by pushing the tag again. Optional Homebrew verification remains controlled by `MERGETETHER_HOMEBREW_TAP_REPO`.

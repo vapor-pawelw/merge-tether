@@ -268,7 +268,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Expand or collapse iPhone discussion threads by tapping the comment card, including the area around the chevron.
 
-- Rebuild and relaunch the local Mac installation from a script, and build an iPhone IPA for SideStore with a separate command.
+- Rebuild and relaunch the local Mac installation from a script, and build an iPhone IPA for signing with a separate command.
 
 - Keep newly tracked merge requests on **Default** when automation adds them to the board.
 

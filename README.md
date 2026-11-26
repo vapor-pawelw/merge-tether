@@ -40,6 +40,8 @@ open MergeTether.xcworkspace
 
 Run the `MergeTether` scheme in Xcode. For downloadable builds, check the features listed in their release notes. [Build guide](docs/building.md) · [GitHub Releases](https://github.com/vapor-pawelw/merge-tether/releases)
 
+GitHub Releases and Homebrew distribute the Mac app. The public build runs the GitLab inbox on its own. For iPhone or iPad pairing, build both apps with your own relay.
+
 The board works with `glab` alone. To run agent actions or automation, select **Codex** or **Claude** during onboarding or in **Settings → Agent** and sign in to the selected CLI.
 
 ## Delegate a review or a follow-up
@@ -62,16 +64,13 @@ Agent progress, results, and failures are visible on the Mac. Permissions for pu
 
 MergeTether is built with **Swift 6 and SwiftUI**. The Mac app reads and writes GitLab through `glab`, starts the selected agent CLI in the background, and keeps settings and run history locally. Agent processes have file, command, and network access. The data they read can reach the selected provider. [Agent data and access](docs/automation.md#what-the-agent-sees)
 
-The optional **iPhone companion** mirrors the board and sends confirmed MR actions through a paired, online Mac. It requires **iOS 17+** and access to a MergeTether relay on Cloudflare. The Mac handles GitLab requests and keeps your credentials. [Companion architecture](docs/remote.md) · [Bring your own relay](docs/byo-relay.md)
+### iPhone and iPad companion
 
-If you already have a relay, run the interactive setup from your checkout before generating the Xcode project.
+The companion is available in this repository for **iOS 17+**. It mirrors the board and sends confirmed MR actions through a paired, online Mac. Both apps need the same relay address. The Mac handles GitLab requests and keeps your credentials. [Companion architecture](docs/remote.md)
 
-```sh
-./scripts/setup-relay.sh
-mise exec -- tuist generate --no-open
-```
-
-Enter your relay's HTTPS URL and access token. Project generation uses the saved URL for both the Mac and iPhone builds. The Mac keeps the token in private local storage and fills it in when you pair. After building, choose **Enable phone access** on the Mac and scan its QR code using the iPhone app. [Relay setup details](docs/byo-relay.md#interactive-setup-for-an-existing-relay)
+1. Deploy the relay to your own Cloudflare account and keep its HTTPS URL and access token. [Relay deployment guide](docs/byo-relay.md#deploy-your-instance)
+2. From your checkout, run `./scripts/setup-relay.sh` and enter the URL and token. Then run `mise exec -- tuist generate --no-open` and build the `MergeTether` scheme in Xcode. The URL is embedded in both local builds. The token stays in private storage on your Mac. [Relay configuration](docs/byo-relay.md#interactive-setup-for-an-existing-relay)
+3. Run `./scripts/build-ios-ipa.sh` and sign and install the IPA on your iPhone or iPad. Open your locally built Mac app, choose **Enable phone access**, and scan its QR code with the companion. [Build an iOS IPA](docs/building.md#build-an-ios-ipa) · [Pair the apps](docs/byo-relay.md#pair-and-confirm-ownership)
 
 ## Contributing
 

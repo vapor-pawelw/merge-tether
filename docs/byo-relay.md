@@ -2,7 +2,7 @@
 
 If you already have a relay URL and access token, start with [interactive setup](#interactive-setup-for-an-existing-relay). To host your own relay, [deploy an instance](#deploy-your-instance) to your Cloudflare account first. The [relay server](../Services/RemoteRelay) is deployed separately from the Mac and iPhone apps.
 
-The relay origin is **public metadata**: it is embedded in both apps' Info.plist and is visible in the UI and extractable from an IPA. It neither authenticates users nor prevents resource consumption. Its operator is the person or organization controlling that deployment; the displayed origin is not proof of a person's identity. Build from your own configuration and verify the address before accepting pairing.
+Both local app bundles embed the relay's HTTPS origin in their Info.plist. Anyone with either bundle can read that address, so keep builds that contain your private relay address to yourself. Verify the displayed address before accepting pairing.
 
 ## Account and cost boundary
 
@@ -79,9 +79,7 @@ mise exec -- bash scripts/build-release.sh 1.2.0 --platform all --unsigned \
   --relay-config "$HOME/.config/mergetether/relay-build.json"
 ```
 
-Distribution builds still require the signing, provisioning and notarization setup described in [building.md](building.md#release-builds). iOS distribution requires a valid relay config; there is no shared-origin fallback. Mac-only builds may omit it. `--unsigned` is explicit inspection mode and may omit it too; its iOS device ZIP is not installable. An inspection app with no origin shows the setup message and cannot pair. Tests and previews inject a synthetic configuration and local transports, without live relay services.
-
-If you use the repository's signed release workflow in your own fork, configure `MERGETETHER_RELAY_CONFIG_JSON` as a repository secret containing exactly the same origin-only JSON. The workflow requires it for its iOS distribution artifact, writes a temporary file with mode `0600` under `RUNNER_TEMP`, passes `--relay-config`, and removes the file during cleanup. Its other signing/notarization secrets remain separate. No personal endpoint is committed or supplied by default; marking this origin as a CI secret is a configuration convenience, not a promise that an origin embedded in an IPA remains secret. Configuring CI does not itself authorize a tag push or publication.
+GitHub Releases and Homebrew ship the Mac app with an empty relay origin. For pairing, build your Mac app locally and use the same relay configuration to build the iOS IPA. The IPA can be signed and installed on your device. [Build an iOS IPA](building.md#build-an-ios-ipa)
 
 ## Pair and confirm ownership
 
