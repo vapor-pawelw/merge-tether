@@ -95,6 +95,23 @@ struct AssistantAutomaticRetryPolicyTests {
         #expect(plans([child], []).isEmpty, "Missing durable history cannot mint a new budget")
     }
 
+    @Test func diskDeferredReplacementKeepsLineageWithoutSpendingItsAttempt() throws {
+        let root = candidate()
+        var diskDeferred = try #require(plans([root], []).first).reservation(at: time)
+        let child = candidate(identity: diskDeferred.identity, retryOf: root.id)
+        diskDeferred.state = .started
+        diskDeferred.replacementJobID = child.id
+        diskDeferred.diskDeferred = true
+
+        let next = try #require(plans([child], [diskDeferred]).first)
+        #expect(next.rootID == root.id && next.parentJobID == child.id && next.attempt == 1)
+        var started = next.reservation(at: next.dueAt)
+        let replacement = candidate(identity: started.identity, retryOf: child.id)
+        started.state = .started
+        started.replacementJobID = replacement.id
+        #expect(plans([replacement], [diskDeferred, started]).first?.attempt == 2)
+    }
+
     @Test func anotherAccountCannotAdoptARetryIdentity() throws {
         let job = candidate()
         var record = try #require(plans([job], []).first).reservation(at: time)

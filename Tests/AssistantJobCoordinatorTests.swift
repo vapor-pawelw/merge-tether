@@ -496,6 +496,133 @@ import Testing
         #expect(settings.assistantHandoffs.last?.execution?.state == .queued)
     }
 
+    @Test func diskReservationsKeepAnotherJobQueuedUntilCapacityReturns() async throws {
+        let (settings, name, defaults) = try fixture()
+        defer { defaults.removePersistentDomain(forName: name) }
+        var first = job(iid: 1)
+        first.estimatedRepositoryBytes = 800_000_000
+        let firstID = first.id
+        let second = job(iid: 2)
+        settings.assistantHandoffs = [first, second]
+        let health = AssistantCLIHealthStore(defaults: defaults)
+        let (executionGate, finishExecution) = AsyncStream<Void>.makeStream()
+        let (cleanupGate, finishCleanup) = AsyncStream<Void>.makeStream()
+        var available: Int64 = 2_100_000_000
+        var cleaning = false
+        var started: [UUID] = []
+        let coordinator = AssistantJobCoordinator(healthStore: health, availableDiskBytes: { available },
+            cleanupAfterSuccess: { handoff, _ in
+                if handoff.id == firstID {
+                    cleaning = true
+                    for await _ in cleanupGate { break }
+                }
+            }, execute: { handoff, _ in
+                started.append(handoff.id)
+                if handoff.id == firstID { for await _ in executionGate { break } }
+                return .init(result: .init(status: .succeeded, summary: "Done"), output: "")
+            })
+        defer {
+            finishExecution.finish()
+            finishCleanup.finish()
+            coordinator.prepareForTermination(settings: settings)
+        }
+
+        #expect(coordinator.schedule(first, settings: settings))
+        #expect(coordinator.schedule(second, settings: settings))
+        for _ in 0..<100 where started.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(started == [firstID])
+        #expect(settings.assistantHandoffs[1].execution?.state == .queued)
+        #expect(settings.assistantHandoffs[1].execution?.diskAdmissionIssue?.cause == .insufficientCapacity)
+
+        finishExecution.finish()
+        for _ in 0..<100 where !cleaning { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(cleaning && coordinator.isWorking(on: first.key.work))
+        available = 2_600_000_000
+        coordinator.resumePendingJobs()
+        try await Task.sleep(for: .milliseconds(15))
+        #expect(started == [firstID])
+        #expect(settings.assistantHandoffs[1].execution?.state == .queued)
+        available = 1_000_000_000
+        finishCleanup.finish()
+        await coordinator.waitForTermination(timeout: .seconds(1))
+        #expect(started == [firstID, second.id])
+        #expect(settings.assistantHandoffs[1].execution?.state == .succeeded)
+        #expect(settings.assistantHandoffs[1].execution?.diskAdmissionIssue == nil)
+    }
+
+    @Test(arguments: [nil as Int64?, 999_999_999])
+    func diskAdmissionFailureReleasesPipelineAndRetryReservationsBeforeLaunching(_ initialBytes: Int64?) throws {
+        let (settings, name, defaults) = try fixture()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let detector = ExistingPipelineWorkDetector(directory: directory)
+        var next = job()
+        let prior = UUID()
+        let attempt = AssistantAutomaticRetryAttempt(id: UUID(), rootID: prior, parentJobID: prior,
+            target: .init(host: next.key.work.host, username: next.key.username,
+                projectID: next.key.work.projectID, iid: next.key.work.iid),
+            family: "pipeline", attempt: 1, reservedAt: .now)
+        next.retryOf = prior
+        next.automaticRetryIdentity = attempt.identity
+        let claim = try #require(detector.registerRun(for: .init(host: next.key.work.host,
+            projectID: next.key.work.projectID, mergeRequestIID: next.key.work.iid, pipelineID: 3)))
+        try detector.bindRun(next.id, to: claim)
+        next.pipelineReservation = claim
+        settings.assistantHandoffs = [next]
+        settings.assistantAutomaticRetryAttempts = [attempt]
+        var available = initialBytes
+        let coordinator = AssistantJobCoordinator(healthStore: AssistantCLIHealthStore(defaults: defaults),
+            availableDiskBytes: { available }, pipelineWorkDetector: detector, execute: { _, _ in
+                Issue.record("Disk admission must stop the run before execution.")
+                throw CancellationError()
+            })
+
+        #expect(coordinator.schedule(next, settings: settings))
+        #expect(!coordinator.isWorking(on: next.key.work))
+        #expect(!detector.hasActiveReservation(for: claim))
+        let restored = SettingsManager(defaults: defaults)
+        let execution = try #require(restored.assistantHandoffs.first?.execution)
+        let issue = try #require(execution.prelaunchDiskFailure)
+        #expect(issue.cause == (initialBytes == nil ? .capacityUnavailable : .insufficientCapacity))
+        #expect(issue.requiredBytes == 1_000_000_000)
+        #expect(execution.attentionExplanation == String(localized: issue.errorTitle))
+        #expect(restored.assistantAutomaticRetryAttempts.first?.diskDeferred == true)
+        #expect(restored.assistantAutomaticRetryAttempts.first?.replacementJobID == next.id)
+        #expect(!coordinator.canRetryAfterDiskFailure(execution))
+        available = issue.requiredBytes
+        #expect(coordinator.canRetryAfterDiskFailure(execution))
+    }
+
+    @Test func repositoryStatisticsAreCachedPerSourceProjectAndAccount() async throws {
+        let (_, name, defaults) = try fixture()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let coordinator = AssistantJobCoordinator(healthStore: AssistantCLIHealthStore(defaults: defaults))
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let account = GitLabAccountIdentity(host: "gitlab.example.test", username: "me")
+        let glab = gitlab.service(host: account.host, username: account.username)
+        gitlab.handler = { request in
+            switch request.endpoint {
+            case "/projects/5?statistics=true":
+                return InMemoryGitLab.output(#"{"id":5,"statistics":{"repository_size":850000000,"storage_size":9000000000}}"#)
+            case "/projects/6?statistics=true":
+                return InMemoryGitLab.output(#"{"id":6,"name":"Statistics unavailable"}"#)
+            default: return try gitlab.unexpected(request)
+            }
+        }
+
+        #expect(await coordinator.repositorySize(projectID: 5, account: account, glab: glab) == 850_000_000)
+        #expect(await coordinator.repositorySize(projectID: 5, account: account, glab: glab) == 850_000_000)
+        #expect(await coordinator.repositorySize(projectID: 6, account: account, glab: glab) == nil)
+        #expect(await coordinator.repositorySize(projectID: 6, account: account, glab: glab) == nil)
+        #expect(gitlab.requests.map(\.endpoint) == ["/projects/5?statistics=true", "/projects/6?statistics=true"])
+        let other = GitLabAccountIdentity(host: account.host, username: "other")
+        let otherGlab = gitlab.service(host: other.host, username: other.username)
+        #expect(await coordinator.repositorySize(projectID: 5, account: other, glab: otherGlab) == 850_000_000)
+        #expect(gitlab.requests.count == 3)
+    }
+
     private func fixture() throws -> (SettingsManager, String, UserDefaults) {
         let name = "AssistantJobCoordinatorTests.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: name))

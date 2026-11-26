@@ -1,6 +1,34 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "assistant.jobs.waiting.for.mac.disk": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Waiting for disk space on the Mac"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Oczekiwanie na wolne miejsce na Macu"}}
+      }
+    },
+    "assistant.jobs.waiting.to.check.mac.disk": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Waiting to check disk space on the Mac"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Oczekiwanie na sprawdzenie miejsca na Macu"}}
+      }
+    },
+    "assistant.jobs.error.mac.disk.full": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Free up disk space on the Mac and retry this run."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Zwolnij miejsce na Macu i ponów uruchomienie."}}
+      }
+    },
+    "assistant.jobs.error.mac.disk.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "The Mac could not check disk space. Check access to the Assistant Runs folder and retry."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się sprawdzić miejsca na Macu. Sprawdź dostęp do folderu Assistant Runs i ponów uruchomienie."}}
+      }
+    },
     "assistant.jobs.read.only.review": {
       "extractionState": "manual",
       "localizations": {
