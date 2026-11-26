@@ -393,7 +393,8 @@ final class MergeRequestAttentionMonitor {
                 let revision = glab.accountRevision
                 guard let iid = target.iid, glab.resolvedHost == target.host,
                       glab.currentUsername == target.username else { throw CancellationError() }
-                _ = try await glab.fetchAuthenticatedUser(host: target.host, expectedUsername: target.username)
+                _ = try await glab.fetchAuthenticatedUser(host: target.host, expectedUsername: target.username,
+                                                          expectedUserID: target.userID)
                 let request = try await glab.fetchMergeRequest(projectID: target.projectID, iid: iid, host: target.host)
                 guard request.isOpen, request.webURL.isGitLabMergeRequest(host: target.host, iid: iid),
                       settings?.automation.scope.permits(request, host: target.host, username: target.username) == true
@@ -404,14 +405,17 @@ final class MergeRequestAttentionMonitor {
                 }
                 return notes
             }, isCurrent: { target, assistant, model, thinking in
+                let projected = target.forAccount(.init(host: target.host, username: target.username))
                 guard let settings, glab.resolvedHost == target.host, glab.currentUsername == target.username,
+                      glab.authenticatedUserID == target.userID,
                       settings.automation.hasAutomaticActionConsent,
-                      settings.automation.selectedAssistant == assistant, settings.publicationPolicy(for: target).requiresAI,
-                      settings.automation.scope.resolve(target).active else { return false }
+                      settings.automation.selectedAssistant == assistant, settings.publicationPolicy(for: projected).requiresAI,
+                      settings.automation.scope.resolve(projected).active else { return false }
                 let configured = assistant == .codex ? settings.automation.codexVerificationModel.rawValue
                     : settings.automation.claudeVerificationModel.rawValue
                 return model == configured && settings.automation.verificationThinking == thinking
-            }, criteriaOverride: { settings?.automation.aiCommentCriteriaOverride })
+            }, criteriaOverride: { settings?.automation.aiCommentCriteriaOverride },
+            legacyUsernames: { settings?.unambiguousLegacyUsernames(for: $0) ?? [$0.username] })
         self.aiOriginCoordinator = publicationOrigins
         self.displayAIOriginCoordinator = settings.map { settings in
             AICommentDisplayCoordinator(glab: glab, settings: settings, assessmentDirectory: aiAssessmentDirectory,
@@ -516,7 +520,8 @@ final class MergeRequestAttentionMonitor {
         }
         aiOriginCoordinator.onPersisted = { [weak self] target, notes, assessment in
             guard let context = originReadContexts.values.removeValue(forKey: target) else { return }
-            self?.displayAIOriginCoordinator?.notifyPersistedOrigins(target: target, request: context.request,
+            let projected = target.forAccount(.init(host: target.host, username: target.username))
+            self?.displayAIOriginCoordinator?.notifyPersistedOrigins(target: projected, request: context.request,
                 accountRevision: context.revision, notes: notes, assessment: assessment)
         }
         aiOriginCoordinator.onChange = { [weak self] in
@@ -660,36 +665,7 @@ final class MergeRequestAttentionMonitor {
             pendingRefresh = (account, todos, revision)
             return
         }
-        if self.account != account {
-            draftRegeneration.cancelAndClear()
-            dependencyTask?.cancel()
-            dependencyPresentation = .init()
-            authorFeedbackCoordinator?.cancel()
-            draftProofRecoveryCoordinator?.cancel()
-            aiOriginCoordinator.cancel()
-            accountGeneration += 1
-            attentionRecords = [:]
-            attentionRecordsRevision = nil
-            attentionCandidateIDs = []
-            catalogIDs = []
-            terminalCatalogRequests = []
-            recentTodos = []
-            hasError = false
-            hasOwnListing = false
-            syncedCatalogRevision = nil
-            confirmationStates = [:]
-            previousDrafts = [:]
-            publishedDrafts = [:]
-            manualPublicationProgress = [:]
-            approvedHeads = [:]
-            failedApprovalHeads = [:]
-            approvalReadFailures = [:]
-            verifiedRemoteFiles = [:]
-            user = nil
-            self.account = account
-            displayAIOriginCoordinator?.cancel()
-            reReviewCoordinator?.reset()
-        }
+        if self.account != account { resetAccountState(for: account) }
         refreshGeneration += 1
         isLoading = true
         Task {
@@ -704,6 +680,37 @@ final class MergeRequestAttentionMonitor {
                 }
             }
         }
+    }
+
+    private func resetAccountState(for account: Account) {
+        draftRegeneration.cancelAndClear()
+        dependencyTask?.cancel()
+        dependencyPresentation = .init()
+        authorFeedbackCoordinator?.cancel()
+        draftProofRecoveryCoordinator?.cancel()
+        aiOriginCoordinator.cancel()
+        accountGeneration += 1
+        attentionRecords = [:]
+        attentionRecordsRevision = nil
+        attentionCandidateIDs = []
+        catalogIDs = []
+        terminalCatalogRequests = []
+        recentTodos = []
+        hasError = false
+        hasOwnListing = false
+        syncedCatalogRevision = nil
+        confirmationStates = [:]
+        previousDrafts = [:]
+        publishedDrafts = [:]
+        manualPublicationProgress = [:]
+        approvedHeads = [:]
+        failedApprovalHeads = [:]
+        approvalReadFailures = [:]
+        verifiedRemoteFiles = [:]
+        user = nil
+        self.account = account
+        displayAIOriginCoordinator?.cancel()
+        reReviewCoordinator?.reset()
     }
 
     private func isCurrent(_ account: Account) -> Bool {
@@ -880,6 +887,7 @@ final class MergeRequestAttentionMonitor {
         let host = account.host
         let user = try await glab.fetchAuthenticatedUser(host: host, expectedUsername: account.username)
         guard isCurrent(account, revision: revision) else { return }
+        if let previousUser = self.user, previousUser.id != user.id { resetAccountState(for: account) }
         if let settings, feedbackDecision == nil, workerAuditRetry == nil,
            settings.assistantHandoffs.contains(where: { $0.execution?.pendingWorkerAudit != nil }) {
             workerAuditRetry = Task { [weak self, glab] in
@@ -1035,7 +1043,7 @@ final class MergeRequestAttentionMonitor {
         }.map(\.target))
         let trackedTargets = settings?.mrLifecycleLedger.targets(host: host, username: user.username) ?? []
         let hiddenTargets = settings?.ignoredMergeRequests.filter {
-            $0.host == host && $0.username == user.username
+            $0.account.matches(user.account(on: host))
         } ?? []
         let listedAssignments = Set((assigned ?? []).filter { request in
             request.isOpen && request.reviewers?.contains(where: { $0.id == user.id }) == true
@@ -2721,7 +2729,8 @@ final class MergeRequestAttentionMonitor {
             guard current(), drafts.filter({ $0.id == draftID }) == [draft],
                   evidence.lanes[source.id] == .unconfirmed else { return .changed }
             let classification: AICommentOriginOverride.Classification = choice == .reply ? .ai : .human
-            try originCenter.applyImmediately(classification, to: [note], in: discussions, target: target) { selected in
+            try originCenter.applyImmediately(classification, to: [note], in: discussions, target: target,
+                userID: user.id, legacyUsernames: settings.unambiguousLegacyUsernames(for: user.account(on: account.host))) { selected in
                 settings.recordAIReplyTrust(classification, notes: selected, host: account.host, user: user)
             }
             invalidateCommentOriginPublication()
@@ -2787,13 +2796,14 @@ final class MergeRequestAttentionMonitor {
         }
         let preferences = settings?.reviewParticipationPreferences
         let automation = verifiedAutomation.union(preferences?.botIDs(host: host, username: user.username) ?? [])
+        let legacyUsernames = settings?.unambiguousLegacyUsernames(for: user.account(on: host)) ?? [user.username]
         let now = Date()
         var evidence = PublicationNoteEvidence()
         for note in notes {
             guard let id = note.id, id > 0, let authorID = note.author?.id, authorID > 0 else { continue }
             let automatedAuthor = automation.contains(authorID)
             let override = AICommentOriginOverrideStore.override(for: note, host: host, projectID: projectID, iid: iid,
-                username: user.username, in: aiAssessmentDirectory)
+                username: user.username, userID: user.id, legacyUsernames: legacyUsernames, in: aiAssessmentDirectory)
             let verdict: AICommentOriginOverride.Classification? = override.map {
                 $0.isActive(at: now) ? $0.classification : .uncertain
             }
@@ -2801,7 +2811,7 @@ final class MergeRequestAttentionMonitor {
             guard policy.requiresAI else { continue }
             let definite = automatedAuthor || AICommentOriginAssessor.declaredAttribution(for: note) != nil
             let styleSaysAI = verdict == nil && !definite && hasCurrentStyleAssessment(note, policy: policy,
-                host: host, projectID: projectID, iid: iid, username: user.username)
+                host: host, projectID: projectID, iid: iid, userID: user.id, legacyUsernames: legacyUsernames)
             evidence.lanes[id] = .init(override: verdict, definite: definite, styleSaysAI: styleSaysAI,
                 trustsAuthor: preferences?.aiReplyTrust(host: host, accountID: user.id, authorID: authorID)?.trustsStyleAssessment == true)
         }
@@ -2809,11 +2819,12 @@ final class MergeRequestAttentionMonitor {
     }
 
     private func hasCurrentStyleAssessment(_ note: GitLabMergeRequestDiscussion.Note, policy: AutomaticPublicationPolicy,
-                                            host: String, projectID: Int, iid: Int, username: String) -> Bool {
+                                            host: String, projectID: Int, iid: Int, userID: Int, legacyUsernames: Set<String>) -> Bool {
         let directory = AICommentAssessmentStore.scopedDirectory(aiAssessmentDirectory, criteriaOverride: policy.aiCommentCriteriaOverride)
-        guard let record = AICommentAssessmentStore.assessment(for: note, host: host, projectID: projectID, iid: iid, in: directory),
+        guard let record = AICommentAssessmentStore.assessment(for: note, host: host, projectID: projectID, iid: iid,
+            userID: userID, legacyUsernames: legacyUsernames, in: directory),
               record.criteriaVersion == AICommentOriginAssessor.criteriaVersion else { return false }
-        return record.username == username && record.authorID == note.author?.id
+        return record.authorID == note.author?.id
     }
 
     private func rememberManuallyConfirmedAIReply(_ draft: GitLabDraftNote, discussions: [GitLabMergeRequestDiscussion],
@@ -2821,12 +2832,13 @@ final class MergeRequestAttentionMonitor {
         guard let settings, let notes = AutomaticPublicationPolicy.sourceNotes(for: draft, discussions: discussions, userID: user.id)
         else { return }
         let policy = settings.publicationPolicy(for: commentReviewTarget(id, account: account))
+        let legacyUsernames = settings.unambiguousLegacyUsernames(for: user.account(on: account.host))
         let confirmed = notes.filter { note in
             AICommentOriginOverrideStore.override(for: note, host: account.host, projectID: id.projectID, iid: id.iid,
-                username: account.username, in: aiAssessmentDirectory) == nil
+                username: account.username, userID: user.id, legacyUsernames: legacyUsernames, in: aiAssessmentDirectory) == nil
                 && AICommentOriginAssessor.declaredAttribution(for: note) == nil
                 && hasCurrentStyleAssessment(note, policy: policy, host: account.host, projectID: id.projectID,
-                    iid: id.iid, username: account.username)
+                    iid: id.iid, userID: user.id, legacyUsernames: legacyUsernames)
         }
         if !confirmed.isEmpty {
             settings.recordAIReplyTrust(.ai, notes: confirmed, host: account.host, user: user)
@@ -2866,8 +2878,8 @@ final class MergeRequestAttentionMonitor {
               displayAIOriginCoordinator?.isChecking(work: work) != true else { return }
         let model = configuration.assistant == .codex ? configuration.codexVerificationModel.rawValue
             : configuration.claudeVerificationModel.rawValue
-        aiOriginCoordinator.schedule(target: .init(host: account.host, username: account.username,
-            projectID: request.projectID, iid: request.iid), notes: unknown, assistant: configuration.assistant, model: model, thinking: configuration.verificationThinking)
+        aiOriginCoordinator.schedule(target: target.forAccount(user.account(on: account.host)), notes: unknown,
+            assistant: configuration.assistant, model: model, thinking: configuration.verificationThinking)
     }
 
     private func permitsParticipantReply(_ draft: GitLabDraftNote, request: GitLabMergeRequest,

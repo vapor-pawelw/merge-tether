@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Let a new push reopen re-review eligibility after an older unconfirmed request, while still preventing duplicates on the first verified commit.
 
 - Keep merge request automation preferences and write safeguards when you rename your GitLab account.
+- Preserve successful agent transcripts after signing in again, and keep comment verdicts, hidden reviews, and approval state separate when a GitLab username changes owners.
 
 - Auto-reply to comments based on style only after you confirm two AI comments from the same author and have marked none human. See author-trust publications in the MR Event log and manage trust in publication settings.
 - Use **Reply (AI)** or **It's human** on unconfirmed reply drafts in Mac, iPhone and iPad Details.

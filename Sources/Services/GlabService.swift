@@ -31,6 +31,7 @@ final class GlabService {
     @ObservationIgnored var acceptAuthenticatedAccount: ((GitLabAccountIdentity) -> Bool)?
     @ObservationIgnored var clearAuthenticatedAccount: (() -> Void)?
     @ObservationIgnored var knownAccountUsernames: ((GitLabAccountIdentity) -> Set<String>)?
+    @ObservationIgnored var unambiguousAccountUsernames: ((GitLabAccountIdentity) -> Set<String>)?
     @ObservationIgnored private var feedbackAccountObservers: [UUID: @MainActor (FeedbackAccountKindUpdate) -> Void] = [:]
     @ObservationIgnored private var feedbackAccountRevision: UInt64 = 0
     // This bounded cache only restores display after removing a local designation; policy reads remain fresh.

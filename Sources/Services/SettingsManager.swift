@@ -108,7 +108,9 @@ final class SettingsManager {
         func reproject(_ target: MRAutomationScope.Target) -> MRAutomationScope.Target {
             projectedTarget(reboundTarget(target, projectedFor: previous))
         }
-        automation.scope.mapAccountTargets(reproject)
+        automation.scope.mapAccountTargets(pausedTarget: {
+            self.projectedTarget(self.reboundTarget($0, projectedFor: previous, unboundSafety: true))
+        }, reproject)
         transferMRSettings(.rebind(previous))
         newReviewGenerations = Dictionary(newReviewGenerations.map { (reproject($0.key), $0.value) },
             uniquingKeysWith: { first, _ in first })
@@ -159,11 +161,14 @@ final class SettingsManager {
     }
 
     private func reboundTarget(_ target: MRAutomationScope.Target,
-                               projectedFor previous: GitLabAccountIdentity?) -> MRAutomationScope.Target {
+                               projectedFor previous: GitLabAccountIdentity?,
+                               unboundSafety: Bool = false) -> MRAutomationScope.Target {
         let canonical = canonicalTarget(target, projectedFor: previous)
         guard canonical.userID == nil, let account = activeGitLabAccount, canonical.account.matches(account) else {
             return canonical
         }
+        // An unbound safety preference must take effect in the session that binds it.
+        if unboundSafety { return canonical.forAccount(account) }
         // A reused handle cannot transfer older data to the new account.
         let owner = mrSettingsArchive.accountNames.first(where: { canonical.account.matches($0) }) ?? account
         return canonicalTarget(canonical.forAccount(owner), projectedFor: nil)
@@ -299,8 +304,10 @@ final class SettingsManager {
     @discardableResult
     func reconcileHiddenReview(_ target: MRAutomationScope.Target, request: GitLabMergeRequest,
                                reviewerID: Int, hideID: UUID?) -> Bool {
+        let owner = canonicalTarget(target, projectedFor: activeGitLabAccount).userID
         guard hiddenMergeRequests.targets.contains(target),
               hiddenMergeRequests.details[target]?.hideID == hideID,
+              owner == nil || owner == reviewerID,
               let iid = target.iid, request.mergeRequestID == target.mergeRequestID,
               request.webURL.isGitLabMergeRequest(host: target.host, iid: iid),
               [.opened, .closed, .merged].contains(request.state), reviewerID > 0 else { return false }
@@ -937,6 +944,8 @@ extension SettingsManager {
             restorePayload: (Value, Value) -> Value = { value, _ in value },
             mapTarget: ((Element, TargetTransform) -> Element?)? = nil,
             mirrorEntry: ((Element) -> Element?)? = nil,
+            archiveEntry: (Element) -> Element = { $0 },
+            unboundSafety: (Element) -> Bool = { _ in false },
             scope: (Element) -> MRSettingsKey?
         ) {
             func mapped(_ values: [Element], by transform: TargetTransform) -> [Element] {
@@ -960,9 +969,11 @@ extension SettingsManager {
                     self[keyPath: path] = legacy
                 }
             case .rebind(let previous):
-                guard mapTarget != nil else { return }
-                self[keyPath: path] = combine(mapped(split(self[keyPath: path])) {
-                    projectedTarget(reboundTarget($0, projectedFor: previous))
+                guard let mapTarget else { return }
+                self[keyPath: path] = combine(split(self[keyPath: path]).compactMap { entry in
+                    mapTarget(entry) {
+                        projectedTarget(reboundTarget($0, projectedFor: previous, unboundSafety: unboundSafety(entry)))
+                    }
                 })
                 changedMRKeys.insert(key)
             case .save, .savePreference:
@@ -983,23 +994,26 @@ extension SettingsManager {
                     return
                 }
                 guard changed || repartition || archive.mirrorFingerprints[key] != fingerprint else { return }
-                archive.replace(field, with: canonical, keyedBy: scope)
+                archive.replace(field, with: canonical.map(archiveEntry), keyedBy: scope)
                 archive.mirrorFingerprints[key] = fingerprint
                 updatedKeys.insert(key)
             }
         }
 
         func targets(_ path: ReferenceWritableKeyPath<SettingsManager, Set<Target>>,
-                     _ value: WritableKeyPath<Record, [Target]?>, _ key: String) {
-            field(path, value, key, split: Array.init, combine: Set.init, mapTarget: { $1($0) }, scope: MRSettingsKey.init)
+                     _ value: WritableKeyPath<Record, [Target]?>, _ key: String, unboundSafety: Bool = false) {
+            field(path, value, key, split: Array.init, combine: Set.init, mapTarget: { $1($0) },
+                  unboundSafety: { _ in unboundSafety }, scope: MRSettingsKey.init)
         }
 
         func scoped<Value: Codable & Sendable>(_ path: ReferenceWritableKeyPath<SettingsManager, [Target: Value]>,
                                     _ value: WritableKeyPath<Record, [Record.Scoped<Value>]?>, _ key: String,
+                                    unboundSafety: (Value) -> Bool = { _ in false },
                                     combineDuplicates: (Value, Value) -> Value = { first, _ in first }) {
             field(path, value, key, split: { $0.map { .init(target: $0.key, value: $0.value) } },
                 combine: { Dictionary($0.map { ($0.target, $0.value) }, uniquingKeysWith: combineDuplicates) },
                 mapTarget: { entry, transform in transform(entry.target).map { .init(target: $0, value: entry.value) } },
+                unboundSafety: { unboundSafety($0.value) },
                 scope: { MRSettingsKey($0.target) })
         }
 
@@ -1051,11 +1065,12 @@ extension SettingsManager {
             }, scope: { MRSettingsKey($0[keyPath: target]) })
         }
 
-        targets(\.autoApproveOptOuts, \.autoApproveOptOuts, Key.autoApproveOptOuts)
-        scoped(\.independentApprovalPreferences, \.independentApprovalPreferences, Key.independentApprovalPreferences)
+        targets(\.autoApproveOptOuts, \.autoApproveOptOuts, Key.autoApproveOptOuts, unboundSafety: true)
+        scoped(\.independentApprovalPreferences, \.independentApprovalPreferences, Key.independentApprovalPreferences,
+            unboundSafety: { $0 == .off })
             { first, second in first == .off || second == .off ? .off : first }
-        targets(\.autoPublishOptOuts, \.autoPublishOptOuts, Key.autoPublishOptOuts)
-        targets(\.autoMergeOptOuts, \.autoMergeOptOuts, Key.autoMergeOptOuts)
+        targets(\.autoPublishOptOuts, \.autoPublishOptOuts, Key.autoPublishOptOuts, unboundSafety: true)
+        targets(\.autoMergeOptOuts, \.autoMergeOptOuts, Key.autoMergeOptOuts, unboundSafety: true)
         targets(\.autoMergeOptIns, \.autoMergeOptIns, Key.autoMergeOptIns)
         let emptyActionOptIns = archive.emptyActionOptIns ?? []
         field(\.automaticActionOptIns, \.automaticActionOptIns, Key.automaticActionOptIns,
@@ -1083,7 +1098,7 @@ extension SettingsManager {
                     updated.target = target
                     return updated
                 })
-            }, scope: { MRSettingsKey($0.target) })
+            }, unboundSafety: { _ in true }, scope: { MRSettingsKey($0.target) })
         targets(\.newReviewTargets, \.newReviewTargets, Key.newReviewTargets)
         targets(\.heldNewReviewTargets, \.heldNewReviewTargets, Key.heldNewReviewTargets)
         targetSet(\.authorFeedbackAttempts, \.authorFeedbackAttempts, Key.authorFeedbackAttempts, target: \.target)
@@ -1111,14 +1126,7 @@ extension SettingsManager {
             scope: { MRSettingsKey(host: $0.key.host, projectID: $0.key.projectID, iid: $0.key.iid, userID: $0.key.authorID) })
         scoped(\.reReviewDraftBaselines, \.reReviewDraftBaselines, Key.reReviewDraftBaselines, combineDuplicates: max)
         field(\.assistantHandoffs, \.assistantHandoffs, Key.assistantHandoffs,
-            split: { jobs in
-                jobs.enumerated().map { index, job in
-                    // The compatibility key already holds successful display transcripts.
-                    var record = job
-                    if record.execution?.state == .succeeded { record.execution?.output = nil }
-                    return .init(position: index, value: record)
-                }
-            },
+            split: { $0.enumerated().map { .init(position: $0.offset, value: $0.element) } },
             combine: { $0.sorted { $0.position < $1.position }.map(\.value) },
             restorePayload: { jobs, compatibilityJobs in
                 let byID = Dictionary(compatibilityJobs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -1135,6 +1143,12 @@ extension SettingsManager {
                 let original = GitLabAccountIdentity(host: key.work.host, username: key.username, userID: job.accountUserID)
                 guard self.mirrorAccount(original) != nil else { return nil }
                 job.accountUserID = nil
+                return .init(position: entry.position, value: job)
+            }, archiveEntry: { entry in
+                var job = entry.value
+                let account = GitLabAccountIdentity(host: job.key.work.host, username: job.key.username, userID: job.accountUserID)
+                // Successful transcripts live in the compatibility history when it can represent their owner.
+                if job.execution?.state == .succeeded, self.mirrorAccount(account) != nil { job.execution?.output = nil }
                 return .init(position: entry.position, value: job)
             }, scope: {
                 let target = $0.value.key.automationTarget

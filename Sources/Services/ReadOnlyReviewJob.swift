@@ -63,7 +63,10 @@ struct ReadOnlyReviewJob {
             requiredWorkerDirectories: [invocation.temporaryDirectory],
             usage: .init(role: .codingAgent, assistant: assistant, model: model,
                 mergeRequest: .init(host: work.host, username: user.username, projectID: work.projectID, iid: work.iid,
-                    title: target.title, url: target.webURL.absoluteString)), authorizeLaunch: current)
+                    title: target.title, url: target.webURL.absoluteString)), beforeLaunch: {
+                        _ = try await glab.fetchAuthenticatedUser(host: work.host, expectedUsername: user.username,
+                                                                  expectedUserID: user.id)
+                    }, authorizeLaunch: current)
         session.stop()
         guard output.exitCode == 0 else {
             // Codex event output can contain the full text of files returned by the tool.

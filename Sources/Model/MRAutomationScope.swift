@@ -66,8 +66,11 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
     /// Runtime-only global killswitch. It is never encoded, so stored overrides and presets stay unchanged.
     var isGloballySuspended = false
 
-    mutating func mapAccountTargets(_ transform: (Target) -> Target?) {
-        overrides = Dictionary(overrides.compactMap { target, choice in transform(target).map { ($0, choice) } },
+    mutating func mapAccountTargets(pausedTarget: ((Target) -> Target?)? = nil, _ transform: (Target) -> Target?) {
+        overrides = Dictionary(overrides.compactMap { target, choice in
+            let mapped = if choice == .paused, let pausedTarget { pausedTarget(target) } else { transform(target) }
+            return mapped.map { ($0, choice) }
+        },
             uniquingKeysWith: { first, second in first == .paused || second == .paused ? .paused : first })
         managedTargets = managedTargets.map { Set($0.compactMap(transform)) }
         repositoryLabels = repositoryLabels.map {

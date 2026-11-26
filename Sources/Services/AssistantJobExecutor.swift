@@ -82,7 +82,9 @@ enum AssistantJobExecutor {
             guard glab.accountRevision == accountRevision else { throw ExecutionError.wrongAccount }
             if resolved { throw FeedbackAlreadyResolved() }
         }
-        let user = try await glab.fetchAuthenticatedUser(host: handoff.key.work.host, expectedUsername: handoff.key.username)
+        let user = try await glab.fetchAuthenticatedUser(host: handoff.key.work.host, expectedUsername: handoff.key.username,
+                                                         expectedUserID: handoff.accountUserID)
+        guard glab.accountRevision == accountRevision else { throw ExecutionError.wrongAccount }
         let request = try await glab.fetchMergeRequest(projectID: handoff.key.work.projectID,
                                                       iid: handoff.key.work.iid, host: handoff.key.work.host)
         guard request.isOpen else { throw ExecutionError.inactiveMergeRequest }
@@ -194,6 +196,9 @@ enum AssistantJobExecutor {
             verdict or run result. This limit applies to human and bot threads and overrides broader reply guidance.
             """
         let assessmentTarget = handoff.key.automationTarget
+        let decidingAccount = user.account(on: assessmentTarget.host)
+        let boundAssessmentTarget = assessmentTarget.forAccount(decidingAccount)
+        let legacyUsernames = settings.unambiguousLegacyUsernames(for: decidingAccount)
         let assessmentPolicy = settings.publicationPolicy(for: assessmentTarget)
         let assessmentDirectory = AICommentAssessmentStore.scopedDirectory(AICommentAssessmentStore.directory,
             criteriaOverride: assessmentPolicy.aiCommentCriteriaOverride)
@@ -201,15 +206,18 @@ enum AssistantJobExecutor {
             && assessmentPolicy.covers(request, host: assessmentTarget.host)
             && (handoff.workflow != .followUp || handoff.followUpPushAllowed == true)
             && !AICommentOriginCoordinator.isEvaluating(assessmentTarget)
+            && !AICommentOriginCoordinator.isEvaluating(boundAssessmentTarget)
         let assessmentInstructions: String
         if mayAssess {
             let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid,
                 host: assessmentTarget.host)
             let cached = (discussions ?? []).flatMap(\.notes).compactMap { note -> String? in
                 guard let id = note.id, let body = note.body,
-                      AICommentAssessmentStore.reusable(note, target: assessmentTarget, in: assessmentDirectory) != nil
+                      AICommentAssessmentStore.reusable(note, target: boundAssessmentTarget, legacyUsernames: legacyUsernames,
+                                                        in: assessmentDirectory) != nil
                         || AICommentOriginOverrideStore.override(for: note, host: assessmentTarget.host, projectID: request.projectID,
-                            iid: request.iid, in: AICommentAssessmentStore.directory) != nil else { return nil }
+                            iid: request.iid, username: user.username, userID: user.id, legacyUsernames: legacyUsernames,
+                            in: AICommentAssessmentStore.directory) != nil else { return nil }
                 return "\(id):\(AICommentAssessmentStore.digest(body))"
             }
             assessmentInstructions = AICommentAssessmentStore.workerInstructions(
@@ -338,6 +346,8 @@ enum AssistantJobExecutor {
             }
             try validateWorkerAdmission(handoff, settings: settings, request: latest, detector: pipelineWorkDetector)
             try await stopIfFeedbackResolved(latest)
+            _ = try await glab.fetchAuthenticatedUser(host: handoff.key.work.host, expectedUsername: user.username,
+                                                      expectedUserID: user.id)
         }
         let authorizeLaunch: @MainActor @Sendable () -> Bool = {
             do {
@@ -556,9 +566,11 @@ enum AssistantJobExecutor {
                 case .claude: handoff.claudeCodingModel?.rawValue ?? "default"
                 }
                 do {
+                    let account = user.account(on: work.host)
                     try AICommentAssessmentStore.persistWorkerAssessments(classifications, draftClaims: claims,
                         baseline: baseline, current: drafts, discussions: discussions, userID: user.id,
-                        target: handoff.key.automationTarget, assistant: handoff.key.assistant, model: model, in: assessmentDirectory)
+                        target: handoff.key.automationTarget.forAccount(account), assistant: handoff.key.assistant, model: model,
+                        legacyUsernames: settings.unambiguousLegacyUsernames(for: account), in: assessmentDirectory)
                 } catch {
                     Log.monitor.error("Could not save the worker's comment assessments: \(String(describing: error), privacy: .private)")
                 }

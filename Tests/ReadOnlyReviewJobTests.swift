@@ -4,7 +4,7 @@ import Testing
 
 @MainActor
 struct ReadOnlyReviewJobTests {
-    @Test(arguments: AutomationAssistant.allCases, ["inline", "outside-scope", "changed-head", "tmp-deleted"])
+    @Test(arguments: AutomationAssistant.allCases, ["inline", "outside-scope", "changed-head", "tmp-deleted", "reassigned-login"])
     func reviewUsesScopedToolAndOnlyTheAppCanSaveDrafts(_ assistant: AutomationAssistant, _ scenario: String) async throws {
         let suite = "ReadOnlyReview.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -22,6 +22,7 @@ struct ReadOnlyReviewJobTests {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: folder) }
         let finished = folder.appending(path: "fixture-finished")
+        let started = folder.appending(path: "fixture-started")
         let base = "/projects/3/merge_requests/7"
         let patch = "@@ -1 +1 @@\n-old\n+new\n"
         func request(_ sha: String) -> [String: Any] {
@@ -32,7 +33,9 @@ struct ReadOnlyReviewJobTests {
         }
         gitlab.handler = { call in
             switch call.endpoint {
-            case "/user": return InMemoryGitLab.output(#"{"id":4,"username":"reviewer"}"#)
+            case "/user":
+                let id = gitlab.has("replace-login") ? 22 : 4
+                return InMemoryGitLab.output(#"{"id":\#(id),"username":"reviewer"}"#)
             case base:
                 return try InMemoryGitLab.json(request(scenario == "changed-head" && FileManager.default.fileExists(atPath: finished.path) ? nextHead : head))
             case base + "/raw_diffs": return InMemoryGitLab.output(patch)
@@ -71,9 +74,11 @@ struct ReadOnlyReviewJobTests {
         encoder.outputFormatting = .withoutEscapingSlashes
         let helperValue = String(decoding: try encoder.encode(helper.path), as: UTF8.self)
         let finishedValue = String(decoding: try encoder.encode(finished.path), as: UTF8.self)
+        let startedValue = String(decoding: try encoder.encode(started.path), as: UTF8.self)
         try Data("""
             #!/usr/bin/python3
             import json, os, pathlib, shutil, subprocess, sys
+            pathlib.Path(\(startedValue)).touch()
             values = sys.argv[1:]
             sys.stdin.read()
             for args in (["context"], ["diff"], ["discussions"], ["work-item", "show", "15"], ["change", "show", "21"]):
@@ -96,11 +101,17 @@ struct ReadOnlyReviewJobTests {
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
         let target = try await glab.fetchMergeRequest(projectID: 3, iid: 7, host: host)
         let user = try await glab.fetchAuthenticatedUser(host: host, expectedUsername: "reviewer")
+        if scenario == "reassigned-login" { gitlab.write("replace-login") }
         let outcome: AssistantJobCoordinator.Outcome
         do {
             outcome = try await ReadOnlyReviewJob(handoff: handoff, settings: settings, glab: glab, target: target,
                 user: user, invocation: invocation, executable: cli, timeout: 45,
                 expectedAccountRevision: glab.accountRevision).run()
+        } catch is CancellationError where scenario == "reassigned-login" {
+            #expect(!FileManager.default.fileExists(atPath: started.path))
+            #expect(gitlab.requests.last?.endpoint == "/user")
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+            return
         } catch let interruption as ProcessRunner.WorkerInterruption {
             #expect(scenario == "tmp-deleted")
             if case .workspaceLost(let directory) = interruption.reason {
@@ -114,6 +125,7 @@ struct ReadOnlyReviewJobTests {
             return
         }
         #expect(scenario != "tmp-deleted")
+        #expect(scenario != "reassigned-login")
         let writes = gitlab.requests.filter { $0.method != "GET" }
         #expect(writes.map(\.endpoint) == (scenario == "inline" ? [base + "/draft_notes"] : []))
         #expect(outcome.result.status == (scenario == "inline" ? .succeeded : .blocked))

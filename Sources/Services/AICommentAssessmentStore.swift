@@ -95,7 +95,10 @@ enum AICommentAssessmentStore {
               target.projectID > 0, !target.host.isEmpty, !target.username.isEmpty else {
             throw AICommentOriginAssessor.AssessmentError.invalidEvidence
         }
-        return .init(target: target, noteID: id, authorID: authorID, bodySHA256: digest(body),
+        let accountTarget = target.userID.map {
+            target.forAccount(.init(host: target.host, username: "", userID: $0))
+        } ?? target
+        return .init(target: accountTarget, noteID: id, authorID: authorID, bodySHA256: digest(body),
             provider: assistant.rawValue, model: model, criteriaVersion: AICommentOriginAssessor.criteriaVersion, thinking: thinking, purpose: purpose)
     }
 
@@ -198,22 +201,35 @@ enum AICommentAssessmentStore {
         .init(commentBody: body.map { CommentBodyDigest(digest($0)) })
     }
 
-    nonisolated static func fileURL(host: String, projectID: Int, iid: Int, noteID: Int, in directory: URL) -> URL {
-        directory.appending(path: host).appending(path: "\(projectID)-\(iid)-\(noteID).json")
+    nonisolated static func fileURL(host: String, projectID: Int, iid: Int, noteID: Int, userID: Int? = nil, in directory: URL) -> URL {
+        let hostDirectory = directory.appending(path: host)
+        let accountDirectory = userID.map { hostDirectory.appending(path: "user-\($0)") }
+        return (accountDirectory ?? hostDirectory).appending(path: "\(projectID)-\(iid)-\(noteID).json")
     }
 
     /// Legacy display records never enter the current installation's publication evidence.
     nonisolated static func displayResult(for note: GitLabMergeRequestDiscussion.Note, host: String,
-        projectID: Int, iid: Int, username: String, criteriaOverride: String? = nil, in baseDirectory: URL, legacyDirectory: URL? = nil,
-        displayDirectory: URL? = nil) -> AICommentAssessment? {
+        projectID: Int, iid: Int, username: String, userID: Int? = nil, legacyUsernames: Set<String>? = nil,
+        criteriaOverride: String? = nil, in baseDirectory: URL, legacyDirectory: URL? = nil, displayDirectory: URL? = nil) -> AICommentAssessment? {
         guard let id = note.id, id > 0 else { return nil }
         let directory = scopedDirectory(baseDirectory, criteriaOverride: criteriaOverride)
         let displayBase = displayDirectory ?? (baseDirectory.standardizedFileURL == Self.directory.standardizedFileURL ? Self.displayDirectory : nil)
         let display = displayBase.map { scopedDirectory($0, criteriaOverride: criteriaOverride) }
-        let currentPath = fileURL(host: host, projectID: projectID, iid: iid, noteID: id, in: directory)
+        let currentPath = fileURL(host: host, projectID: projectID, iid: iid, noteID: id, userID: userID, in: directory)
         let currentExists = FileManager.default.fileExists(atPath: currentPath.path)
-        if currentExists, let record = result(for: note, host: host, projectID: projectID, iid: iid, in: directory),
-           record.username == nil || record.username == username,
+        let names = legacyUsernames ?? [username]
+        let scoped = stored(for: note, host: host, projectID: projectID, iid: iid, userID: userID,
+                            legacyUsernames: names, in: directory)?.record
+        let anonymousLegacy: AICommentAssessment?
+        if scoped == nil, userID != nil, names.contains(username),
+           let legacy = result(for: note, host: host, projectID: projectID, iid: iid, in: directory), legacy.username == nil {
+            // Earlier display hints lacked a username and never qualify as account-bound publication evidence.
+            anonymousLegacy = legacy
+        } else {
+            anonymousLegacy = nil
+        }
+        if let record = scoped ?? anonymousLegacy,
+           userID != nil || record.username == nil || record.username == username,
            record.qualifiesAsAI || record.criteriaVersion == AICommentOriginAssessor.criteriaVersion {
             return record
         }
@@ -231,13 +247,14 @@ enum AICommentAssessmentStore {
             legacy = InstallationStorage.current.legacyEvidence.appending(path: "ai-assessments")
         }
         guard let record = result(for: note, host: host, projectID: projectID, iid: iid, in: legacy),
-              validDisplayBinding(record, note: note, username: username) else { return nil }
+              let previousName = record.username, names.contains(previousName),
+              validDisplayBinding(record, note: note, username: previousName) else { return nil }
         return record
     }
 
     private nonisolated static func validDisplayBinding(_ record: AICommentAssessment,
-        note: GitLabMergeRequestDiscussion.Note, username: String) -> Bool {
-        record.version == 2 && !username.isEmpty && record.username == username
+        note: GitLabMergeRequestDiscussion.Note, username: String?) -> Bool {
+        record.version == 2 && record.username?.isEmpty == false && (username == nil || record.username == username)
             && (note.author?.id ?? 0) > 0 && record.authorID == note.author?.id
             && record.criteriaVersion == AICommentOriginAssessor.criteriaVersion
             && record.provider.flatMap(AutomationAssistant.init(rawValue:)) != nil
@@ -261,9 +278,11 @@ enum AICommentAssessmentStore {
     /// Only an app-sealed record authorizes publication. Plain files, including worker-written or older
     /// records, remain display hints and are re-assessed by the app before they can count.
     nonisolated static func assessment(
-        for note: GitLabMergeRequestDiscussion.Note, host: String, projectID: Int, iid: Int, in directory: URL
+        for note: GitLabMergeRequestDiscussion.Note, host: String, projectID: Int, iid: Int, userID: Int? = nil,
+        legacyUsernames: Set<String> = [], in directory: URL
     ) -> AICommentAssessment? {
-        guard let (record, sealed) = stored(for: note, host: host, projectID: projectID, iid: iid, in: directory),
+        guard let (record, sealed) = stored(for: note, host: host, projectID: projectID, iid: iid,
+                                           userID: userID, legacyUsernames: legacyUsernames, in: directory),
               sealed, record.purpose != .display, record.qualifiesAsAI,
               record.criteriaVersion == nil || record.criteriaVersion == AICommentOriginAssessor.criteriaVersion else { return nil }
         return record
@@ -281,10 +300,22 @@ enum AICommentAssessmentStore {
 
     /// The current record and whether the app sealed it for this exact host, MR and note.
     nonisolated static func stored(
-        for note: GitLabMergeRequestDiscussion.Note, host: String, projectID: Int, iid: Int, in directory: URL
+        for note: GitLabMergeRequestDiscussion.Note, host: String, projectID: Int, iid: Int, userID: Int? = nil,
+        legacyUsernames: Set<String> = [], in directory: URL
+    ) -> (record: AICommentAssessment, sealed: Bool)? {
+        if let userID, let current = storedRecord(for: note, host: host, projectID: projectID, iid: iid, userID: userID, in: directory) {
+            return current
+        }
+        guard let legacy = storedRecord(for: note, host: host, projectID: projectID, iid: iid, userID: nil, in: directory),
+              userID == nil || legacy.record.username.map(legacyUsernames.contains) == true else { return nil }
+        return legacy
+    }
+
+    private nonisolated static func storedRecord(
+        for note: GitLabMergeRequestDiscussion.Note, host: String, projectID: Int, iid: Int, userID: Int?, in directory: URL
     ) -> (record: AICommentAssessment, sealed: Bool)? {
         guard let id = note.id, let body = note.body, !body.isEmpty else { return nil }
-        let path = fileURL(host: host, projectID: projectID, iid: iid, noteID: id, in: directory)
+        let path = fileURL(host: host, projectID: projectID, iid: iid, noteID: id, userID: userID, in: directory)
         guard let data = try? Data(contentsOf: path), data.count < 16384 else { return nil }
         let payload = EvidenceSeal.open(data, context: sealContext(for: path))
         guard let record = try? JSONDecoder().decode(AICommentAssessment.self, from: payload ?? data) else { return nil }
@@ -300,7 +331,7 @@ enum AICommentAssessmentStore {
 
     @discardableResult nonisolated static func persist(_ assessment: AICommentOriginAssessment, target: MRAutomationScope.Target,
         notes: [GitLabMergeRequestDiscussion.Note], assistant: AutomationAssistant, model: String, thinking: VerificationThinking = .high,
-        purpose: AICommentAssessment.Purpose? = nil, in directory: URL) throws -> [AICommentAssessment] {
+        purpose: AICommentAssessment.Purpose? = nil, legacyUsernames: Set<String> = [], in directory: URL) throws -> [AICommentAssessment] {
         try AICommentOriginAssessor.validate(assessment, noteIDs: notes.compactMap(\.id))
         guard let iid = target.iid else { throw AICommentOriginAssessor.AssessmentError.invalidEvidence }
         var written: [AICommentAssessment] = []
@@ -308,15 +339,17 @@ enum AICommentAssessmentStore {
             guard let note = notes.first(where: { $0.id == result.noteID }), let body = note.body else { throw AICommentOriginAssessor.AssessmentError.invalidEvidence }
             // A worker can save a current positive while the lightweight pass is still running.
             if (result.classification != .aiAssisted || result.confidence == .uncertain),
-               let existing = self.assessment(for: note, host: target.host, projectID: target.projectID, iid: iid, in: directory),
+               let existing = self.assessment(for: note, host: target.host, projectID: target.projectID, iid: iid,
+                                              userID: target.userID, legacyUsernames: legacyUsernames, in: directory),
                existing.criteriaVersion == AICommentOriginAssessor.criteriaVersion,
-               existing.username == target.username, existing.authorID == note.author?.id { continue }
+               target.userID != nil || existing.username == target.username, existing.authorID == note.author?.id { continue }
             let record = AICommentAssessment(version: 2, host: target.host, projectID: target.projectID, iid: iid,
                 noteID: result.noteID, bodySHA256: digest(body), confidence: result.confidence.rawValue,
                 evidence: GlabService.redactWorkflowEvidence(result.evidence), classification: result.classification.rawValue,
                 provider: assistant.rawValue, model: model, criteriaVersion: AICommentOriginAssessor.criteriaVersion,
                 username: target.username, authorID: note.author?.id, thinking: thinking, purpose: purpose)
-            let path = fileURL(host: target.host, projectID: target.projectID, iid: iid, noteID: result.noteID, in: directory)
+            let path = fileURL(host: target.host, projectID: target.projectID, iid: iid, noteID: result.noteID,
+                               userID: target.userID, in: directory)
             try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let encoded = try JSONEncoder().encode(record)
             // Without the signing key the record is still useful for display, but never authorizes publication.
@@ -351,10 +384,11 @@ enum AICommentAssessmentStore {
     }
 
     nonisolated static func reusable(_ note: GitLabMergeRequestDiscussion.Note, target: MRAutomationScope.Target,
-                                    in directory: URL) -> AICommentAssessment? {
+                                    legacyUsernames: Set<String> = [], in directory: URL) -> AICommentAssessment? {
         guard let iid = target.iid,
-              let (record, sealed) = stored(for: note, host: target.host, projectID: target.projectID, iid: iid, in: directory),
-              sealed, validDisplayBinding(record, note: note, username: target.username) else { return nil }
+              let (record, sealed) = stored(for: note, host: target.host, projectID: target.projectID, iid: iid,
+                                            userID: target.userID, legacyUsernames: legacyUsernames, in: directory),
+              sealed, validDisplayBinding(record, note: note, username: target.userID == nil ? target.username : nil) else { return nil }
         return record
     }
 
@@ -376,7 +410,7 @@ enum AICommentAssessmentStore {
     nonisolated static func persistWorkerAssessments(_ claims: [AssistantJobResult.SourceAssessment],
         draftClaims: [AssistantJobResult.GeneratedDraft], baseline: [GitLabDraftNote], current: [GitLabDraftNote],
         discussions: [GitLabMergeRequestDiscussion], userID: Int, target: MRAutomationScope.Target,
-        assistant: AutomationAssistant, model: String, in directory: URL) throws {
+        assistant: AutomationAssistant, model: String, legacyUsernames: Set<String> = [], in directory: URL) throws {
         guard !claims.isEmpty, claims.count <= 100, Set(claims.map(\.noteID)).count == claims.count else { return }
         let replies = AICommentProvenanceStore.validatedGeneratedDrafts(draftClaims, baseline: baseline, current: current, userID: userID)
         let sources = Set(replies.flatMap { _, draft in
@@ -389,12 +423,12 @@ enum AICommentAssessmentStore {
                   let body = note.body, !body.isEmpty, note.system != true, (note.author?.id ?? 0) > 0,
                   note.author?.id != userID,
                   EvidenceContext(commentBody: .init(claim.bodySHA256)).binds(to: bodyEvidence(body), policy: .commentBody),
-                  reusable(note, target: target, in: directory) == nil else { continue }
+                  reusable(note, target: target, legacyUsernames: legacyUsernames, in: directory) == nil else { continue }
             let verdict = AICommentOriginAssessment.Note(noteID: claim.noteID, classification: claim.classification,
                 confidence: claim.confidence, evidence: claim.evidence)
             guard (try? AICommentOriginAssessor.validate(.init(notes: [verdict]), noteIDs: [claim.noteID])) != nil else { continue }
             try persist(.init(notes: [verdict]), target: target, notes: [note], assistant: assistant, model: model,
-                purpose: .publication, in: directory)
+                purpose: .publication, legacyUsernames: legacyUsernames, in: directory)
         }
     }
 }

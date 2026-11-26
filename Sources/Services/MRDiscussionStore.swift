@@ -175,6 +175,8 @@ final class MRDiscussionStore {
         let legacyDirectory = legacyAssessmentDirectory
         let displayDirectory = displayAssessmentDirectory
         let provenanceDirectory = self.provenanceDirectory
+        let viewer = GitLabAccountIdentity(host: target.host, username: target.username, userID: userID)
+        let legacyUsernames = glab.unambiguousAccountUsernames?(viewer) ?? [target.username]
         let context = userID.map { id in
             let account = GitLabAccountIdentity(host: target.host, username: target.username, userID: id)
             return AICommentProvenanceStore.Context(host: target.host, username: target.username, userID: id,
@@ -191,7 +193,8 @@ final class MRDiscussionStore {
                     let isGenerated = generated?.contains(note, discussionID: thread.id) == true
                     if let id = note.id, !isGenerated { contexts.removeNote(id) }
                     if let id = note.id, let override = AICommentOriginOverrideStore.override(for: note, host: target.host,
-                        projectID: target.projectID, iid: target.iid, username: target.username, in: directory) {
+                        projectID: target.projectID, iid: target.iid, username: target.username, userID: userID,
+                        legacyUsernames: legacyUsernames, in: directory) {
                         origins[id] = .manual(override.badge)
                         continue
                     }
@@ -205,9 +208,9 @@ final class MRDiscussionStore {
                     }
                     if let id = note.id, id > 0, let record = AICommentAssessmentStore.displayResult(for: note,
                         host: target.host, projectID: target.projectID, iid: target.iid,
-                        username: target.username, criteriaOverride: criteriaOverride, in: directory,
-                        legacyDirectory: legacyDirectory, displayDirectory: displayDirectory),
-                       record.username == nil || record.username == target.username {
+                        username: target.username, userID: userID, legacyUsernames: legacyUsernames,
+                        criteriaOverride: criteriaOverride, in: directory, legacyDirectory: legacyDirectory,
+                        displayDirectory: displayDirectory) {
                         if record.qualifiesAsAI {
                             origins[id] = .assessed(evidence: record.evidence)
                         } else if record.criteriaVersion == AICommentOriginAssessor.criteriaVersion {

@@ -17,7 +17,7 @@ import Observation
         let accountRevision: UInt64
         let origins: [PersistedOrigin]
     }
-    typealias CacheRead = @Sendable ([GitLabMergeRequestDiscussion.Note], MRAutomationScope.Target, URL, URL, String?) async -> [GitLabMergeRequestDiscussion.Note]
+    typealias CacheRead = @MainActor @Sendable ([GitLabMergeRequestDiscussion.Note], MRAutomationScope.Target, URL, URL, String?) async -> [GitLabMergeRequestDiscussion.Note]
 
     private struct Queue {
         let notes: [GitLabMergeRequestDiscussion.Note]
@@ -63,17 +63,20 @@ import Observation
         originRevision &+= 1
         let serial = originRevision, actionDirectory = assessmentDirectory, displayDirectory = self.displayDirectory
         let criteriaOverride = settings.automation.aiCommentCriteriaOverride
+        let userID = glab.authenticatedUserID
+        let names = settings.unambiguousLegacyUsernames(for: .init(host: target.host, username: target.username, userID: userID))
         for note in notes { if let id = note.id { originVersions[.init(target: target, noteID: id)] = serial } }
         Task { [weak self] in
             let origins = await Task.detached {
                 notes.compactMap { note -> PersistedOrigin? in
                     // The user's verdict outranks a late model result for the same comment.
                     if let iid = target.iid, AICommentOriginOverrideStore.override(for: note, host: target.host,
-                        projectID: target.projectID, iid: iid, in: actionDirectory) != nil { return nil }
+                        projectID: target.projectID, iid: iid, username: target.username, userID: userID,
+                        legacyUsernames: names, in: actionDirectory) != nil { return nil }
                     guard let id = note.id, let authorID = note.author?.id, authorID > 0, let body = note.body,
                           let iid = target.iid, let record = AICommentAssessmentStore.displayResult(for: note, host: target.host,
-                            projectID: target.projectID, iid: iid, username: target.username, criteriaOverride: criteriaOverride, in: actionDirectory,
-                            displayDirectory: displayDirectory),
+                            projectID: target.projectID, iid: iid, username: target.username, userID: userID, legacyUsernames: names,
+                            criteriaOverride: criteriaOverride, in: actionDirectory, displayDirectory: displayDirectory),
                           let classification = AICommentOriginAssessment.Classification(rawValue: record.classification),
                           let confidence = AICommentOriginAssessment.Confidence(rawValue: record.confidence) else { return nil }
                     return .init(noteID: id, authorID: authorID, bodySHA256: AICommentAssessmentStore.digest(body),
@@ -101,8 +104,11 @@ import Observation
             ? AICommentAssessmentStore.displayDirectory : assessmentDirectory.appending(path: ".display-only"))
         self.canAutomate = canAutomate; self.publicationIsChecking = publicationIsChecking; self.assess = assess
         self.cacheRead = cacheRead ?? { notes, target, actionDirectory, displayDirectory, criteriaOverride in
-            await Task.detached {
-                Self.missing(notes, target: target, actionDirectory: actionDirectory, displayDirectory: displayDirectory, criteriaOverride: criteriaOverride)
+            let userID = glab.authenticatedUserID
+            let names = settings.unambiguousLegacyUsernames(for: .init(host: target.host, username: target.username, userID: userID))
+            return await Task.detached {
+                Self.missing(notes, target: target, userID: userID, legacyUsernames: names,
+                    actionDirectory: actionDirectory, displayDirectory: displayDirectory, criteriaOverride: criteriaOverride)
             }.value
         }
     }
@@ -181,7 +187,10 @@ import Observation
                 return try await readCurrent(target)
             }, isCurrent: { [weak self] target, assistant, model, thinking in
                 self?.isCurrent(target, assistant: assistant, model: model, thinking: thinking) == true
-            }, criteriaOverride: { [weak self] in self?.settings.automation.aiCommentCriteriaOverride })
+            }, criteriaOverride: { [weak self] in self?.settings.automation.aiCommentCriteriaOverride },
+            overrideAccount: { [weak self] target in
+                .init(host: target.host, username: target.username, userID: self?.glab.authenticatedUserID)
+            }, legacyUsernames: { [weak self] in self?.settings.unambiguousLegacyUsernames(for: $0) ?? [$0.username] })
         worker.onChange = { [weak self] in
             guard let self else { return }
             revision &+= 1
@@ -261,13 +270,15 @@ import Observation
     }
 
     private nonisolated static func missing(_ notes: [GitLabMergeRequestDiscussion.Note], target: MRAutomationScope.Target,
-        actionDirectory: URL, displayDirectory: URL, criteriaOverride: String?) -> [GitLabMergeRequestDiscussion.Note] {
+        userID: Int?, legacyUsernames: Set<String>, actionDirectory: URL, displayDirectory: URL,
+        criteriaOverride: String?) -> [GitLabMergeRequestDiscussion.Note] {
         notes.filter { note in
             if let iid = target.iid, AICommentOriginOverrideStore.override(for: note, host: target.host,
-                projectID: target.projectID, iid: iid, in: actionDirectory) != nil { return false }
+                projectID: target.projectID, iid: iid, username: target.username, userID: userID,
+                legacyUsernames: legacyUsernames, in: actionDirectory) != nil { return false }
             guard let iid = target.iid, let record = AICommentAssessmentStore.displayResult(for: note, host: target.host,
-                projectID: target.projectID, iid: iid, username: target.username, criteriaOverride: criteriaOverride, in: actionDirectory,
-                displayDirectory: displayDirectory) else { return true }
+                projectID: target.projectID, iid: iid, username: target.username, userID: userID, legacyUsernames: legacyUsernames,
+                criteriaOverride: criteriaOverride, in: actionDirectory, displayDirectory: displayDirectory) else { return true }
             return !(record.qualifiesAsAI || record.criteriaVersion == AICommentOriginAssessor.criteriaVersion)
         }
     }

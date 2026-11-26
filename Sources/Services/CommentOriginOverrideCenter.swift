@@ -59,19 +59,23 @@ final class CommentOriginOverrideCenter {
     /// Every note must be a current comment of `discussions`; the verdict binds its author and body.
     @discardableResult
     func apply(_ classification: Classification?, to notes: [Note], in discussions: [GitLabMergeRequestDiscussion],
-               target: MRAutomationScope.Target, activate: @escaping Activate = { _ in true }) async throws -> Change {
+               target: MRAutomationScope.Target, userID: Int? = nil, legacyUsernames: Set<String>? = nil,
+               activate: @escaping Activate = { _ in true }) async throws -> Change {
         let selected = try validated(notes, in: discussions, target: target)
         let becomingAI = Set(selected.compactMap(\.id))
         let drafts = classification == .ai ? await gain(target, discussions, becomingAI) : 0
-        let change = try store(classification, notes: selected, target: target, drafts: drafts, activate: activate)
+        let change = try store(classification, notes: selected, target: target, userID: userID,
+            legacyUsernames: legacyUsernames ?? [target.username], drafts: drafts, activate: activate)
         if drafts == 0 { await resume(target) }
         return change
     }
 
     func applyImmediately(_ classification: Classification, to notes: [Note], in discussions: [GitLabMergeRequestDiscussion],
-                          target: MRAutomationScope.Target, activate: @escaping Activate) throws {
+                          target: MRAutomationScope.Target, userID: Int? = nil, legacyUsernames: Set<String>? = nil,
+                          activate: @escaping Activate) throws {
         let selected = try validated(notes, in: discussions, target: target)
-        _ = try store(classification, notes: selected, target: target, drafts: 0, activate: activate)
+        _ = try store(classification, notes: selected, target: target, userID: userID,
+            legacyUsernames: legacyUsernames ?? [target.username], drafts: 0, activate: activate)
     }
 
     private func validated(_ notes: [Note], in discussions: [GitLabMergeRequestDiscussion],
@@ -95,9 +99,8 @@ final class CommentOriginOverrideCenter {
     }
 
     private func store(_ classification: Classification?, notes selected: [Note], target: MRAutomationScope.Target,
-                       drafts: Int, activate: @escaping Activate) throws -> Change {
+                       userID: Int?, legacyUsernames: Set<String>, drafts: Int, activate: @escaping Activate) throws -> Change {
         guard let iid = target.iid else { throw ChangeError.invalidTarget }
-        let key = { (id: Int) in AICommentOriginOverrideStore.Key(host: target.host, projectID: target.projectID, iid: iid, noteID: id) }
         let directory = directory
         let start = wholeSecond(now())
         let activatesAt = drafts > 0 ? start.addingTimeInterval(grace.seconds) : start
@@ -105,13 +108,26 @@ final class CommentOriginOverrideCenter {
         var written: [AICommentOriginOverrideStore.Key: AICommentOriginOverride?] = [:]
         for note in selected {
             let id = note.id!
+            let key = AICommentOriginOverrideStore.Key(host: target.host, projectID: target.projectID, iid: iid, noteID: id,
+                                                       userID: userID)
             // `updateValue` keeps an explicit `nil`: "no override" is a state to restore, not a missing entry.
-            previous.updateValue(AICommentOriginOverrideStore.stored(key(id), in: directory), forKey: key(id))
-            written.updateValue(classification.map {
+            previous.updateValue(AICommentOriginOverrideStore.stored(key, in: directory), forKey: key)
+            let record = classification.map {
                 AICommentOriginOverride(version: 1, host: target.host, username: target.username, projectID: target.projectID,
                     iid: iid, noteID: id, authorID: note.author!.id, bodySHA256: AICommentAssessmentStore.digest(note.body!),
-                    classification: $0, createdAt: start, activatesAt: activatesAt)
-            }, forKey: key(id))
+                    classification: $0, createdAt: start, activatesAt: activatesAt, accountUserID: userID)
+            }
+            written.updateValue(record, forKey: key)
+            if let userID {
+                var legacyKey = key
+                legacyKey.userID = nil
+                let legacy = AICommentOriginOverrideStore.stored(legacyKey, in: directory)
+                let belongs = legacy.map { AICommentOriginOverrideStore.legacyBelongs($0, userID: userID, usernames: legacyUsernames) }
+                if record == nil ? belongs == true : legacyUsernames.contains(target.username) && (belongs ?? true) {
+                    previous.updateValue(legacy, forKey: legacyKey)
+                    written.updateValue(record, forKey: legacyKey)
+                }
+            }
         }
         do {
             for (key, record) in written {
@@ -168,8 +184,8 @@ final class CommentOriginOverrideCenter {
             let active = AICommentOriginOverride(version: written.version, host: written.host, username: written.username,
                 projectID: written.projectID, iid: written.iid, noteID: written.noteID, authorID: written.authorID,
                 bodySHA256: written.bodySHA256, classification: written.classification, createdAt: written.createdAt,
-                activatesAt: min(written.activatesAt, start))
-            try? AICommentOriginOverrideStore.save(active, in: directory)
+                activatesAt: min(written.activatesAt, start), accountUserID: written.accountUserID)
+            try? AICommentOriginOverrideStore.restore(key, to: active, in: directory)
         }
         await finish(id)
     }

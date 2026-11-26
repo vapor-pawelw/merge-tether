@@ -428,6 +428,125 @@ struct MRSettingsRecordTests {
         }
     }
 
+    @Test func successfulTranscriptsSurviveAuthenticatedMigration() throws {
+        try withDefaults { defaults in
+            let settings = SettingsManager(defaults: defaults)
+            var run = job()
+            run.execution?.output = "Successful transcript"
+            settings.assistantHandoffs = [run]
+            #expect(settings.save())
+            #expect(settings.bindAuthenticatedAccount(.init(host: target.host, username: target.username, userID: 21)))
+            #expect(SettingsManager(defaults: defaults).assistantHandoffs.first?.execution?.output == "Successful transcript")
+            #expect(settings.bindAuthenticatedAccount(.init(host: target.host, username: target.username, userID: 22)))
+            #expect(SettingsManager(defaults: defaults).assistantHandoffs.first?.execution?.output == "Successful transcript")
+        }
+    }
+
+    @Test func disablingPublicationBeforeBindingProtectsTheCurrentSession() throws {
+        try withDefaults { defaults in
+            let previouslySignedIn = SettingsManager(defaults: defaults)
+            #expect(previouslySignedIn.bindAuthenticatedAccount(.init(host: target.host, username: target.username, userID: 21)))
+            let settings = SettingsManager(defaults: defaults)
+            settings.setActionPreference(.off, for: .commentPublication, target: target)
+            #expect(settings.save())
+            let restarted = SettingsManager(defaults: defaults)
+            #expect(restarted.bindAuthenticatedAccount(.init(host: target.host, username: target.username, userID: 22)))
+            #expect(restarted.actionPreference(.commentPublication, for: target) == .off)
+            #expect(restarted.bindAuthenticatedAccount(.init(host: target.host, username: target.username, userID: 21)))
+            #expect(restarted.actionPreference(.commentPublication, for: target) == .default)
+        }
+    }
+
+    @Test func anUnboundPauseAndHideFollowTheNextAccountAcrossRestart() throws {
+        try withDefaults { defaults in
+            let previous = GitLabAccountIdentity(host: target.host, username: target.username, userID: 21)
+            let current = GitLabAccountIdentity(host: target.host, username: target.username, userID: 22)
+            let settings = SettingsManager(defaults: defaults)
+            #expect(settings.bindAuthenticatedAccount(previous))
+            settings.clearAuthenticatedAccount()
+            settings.automation.scope[target] = .paused
+            let url = try #require(URL(string: "https://\(target.host)/team/service/-/merge_requests/11"))
+            #expect(settings.hideReviewedMergeRequest(.init(target: target, title: "Review", url: url)))
+            #expect(settings.save())
+
+            let restarted = SettingsManager(defaults: defaults)
+            #expect(restarted.bindAuthenticatedAccount(current))
+            #expect(restarted.automation.scope[target] == .paused)
+            #expect(restarted.hiddenReviewDetails[target]?.target == target)
+            #expect(restarted.bindAuthenticatedAccount(previous))
+            #expect(restarted.automation.scope[target] == .inherit)
+            #expect(restarted.hiddenReviewDetails[target] == nil)
+        }
+    }
+
+    @Test func aReassignedUsernameCannotRemoveThePreviousAccountsHiddenReview() async throws {
+        let suite = "MRSettingsHiddenOwner.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        let first = GitLabAccountIdentity(host: target.host, username: target.username, userID: 21)
+        let second = GitLabAccountIdentity(host: target.host, username: target.username, userID: 22)
+        let json = request("opened").dropLast() + #", "reviewers":[{"id":21,"username":"me","name":"First account"}]}"#
+        let open = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(json.utf8))
+        #expect(settings.bindAuthenticatedAccount(first))
+        #expect(settings.hideReviewedMergeRequest(.init(target: target, title: open.title, url: open.webURL, request: open)))
+        #expect(settings.bindAuthenticatedAccount(second))
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: target.host, username: target.username)
+        glab.acceptAuthenticatedAccount = settings.bindAuthenticatedAccount
+        gitlab.handler = { command in
+            switch command.endpoint {
+            case "/user": return InMemoryGitLab.output(#"{"id":22,"username":"me"}"#)
+            case "/projects/7/merge_requests/11": return InMemoryGitLab.output(String(json))
+            default: return InMemoryGitLab.output("[]")
+            }
+        }
+        let monitor = MergeRequestAttentionMonitor(glab: glab, settings: settings, canAutomate: { _ in false })
+        await withCheckedContinuation { continuation in
+            monitor.onRefreshed = { monitor.onRefreshed = nil; continuation.resume() }
+            monitor.refresh(host: target.host, username: target.username, todos: [])
+        }
+        #expect(settings.ignoredMergeRequests.contains(target.forAccount(first)))
+        let priorTarget = target.forAccount(first)
+        #expect(!settings.reconcileHiddenReview(priorTarget, request: open, reviewerID: 22,
+            hideID: settings.hiddenReviewDetails[priorTarget]?.hideID))
+        #expect(settings.ignoredMergeRequests.contains(priorTarget))
+    }
+
+    @Test func aQueuedWorkerRejectsAReassignedUsernameBeforeReadingItsMergeRequest() async throws {
+        let suite = "WorkerAccountOwner.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: target.host, username: target.username)
+        settings.glabPath = glab.glabPath
+        #expect(settings.bindAuthenticatedAccount(.init(host: target.host, username: target.username, userID: 21)))
+        var run = job()
+        run.accountUserID = 21
+        run.workflow = .review
+        run.execution = .init(state: .queued)
+        run.configurationSnapshot = settings.automation
+        settings.assistantHandoffs = [run]
+        gitlab.handler = { command in
+            switch command.arguments.first {
+            case "config": return InMemoryGitLab.output(target.host)
+            case "auth": return InMemoryGitLab.output(error: "Logged in to \(target.host) as \(target.username)")
+            default:
+                if command.endpoint == "/user" { return InMemoryGitLab.output(#"{"id":22,"username":"me"}"#) }
+                throw GlabError.notAuthenticated
+            }
+        }
+        await #expect(throws: (any Error).self) {
+            _ = try await AssistantJobExecutor.execute(run, settings: settings, glab: glab,
+                detectCLI: { _ in .ready(URL(fileURLWithPath: "/unused-agent-fixture")) })
+        }
+        #expect(gitlab.requests.last?.endpoint == "/user")
+    }
+
     @Test func invalidNewJournalPreservesRawBytesAndHoldsAutomationWithLegacyDataAvailable() throws {
         try withDefaults { defaults in
             let raw = Data(#"{"version":99}"#.utf8)

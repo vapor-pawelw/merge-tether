@@ -46,6 +46,8 @@ final class AICommentOriginCoordinator {
     private let fetchCurrent: FetchCurrent
     private let isCurrent: IsCurrent
     private let criteriaOverride: @MainActor () -> String?
+    private let overrideAccount: @MainActor (MRAutomationScope.Target) -> GitLabAccountIdentity
+    private let legacyUsernames: @MainActor (GitLabAccountIdentity) -> Set<String>
     private let retryWait: ReadOnlyAssessmentRetry.Wait
     private let now: ReadOnlyAssessmentRetry.Clock
     @ObservationIgnored private var pending: [MRAutomationScope.Target: Request] = [:]
@@ -74,17 +76,22 @@ final class AICommentOriginCoordinator {
          assess: @escaping Assess = { try await AICommentOriginAssessor.verify(target: $0, notes: $1, assistant: $2, model: $3, thinking: $4, criteriaOverride: $5) },
          fetchCurrent: @escaping FetchCurrent, isCurrent: @escaping IsCurrent,
          criteriaOverride: @escaping @MainActor () -> String? = { nil },
+         overrideAccount: @escaping @MainActor (MRAutomationScope.Target) -> GitLabAccountIdentity = { $0.account },
+         legacyUsernames: @escaping @MainActor (GitLabAccountIdentity) -> Set<String> = { [$0.username] },
          retryWait: @escaping ReadOnlyAssessmentRetry.Wait = ReadOnlyAssessmentRetry.wait,
          now: @escaping ReadOnlyAssessmentRetry.Clock = { Date() }) {
         self.directory = directory; self.overrideDirectory = overrideDirectory ?? directory; self.assess = assess; self.fetchCurrent = fetchCurrent; self.isCurrent = isCurrent
         self.purpose = purpose
         self.criteriaOverride = criteriaOverride
+        self.overrideAccount = overrideAccount
+        self.legacyUsernames = legacyUsernames
         self.retryWait = retryWait
         self.now = now
     }
 
     private func key(_ request: Request, _ note: Note) -> String {
-        "\(request.directory.path)/\(request.target.host)/\(request.target.username)/\(request.target.projectID)/\(request.target.iid ?? 0)/\(note.id ?? 0)/\(note.author?.id ?? 0)/\(AICommentAssessmentStore.digest(note.body ?? ""))/\(request.assistant.rawValue)/\(request.model)/\(AICommentOriginAssessor.criteriaVersion)/\(request.thinking.rawValue)"
+        let account = request.target.userID.map { "user-\($0)" } ?? request.target.username
+        return "\(request.directory.path)/\(request.target.host)/\(account)/\(request.target.projectID)/\(request.target.iid ?? 0)/\(note.id ?? 0)/\(note.author?.id ?? 0)/\(AICommentAssessmentStore.digest(note.body ?? ""))/\(request.assistant.rawValue)/\(request.model)/\(AICommentOriginAssessor.criteriaVersion)/\(request.thinking.rawValue)"
     }
 
     func schedule(target: MRAutomationScope.Target, notes: [Note], assistant: AutomationAssistant, model: String, thinking: VerificationThinking = .high) {
@@ -105,6 +112,8 @@ final class AICommentOriginCoordinator {
             && (purpose != .display || incomingIDs.contains($0.value.note.noteID)) }).keys {
             validated.removeValue(forKey: stale)
         }
+        let decidingAccount = overrideAccount(target)
+        let names = legacyUsernames(decidingAccount)
         let uncovered = notes.filter { note in
             let identity = key(candidate, note)
             if let attemptedAt = attempted[identity] {
@@ -112,21 +121,24 @@ final class AICommentOriginCoordinator {
                       now().timeIntervalSince(attemptedAt) >= ReadOnlyAssessmentRetry.cooldown else { return false }
             }
             if AICommentOriginOverrideStore.override(for: note, host: target.host, projectID: target.projectID,
-                iid: target.iid!, username: target.username, in: overrideDirectory) != nil { return false }
+                iid: target.iid!, username: target.username, userID: decidingAccount.userID,
+                legacyUsernames: names, in: overrideDirectory) != nil { return false }
             if purpose != .display,
-               AICommentAssessmentStore.reusable(note, target: target, in: candidate.directory)?.purpose == .publication { return false }
+               AICommentAssessmentStore.reusable(note, target: target, legacyUsernames: names,
+                                                 in: candidate.directory)?.purpose == .publication { return false }
             if let (record, sealed) = AICommentAssessmentStore.stored(for: note, host: target.host,
-                projectID: target.projectID, iid: target.iid!, in: candidate.directory) {
+                projectID: target.projectID, iid: target.iid!, userID: target.userID, legacyUsernames: names, in: candidate.directory) {
                 // An unsealed publication record, such as one a worker wrote, is re-assessed by the app.
                 guard purpose == .display || sealed else { return true }
+                let sameAccount = target.userID != nil || record.username == target.username
                 if record.qualifiesAsAI && (purpose == .display || record.purpose != .display)
-                    && (record.username == nil || record.username == target.username)
+                    && (record.username == nil || sameAccount)
                     && (record.criteriaVersion == AICommentOriginAssessor.criteriaVersion
                         || purpose == .display && record.criteriaVersion == nil)
-                    && (purpose == .display || record.username == target.username && record.authorID == note.author?.id) { return false }
+                    && (purpose == .display || sameAccount && record.authorID == note.author?.id) { return false }
                 if record.provider == assistant.rawValue && record.model == model
                     && record.criteriaVersion == AICommentOriginAssessor.criteriaVersion
-                    && record.username == target.username && record.authorID == note.author?.id
+                    && sameAccount && record.authorID == note.author?.id
                     && record.thinking == thinking && record.purpose == purpose { return false }
             }
             return true
@@ -159,7 +171,9 @@ final class AICommentOriginCoordinator {
     }
 
     func cancel(outsideScope scope: MRAutomationScope? = nil) {
-        for target in Set(pending.keys).union(running.keys).union(failures.values.map(\.target)).union(validated.values.map(\.target)) where scope.map({ !$0.resolve(target).active }) ?? true {
+        for target in Set(pending.keys).union(running.keys).union(failures.values.map(\.target)).union(validated.values.map(\.target)) {
+            let projected = target.forAccount(.init(host: target.host, username: target.username))
+            guard scope.map({ !$0.resolve(projected).active }) ?? true else { continue }
             pending.removeValue(forKey: target); running[target]?.1.cancel()
             for key in failures.filter({ $0.value.target == target }).keys {
                 failures.removeValue(forKey: key)
@@ -200,10 +214,18 @@ final class AICommentOriginCoordinator {
                     let persisted = try await ReadOnlyAssessmentRetry.run(isCurrent: {
                         self.requestIsCurrent(request)
                     }, wait: retryWait) {
+                        let names = self.legacyUsernames(target.account)
+                        let pendingTargets = [target] + (target.userID == nil ? [] : names.sorted().map {
+                            target.forAccount(.init(host: target.host, username: $0))
+                        })
                         for note in request.notes where self.validated[self.key(request, note)] == nil {
-                            if let restored = try AICommentAssessmentStore.pendingVerdict(for: note, target: target,
-                                assistant: request.assistant, model: request.model, thinking: request.thinking, purpose: self.purpose, in: request.directory) {
-                                self.validated[self.key(request, note)] = .init(target: target, note: restored)
+                            for pendingTarget in pendingTargets {
+                                if let restored = try AICommentAssessmentStore.pendingVerdict(for: note, target: pendingTarget,
+                                    assistant: request.assistant, model: request.model, thinking: request.thinking,
+                                    purpose: self.purpose, in: request.directory) {
+                                    self.validated[self.key(request, note)] = .init(target: target, note: restored)
+                                    break
+                                }
                             }
                         }
                         let missing = request.notes.filter { self.validated[self.key(request, $0)] == nil }
@@ -237,11 +259,15 @@ final class AICommentOriginCoordinator {
                             return matches.count == 1 && original.matchesOriginSource(matches[0])
                         }) else { throw CancellationError() }
                         let written = try AICommentAssessmentStore.persist(result, target: target, notes: request.notes,
-                            assistant: request.assistant, model: request.model, thinking: request.thinking, purpose: self.purpose, in: request.directory)
+                            assistant: request.assistant, model: request.model, thinking: request.thinking, purpose: self.purpose,
+                            legacyUsernames: names, in: request.directory)
                         for note in request.notes {
                             // The ordinary record is authoritative now; leftover pending data cannot qualify on its own.
-                            try? AICommentAssessmentStore.removePendingVerdict(for: note, target: target,
-                                assistant: request.assistant, model: request.model, thinking: request.thinking, purpose: self.purpose, in: request.directory)
+                            for pendingTarget in pendingTargets {
+                                try? AICommentAssessmentStore.removePendingVerdict(for: note, target: pendingTarget,
+                                    assistant: request.assistant, model: request.model, thinking: request.thinking,
+                                    purpose: self.purpose, in: request.directory)
+                            }
                         }
                         return written
                     }

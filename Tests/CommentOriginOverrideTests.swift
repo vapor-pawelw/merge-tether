@@ -102,6 +102,27 @@ struct CommentOriginOverrideTests {
         #expect(AICommentOriginOverrideStore.override(for: note(), host: target.host, projectID: 7, iid: 13, in: directory) == nil)
     }
 
+    @Test func accountBoundOverridesSurviveRenameAndKeepTheTwoOwnersSeparate() async throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let source = note()
+        let center = CommentOriginOverrideCenter(directory: directory, gain: { _, _, _ in 0 }, resume: { _ in })
+        func verdict(_ id: Int, username: String) -> AICommentOriginOverride.Classification? {
+            AICommentOriginOverrideStore.override(for: source, host: target.host, projectID: 7, iid: 13,
+                username: username, userID: id, legacyUsernames: [], in: directory)?.classification
+        }
+        try await center.apply(.human, to: [source], in: discussions(source), target: target, userID: 21)
+        #expect(verdict(21, username: "renamed") == .human)
+        #expect(verdict(22, username: target.username) == nil)
+
+        try await center.apply(.ai, to: [source], in: discussions(source), target: target, userID: 22, legacyUsernames: [])
+        #expect(verdict(22, username: target.username) == .ai)
+        #expect(verdict(21, username: "renamed") == .human)
+
+        try await center.apply(nil, to: [source], in: discussions(source), target: target, userID: 22, legacyUsernames: [])
+        #expect(verdict(22, username: target.username) == nil)
+        #expect(verdict(21, username: "renamed") == .human)
+    }
+
     @Test func aManualVerdictOutranksAVerifiedAssistantInTheConversation() async throws {
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
         let duo = GitLabMergeRequestDiscussion.Note(id: 3, author: .init(id: 7, username: "GitLabDuo", name: "Duo"), system: false,

@@ -17,6 +17,7 @@ struct AICommentOriginOverride: Codable, Equatable, Sendable {
     let createdAt: Date
     /// An override that widens automatic publication waits until this moment, so it can still be undone.
     let activatesAt: Date
+    var accountUserID: Int? = nil
 
     var evidenceContext: EvidenceContext { .init(commentBody: .init(bodySHA256)) }
 
@@ -37,6 +38,7 @@ enum AICommentOriginOverrideStore {
         let projectID: Int
         let iid: Int
         let noteID: Int
+        var userID: Int? = nil
     }
 
     /// Kept beside the action-authorizing assessments so the publication gate and the display read the same verdict.
@@ -45,23 +47,38 @@ enum AICommentOriginOverrideStore {
     }
 
     nonisolated static func fileURL(_ key: Key, in assessmentDirectory: URL) -> URL {
-        directory(in: assessmentDirectory).appending(path: key.host)
-            .appending(path: "\(key.projectID)-\(key.iid)-\(key.noteID).json")
+        let hostDirectory = directory(in: assessmentDirectory).appending(path: key.host)
+        let accountDirectory = key.userID.map { hostDirectory.appending(path: "user-\($0)") }
+        return (accountDirectory ?? hostDirectory).appending(path: "\(key.projectID)-\(key.iid)-\(key.noteID).json")
     }
 
     /// Returns the stored record only while it still describes this exact comment.
     nonisolated static func override(for note: GitLabMergeRequestDiscussion.Note, host: String, projectID: Int, iid: Int,
-                                      username: String? = nil, in assessmentDirectory: URL) -> AICommentOriginOverride? {
-        guard let id = note.id, id > 0, let authorID = note.author?.id, authorID > 0, let body = note.body,
-              let record = stored(.init(host: host, projectID: projectID, iid: iid, noteID: id), in: assessmentDirectory),
-              record.authorID == authorID,
-              record.evidenceContext.binds(to: AICommentAssessmentStore.bodyEvidence(body), policy: .commentBody),
-              username.map({ $0 == record.username }) ?? true else { return nil }
+                                      username: String? = nil, userID: Int? = nil, legacyUsernames: Set<String>? = nil,
+                                      in assessmentDirectory: URL) -> AICommentOriginOverride? {
+        guard let id = note.id, id > 0, let authorID = note.author?.id, authorID > 0, let body = note.body else { return nil }
+        let key = Key(host: host, projectID: projectID, iid: iid, noteID: id)
+        let record = userID.flatMap {
+            stored(.init(host: host, projectID: projectID, iid: iid, noteID: id, userID: $0), in: assessmentDirectory)
+        } ?? stored(key, in: assessmentDirectory).flatMap { legacy in
+            if let userID {
+                let names = legacyUsernames ?? Set([username].compactMap { $0 })
+                return legacyBelongs(legacy, userID: userID, usernames: names) ? legacy : nil
+            }
+            return legacy.accountUserID == nil && (username == nil || username == legacy.username) ? legacy : nil
+        }
+        guard let record, record.authorID == authorID,
+              record.evidenceContext.binds(to: AICommentAssessmentStore.bodyEvidence(body), policy: .commentBody) else { return nil }
         return record
     }
 
+    nonisolated static func legacyBelongs(_ record: AICommentOriginOverride, userID: Int, usernames: Set<String>) -> Bool {
+        record.accountUserID.map { $0 == userID } ?? usernames.contains(record.username)
+    }
+
     nonisolated static func sealContext(_ key: Key) -> String {
-        "ai-origin-override:\(key.host):\(key.projectID):\(key.iid):\(key.noteID)"
+        let legacy = "ai-origin-override:\(key.host):\(key.projectID):\(key.iid):\(key.noteID)"
+        return key.userID.map { "\(legacy):user-\($0)" } ?? legacy
     }
 
     /// An unsealed record, such as an older override or one written outside the app, can only narrow
@@ -72,16 +89,22 @@ enum AICommentOriginOverrideStore {
         guard let record = try? decoder.decode(AICommentOriginOverride.self, from: payload ?? data),
               record.version == 1, record.host == key.host, record.projectID == key.projectID,
               record.iid == key.iid, record.noteID == key.noteID, !record.username.isEmpty,
+              key.userID == nil || record.accountUserID == key.userID,
+              record.accountUserID.map({ $0 > 0 }) ?? true,
               payload != nil || record.classification != .ai else { return nil }
         return record
     }
 
     nonisolated static func save(_ record: AICommentOriginOverride, in assessmentDirectory: URL) throws {
-        let path = fileURL(.init(host: record.host, projectID: record.projectID, iid: record.iid, noteID: record.noteID),
-                           in: assessmentDirectory)
+        let key = Key(host: record.host, projectID: record.projectID, iid: record.iid, noteID: record.noteID,
+                      userID: record.accountUserID)
+        try save(record, for: key, in: assessmentDirectory)
+    }
+
+    nonisolated private static func save(_ record: AICommentOriginOverride, for key: Key, in assessmentDirectory: URL) throws {
+        let path = fileURL(key, in: assessmentDirectory)
         try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
-        let key = Key(host: record.host, projectID: record.projectID, iid: record.iid, noteID: record.noteID)
         let encoded = try encoder.encode(record)
         let stored: Data
         do { stored = try EvidenceSeal.seal(encoded, context: sealContext(key)) }
@@ -101,7 +124,7 @@ enum AICommentOriginOverrideStore {
 
     /// Restores exactly what was stored before a change: the earlier override, or none.
     nonisolated static func restore(_ key: Key, to previous: AICommentOriginOverride?, in assessmentDirectory: URL) throws {
-        if let previous { try save(previous, in: assessmentDirectory) } else { try remove(key, in: assessmentDirectory) }
+        if let previous { try save(previous, for: key, in: assessmentDirectory) } else { try remove(key, in: assessmentDirectory) }
     }
 
     nonisolated private static var encoder: JSONEncoder {

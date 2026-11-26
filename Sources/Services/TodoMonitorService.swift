@@ -299,6 +299,9 @@ final class TodoMonitorService {
         }
         glab.clearAuthenticatedAccount = { [weak settings] in settings?.clearAuthenticatedAccount() }
         glab.knownAccountUsernames = { [weak settings] account in settings?.knownUsernames(for: account) ?? [account.username] }
+        glab.unambiguousAccountUsernames = { [weak settings] account in
+            settings?.unambiguousLegacyUsernames(for: account) ?? [account.username]
+        }
         self.todoStore = InboxTodoStore(settings: settings, glab: glab)
         self.notifications = notifications
         self.assistantDependencies = assistantDependencies
