@@ -6,6 +6,7 @@ import MergeTetherRemote
     let target: MRAutomationScope.Target
     let url: URL
     let item: MergeRequestAttentionMonitor.Item?
+    private let request: GitLabMergeRequest?
     let isDraft: Bool
     let isFinished: Bool
     let isReviewed: Bool
@@ -24,6 +25,7 @@ import MergeTetherRemote
         self.target = target
         self.url = url
         self.item = row?.item ?? proposal?.item
+        self.request = request
         self.isDraft = row?.isDraft ?? (request?.draft == true || request?.detailedMergeStatus == "draft_status")
         self.isFinished = request.map { $0.state != "opened" } ?? false
         self.isReviewed = board.reviewed.contains { $0.id.projectID == projectID && $0.id.iid == iid }
@@ -43,12 +45,14 @@ import MergeTetherRemote
         card.pinned = pin.map { monitor.settings.boardPins.contains($0) }
         if !isFinished, editor.isAvailable { card.automation = automation(editor) }
         card.canRemoveFromBoard = canRemove ? true : nil
+        card.canLeaveReview = reviewToLeave == nil ? nil : true
         card.canAcknowledgeFinished = item.flatMap { monitor.canAcknowledgeFinishedMergeRequest($0) ? true : nil }
         guard let token = try? RemoteDigest.token([
             try RemoteDigest.token(target), card.url?.absoluteString ?? "", card.head ?? "",
             card.contextRevision ?? "", String(isDraft), String(isFinished),
             try RemoteDigest.token(card.pinned), try RemoteDigest.token(card.automation),
-            try RemoteDigest.token(card.canRemoveFromBoard), try RemoteDigest.token(card.canAcknowledgeFinished)
+            try RemoteDigest.token(card.canRemoveFromBoard), try RemoteDigest.token(card.canLeaveReview),
+            try RemoteDigest.token(card.canAcknowledgeFinished)
         ]) else { return }
         card.actions.append(.init(id: RemoteCardChange.actionID, kind: .editCard, token: token))
     }
@@ -68,6 +72,9 @@ import MergeTetherRemote
         case .remove:
             guard canRemove, let item else { return .changed }
             return monitor.removeReviewedMergeRequest(item) ? .completed : .failed
+        case .leaveReview:
+            guard let request = reviewToLeave else { return .changed }
+            return await monitor.leaveReview(request, accountRevision: monitor.glab.accountRevision)
         case .acknowledge:
             guard let item, monitor.canAcknowledgeFinishedMergeRequest(item) else { return .changed }
             return monitor.acknowledgeFinishedMergeRequest(item) ? .completed : .failed
@@ -89,6 +96,13 @@ import MergeTetherRemote
         guard !isFinished, isReviewed, let request = item?.mergeRequest else { return false }
         return request.author.username != target.username && request.projectID == target.projectID
             && request.iid == target.iid && request.webURL == url
+    }
+
+    private var reviewToLeave: GitLabMergeRequest? {
+        guard isReviewed, let request, request.webURL == url,
+              monitor.scopeTarget(projectID: request.projectID, iid: request.iid, url: request.webURL) == target,
+              monitor.selfReviewerRemoval(for: request) != nil else { return nil }
+        return request
     }
 
     private func automation(_ editor: MRAutomationScopeEditor) -> RemoteCardAutomation {

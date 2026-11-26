@@ -48,6 +48,7 @@ public enum RemoteCardChange: Codable, Equatable, Sendable {
     case repository(RemoteCardAutomation.Preference)
     case refresh
     case remove
+    case leaveReview
     case acknowledge
     case openAssistant(RemoteCardAssistant, message: String?)
 

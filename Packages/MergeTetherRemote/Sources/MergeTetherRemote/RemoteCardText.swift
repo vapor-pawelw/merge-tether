@@ -49,6 +49,7 @@ public extension RemoteCard {
         content.pinned = nil
         content.automation = nil
         content.canRemoveFromBoard = nil
+        content.canLeaveReview = nil
         content.canAcknowledgeFinished = nil
         content.boardTraits = nil
         content.actions.removeAll { $0.kind == .editCard || $0.id == RemoteAction.reviewSeenID }

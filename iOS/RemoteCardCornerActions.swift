@@ -10,12 +10,22 @@ struct RemoteCardCornerActions: View {
     let onShowDetails: (() -> Void)?
 
     @State private var panel: Panel?
-    @State private var confirmRemoval = false
+    @State private var reviewRemoval: ReviewRemoval?
     @State private var copyFeedback: UUID?
 
     private enum Panel: String, Identifiable {
         case automation, assistant
         var id: Self { self }
+    }
+
+    private enum ReviewRemoval {
+        case hide, leave
+
+        var title: LocalizedStringResource {
+            self == .hide ? .Board.boardReviewAssignmentHide : .Board.boardReviewAssignmentLeave
+        }
+
+        var change: RemoteCardChange { self == .hide ? .remove : .leaveReview }
     }
 
     private var url: URL? {
@@ -50,11 +60,17 @@ struct RemoteCardCornerActions: View {
                 menu(url)
             }
         }
-        .confirmationDialog(Text(.Board.boardReviewAssignmentHide), isPresented: $confirmRemoval, titleVisibility: .visible) {
-            Button(role: .destructive) { submit(.remove) } label: { Text(.Board.boardReviewAssignmentHide) }
-        } message: {
-            Text(model?.state.board?.hiddenReviews != nil
-                ? .RemoteCardActions.remoteCardActionsHideReviewExplanation : .Board.boardReviewAssignmentHideExplanation)
+        .confirmationDialog(Text((reviewRemoval ?? .hide).title), isPresented: Binding(
+            get: { reviewRemoval != nil }, set: { if !$0 { reviewRemoval = nil } }
+        ), titleVisibility: .visible, presenting: reviewRemoval) { removal in
+            Button(role: .destructive) { submit(removal.change) } label: { Text(removal.title) }
+        } message: { removal in
+            if removal == .leave {
+                Text(.Board.boardReviewAssignmentLeaveExplanation)
+            } else {
+                Text(model?.state.board?.hiddenReviews != nil
+                    ? .RemoteCardActions.remoteCardActionsHideReviewExplanation : .Board.boardReviewAssignmentHideExplanation)
+            }
         }
         .sheet(item: $panel) { panel in
             if let model {
@@ -65,7 +81,10 @@ struct RemoteCardCornerActions: View {
                 }
             }
         }
-        .onChange(of: model?.state.board?.hostSession) { panel = nil; confirmRemoval = false }
+        .onChange(of: model?.state.board?.hostSession) {
+            panel = nil
+            reviewRemoval = nil
+        }
     }
 
     private func menu(_ url: URL) -> some View {
@@ -114,12 +133,20 @@ struct RemoteCardCornerActions: View {
                         .disabled(!canEdit)
                 }
             }
-            if card.canRemoveFromBoard == true {
+            if card.canRemoveFromBoard == true || card.canLeaveReview == true {
                 Section {
-                    Button(role: .destructive) { confirmRemoval = true } label: {
-                        Label(.Board.boardReviewAssignmentHide, systemImage: "eye.slash")
+                    if card.canRemoveFromBoard == true {
+                        Button(role: .destructive) { reviewRemoval = .hide } label: {
+                            Label(.Board.boardReviewAssignmentHide, systemImage: "eye.slash")
+                        }
+                        .disabled(!canEdit)
                     }
-                    .disabled(!canEdit)
+                    if card.canLeaveReview == true {
+                        Button(role: .destructive) { reviewRemoval = .leave } label: {
+                            Label(.Board.boardReviewAssignmentLeave, systemImage: "person.badge.minus")
+                        }
+                        .disabled(!canEdit)
+                    }
                 }
             }
         } label: {

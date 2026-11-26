@@ -114,6 +114,7 @@ struct MRCommonMenuItems: View {
     var boardPin: BoardCardPin? = nil
     var boardGitLabURL: URL? = nil
     var onRemove: (() -> Void)? = nil
+    var reviewAssignment: GitLabMergeRequest? = nil
     @State private var startingReview = false
     private var isFinished: Bool { MergeRequestFinishedState(item.mergeRequest) != nil }
 
@@ -173,6 +174,58 @@ struct MRCommonMenuItems: View {
             } label: {
                 Label { Text(.Board.boardReviewAssignmentHide) } icon: { Image(systemName: "eye.slash") }
             }
+            if let request = reviewAssignment {
+                LeaveReviewButton(request: request, monitor: monitor)
+            }
+        }
+    }
+}
+
+struct LeaveReviewButton: View {
+    let request: GitLabMergeRequest
+    let monitor: TodoMonitorService
+    var inline = false
+    @State private var leaving = false
+
+    var body: some View {
+        if monitor.selfReviewerRemoval(for: request) != nil {
+            if inline { button.buttonStyle(.plain) }
+            else { button }
+        }
+    }
+
+    private var button: some View {
+        Button(role: .destructive, action: leaveReview) {
+            if inline {
+                MRActionProgressLabel(working: leaving) { Text(.Board.boardReviewAssignmentLeave).lineLimit(1) }
+            } else {
+                Label { Text(.Board.boardReviewAssignmentLeave) } icon: { Image(systemName: "person.badge.minus") }
+            }
+        }
+        .disabled(leaving)
+    }
+
+    private func leaveReview() {
+        let revision = monitor.glab.accountRevision
+        let reference = "\(request.webURL.gitLabProjectPath) !\(request.iid)"
+        guard confirmMRAction(id: "leaveReview", title: .Board.boardReviewAssignmentLeave,
+            message: reference + "\n\n" + String(localized: .Board.boardReviewAssignmentLeaveExplanation)) else { return }
+        leaving = true
+        Task {
+            defer { leaving = false }
+            let status = await monitor.leaveReview(request, accountRevision: revision)
+            let message: LocalizedStringResource
+            switch status {
+            case .completed: return
+            case .changed: message = .Board.boardReviewersChanged
+            case .uncertain: message = .Board.boardReviewersUncertain
+            default: message = .Board.boardReviewersSaveFailed
+            }
+            let alert = NSAlert()
+            alert.messageText = String(localized: .Board.boardReviewAssignmentLeave)
+            alert.informativeText = String(localized: message)
+            alert.addButton(withTitle: String(localized: .Remote.remoteClose))
+            alert.runModal()
         }
     }
 }

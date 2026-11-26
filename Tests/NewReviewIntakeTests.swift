@@ -82,6 +82,84 @@ struct NewReviewIntakeTests {
     }
 
     @Test(arguments: [false, true])
+    func leavingReviewUpdatesGitLabMembershipOnlyWhenConfirmed(gitLabAccepts: Bool) async throws {
+        let name = "LeaveReview-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.manual, for: .codex)
+        settings.addNewReviewsToReviewed = true
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let other = #"{"id":11,"username":"charlie","name":"Charlie"}"#
+        let me = #"{"id":7,"username":"alice","name":"Alice"}"#
+        let assigned = "\(mergeRequestJSON.dropLast()),\"reviewers\":[\(me),\(other)]}"
+        let unassigned = "\(mergeRequestJSON.dropLast()),\"reviewers\":[\(other)]}"
+        gitlab.write("merge-request", assigned)
+        gitlab.handler = { request in
+            if request.arguments.first == "config" { return InMemoryGitLab.output(self.host) }
+            if request.arguments.first == "auth" { return InMemoryGitLab.output(error: "Logged in to \(self.host) as alice") }
+            if request.endpoint == "/user" { return InMemoryGitLab.output(me) }
+            if request.endpoint == "/projects/1/merge_requests/42" { return try gitlab.response("merge-request") }
+            if request.endpoint.hasPrefix("/merge_requests?scope=all&state=opened&reviewer_id=7") {
+                return InMemoryGitLab.output(gitlab.text("merge-request") == assigned ? "[\(assigned)]" : "[]")
+            }
+            if request.endpoint == "graphql" {
+                #expect(request.arguments.contains("username=alice"))
+                #expect(request.arguments.contains("mode=REMOVE"))
+                guard gitLabAccepts else {
+                    return InMemoryGitLab.output(#"{"errors":[{"message":"Permission denied"}]}"#)
+                }
+                gitlab.write("merge-request", unassigned)
+                return InMemoryGitLab.output(#"{"data":{"mergeRequestSetReviewers":{"mergeRequest":{"iid":"42"},"errors":[]}}}"#)
+            }
+            return InMemoryGitLab.output("[]")
+        }
+        let glab = gitlab.service(host: host, username: "alice")
+        settings.glabPath = glab.glabPath
+        settings.resolvedHost = host
+        let monitor = TodoMonitorService(settings: settings, glab: glab,
+            notifications: NotificationService(authorization: { .denied }, post: { _ in }))
+        defer { monitor.stopTimer() }
+        await monitor.bootstrap()
+        settings.onboardingCompleted = true
+        await monitor.refreshManually()
+        let board = monitor.boardSnapshot
+        let row = try #require(board.reviewed.first)
+        let request = try #require(row.displayRequest)
+        let revision = glab.accountRevision
+
+        let otherRemoval = ReviewerChange(.remove, reviewerID: 11, username: "charlie")
+        #expect(await monitor.changeReviewers([otherRemoval], of: request, accountRevision: revision) == .changed)
+        await #expect(throws: CancellationError.self) {
+            try await glab.changeMergeRequestReviewers([otherRemoval], of: request,
+                host: host, username: "alice", shouldProceed: { true })
+        }
+        #expect(gitlab.requests.allSatisfy { $0.endpoint != "graphql" })
+
+        var card = RemoteBoardAdapter.card(row.item, account: "alice@\(host)")
+        let context = try #require(RemoteCardActionContext(card: card, board: board, monitor: monitor))
+        context.project(&card)
+        #expect(card.canRemoveFromBoard == true && card.canLeaveReview == true)
+        let command = try #require(RemoteCardChange(argument: RemoteCardChange.leaveReview.argument))
+        let outcome = await context.execute(command)
+        #expect(outcome == (gitLabAccepts ? .completed : .uncertain))
+        #expect(gitlab.requests.filter { $0.endpoint == "graphql" }.count == 1)
+        #expect(monitor.boardSnapshot.reviewed.isEmpty == gitLabAccepts)
+        #expect(monitor.hiddenReviewAssignments.isEmpty)
+        #expect(!settings.ignoredMergeRequests.contains(target))
+
+        if gitLabAccepts {
+            #expect(monitor.boardSnapshot.otherMergeRequests.isEmpty)
+            let live = try await glab.fetchMergeRequest(projectID: 1, iid: 42, host: host)
+            #expect(live.reviewers?.map(\.username) == ["charlie"])
+            gitlab.write("merge-request", assigned)
+            await monitor.refreshManually()
+            #expect(monitor.boardSnapshot.reviewed.first?.id.iid == 42)
+        }
+    }
+
+    @Test(arguments: [false, true])
     func macCardClearsNewOnFirstClickAndOpensDetailsOnNextClick(confirmedAssignment: Bool) async throws {
         try await fixture(preset: .manual) { monitor, settings in
             settings.automation.startNewReviewsAutomatically = false

@@ -563,7 +563,8 @@ private struct CommandCenterMRDetailContent: View {
     private var headerMenu: some View {
         BoardActionsMenu {
             MRCommonMenuItems(item: item, monitor: monitor,
-                onRemove: isReviewed ? { monitor.removeReviewedMergeRequest(item) } : nil)
+                onRemove: isReviewed ? { monitor.removeReviewedMergeRequest(item) } : nil,
+                reviewAssignment: presentationRow.displayRequest)
         }
     }
 

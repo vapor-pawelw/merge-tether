@@ -256,6 +256,7 @@ public struct RemoteCard: Codable, Equatable, Identifiable, Sendable {
     public var pinned: Bool?
     public var automation: RemoteCardAutomation?
     public var canRemoveFromBoard: Bool?
+    public var canLeaveReview: Bool?
     public var canAcknowledgeFinished: Bool?
     public var boardTraits: RemoteBoardCardTraits?
     public init(id: String, title: String, project: String, url: URL?, head: String? = nil,
@@ -537,6 +538,7 @@ extension RemoteBoard {
                     if !supportsReviewBoard { compatible.lanes[lane].cards[card].pinned = nil }
                     compatible.lanes[lane].cards[card].automation = nil
                     compatible.lanes[lane].cards[card].canRemoveFromBoard = nil
+                    compatible.lanes[lane].cards[card].canLeaveReview = nil
                     compatible.lanes[lane].cards[card].canAcknowledgeFinished = nil
                 }
                 if !supportsReviewerEditing {

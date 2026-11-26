@@ -96,6 +96,9 @@ private struct CommandCenterMRCardContent: View {
                             monitor.removeReviewedMergeRequest(row.displayItem)
                         } label: { Text(.Board.boardReviewAssignmentHide) }
                         .buttonStyle(.plain)
+                        if let request = row.displayRequest {
+                            LeaveReviewButton(request: request, monitor: monitor, inline: true)
+                        }
                     }
                     if presentation.showsAdditionalCommentReview || finishingCommentReview {
                         Button {
@@ -567,7 +570,8 @@ private struct CommandCenterMRCardContent: View {
             }
         }
         MRCommonMenuItems(item: item, monitor: monitor, boardPin: cardPin, boardGitLabURL: row.displayURL,
-            onRemove: allowsRemoval ? { monitor.removeReviewedMergeRequest(row.displayItem) } : nil)
+            onRemove: allowsRemoval ? { monitor.removeReviewedMergeRequest(row.displayItem) } : nil,
+            reviewAssignment: row.displayRequest)
     }
 
     private var chips: [MRCardPresentation.Chip] { presentation.chips }

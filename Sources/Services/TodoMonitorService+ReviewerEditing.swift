@@ -8,6 +8,19 @@ extension TodoMonitorService {
             && request.webURL.isGitLabMergeRequest(host: host, iid: request.iid)
     }
 
+    func selfReviewerRemoval(for request: GitLabMergeRequest) -> ReviewerChange? {
+        guard let target = scopeTarget(projectID: request.projectID, iid: request.iid, url: request.webURL),
+              request.state == "opened", request.author.username != target.username,
+              let reviewer = request.reviewers?.first(where: { $0.username == target.username }), reviewer.id > 0
+        else { return nil }
+        return .init(.remove, reviewerID: reviewer.id, username: reviewer.username)
+    }
+
+    func leaveReview(_ request: GitLabMergeRequest, accountRevision: UInt64) async -> RemoteCommandResult.Status {
+        guard let removal = selfReviewerRemoval(for: request) else { return .changed }
+        return await changeReviewers([removal], of: request, accountRevision: accountRevision)
+    }
+
     func searchReviewers(of request: GitLabMergeRequest, query: String, accountRevision: UInt64) async throws -> [ReviewerCandidate] {
         guard canEditReviewers(of: request), let host = glab.resolvedHost, accountRevision == glab.accountRevision else {
             throw CancellationError()
@@ -20,7 +33,9 @@ extension TodoMonitorService {
     func changeReviewers(_ changes: [ReviewerChange], of displayed: GitLabMergeRequest,
                          accountRevision: UInt64) async -> RemoteCommandResult.Status {
         let id = MergeRequestAttentionMonitor.Item.ID(projectID: displayed.projectID, iid: displayed.iid)
-        guard let host = glab.resolvedHost, let username = glab.currentUsername, canEditReviewers(of: displayed),
+        let leavingReview = changes.count == 1 && changes.first == selfReviewerRemoval(for: displayed)
+        guard let host = glab.resolvedHost, let username = glab.currentUsername,
+              leavingReview || canEditReviewers(of: displayed),
               accountRevision == glab.accountRevision, reviewerEdits.insert(id).inserted else { return .changed }
         defer { reviewerEdits.remove(id) }
 
@@ -42,7 +57,7 @@ extension TodoMonitorService {
         }
         guard authorized() else { return .uncertain }
         await refreshFromGitLab(for: id)
-        return .completed
+        return authorized() ? .completed : .uncertain
     }
 }
 
@@ -106,11 +121,13 @@ extension GlabService {
         guard let first = changes.first, first.reviewerID > 0, !first.username.isEmpty,
               changes.count == 1 || ReviewerChange.Batch(changes) != nil else { throw CancellationError() }
         let user = try await fetchAuthenticatedUser(host: host, expectedUsername: username)
+        let leavingReview = changes.count == 1 && first.operation == .remove
+            && first.reviewerID == user.id && first.username == user.username
         let live = try await fetchMergeRequest(projectID: displayed.projectID, iid: displayed.iid, host: host)
         guard shouldProceed(), live.projectID == displayed.projectID, live.iid == displayed.iid,
               live.webURL.isGitLabMergeRequest(host: host, iid: live.iid),
               live.webURL.gitLabProjectPath == displayed.webURL.gitLabProjectPath,
-              live.state == "opened", live.author.id == user.id, let reviewers = live.reviewers else {
+              live.state == "opened", live.author.id == user.id || leavingReview, let reviewers = live.reviewers else {
             throw CancellationError()
         }
 

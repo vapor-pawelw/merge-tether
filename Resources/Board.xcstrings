@@ -43,6 +43,20 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Przywróć"}}
       }
     },
+    "board.reviewAssignment.leave": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Leave review" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Wypisz się z przeglądu" } }
+      }
+    },
+    "board.reviewAssignment.leaveExplanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Remove yourself from the reviewers in GitLab. The merge request will leave Reviewing." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Usuń siebie z listy reviewerów w GitLabie. MR zniknie z kolumny „Do przeglądu”." } }
+      }
+    },
     "board.reviewAssignment.seen": {
       "extractionState": "manual",
       "localizations": {
