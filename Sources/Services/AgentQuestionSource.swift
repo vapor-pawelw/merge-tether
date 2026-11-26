@@ -57,21 +57,34 @@ struct AgentQuestionSource: Sendable {
         return .init(installedVersion: build.version, ref: revision.ref, mainFallback: revision.ref == "main", files: files)
     }
 
-    static func installedHelp(for terms: [String], bundle: Bundle = .main) -> [String] {
-        guard let url = bundle.url(forResource: "automation", withExtension: "md"),
+    enum HelpMatch { case controlNames, topics }
+
+    static func installedHelp(for terms: [String], matching: HelpMatch = .controlNames, bundle: Bundle = .main) -> [String] {
+        guard !terms.isEmpty, let url = bundle.url(forResource: "automation", withExtension: "md"),
               let documentation = try? String(contentsOf: url, encoding: .utf8) else { return [] }
-        return installedHelp(for: terms, documentation: documentation)
+        return installedHelp(for: terms, matching: matching, documentation: documentation)
     }
 
-    static func installedHelp(for terms: [String], documentation: String) -> [String] {
-        let queries = terms.map { " " + helpSearchKey($0) + " " }
+    static func installedHelp(for terms: [String], matching: HelpMatch = .controlNames,
+                              documentation: String) -> [String] {
+        let boundedTerms = terms.prefix(5).map { String($0.prefix(AgentQuestionInput.maximumLength)) }
+        let queries = boundedTerms.map { " " + helpSearchKey($0) + " " }
+        let topics = words(boundedTerms.joined(separator: " "))
+            .subtracting(["merge", "request", "button", "gitlab", "what", "does", "with", "when", "this"])
+        let keywords = matching == .topics ? Set(topics.map { String($0.prefix(6)) }) : []
         let paragraphs = documentation.components(separatedBy: "\n\n")
         let matches = paragraphs.enumerated().compactMap { index, paragraph -> (index: Int, score: Int)? in
             let labels = paragraph.matches(of: /\*\*([^*\n]+)\*\*/).map { helpSearchKey(String($0.1)) }
-            let score = labels.filter { label in
+            let labelScore = labels.filter { label in
                 label.contains(" ") && queries.contains { $0.contains(" " + label + " ") }
             }.map(\.count).max()
-            return score.map { (index, $0) }
+            if let labelScore { return (index, 100 + labelScore) }
+            guard !keywords.isEmpty else { return nil }
+            let terms = Set(words(paragraph).map { String($0.prefix(6)) })
+            let score = terms.intersection(keywords).count
+            guard score >= min(2, keywords.count) else { return nil }
+            let labelTerms = Set(words(labels.joined(separator: " ")).map { String($0.prefix(6)) })
+            return (index, score + 4 * labelTerms.intersection(keywords).count)
         }
         return matches.sorted { lhs, rhs in
             lhs.score == rhs.score ? lhs.index < rhs.index : lhs.score > rhs.score

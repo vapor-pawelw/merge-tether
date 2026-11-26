@@ -171,15 +171,33 @@ final class AgentQuestionConversation {
                           monitor: TodoMonitorService, isCurrent: () -> Bool)
         async throws -> (AgentQuestionCLI.Turn, AgentQuestionSource.Notice?) {
         guard first.reply.requestsEvidence else { return (first, nil) }
-        let details = monitor.agentQuestionDetails(for: first.reply.mergeRequestIIDs ?? [])
+        guard isCurrent() else { throw CancellationError() }
+
+        var request = first
+        var help = installedHelp
+        var iids = Self.mentionedIIDs(in: question.text) + (first.reply.mergeRequestIIDs ?? [])
+        let additionalHelp = AgentQuestionSource.installedHelp(for: first.reply.sourceTerms ?? [], matching: .topics)
+            .filter { !installedHelp.contains($0) }
+        if !additionalHelp.isEmpty {
+            help += additionalHelp
+            let guide = Prompt(question: question.text, snapshot: nil, mergeRequestDetails: monitor.agentQuestionDetails(for: iids),
+                               installedHelp: help, source: nil, evidenceResponse: false)
+            request = try await ask(guide, owner: owner, executable: executable, session: request.session,
+                                    configuration: configuration, directory: directory)
+            guard isCurrent() else { throw CancellationError() }
+            guard request.reply.requestsEvidence else { return (request, nil) }
+            iids += request.reply.mergeRequestIIDs ?? []
+        }
+
+        let details = monitor.agentQuestionDetails(for: iids)
         let evidence: AgentQuestionSource.Evidence?
-        if let terms = first.reply.sourceTerms, !terms.isEmpty {
+        if let terms = request.reply.sourceTerms, !terms.isEmpty {
             evidence = try await source.evidence(for: terms, build: .installed)
         } else { evidence = nil }
         guard isCurrent() else { throw CancellationError() }
         let prompt = Prompt(question: question.text, snapshot: nil, mergeRequestDetails: details,
-                            installedHelp: installedHelp, source: evidence, evidenceResponse: true)
-        let turn = try await ask(prompt, owner: owner, executable: executable, session: first.session,
+                            installedHelp: help, source: evidence, evidenceResponse: true)
+        let turn = try await ask(prompt, owner: owner, executable: executable, session: request.session,
                                  configuration: configuration, directory: directory)
         return (turn, evidence?.notice)
     }

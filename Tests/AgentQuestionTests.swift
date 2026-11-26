@@ -122,9 +122,23 @@ extension AgentQuestionTests {
             return #"{"type":"item.completed","item":{"type":"agent_message","text":\#(json)}}"#
         }
         let evidenceRequest = #"{"type":"item.completed","item":{"type":"agent_message","text":"{\"answer\":\"Provisional\",\"mergeRequestIIDs\":[42]}"}}"#
+        let guideRequest = #"{"type":"item.completed","item":{"type":"agent_message","text":"{\"sourceTerms\":[\"claim assignment\"]}"}}"#
         let fixture = """
             #!/bin/sh
             input=$(/bin/cat)
+            if printf '%s' "$input" | /usr/bin/grep -Fq '"question":"When does an assignment count?"'; then
+                printf '%s\\n' '{"type":"thread.started","thread_id":"\(session)"}'
+                if printf '%s' "$input" | /usr/bin/grep -Fq '"installedHelp":[]'; then
+                    printf '%s\\n' '\(guideRequest)'
+                elif printf '%s' "$input" | /usr/bin/grep -Fq 'current GitLab assignment' &&
+                     printf '%s' "$input" | /usr/bin/grep -Fq '"evidenceResponse":false'; then
+                    printf '%s\\n' '\(try event(answer: "Explained using the installed guide"))'
+                else
+                    exit 1
+                fi
+                printf '%s\\n' '{"type":"turn.completed"}'
+                exit 0
+            fi
             if printf '%s' "$input" | /usr/bin/grep -q '"question":"Why is !42 blocked?"'; then
                 printf '%s\\n' '{"type":"thread.started","thread_id":"\(session)"}'
                 case "$input" in
@@ -165,7 +179,11 @@ extension AgentQuestionTests {
         #expect(first.messages.count == 2)
         #expect(first.messages.last?.text == "Started")
 
-        let restored = AgentQuestionConversation(root: storage)
+        let source = AgentQuestionSource { _ in
+            Issue.record("This conversation should be answered with installed guidance.")
+            throw URLError(.unsupportedURL)
+        }
+        let restored = AgentQuestionConversation(root: storage, source: source)
         restored.activate(owner)
         #expect(restored.messages == first.messages)
         restored.submit("Can you explain that?", owner: owner, executable: executable, configuration: configuration, monitor: monitor)
@@ -176,6 +194,13 @@ extension AgentQuestionTests {
         try await waitForQuestion(restored)
         #expect(restored.failure == nil)
         #expect(restored.messages.last?.text == "Grounded answer")
+
+        restored.submit("When does an assignment count?", owner: owner, executable: executable,
+                        configuration: configuration, monitor: monitor)
+        try await waitForQuestion(restored)
+        #expect(restored.failure == nil)
+        #expect(restored.messages.last?.text == "Explained using the installed guide")
+        #expect(restored.messages.last?.sourceNotice == nil)
 
         restored.clear()
         let clean = AgentQuestionConversation(root: storage)
@@ -260,6 +285,17 @@ extension AgentQuestionTests {
         #expect(help.first == claim)
         #expect(!help.contains { $0.contains("Auto-merge") })
         #expect(AgentQuestionSource.installedHelp(for: ["Czy GitLab dzisiaj działa?"], documentation: docs).isEmpty)
+    }
+
+    @Test func agentTopicsCanFindDocumentationWithoutTheExactControlName() throws {
+        let docs = "**Claim merge request** rechecks your assignment and records your claim."
+        #expect(AgentQuestionSource.installedHelp(for: ["claim assignment"], documentation: docs).isEmpty)
+        #expect(AgentQuestionSource.installedHelp(for: ["claim assignment"], matching: .topics,
+                                                   documentation: docs) == [docs])
+        #expect(AgentQuestionSource.installedHelp(for: ["claim", "assignee", "reassign", "ownership"], matching: .topics,
+                                                   documentation: docs) == [docs])
+        #expect(AgentQuestionSource.installedHelp(for: ["runner resource quota"], matching: .topics,
+                                                   documentation: docs).isEmpty)
     }
 
     @Test func appBundleDocumentsThatClaimIsLocal() throws {

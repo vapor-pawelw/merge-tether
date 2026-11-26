@@ -69,11 +69,13 @@ struct AgentQuestionCLI {
         Use the latest snapshot for facts. Distinguish configured automation, present eligibility and a
         submission already queued by GitLab. Eligibility can change and is never a guarantee of merging.
         State when evidence is stale, missing or partial. Use the supplied MR URLs for Markdown links.
-        The installedHelp field contains documentation shipped with the running app. For a question about
-        the effect of a visible control, answer from the installed help and current MR facts when they cover
-        the question. Prefer this help for the installed build if GitHub main differs. Name the system the
-        control reads from, what it saves and where. For implementation details or gaps, request public code
-        with {"sourceTerms":["up to five specific English concepts or Swift type names"]}.
+        Read installedHelp first for any question about how MergeTether works. It contains documentation
+        shipped with the running app. Answer from it and current MR facts when they cover the question.
+        Prefer it for the installed build if GitHub main differs. For controls, name the system the control
+        reads from, what it saves and where. If you need more evidence, return sourceTerms with up to five
+        specific English concepts, control names or Swift type names. The app searches its installed guide
+        with these terms before using GitHub. If the installed guide does not establish a requested app
+        behavior, ask for evidence before answering.
         For "why" questions about a specific MR, a warning, a note or a job, use merge request details,
         especially the visible reason, jobs and Event log. If those details are missing, request
         {"mergeRequestIIDs":[142]}. You may request both kinds of evidence together in one object.
