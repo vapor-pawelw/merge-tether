@@ -128,7 +128,7 @@ final class MergeRequestTodoRouter {
             let previousAttempt = settings.automationReceipts.contains(attempt) || settings.automationAttemptReceipts.contains(attempt)
                 || settings.assistantHandoffs.contains { job in
                     job.key.work.host == host && job.key.work.projectID == target.projectID && job.key.work.iid == iid
-                        && job.key.username == username && job.execution == nil
+                        && settings.handoffMatchesAccount(job, host: host, username: username) && job.execution == nil
                         && (job.feedbackTodos?.contains(todo.feedbackIdentity) == true
                             || todo.linkedNoteID.map { job.feedbackNoteIDs?.contains($0) == true } == true)
                 }
@@ -143,14 +143,14 @@ final class MergeRequestTodoRouter {
         }
         await synchronize(host: host, username: username, cachedRequests: requests)
         guard !Task.isCancelled, isCurrentPass() else { return acknowledged }
-        for intent in settings.mrActionIntents where intent.target.host == host && intent.target.username == username
+        for intent in settings.mrActionIntents where intent.target.account == .init(host: host, username: username)
             && intent.state == .pending && intent.jobID == nil {
             if shouldRunAutomatically(intent.kind, request: intent.request, target: intent.target, workflowEventKind: intent.workflowEventKind), await canAutomate() {
                 await run(intent.id, manual: false)
             }
         }
         if automatically {
-            for intent in settings.mrActionIntents where intent.target.host == host && intent.target.username == username
+            for intent in settings.mrActionIntents where intent.target.account == .init(host: host, username: username)
                 && intent.kind == .review && intent.state == .failed && intent.reviewRecoveryJobID == nil {
                 guard !Task.isCancelled, isCurrentPass() else { break }
                 await recoverRejectedReview(intent)
@@ -632,7 +632,7 @@ final class MergeRequestTodoRouter {
                 _ = AssistantAutomationRunner.finishQueuedResolvedFeedback(job.id, settings: settings)
             }
         }
-        for original in settings.mrActionIntents where original.target.host == host && original.target.username == username
+        for original in settings.mrActionIntents where original.target.account == .init(host: host, username: username)
             && original.state != .completed && (target == nil || original.target == target) {
             guard !Task.isCancelled, isCurrent(host, username), glab.accountRevision == revision,
                   let iid = original.target.iid else { return }

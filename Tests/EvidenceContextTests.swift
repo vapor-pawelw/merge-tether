@@ -46,6 +46,27 @@ struct EvidenceContextTests {
         check(\.savedVerdict, .init("different verdict"), rejects: [.savedVerdict])
     }
 
+    @Test func accountBindingsPreferUserIDAndKeepTheirOtherRequirements() {
+        let original = GitLabAccountIdentity(host: "gitlab.example.test", username: "before", userID: 21)
+        let renamed = GitLabAccountIdentity(host: original.host, username: "after", userID: 21)
+        let reused = GitLabAccountIdentity(host: original.host, username: original.username, userID: 22)
+        let legacy = GitLabAccountIdentity(host: original.host, username: original.username)
+        let otherHost = GitLabAccountIdentity(host: "other.example.test", username: renamed.username, userID: 21)
+        var recorded = evidence
+        recorded.account = original
+        for policy: EvidenceContext.BindingPolicy in [.accountIdentity, .accountSession, .accountAndRequest, .reReviewAssessment] {
+            var current = recorded
+            current.account = renamed
+            #expect(recorded.binds(to: current, policy: policy))
+            current.account = reused
+            #expect(!recorded.binds(to: current, policy: policy))
+            current.account = legacy
+            #expect(recorded.binds(to: current, policy: policy))
+            current.account = otherHost
+            #expect(!recorded.binds(to: current, policy: policy))
+        }
+    }
+
     @Test func missingEvidenceRequiresTheOriginalPolicyToAllowIt() {
         let empty = EvidenceContext()
         let acceptsTwoEmptyContexts: Set<EvidenceContext.BindingPolicy> = [

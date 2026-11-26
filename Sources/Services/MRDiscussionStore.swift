@@ -94,7 +94,8 @@ final class MRDiscussionStore {
             }
             guard isCurrent(current, target: requested, glab: glab, revision: revision) else { return }
             let preparedContent = Task.detached { MRDiscussionContent(result) }
-            let cached = await cachedOrigins(in: result, target: requested, userID: authenticatedUserID, criteriaOverride: criteriaOverride)
+            let cached = await cachedOrigins(in: result, target: requested, userID: authenticatedUserID,
+                criteriaOverride: criteriaOverride, glab: glab)
             let content = await preparedContent.value
             var assessed = cached.0
             let contexts = cached.1
@@ -157,7 +158,8 @@ final class MRDiscussionStore {
     func reloadOrigins(glab: GlabService) async {
         guard let target, hasLoaded, loadedRevision == glab.accountRevision, matchesAccount(target, glab: glab) else { return }
         let current = generation, revision = glab.accountRevision
-        let cached = await cachedOrigins(in: discussions, target: target, userID: authenticatedUserID, criteriaOverride: assessmentCriteria)
+        let cached = await cachedOrigins(in: discussions, target: target, userID: authenticatedUserID,
+            criteriaOverride: assessmentCriteria, glab: glab)
         var updated = cached.0
         let contexts = cached.1
         guard isCurrent(current, target: target, glab: glab, revision: revision) else { return }
@@ -167,16 +169,18 @@ final class MRDiscussionStore {
     }
 
     private func cachedOrigins(in result: [GitLabMergeRequestDiscussion], target: MRDiscussionTarget,
-                               userID: Int?, criteriaOverride: String?) async -> ([Int: MRDiscussionSnapshot.Origin], AICommentProvenanceStore.ExtraContexts) {
+                               userID: Int?, criteriaOverride: String?, glab: GlabService) async
+        -> ([Int: MRDiscussionSnapshot.Origin], AICommentProvenanceStore.ExtraContexts) {
         let directory = assessmentDirectory
         let legacyDirectory = legacyAssessmentDirectory
         let displayDirectory = displayAssessmentDirectory
         let provenanceDirectory = self.provenanceDirectory
+        let context = userID.map { id in
+            let account = GitLabAccountIdentity(host: target.host, username: target.username, userID: id)
+            return AICommentProvenanceStore.Context(host: target.host, username: target.username, userID: id,
+                projectID: target.projectID, iid: target.iid, legacyUsernames: glab.knownAccountUsernames?(account) ?? [])
+        }
         return await Task.detached {
-            let context = userID.map { userID in
-                AICommentProvenanceStore.Context(host: target.host, username: target.username,
-                    userID: userID, projectID: target.projectID, iid: target.iid)
-            }
             let generated = context.map { AICommentProvenanceStore.reconcile(result, context: $0, in: provenanceDirectory) }
             var contexts = context.map {
                 AICommentProvenanceStore.extraContexts(context: $0, snapshot: generated, in: provenanceDirectory)

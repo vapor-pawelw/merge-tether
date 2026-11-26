@@ -2,7 +2,8 @@ import Foundation
 
 struct AssistantAutomaticRetryTarget: Codable, Hashable, Sendable {
     let host: String
-    let username: String
+    var username: String
+    var accountUserID: Int? = nil
     let projectID: Int
     let iid: Int
     var isValid: Bool { !host.isEmpty && !username.isEmpty && projectID > 0 && iid > 0 }
@@ -19,7 +20,7 @@ struct AssistantAutomaticRetryAttempt: Codable, Equatable, Identifiable, Sendabl
     let id: UUID
     let rootID: UUID
     let parentJobID: UUID
-    let target: AssistantAutomaticRetryTarget
+    var target: AssistantAutomaticRetryTarget
     let family: String
     let attempt: Int
     let reservedAt: Date

@@ -62,9 +62,9 @@ struct EvidenceContext: Sendable {
     enum BindingPolicy: CaseIterable, Sendable {
         /// Account-scoped work with no captured session revision.
         case accountIdentity
-        /// Async work belongs to the same host, username and login revision.
+        /// Async work belongs to the same account and login revision.
         case accountSession
-        /// Persisted ownership uses host, username and MR ID. The caller checks the GitLab user ID.
+        /// Persisted ownership binds both the account and the MR ID.
         case accountAndRequest
         /// A head-only comparison, including two absent heads where no head was captured.
         case head
@@ -122,11 +122,12 @@ struct EvidenceContext: Sendable {
     func binds(to current: EvidenceContext, policy: BindingPolicy) -> Bool {
         switch policy {
         case .accountIdentity:
-            return matches(account, current.account)
+            guard let account, let currentAccount = current.account else { return false }
+            return account.matches(currentAccount)
         case .accountSession:
-            return matches(account, current.account) && matches(accountRevision, current.accountRevision)
+            return binds(to: current, policy: .accountIdentity) && matches(accountRevision, current.accountRevision)
         case .accountAndRequest:
-            return matches(account, current.account) && matches(mergeRequestID, current.mergeRequestID)
+            return binds(to: current, policy: .accountIdentity) && matches(mergeRequestID, current.mergeRequestID)
         case .head:
             return head == current.head
         case .semanticText:

@@ -58,6 +58,130 @@ struct MRSettingsRecordTests {
         }
     }
 
+    @Test func authenticatedMigrationRetainsOptOutsAndPipelineFencesAfterRenameAndRestart() async throws {
+        let suite = "MRSettingsAccountMigration.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let encoder = JSONEncoder()
+        defaults.set(try encoder.encode(Set([target])), forKey: "autoPublishOptOuts")
+        let fence = PipelineRefreshAttempt(target: target, userID: 21, oldPipelineID: 3, sourceProjectID: 7,
+            sourceBranch: "feature", sourceSHA: "source", targetProjectID: 7, targetBranch: "main", targetSHA: "target")
+        defaults.set(try encoder.encode(Set([fence])), forKey: "pipelineRefreshAttempts")
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: target.host, username: target.username)
+
+        let settings = SettingsManager(defaults: defaults)
+        glab.acceptAuthenticatedAccount = settings.bindAuthenticatedAccount
+        gitlab.handler = { _ in throw GlabError.notAuthenticated }
+        await #expect(throws: GlabError.notAuthenticated) {
+            try await glab.fetchAuthenticatedUser(host: target.host, expectedUsername: target.username)
+        }
+        #expect(defaults.data(forKey: "mergeRequestAccountRecords") == nil)
+        #expect(settings.storedActionPreference(.commentPublication, for: target) == .off)
+
+        gitlab.handler = { _ in InMemoryGitLab.output(#"{"id":21,"username":"me"}"#) }
+        _ = try await glab.fetchAuthenticatedUser(host: "other.example.test", expectedUsername: target.username)
+        #expect(defaults.data(forKey: "mergeRequestAccountRecords") == nil)
+        _ = try await glab.fetchAuthenticatedUser(host: target.host, expectedUsername: target.username)
+        let archived = try #require(defaults.data(forKey: "mergeRequestAccountRecords"))
+        let archive = try JSONDecoder().decode(MRSettingsArchive.self, from: archived)
+        #expect(archive.values(\.autoPublishOptOuts).first?.userID == 21)
+        #expect(archive.values(\.pipelineRefreshAttempts).first?.target.userID == 21)
+
+        let renamed = MRAutomationScope.Target.mergeRequest(host: target.host, username: "renamed", projectID: 7, iid: 11)
+        let restarted = SettingsManager(defaults: defaults)
+        glab.acceptAuthenticatedAccount = restarted.bindAuthenticatedAccount
+        gitlab.handler = { _ in InMemoryGitLab.output(#"{"id":21,"username":"renamed"}"#) }
+        let renamedUser = try await glab.refreshAuthenticatedAccount()
+        #expect(renamedUser.username == renamed.username)
+        #expect(glab.currentUsername == renamed.username)
+        #expect(restarted.storedActionPreference(.commentPublication, for: renamed) == .off)
+        var renamedFence = fence
+        renamedFence.target = renamed
+        #expect(restarted.pipelineRefreshAttempts.contains(renamedFence))
+        let mirror = try #require(defaults.data(forKey: "pipelineRefreshAttempts"))
+        #expect(try JSONDecoder().decode(Set<PipelineRefreshAttempt>.self, from: mirror) == [renamedFence])
+        restarted.automation.applyPreset(.full, for: .codex)
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data("""
+            {"project_id":7,"iid":11,"author":{"id":21,"username":"renamed","name":"Owner"},
+             "title":"Rename","web_url":"https://\(renamed.host)/team/repo/-/merge_requests/11","state":"opened","draft":false,
+             "sha":"source","source_project_id":7,"source_branch":"feature","target_project_id":7,"target_branch":"main",
+             "has_conflicts":false,"labels":[],"head_pipeline":{"id":3,"project_id":7,"status":"failed","sha":"old"}}
+            """.utf8))
+        let user = GitLabAuthenticatedUser(id: 21, username: renamed.username)
+        let proof = StalePipelineTarget(request: request, pipeline: try #require(request.headPipeline),
+            user: user, targetHeadSHA: fence.targetSHA, accountRevision: glab.accountRevision)
+        await #expect(throws: PipelineRefreshError.alreadyAttempted) {
+            try await glab.refreshStaleFailedPipeline(proof, for: request, host: renamed.host,
+                expectedUser: user, settings: restarted, shouldProceed: { true })
+        }
+        #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
+    @Test func reassignedUsernameCannotCarryAnotherUsersOptInAcrossRestart() throws {
+        try withDefaults { defaults in
+            let settings = SettingsManager(defaults: defaults)
+            settings.autoMergeOptIns = [target]
+            #expect(settings.bindAuthenticatedAccount(.init(host: target.host, username: target.username, userID: 21)))
+            let restarted = SettingsManager(defaults: defaults)
+            #expect(restarted.bindAuthenticatedAccount(.init(host: target.host, username: target.username, userID: 22)))
+            #expect(restarted.storedActionPreference(.merge, for: target) == .default)
+            let renamed = MRAutomationScope.Target.mergeRequest(host: target.host, username: "renamed", projectID: 7, iid: 11)
+            #expect(restarted.bindAuthenticatedAccount(.init(host: target.host, username: renamed.username, userID: 21)))
+            #expect(restarted.storedActionPreference(.merge, for: renamed) == .on)
+        }
+    }
+
+    @Test func legacyClientCanEditDowngradeMirrorsAndKeepAnAuthenticatedFence() throws {
+        try withDefaults { defaults in
+            let owner = GitLabAccountIdentity(host: target.host, username: target.username, userID: 21)
+            let settings = SettingsManager(defaults: defaults)
+            settings.autoPublishOptOuts = [target]
+            settings.automation.scope[target] = .paused
+            #expect(settings.bindAuthenticatedAccount(owner))
+
+            let encoder = JSONEncoder()
+            let oldClient = try JSONDecoder().decode(AutomationSettings.self,
+                from: #require(defaults.data(forKey: "automation")))
+            #expect(oldClient.scope[target] == .paused)
+            #expect(try JSONDecoder().decode(Set<MRAutomationScope.Target>.self,
+                from: #require(defaults.data(forKey: "autoPublishOptOuts"))) == [target])
+            defaults.set(try encoder.encode(Set([target.repository])), forKey: "autoPublishOptOuts")
+
+            let upgraded = SettingsManager(defaults: defaults)
+            #expect(upgraded.save())
+            let unbound = try JSONDecoder().decode(MRSettingsArchive.self,
+                from: #require(defaults.data(forKey: "mergeRequestAccountRecords")))
+            #expect(unbound.values(\.autoPublishOptOuts) == [target.repository])
+            #expect(upgraded.bindAuthenticatedAccount(owner))
+            #expect(upgraded.automation.scope[target] == .paused)
+            #expect(upgraded.autoPublishOptOuts == [target.repository])
+            #expect(upgraded.save())
+            let restarted = SettingsManager(defaults: defaults)
+            #expect(restarted.bindAuthenticatedAccount(owner))
+            #expect(restarted.autoPublishOptOuts == [target.repository])
+        }
+    }
+
+    @Test func scopeAndHandoffLookupDropPreviousAccountWhileNewLoginIsUnverified() throws {
+        try withDefaults { defaults in
+            let settings = SettingsManager(defaults: defaults)
+            let owner = GitLabAccountIdentity(host: target.host, username: target.username, userID: 21)
+            settings.automation.scope[target] = .forceOn
+            settings.assistantHandoffs = [job()]
+            #expect(settings.bindAuthenticatedAccount(owner))
+            let handoff = try #require(settings.assistantHandoffs.first)
+            #expect(settings.handoffMatchesAccount(handoff, host: target.host, username: target.username))
+            settings.clearAuthenticatedAccount()
+            #expect(settings.automation.scope[target] == .inherit)
+            #expect(!settings.handoffMatchesAccount(handoff, host: target.host, username: target.username))
+            #expect(settings.bindAuthenticatedAccount(.init(host: target.host, username: target.username, userID: 22)))
+            #expect(settings.automation.scope[target] == .inherit)
+            #expect(!settings.handoffMatchesAccount(handoff, host: target.host, username: target.username))
+        }
+    }
+
     @Test(arguments: ["merged", "closed", "failed", "partial", "auth", "authChanged", "wrongMR", "accountChanged", "stale"])
     func onlyCurrentExactTerminalObservationsRetireTransientData(_ response: String) async throws {
         let suite = "MRSettingsRecordTests.\(UUID())"

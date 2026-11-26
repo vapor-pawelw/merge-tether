@@ -63,7 +63,7 @@ struct MergeTrainPreparationConflict: Error, Codable, Hashable, Sendable {
 struct MergeSubmissionReceipt: Codable, Equatable {
     enum Origin: String, Codable { case appAttempt, observedQueue }
     var origin: Origin = .appAttempt
-    let target: MRAutomationScope.Target
+    var target: MRAutomationScope.Target
     let userID: Int
     let context: MergeRequestDependencySummary.Context
     let semanticFingerprint: String

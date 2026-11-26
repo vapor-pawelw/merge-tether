@@ -9,7 +9,7 @@ struct MRAutomationEvent: Codable, Identifiable, Equatable, Sendable {
     enum Origin: String, Codable, Sendable { case manual, automatic }
     enum State: String, Codable, Sendable { case requested, queued, failed, completed, blocked }
     let id: UUID
-    let target: MRAutomationScope.Target
+    var target: MRAutomationScope.Target
     let createdAt: Date
     let action: Action
     let origin: Origin

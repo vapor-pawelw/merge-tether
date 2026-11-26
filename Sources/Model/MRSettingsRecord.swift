@@ -1,19 +1,20 @@
 import Foundation
 
-/// GitLab project and MR numbers are host-local. Account names or numeric user IDs
-/// stay on the individual entries so old receipts keep their original binding.
+/// GitLab project, MR and account numbers are host-local.
 struct MRSettingsKey: Codable, Hashable {
     let host: String
     let request: GitLabMergeRequestID
+    let userID: Int?
 
-    init?(host: String, projectID: Int, iid: Int?) {
+    init?(host: String, projectID: Int, iid: Int?, userID: Int? = nil) {
         guard !host.isEmpty, projectID > 0, let iid, iid > 0 else { return nil }
         self.host = host
         self.request = .init(projectID: projectID, iid: iid)
+        self.userID = userID
     }
 
     init?(_ target: MRAutomationScope.Target) {
-        self.init(host: target.host, projectID: target.projectID, iid: target.iid)
+        self.init(host: target.host, projectID: target.projectID, iid: target.iid, userID: target.userID)
     }
 }
 
@@ -80,6 +81,8 @@ struct MRSettingsRecord: Codable {
     var pendingCommentReviews: [Target]?
     var commentReviewProgress: [Scoped<SettingsManager.CommentReviewProgress>]?
     var reviewerApprovals: [ReviewerApproval]?
+    var reviewParticipationPreferences: [ReviewParticipationPreferences.StoredEntry]?
+    var feedbackSuggestionDecisions: [FeedbackSuggestionDecisions.AccountEntry]?
 
     var isEmpty: Bool {
         autoApproveOptOuts == nil && independentApprovalPreferences == nil && autoPublishOptOuts == nil
@@ -93,6 +96,7 @@ struct MRSettingsRecord: Codable {
             && reReviewDraftBaselines == nil && assistantHandoffs == nil && workflowActivity == nil
             && automationEvents == nil && mrActionIntents == nil && routedMRTodoReceipts == nil
             && boardPins == nil && pendingCommentReviews == nil && commentReviewProgress == nil && reviewerApprovals == nil
+            && reviewParticipationPreferences == nil && feedbackSuggestionDecisions == nil
     }
 }
 
@@ -104,9 +108,11 @@ struct MRSettingsArchive: Codable {
     var legacyHideDeadline: Date?
     var emptyActionOptIns: Set<MRAutomaticAction>?
     var mirrorFingerprints: [String: Data] = [:]
+    var accountNames: [GitLabAccountIdentity] = []
+    var accountAutomationScope: MRAutomationScope?
 
     private enum CodingKeys: String, CodingKey {
-        case version, records, unscoped, legacyHideDeadline, emptyActionOptIns, mirrorFingerprints
+        case version, records, unscoped, legacyHideDeadline, emptyActionOptIns, mirrorFingerprints, accountNames, accountAutomationScope
     }
 
     init() { version = 1 }
@@ -122,6 +128,8 @@ struct MRSettingsArchive: Codable {
         legacyHideDeadline = try values.decodeIfPresent(Date.self, forKey: .legacyHideDeadline)
         emptyActionOptIns = try values.decodeIfPresent(Set<MRAutomaticAction>.self, forKey: .emptyActionOptIns)
         mirrorFingerprints = try values.decode([String: Data].self, forKey: .mirrorFingerprints)
+        accountNames = try values.decodeIfPresent([GitLabAccountIdentity].self, forKey: .accountNames) ?? []
+        accountAutomationScope = try values.decodeIfPresent(MRAutomationScope.self, forKey: .accountAutomationScope)
     }
 
     func values<Value>(_ field: KeyPath<MRSettingsRecord, [Value]?>) -> [Value] {

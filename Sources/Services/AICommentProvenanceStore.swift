@@ -8,6 +8,13 @@ enum AICommentProvenanceStore {
         let userID: Int
         let projectID: Int
         let iid: Int
+        var legacyUsernames: Set<String> = []
+
+        private enum CodingKeys: String, CodingKey { case host, username, userID, projectID, iid }
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.host == rhs.host && lhs.userID == rhs.userID && lhs.projectID == rhs.projectID && lhs.iid == rhs.iid
+        }
 
         var isValid: Bool {
             !host.isEmpty && !username.isEmpty && userID > 0 && projectID > 0 && iid > 0
@@ -55,7 +62,7 @@ enum AICommentProvenanceStore {
 
         func contains(_ note: GitLabMergeRequestDiscussion.Note, discussionID: String?) -> Bool {
             guard context.isValid, note.system != true, let id = note.id, id > 0,
-                  note.author?.id == context.userID, note.author?.username == context.username,
+                  note.author?.id == context.userID,
                   let body = note.body, !body.isEmpty, let record = notes[id] else { return false }
             return record.version == 1 && record.context == context && record.noteID == id && record.draftID > 0 && record.discussionID == discussionID
                 && record.evidenceContext.binds(to: AICommentAssessmentStore.bodyEvidence(body), policy: .commentBody)
@@ -145,13 +152,15 @@ enum AICommentProvenanceStore {
         guard context.isValid, validHead(headSHA) else { return }
         for (claim, draft) in validatedGeneratedDrafts(claims, baseline: baseline, current: current, userID: context.userID) {
             try remember(draft, context: context, runID: runID, headSHA: headSHA, in: directory)
-            let contextFile = file(kind: "context", id: claim.id, context: context, in: directory)
             if let markdown = normalizedExtraContext(claim.extraContext) {
                 // Display-only: a failed write never blocks the authorship receipt above.
                 try? write(ExtraContextRecord(version: 1, context: context, draftID: claim.id,
-                    bodySHA256: claim.bodySHA256, markdown: markdown, proposedSolution: claim.proposedSolution), to: contextFile)
+                    bodySHA256: claim.bodySHA256, markdown: markdown, proposedSolution: claim.proposedSolution),
+                    kind: "context", id: claim.id, context: context, in: directory)
             } else {
-                try? FileManager.default.removeItem(at: contextFile)
+                for path in files(kind: "context", id: claim.id, context: context, in: directory) {
+                    try? FileManager.default.removeItem(at: path)
+                }
             }
         }
     }
@@ -159,11 +168,8 @@ enum AICommentProvenanceStore {
     /// Loads the agent's app-only explanations for current drafts and the notes published from them.
     nonisolated static func extraContexts(context: Context, snapshot: Snapshot? = nil, in directory: URL = directory) -> ExtraContexts {
         guard context.isValid else { return .empty }
-        let folder = file(kind: "context", id: 0, context: context, in: directory).deletingLastPathComponent()
-        guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.fileSizeKey]),
-              files.count <= 10_000 else { return .empty }
         var result = ExtraContexts()
-        for url in files where url.pathExtension == "json" {
+        for url in directoryContents(kind: "context", context: context, in: directory).reversed() {
             guard let record: ExtraContextRecord = read(url, limit: 32_768), record.version == 1, record.context == context,
                   record.draftID > 0, url.deletingPathExtension().lastPathComponent == String(record.draftID),
                   let markdown = normalizedExtraContext(record.markdown) else { continue }
@@ -194,15 +200,16 @@ enum AICommentProvenanceStore {
         let record = GeneratedDraft(version: 1, context: context, runID: runID, headSHA: headSHA, draftID: id,
             bodySHA256: AICommentAssessmentStore.digest(body), discussionID: draft.discussionID,
             position: draft.position, resolveDiscussion: draft.resolveDiscussion)
-        try write(record, to: file(kind: "drafts", id: id, context: context, in: directory))
+        try write(record, kind: "drafts", id: id, context: context, in: directory)
     }
 
     nonisolated static func generation(for draft: GitLabDraftNote, context: Context, in directory: URL = directory,
                                       legacyDirectory: URL? = nil) -> UUID? {
         guard context.isValid, let id = draft.id, id > 0 else { return nil }
         for source in displayDirectories(directory, legacyDirectory: legacyDirectory) {
-            if let record: GeneratedDraft = read(file(kind: "drafts", id: id, context: context, in: source)),
-               record.matches(draft, context: context) { return record.runID }
+            for path in files(kind: "drafts", id: id, context: context, in: source) {
+                if let record: GeneratedDraft = read(path), record.matches(draft, context: context) { return record.runID }
+            }
         }
         return nil
     }
@@ -259,8 +266,7 @@ enum AICommentProvenanceStore {
         for draft in publication.drafts {
             let reviewed = EvidenceContext(commentText: draft.note)
             let candidates = added.filter { discussionID, note in
-                note.author?.username == context.username
-                    && reviewed.binds(to: .init(commentText: note.body), policy: .commentText)
+                reviewed.binds(to: .init(commentText: note.body), policy: .commentText)
                     && (draft.discussionID == nil || draft.discussionID == discussionID)
                     && AICommentProvenanceStore.positionMatches(draft.position, note.position, reply: draft.discussionID != nil)
             }
@@ -275,7 +281,7 @@ enum AICommentProvenanceStore {
             }
         }
         for record in records {
-            try write(record, to: file(kind: "notes", id: record.noteID, context: context, in: directory))
+            try write(record, kind: "notes", id: record.noteID, context: context, in: directory)
         }
         return matched
     }
@@ -284,10 +290,7 @@ enum AICommentProvenanceStore {
         guard context.isValid else { return .init(context: context, notes: [:]) }
         var notes: [Int: PublishedNote] = [:]
         for source in displayDirectories(directory, legacyDirectory: legacyDirectory).reversed() {
-            let folder = file(kind: "notes", id: 0, context: context, in: source).deletingLastPathComponent()
-            guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.fileSizeKey]),
-                  files.count <= 10_000 else { continue }
-            for url in files where url.pathExtension == "json" {
+            for url in directoryContents(kind: "notes", context: context, in: source).reversed() {
                 guard let record: PublishedNote = read(url), record.context == context, record.version == 1,
                       record.noteID > 0, url.deletingPathExtension().lastPathComponent == String(record.noteID) else { continue }
                 notes[record.noteID] = record
@@ -310,12 +313,11 @@ enum AICommentProvenanceStore {
         in directory: URL = directory) -> Snapshot {
         let existing = snapshot(context: context, in: directory)
         guard context.isValid else { return existing }
-        let folder = file(kind: "drafts", id: 0, context: context, in: directory).deletingLastPathComponent()
-        guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.fileSizeKey]),
-              files.count <= 10_000 else { return existing }
-        let drafts: [GeneratedDraft] = files.filter { $0.pathExtension == "json" }.compactMap { url in
+        var draftIDs: Set<Int> = []
+        let drafts: [GeneratedDraft] = directoryContents(kind: "drafts", context: context, in: directory).compactMap { url in
             guard let record: GeneratedDraft = read(url), record.version == 1, record.context == context, record.draftID > 0,
-                  url.deletingPathExtension().lastPathComponent == String(record.draftID) else { return nil }
+                  url.deletingPathExtension().lastPathComponent == String(record.draftID),
+                  draftIDs.insert(record.draftID).inserted else { return nil }
             return record
         }
         let linkedDrafts = Set(existing.notes.values.map(\.draftID))
@@ -327,7 +329,7 @@ enum AICommentProvenanceStore {
                 let published = thread.notes.filter { $0.system != true }
                 for (index, note) in published.enumerated() {
                     guard let id = note.id, id > 0, existing.notes[id] == nil,
-                          note.author?.id == context.userID, note.author?.username == context.username,
+                          note.author?.id == context.userID,
                           let body = note.body, !body.isEmpty,
                           record.evidenceContext.binds(to: AICommentAssessmentStore.bodyEvidence(body), policy: .commentBody) else { continue }
                     let placed = record.discussionID.map { $0 == threadID }
@@ -342,7 +344,7 @@ enum AICommentProvenanceStore {
         var notes = existing.notes
         for (noteID, records) in claims where records.count == 1 {
             guard let record = records.first else { continue }
-            do { try write(record, to: file(kind: "notes", id: noteID, context: context, in: directory)) }
+            do { try write(record, kind: "notes", id: noteID, context: context, in: directory) }
             catch { continue }
             notes[noteID] = record
         }
@@ -352,9 +354,9 @@ enum AICommentProvenanceStore {
     /// Remove one confirmed merged MR’s display provenance for the authenticated account.
     nonisolated static func removeMergeRequest(_ context: Context, in directory: URL = directory) {
         guard context.isValid else { return }
-        let scope = file(kind: "notes", id: 0, context: context, in: directory)
-            .deletingLastPathComponent().deletingLastPathComponent()
-        try? FileManager.default.removeItem(at: scope)
+        for path in files(kind: "notes", id: 0, context: context, in: directory) {
+            try? FileManager.default.removeItem(at: path.deletingLastPathComponent().deletingLastPathComponent())
+        }
     }
 
     private nonisolated static func displayDirectories(_ directory: URL, legacyDirectory: URL?) -> [URL] {
@@ -373,10 +375,27 @@ enum AICommentProvenanceStore {
         [40, 64].contains(head.utf8.count) && head.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
     }
 
-    private nonisolated static func file(kind: String, id: Int, context: Context, in directory: URL) -> URL {
-        let fields = [context.host, context.username, String(context.userID), String(context.projectID), String(context.iid)]
+    private nonisolated static func file(kind: String, id: Int, context: Context,
+                                        legacyUsername: String? = nil, in directory: URL) -> URL {
+        let fields = [context.host] + (legacyUsername.map { [$0] } ?? [])
+            + [String(context.userID), String(context.projectID), String(context.iid)]
         let scope = AICommentAssessmentStore.digest(fields.map { "\($0.utf8.count):\($0)" }.joined())
         return directory.appending(path: scope).appending(path: kind).appending(path: "\(id).json")
+    }
+
+    private nonisolated static func files(kind: String, id: Int, context: Context, in directory: URL) -> [URL] {
+        let legacy = [context.username] + context.legacyUsernames.subtracting([context.username]).sorted()
+        return [file(kind: kind, id: id, context: context, in: directory)] + legacy.map {
+            file(kind: kind, id: id, context: context, legacyUsername: $0, in: directory)
+        }
+    }
+
+    private nonisolated static func directoryContents(kind: String, context: Context, in directory: URL) -> [URL] {
+        files(kind: kind, id: 0, context: context, in: directory).flatMap { path -> [URL] in
+            guard let entries = try? FileManager.default.contentsOfDirectory(at: path.deletingLastPathComponent(),
+                includingPropertiesForKeys: [.fileSizeKey]), entries.count <= 10_000 else { return [] }
+            return entries.filter { $0.pathExtension == "json" }
+        }
     }
 
     private nonisolated static func read<T: Decodable>(_ url: URL, limit: Int = 16_384) -> T? {
@@ -385,10 +404,13 @@ enum AICommentProvenanceStore {
         return try? JSONDecoder().decode(T.self, from: data)
     }
 
-    private nonisolated static func write<T: Encodable>(_ value: T, to url: URL) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700])
-        try JSONEncoder().encode(value).write(to: url, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    private nonisolated static func write<T: Encodable>(_ value: T, kind: String, id: Int, context: Context, in directory: URL) throws {
+        let data = try JSONEncoder().encode(value)
+        for url in files(kind: kind, id: id, context: context, in: directory).prefix(2) {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700])
+            try data.write(to: url, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        }
     }
 }

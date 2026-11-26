@@ -20,8 +20,8 @@ final class SettingsManager {
         Set(persistenceStore.failures.keys).subtracting(Self.conveniencePersistenceKeys)
     }
     var automaticActionsAllowed: Bool { persistenceDegraded.isEmpty }
-    var automaticWritesAllowed: Bool { automaticActionsAllowed && automation.hasAutomaticActionConsent }
-    var automaticPublicWritesAllowed: Bool { automaticActionsAllowed && automation.hasAutomaticPublicActionConsent }
+    var automaticWritesAllowed: Bool { automaticActionsAllowed && accountReadyForWrites && automation.hasAutomaticActionConsent }
+    var automaticPublicWritesAllowed: Bool { automaticActionsAllowed && accountReadyForWrites && automation.hasAutomaticPublicActionConsent }
     private static let conveniencePersistenceKeys: Set<String> = [
         "automationEvents", "boardPins", "boardManualOrder", "lastSeenTodoIDs", "reviewAssignments", "incomingReviewFilterSettings"
     ]
@@ -31,30 +31,173 @@ final class SettingsManager {
     @ObservationIgnored var onAutomationChanged: ((AutomationSettings) -> Void)?
     @ObservationIgnored private var changedMRKeys: Set<String> = []
     @ObservationIgnored private var mrSettingsArchive = MRSettingsArchive()
+    @ObservationIgnored private var activeGitLabAccount: GitLabAccountIdentity?
+    var requiresAuthenticatedGitLabAccount = false
+    private var accountBindingSaved = false
+    var accountReadyForWrites: Bool { !requiresAuthenticatedGitLabAccount || accountBindingSaved }
 
     func approvalBaseline(for target: MRAutomationScope.Target, user: GitLabAuthenticatedUser) -> ReviewApprovalBaseline? {
-        guard let key = MRSettingsKey(target), target.username == user.username else { return nil }
-        return mrSettingsArchive.records[key]?.reviewerApprovals?.first { $0.user == user }?.baseline
+        guard let key = MRSettingsKey(target.forAccount(.init(host: target.host, username: target.username))),
+              target.account.matches(user.account(on: target.host)) else { return nil }
+        let accountKey = MRSettingsKey(target.forAccount(user.account(on: target.host)))
+        return (accountKey.flatMap { mrSettingsArchive.records[$0] }?.reviewerApprovals
+            ?? mrSettingsArchive.records[key]?.reviewerApprovals)?.first { $0.user.id == user.id }?.baseline
     }
 
     @discardableResult
     func setApprovalBaseline(_ baseline: ReviewApprovalBaseline?, for target: MRAutomationScope.Target,
                              user: GitLabAuthenticatedUser) -> Bool {
-        guard let key = MRSettingsKey(target), user.id > 0, target.username == user.username,
+        let account = user.account(on: target.host)
+        guard let legacyKey = MRSettingsKey(target.forAccount(.init(host: target.host, username: target.username))),
+              let accountKey = MRSettingsKey(target.forAccount(account)), user.id > 0, target.account.matches(account),
               approvalBaseline(for: target, user: user) != baseline else { return false }
+        let key = mrSettingsArchive.accountNames.isEmpty ? legacyKey : accountKey
         var approvals = mrSettingsArchive.records[key]?.reviewerApprovals ?? []
-        approvals.removeAll { $0.user == user }
+        approvals.removeAll { $0.user.id == user.id }
         if let baseline { approvals.append(.init(user: user, baseline: baseline)) }
         mrSettingsArchive.setReviewerApprovals(approvals, for: key)
+        if key != legacyKey, let legacy = mrSettingsArchive.records[legacyKey]?.reviewerApprovals {
+            mrSettingsArchive.setReviewerApprovals(legacy.filter { $0.user.id != user.id }, for: legacyKey)
+        }
         changedMRKeys.insert(Key.reviewerApprovals)
         return true
     }
 
     func approvalBaselineTargets(host: String, user: GitLabAuthenticatedUser) -> Set<MRAutomationScope.Target> {
         Set(mrSettingsArchive.records.compactMap { key, record in
-            guard key.host == host, record.reviewerApprovals?.contains(where: { $0.user == user }) == true else { return nil }
+            guard key.host == host, key.userID == nil || key.userID == user.id,
+                  record.reviewerApprovals?.contains(where: { $0.user.id == user.id }) == true else { return nil }
             return .mergeRequest(host: host, username: user.username, projectID: key.request.projectID, iid: key.request.iid)
         })
+    }
+
+    /// Called synchronously after a successful, session-bound read of GitLab's /user.
+    func bindAuthenticatedAccount(_ account: GitLabAccountIdentity) -> Bool {
+        guard let id = account.userID, id > 0, !account.host.isEmpty, !account.username.isEmpty else { return false }
+        if activeGitLabAccount == account, activeGitLabAccount?.username == account.username {
+            if !accountBindingSaved { accountBindingSaved = save() }
+            return accountBindingSaved
+        }
+
+        let previous = activeGitLabAccount
+        accountBindingSaved = false
+        if mrSettingsArchive.accountNames.last(where: { $0 == account })?.username != account.username
+            || mrSettingsArchive.accountNames.last(where: { $0.host == account.host && $0.username == account.username }) != account {
+            mrSettingsArchive.accountNames.append(account)
+        }
+        activeGitLabAccount = account
+        assistantHandoffs = assistantHandoffs.map { handoff in
+            guard handoff.accountUserID == nil else { return handoff }
+            var bound = handoff
+            bound.accountUserID = reboundTarget(handoff.key.automationTarget, projectedFor: previous).userID
+            return bound
+        }
+        reprojectAccountTargets(from: previous)
+        accountBindingSaved = save()
+        return accountBindingSaved
+    }
+
+    func clearAuthenticatedAccount() {
+        guard let previous = activeGitLabAccount else { return }
+        activeGitLabAccount = nil
+        accountBindingSaved = false
+        reprojectAccountTargets(from: previous)
+    }
+
+    private func reprojectAccountTargets(from previous: GitLabAccountIdentity?) {
+        func reproject(_ target: MRAutomationScope.Target) -> MRAutomationScope.Target {
+            projectedTarget(reboundTarget(target, projectedFor: previous))
+        }
+        automation.scope.mapAccountTargets(reproject)
+        transferMRSettings(.rebind(previous))
+        newReviewGenerations = Dictionary(newReviewGenerations.map { (reproject($0.key), $0.value) },
+            uniquingKeysWith: { first, _ in first })
+    }
+
+    func knownUsernames(for account: GitLabAccountIdentity) -> Set<String> {
+        Set(mrSettingsArchive.accountNames.filter { $0 == account }.map(\.username)).union([account.username])
+    }
+
+    func unambiguousLegacyUsernames(for account: GitLabAccountIdentity) -> Set<String> {
+        knownUsernames(for: account).filter { username in
+            let candidates = mrSettingsArchive.accountNames.filter { $0.host == account.host && $0.username == username }
+            return candidates.allSatisfy { $0 == account }
+        }
+    }
+
+    func authenticatedAccountID(host: String, username: String) -> Int? {
+        guard let account = activeGitLabAccount, account.host == host, account.username == username else { return nil }
+        return account.userID
+    }
+
+    func handoffMatchesAccount(_ handoff: AssistantAutomationRunner.Handoff, host: String, username: String) -> Bool {
+        guard handoff.key.work.host == host else { return false }
+        guard let currentID = authenticatedAccountID(host: host, username: username) else {
+            return handoff.accountUserID == nil && handoff.key.username == username
+        }
+        if let owner = handoff.accountUserID { return owner == currentID }
+        guard handoff.key.username == username else { return false }
+        let knownOwner = mrSettingsArchive.accountNames.first { $0.host == host && $0.username == username }
+        return knownOwner?.userID.map { $0 == currentID } ?? true
+    }
+
+    func scopedTarget(for handoff: AssistantAutomationRunner.Handoff) -> MRAutomationScope.Target {
+        let target = handoff.key.automationTarget
+        let account = GitLabAccountIdentity(host: target.host, username: target.username, userID: handoff.accountUserID)
+        return projectedTarget(reboundTarget(target.forAccount(account), projectedFor: nil))
+    }
+
+    private func canonicalTarget(_ target: MRAutomationScope.Target,
+                                 projectedFor account: GitLabAccountIdentity?) -> MRAutomationScope.Target {
+        if target.userID == nil, let account, target.account.matches(account) {
+            return target.forAccount(account)
+        }
+        guard target.userID != nil, let account = mrSettingsArchive.accountNames.last(where: { $0 == target.account }) else {
+            return target
+        }
+        return target.forAccount(account)
+    }
+
+    private func reboundTarget(_ target: MRAutomationScope.Target,
+                               projectedFor previous: GitLabAccountIdentity?) -> MRAutomationScope.Target {
+        let canonical = canonicalTarget(target, projectedFor: previous)
+        guard canonical.userID == nil, let account = activeGitLabAccount, canonical.account.matches(account) else {
+            return canonical
+        }
+        // A reused handle cannot transfer older data to the new account.
+        let owner = mrSettingsArchive.accountNames.first(where: { canonical.account.matches($0) }) ?? account
+        return canonicalTarget(canonical.forAccount(owner), projectedFor: nil)
+    }
+
+    private func projectedTarget(_ target: MRAutomationScope.Target) -> MRAutomationScope.Target {
+        guard let account = activeGitLabAccount, target.account == account else { return target }
+        return target.forAccount(.init(host: account.host, username: account.username))
+    }
+
+    private func mirrorTarget(_ target: MRAutomationScope.Target) -> MRAutomationScope.Target? {
+        mirrorAccount(target.account).map(target.forAccount)
+    }
+
+    private func mirrorAccount(_ account: GitLabAccountIdentity) -> GitLabAccountIdentity? {
+        guard account.userID != nil else { return account }
+        let owner = mrSettingsArchive.accountNames.last { $0.host == account.host && $0.username == account.username }
+        guard owner == nil || owner == account else { return nil }
+        return .init(host: account.host, username: account.username)
+    }
+
+    private func downgradeTarget(_ target: MRAutomationScope.Target) -> MRAutomationScope.Target? {
+        if target.userID != nil { return canonicalTarget(target, projectedFor: nil) }
+        // Once a handle has been reassigned, an old client cannot distinguish its owners.
+        guard !hasReassignedUsername(target) else { return nil }
+        return target
+    }
+
+    private func hasReassignedUsername(_ target: MRAutomationScope.Target) -> Bool {
+        hasReassignedUsername(target.account)
+    }
+
+    private func hasReassignedUsername(_ account: GitLabAccountIdentity) -> Bool {
+        Set(mrSettingsArchive.accountNames.filter { $0.host == account.host && $0.username == account.username }).count > 1
     }
 
     var refreshInterval: RefreshInterval
@@ -137,7 +280,7 @@ final class SettingsManager {
     func acknowledgeHiddenReviewNotifications(_ ids: Set<UUID>, host: String, username: String) -> Bool {
         var updated = hiddenMergeRequests
         let matching = updated.details.values.filter { review in
-            review.target.host == host && review.target.username == username
+            review.target.account == .init(host: host, username: username)
                 && review.inboxNotification.map { ids.contains($0.id) } == true
         }
         guard !matching.isEmpty else { return false }
@@ -227,8 +370,12 @@ final class SettingsManager {
     var assistantAutomaticRetryAttempts: [AssistantAutomaticRetryAttempt] = [] {
         didSet { changedMRKeys.insert(Key.assistantAutomaticRetryAttempts) }
     }
-    var feedbackSuggestionDecisions = FeedbackSuggestionDecisions()
-    var reviewParticipationPreferences = ReviewParticipationPreferences()
+    var feedbackSuggestionDecisions = FeedbackSuggestionDecisions() {
+        didSet { changedMRKeys.insert(Key.feedbackSuggestionDecisions) }
+    }
+    var reviewParticipationPreferences = ReviewParticipationPreferences() {
+        didSet { changedMRKeys.insert(Key.reviewParticipationPreferences) }
+    }
     var pipelineRefreshAttempts: Set<PipelineRefreshAttempt> = [] {
         didSet { changedMRKeys.insert(Key.pipelineRefreshAttempts) }
     }
@@ -352,8 +499,6 @@ final class SettingsManager {
         runtimeAutomation.isGloballySuspended = !globallyEnabled
         automation = runtimeAutomation
         acceptedAutomation = loadedAutomation
-        feedbackSuggestionDecisions = store.load(Key.feedbackSuggestionDecisions, fallback: FeedbackSuggestionDecisions())
-        reviewParticipationPreferences = store.load(Key.reviewParticipationPreferences, fallback: ReviewParticipationPreferences())
         boardGrouping = defaults.string(forKey: Key.boardGrouping).flatMap(MRBoardGrouping.init(rawValue:)) ?? .withoutAutomation
         ownAutomationOffExpanded = defaults.bool(forKey: Key.ownAutomationOffExpanded)
         reviewingAutomationOffExpanded = defaults.bool(forKey: Key.reviewingAutomationOffExpanded)
@@ -389,7 +534,18 @@ final class SettingsManager {
         }
 
         lastSeenTodoIDs = store.load(Key.lastSeenTodoIDs, fallback: [])
-        mrSettingsArchive = store.load(Key.mergeRequestRecords, fallback: .init())
+        let legacyArchive = store.load(Key.mergeRequestRecords, fallback: MRSettingsArchive())
+        mrSettingsArchive = store.load(Key.mergeRequestAccountRecords, fallback: legacyArchive)
+        if var savedScope = mrSettingsArchive.accountAutomationScope {
+            if store.savedFingerprint(forKey: Key.automation) == mrSettingsArchive.mirrorFingerprints[Key.automation] {
+                savedScope.isGloballySuspended = !globallyEnabled
+                automation.scope = savedScope
+            } else {
+                savedScope.mapAccountTargets { mirrorTarget($0) == nil || hasReassignedUsername($0) ? $0 : nil }
+                automation.scope.mapAccountTargets(downgradeTarget)
+                automation.scope.retainAccountTargets(from: savedScope)
+            }
+        }
         transferMRSettings(.load)
         changedMRKeys.removeAll()
         let jobs = assistantHandoffs.filter { $0.execution != nil }
@@ -400,7 +556,8 @@ final class SettingsManager {
             newReviewTargets.contains(entry.target) ? (entry.target, entry.value) : nil
         }, uniquingKeysWith: { first, _ in first })
         for handoff in assistantHandoffs where handoff.execution?.state != .feedbackResolved {
-            let target = handoff.key.automationTarget
+            let source = handoff.key.automationTarget
+            let target = source.forAccount(.init(host: source.host, username: source.username, userID: handoff.accountUserID))
             for (noteID, revision) in handoff.verifiedFeedbackNotes ?? [:] {
                 authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision))
             }
@@ -424,9 +581,17 @@ final class SettingsManager {
         persistenceStore.preserveCorruptValues()
         defaults.set(conversationDestination.rawValue, forKey: Key.conversationDestination)
         let previousAutomation = lastSavedAutomation ?? automation
-        let automationSaved = persistenceStore.save(automation, forKey: Key.automation)
-        persistenceStore.save(feedbackSuggestionDecisions, forKey: Key.feedbackSuggestionDecisions)
-        persistenceStore.save(reviewParticipationPreferences, forKey: Key.reviewParticipationPreferences)
+        var storedAutomation = automation
+        if !mrSettingsArchive.accountNames.isEmpty {
+            storedAutomation.scope.mapAccountTargets { canonicalTarget($0, projectedFor: activeGitLabAccount) }
+            mrSettingsArchive.accountAutomationScope = storedAutomation.scope
+            storedAutomation.scope.mapAccountTargets(mirrorTarget)
+        }
+        let automationSaved = persistenceStore.save(storedAutomation, forKey: Key.automation)
+        if automationSaved, mrSettingsArchive.accountAutomationScope != nil {
+            mrSettingsArchive.mirrorFingerprints[Key.automation] = persistenceStore.savedFingerprint(forKey: Key.automation)
+            changedMRKeys.insert(Key.automation)
+        }
         persistenceStore.save(boardManualOrder, forKey: Key.boardManualOrder)
         persistenceStore.save(mrLifecycleLedger, forKey: Key.mrLifecycleLedger)
         persistenceStore.save(reviewAssignments, forKey: Key.reviewAssignments)
@@ -495,10 +660,8 @@ final class SettingsManager {
     }
 
     func saveReviewParticipationPreferences() -> Bool {
-        persistenceStore.preserveCorruptValues()
-        let saved = persistenceStore.save(reviewParticipationPreferences, forKey: Key.reviewParticipationPreferences)
-        let synchronized = persistenceStore.synchronize()
-        return saved && synchronized
+        transferMRSettings(.savePreference(.reviewParticipation(reviewParticipationPreferences)))
+            && persistenceStore.synchronize()
     }
 
     func removeReviewParticipationExclusion(_ id: UUID) -> Bool {
@@ -525,12 +688,12 @@ final class SettingsManager {
 
     private func commitAutomationAuthorPreferences(_ candidate: ReviewParticipationPreferences) -> Bool {
         persistenceStore.preserveCorruptValues()
-        let saved = persistenceStore.save(candidate, forKey: Key.reviewParticipationPreferences)
+        let saved = transferMRSettings(.savePreference(.reviewParticipation(candidate)))
         let synchronized = persistenceStore.synchronize()
         guard saved && synchronized else {
             if saved {
                 // Restore the prior durable decision if synchronization rejected the new one.
-                _ = persistenceStore.save(reviewParticipationPreferences, forKey: Key.reviewParticipationPreferences)
+                _ = transferMRSettings(.savePreference(.reviewParticipation(reviewParticipationPreferences)))
                 _ = persistenceStore.synchronize()
             }
             return false
@@ -605,6 +768,7 @@ final class SettingsManager {
 
     private enum Key {
         static let mergeRequestRecords = "mergeRequestRecords"
+        static let mergeRequestAccountRecords = "mergeRequestAccountRecords"
         static let reviewerApprovals = "reviewerApprovals"
         static let conversationDestination = "conversationDestination"
         static let automation = "automation"
@@ -674,17 +838,20 @@ extension SettingsManager {
     private enum MRSettingsPreference {
         case hiddenReviews(HiddenMergeRequests)
         case boardPins(Set<BoardCardPin>)
+        case reviewParticipation(ReviewParticipationPreferences)
 
         var key: String {
             switch self {
             case .hiddenReviews: Key.ignoredMergeRequests
             case .boardPins: Key.boardPins
+            case .reviewParticipation: Key.reviewParticipationPreferences
             }
         }
     }
 
     private enum MRSettingsTransfer {
         case load
+        case rebind(GitLabAccountIdentity?)
         case save
         case savePreference(MRSettingsPreference)
     }
@@ -705,15 +872,18 @@ extension SettingsManager {
     private func transferMRSettings(_ transfer: MRSettingsTransfer) -> Bool {
         typealias Record = MRSettingsRecord
         typealias Target = MRAutomationScope.Target
+        typealias TargetTransform = (Target) -> Target?
         var archive = mrSettingsArchive
         var updatedKeys = Set<String>()
         var failedKeys = Set<String>()
         var candidateHides: HiddenMergeRequests?
         var candidatePins: Set<BoardCardPin>?
+        var candidateParticipation: ReviewParticipationPreferences?
         if case let .savePreference(preference) = transfer {
             switch preference {
             case .hiddenReviews(let value): candidateHides = value
             case .boardPins(let value): candidatePins = value
+            case .reviewParticipation(let value): candidateParticipation = value
             }
         }
 
@@ -723,28 +893,55 @@ extension SettingsManager {
             candidate: Value? = nil, repartition: Bool = false,
             split: (Value) -> [Element], combine: ([Element]) -> Value,
             restorePayload: (Value, Value) -> Value = { value, _ in value },
+            mapTarget: ((Element, TargetTransform) -> Element?)? = nil,
+            mirrorEntry: ((Element) -> Element?)? = nil,
             scope: (Element) -> MRSettingsKey?
         ) {
+            func mapped(_ values: [Element], by transform: TargetTransform) -> [Element] {
+                guard let mapTarget, !archive.accountNames.isEmpty else { return values }
+                return values.compactMap { mapTarget($0, transform) }
+            }
             switch transfer {
             case .load:
                 let legacy = persistenceStore.load(key, fallback: self[keyPath: path])
                 let fingerprint = persistenceStore.savedFingerprint(forKey: key)
                 if let previous = archive.mirrorFingerprints[key], fingerprint == nil || fingerprint == previous {
-                    self[keyPath: path] = restorePayload(combine(archive.values(field)), legacy)
+                    let canonical = archive.values(field)
+                    self[keyPath: path] = restorePayload(combine(mapped(canonical) { projectedTarget($0) }), legacy)
+                } else if !archive.accountNames.isEmpty, mapTarget != nil, archive.mirrorFingerprints[key] != nil {
+                    let retained = mapped(archive.values(field)) {
+                        mirrorTarget($0) == nil || hasReassignedUsername($0) ? $0 : nil
+                    }
+                    let incoming = mapped(split(legacy)) { downgradeTarget($0) }
+                    self[keyPath: path] = combine(mapped(retained + incoming) { projectedTarget($0) })
                 } else {
                     self[keyPath: path] = legacy
                 }
+            case .rebind(let previous):
+                guard mapTarget != nil else { return }
+                self[keyPath: path] = combine(mapped(split(self[keyPath: path])) {
+                    projectedTarget(reboundTarget($0, projectedFor: previous))
+                })
+                changedMRKeys.insert(key)
             case .save, .savePreference:
                 if case .savePreference(let selected) = transfer, key != selected.key { return }
                 let changed = candidate != nil || changedMRKeys.contains(key)
                 let value = candidate ?? self[keyPath: path]
-                guard persistenceStore.save(value, forKey: key, changed: changed),
+                let canonical = mapped(split(value)) { canonicalTarget($0, projectedFor: activeGitLabAccount) }
+                let mirror: Value
+                if !archive.accountNames.isEmpty, let mirrorEntry {
+                    mirror = combine(canonical.compactMap(mirrorEntry))
+                } else {
+                    mirror = mapTarget == nil || archive.accountNames.isEmpty
+                        ? value : combine(mapped(canonical) { mirrorTarget($0) })
+                }
+                guard persistenceStore.save(mirror, forKey: key, changed: changed),
                       let fingerprint = persistenceStore.savedFingerprint(forKey: key) else {
                     failedKeys.insert(key)
                     return
                 }
                 guard changed || repartition || archive.mirrorFingerprints[key] != fingerprint else { return }
-                archive.replace(field, with: split(value), keyedBy: scope)
+                archive.replace(field, with: canonical, keyedBy: scope)
                 archive.mirrorFingerprints[key] = fingerprint
                 updatedKeys.insert(key)
             }
@@ -752,31 +949,69 @@ extension SettingsManager {
 
         func targets(_ path: ReferenceWritableKeyPath<SettingsManager, Set<Target>>,
                      _ value: WritableKeyPath<Record, [Target]?>, _ key: String) {
-            field(path, value, key, split: Array.init, combine: Set.init, scope: MRSettingsKey.init)
+            field(path, value, key, split: Array.init, combine: Set.init, mapTarget: { $1($0) }, scope: MRSettingsKey.init)
         }
 
         func scoped<Value: Codable & Sendable>(_ path: ReferenceWritableKeyPath<SettingsManager, [Target: Value]>,
-                                    _ value: WritableKeyPath<Record, [Record.Scoped<Value>]?>, _ key: String) {
+                                    _ value: WritableKeyPath<Record, [Record.Scoped<Value>]?>, _ key: String,
+                                    combineDuplicates: (Value, Value) -> Value = { first, _ in first }) {
             field(path, value, key, split: { $0.map { .init(target: $0.key, value: $0.value) } },
-                combine: { Dictionary($0.map { ($0.target, $0.value) }, uniquingKeysWith: { first, _ in first }) },
+                combine: { Dictionary($0.map { ($0.target, $0.value) }, uniquingKeysWith: combineDuplicates) },
+                mapTarget: { entry, transform in transform(entry.target).map { .init(target: $0, value: entry.value) } },
                 scope: { MRSettingsKey($0.target) })
         }
 
         func ordered<Value: Codable>(_ path: ReferenceWritableKeyPath<SettingsManager, [Value]>,
                                       _ value: WritableKeyPath<Record, [Record.Ordered<Value>]?>, _ key: String,
+                                      target: WritableKeyPath<Value, Target>? = nil,
+                                      owner: KeyPath<Value, Int>? = nil,
                                       scope: (Value) -> MRSettingsKey?) {
+            let mapper: ((Record.Ordered<Value>, TargetTransform) -> Record.Ordered<Value>?)? = target.map { path in
+                { entry, transform in
+                    let candidate = mapEntry(entry.value, target: path, owner: owner, using: transform)
+                    return candidate.map { .init(position: entry.position, value: $0) }
+                }
+            }
             field(path, value, key, split: { $0.enumerated().map { .init(position: $0.offset, value: $0.element) } },
-                combine: { $0.sorted { $0.position < $1.position }.map(\.value) }, scope: { scope($0.value) })
+                combine: { $0.sorted { $0.position < $1.position }.map(\.value) },
+                mapTarget: mapper, scope: { scope($0.value) })
         }
 
-        func targetSet<Value: Codable & Hashable>(_ path: ReferenceWritableKeyPath<SettingsManager, Set<Value>>,
+        func mapEntry<Value>(_ entry: Value, target: WritableKeyPath<Value, Target>, owner: KeyPath<Value, Int>?,
+                             using transform: TargetTransform) -> Value? {
+            var previous = entry[keyPath: target]
+            if let owner {
+                previous = previous.forAccount(.init(host: previous.host, username: previous.username, userID: entry[keyPath: owner]))
+            }
+            guard let updated = transform(previous) else { return nil }
+            var result = entry
+            result[keyPath: target] = updated
+            return result
+        }
+
+        func accountEntry<Value>(_ entry: Value, host: KeyPath<Value, String>,
+                                 username: WritableKeyPath<Value, String>, owner: WritableKeyPath<Value, Int?>,
+                                 using transform: TargetTransform) -> Value? {
+            let previous = Target(host: entry[keyPath: host], username: entry[keyPath: username],
+                projectID: 0, iid: nil, userID: entry[keyPath: owner])
+            guard let updated = transform(previous) else { return nil }
+            var result = entry
+            result[keyPath: username] = updated.username
+            result[keyPath: owner] = updated.userID
+            return result
+        }
+
+        func targetSet<Value: Codable & Hashable & Sendable>(_ path: ReferenceWritableKeyPath<SettingsManager, Set<Value>>,
                                                    _ value: WritableKeyPath<Record, [Value]?>, _ key: String,
-                                                   target: KeyPath<Value, Target>) {
-            field(path, value, key, split: Array.init, combine: Set.init, scope: { MRSettingsKey($0[keyPath: target]) })
+                                                   target: WritableKeyPath<Value, Target>, owner: KeyPath<Value, Int>? = nil) {
+            field(path, value, key, split: Array.init, combine: Set.init, mapTarget: { entry, transform in
+                mapEntry(entry, target: target, owner: owner, using: transform)
+            }, scope: { MRSettingsKey($0[keyPath: target]) })
         }
 
         targets(\.autoApproveOptOuts, \.autoApproveOptOuts, Key.autoApproveOptOuts)
         scoped(\.independentApprovalPreferences, \.independentApprovalPreferences, Key.independentApprovalPreferences)
+            { first, second in first == .off || second == .off ? .off : first }
         targets(\.autoPublishOptOuts, \.autoPublishOptOuts, Key.autoPublishOptOuts)
         targets(\.autoMergeOptOuts, \.autoMergeOptOuts, Key.autoMergeOptOuts)
         targets(\.autoMergeOptIns, \.autoMergeOptIns, Key.autoMergeOptIns)
@@ -787,8 +1022,10 @@ extension SettingsManager {
                 var result = Dictionary(uniqueKeysWithValues: emptyActionOptIns.map { ($0, Set<Target>()) })
                 for entry in entries { result[entry.action, default: []].insert(entry.target) }
                 return result
-            }, scope: { MRSettingsKey($0.target) })
-        ordered(\.mergeSubmissions, \.mergeSubmissions, Key.mergeSubmissions, scope: { MRSettingsKey($0.target) })
+            }, mapTarget: { entry, transform in transform(entry.target).map { .init(action: entry.action, target: $0) } },
+            scope: { MRSettingsKey($0.target) })
+        ordered(\.mergeSubmissions, \.mergeSubmissions, Key.mergeSubmissions, target: \.target, owner: \.userID,
+            scope: { MRSettingsKey($0.target) })
         let legacyHideDeadline = archive.legacyHideDeadline
         field(\.hiddenMergeRequests, \.hiddenReviews, Key.ignoredMergeRequests, candidate: candidateHides,
             split: { hides in hides.targets.map { .init(target: $0, detail: hides.details[$0]) } },
@@ -799,22 +1036,40 @@ extension SettingsManager {
                     uniquingKeysWith: { first, _ in first })
                 hides.legacyRestoreUntil = legacyHideDeadline
                 return hides
+            }, mapTarget: { entry, transform in
+                guard let target = transform(entry.target) else { return nil }
+                return .init(target: target, detail: entry.detail.map { detail in
+                    var updated = detail
+                    updated.target = target
+                    return updated
+                })
             }, scope: { MRSettingsKey($0.target) })
         targets(\.newReviewTargets, \.newReviewTargets, Key.newReviewTargets)
         targets(\.heldNewReviewTargets, \.heldNewReviewTargets, Key.heldNewReviewTargets)
         targetSet(\.authorFeedbackAttempts, \.authorFeedbackAttempts, Key.authorFeedbackAttempts, target: \.target)
-        ordered(\.assistantAutomaticRetryAttempts, \.assistantAutomaticRetryAttempts, Key.assistantAutomaticRetryAttempts,
-            scope: { MRSettingsKey(host: $0.target.host, projectID: $0.target.projectID, iid: $0.target.iid) })
-        targetSet(\.pipelineRefreshAttempts, \.pipelineRefreshAttempts, Key.pipelineRefreshAttempts, target: \.target)
+        field(\.assistantAutomaticRetryAttempts, \.assistantAutomaticRetryAttempts, Key.assistantAutomaticRetryAttempts,
+            split: { $0.enumerated().map { .init(position: $0.offset, value: $0.element) } },
+            combine: { $0.sorted { $0.position < $1.position }.map(\.value) },
+            mapTarget: { entry, transform in
+                guard let target = accountEntry(entry.value.target, host: \.host, username: \.username,
+                    owner: \.accountUserID, using: transform) else { return nil }
+                var value = entry.value
+                value.target = target
+                return .init(position: entry.position, value: value)
+            }, scope: {
+                let target = $0.value.target
+                return MRSettingsKey(host: target.host, projectID: target.projectID, iid: target.iid, userID: target.accountUserID)
+            })
+        targetSet(\.pipelineRefreshAttempts, \.pipelineRefreshAttempts, Key.pipelineRefreshAttempts, target: \.target, owner: \.userID)
         ordered(\.pipelineClaimAssessmentAttempts, \.pipelineClaimAssessmentAttempts, Key.pipelineClaimAssessmentAttempts,
-            scope: { MRSettingsKey($0.target) })
+            target: \.target, owner: \.userID, scope: { MRSettingsKey($0.target) })
         field(\.conflictReceipts, \.conflictReceipts, Key.conflictReceipts, split: Array.init, combine: Set.init,
-            scope: { MRSettingsKey(host: $0.host, projectID: $0.projectID, iid: $0.iid) })
+            scope: { MRSettingsKey(host: $0.host, projectID: $0.projectID, iid: $0.iid, userID: $0.userID) })
         field(\.reReviewReceipts, \.reReviewReceipts, Key.reReviewReceipts,
             split: { $0.map { .init(key: $0.key, value: $0.value) } },
             combine: { Dictionary($0.map { ($0.key, $0.value) }, uniquingKeysWith: { first, _ in first }) },
-            scope: { MRSettingsKey(host: $0.key.host, projectID: $0.key.projectID, iid: $0.key.iid) })
-        scoped(\.reReviewDraftBaselines, \.reReviewDraftBaselines, Key.reReviewDraftBaselines)
+            scope: { MRSettingsKey(host: $0.key.host, projectID: $0.key.projectID, iid: $0.key.iid, userID: $0.key.authorID) })
+        scoped(\.reReviewDraftBaselines, \.reReviewDraftBaselines, Key.reReviewDraftBaselines, combineDuplicates: max)
         field(\.assistantHandoffs, \.assistantHandoffs, Key.assistantHandoffs,
             split: { jobs in
                 jobs.enumerated().map { index, job in
@@ -834,41 +1089,75 @@ extension SettingsManager {
                     restored.execution?.output = previous.execution?.output
                     return restored
                 }
-            }, scope: { MRSettingsKey($0.value.key.automationTarget) })
+            }, mirrorEntry: { entry in
+                var job = entry.value
+                let key = job.key
+                let original = GitLabAccountIdentity(host: key.work.host, username: key.username, userID: job.accountUserID)
+                guard self.mirrorAccount(original) != nil else { return nil }
+                job.accountUserID = nil
+                return .init(position: entry.position, value: job)
+            }, scope: {
+                let target = $0.value.key.automationTarget
+                return MRSettingsKey(host: target.host, projectID: target.projectID, iid: target.iid, userID: $0.value.accountUserID)
+            })
         ordered(\.workflowActivity, \.workflowActivity, Key.workflowActivity, scope: {
             let request = $0.event.mergeRequest
-            return MRSettingsKey(host: $0.host, projectID: request.projectID, iid: request.iid)
+            return MRSettingsKey(host: $0.host, projectID: request.projectID, iid: request.iid, userID: $0.user.id)
         })
-        ordered(\.automationEvents, \.automationEvents, Key.automationEvents, scope: { MRSettingsKey($0.target) })
-        ordered(\.mrActionIntents, \.mrActionIntents, Key.mrActionIntents, scope: { MRSettingsKey($0.target) })
+        ordered(\.automationEvents, \.automationEvents, Key.automationEvents, target: \.target, scope: { MRSettingsKey($0.target) })
+        ordered(\.mrActionIntents, \.mrActionIntents, Key.mrActionIntents, target: \.target, scope: { MRSettingsKey($0.target) })
         targetSet(\.routedMRTodoReceipts, \.routedMRTodoReceipts, Key.routedMRTodoReceipts, target: \.target)
         let todoTargets = Dictionary(grouping: routedMRTodoReceipts) {
-            TodoAutomationReceipt(host: $0.target.host, username: $0.target.username, todoID: $0.event.id)
+            let target = canonicalTarget($0.target, projectedFor: activeGitLabAccount)
+            return TodoAutomationReceipt(host: target.host, username: target.username, accountUserID: target.userID, todoID: $0.event.id)
         }.compactMapValues { routes -> MRSettingsKey? in
-            let targets = Set(routes.map(\.target))
+            let targets = Set(routes.map { canonicalTarget($0.target, projectedFor: activeGitLabAccount) })
             guard targets.count == 1, let target = targets.first else { return nil }
             return MRSettingsKey(target)
         }
         let routesChanged = updatedKeys.contains(Key.routedMRTodoReceipts)
-        field(\.automationReceipts, \.automationReceipts, Key.automationReceipts, repartition: routesChanged,
-            split: Array.init, combine: Set.init, scope: { todoTargets[$0] })
-        field(\.automationAttemptReceipts, \.automationAttemptReceipts, Key.automationAttemptReceipts, repartition: routesChanged,
-            split: Array.init, combine: Set.init, scope: { todoTargets[$0] })
+        func todoReceipts(_ path: ReferenceWritableKeyPath<SettingsManager, Set<TodoAutomationReceipt>>,
+                          _ value: WritableKeyPath<Record, [TodoAutomationReceipt]?>, _ key: String) {
+            field(path, value, key, repartition: routesChanged, split: Array.init, combine: Set.init,
+                mapTarget: { accountEntry($0, host: \.host, username: \.username, owner: \.accountUserID, using: $1) },
+                scope: { todoTargets[$0] })
+        }
+        todoReceipts(\.automationReceipts, \.automationReceipts, Key.automationReceipts)
+        todoReceipts(\.automationAttemptReceipts, \.automationAttemptReceipts, Key.automationAttemptReceipts)
         field(\.pendingTodoAcknowledgements, \.pendingTodoAcknowledgements, Key.pendingTodoAcknowledgements, repartition: routesChanged,
-            split: Array.init, combine: Set.init, scope: {
-                todoTargets[.init(host: $0.host, username: $0.username, todoID: $0.todo.id)]
+            split: Array.init, combine: Set.init,
+            mapTarget: { accountEntry($0, host: \.host, username: \.username, owner: \.accountUserID, using: $1) },
+            scope: {
+                todoTargets[.init(host: $0.host, username: $0.username, accountUserID: $0.accountUserID, todoID: $0.todo.id)]
             })
-        field(\.boardPins, \.boardPins, Key.boardPins, candidate: candidatePins, split: Array.init, combine: Set.init, scope: { pin in
+        field(\.boardPins, \.boardPins, Key.boardPins, candidate: candidatePins, split: Array.init, combine: Set.init,
+            mapTarget: { accountEntry($0, host: \.host, username: \.username, owner: \.accountUserID, using: $1) },
+            scope: { pin in
             guard case let .mergeRequest(projectID, iid) = pin.item else { return nil }
-            return MRSettingsKey(host: pin.host, projectID: projectID, iid: iid)
+            return MRSettingsKey(host: pin.host, projectID: projectID, iid: iid, userID: pin.accountUserID)
         })
         targets(\.pendingCommentReviews, \.pendingCommentReviews, Key.pendingCommentReviews)
         scoped(\.commentReviewProgress, \.commentReviewProgress, Key.commentReviewProgress)
+        field(\.reviewParticipationPreferences, \.reviewParticipationPreferences, Key.reviewParticipationPreferences,
+            candidate: candidateParticipation, split: \.storedEntries, combine: ReviewParticipationPreferences.init(storedEntries:),
+            mapTarget: { stored, transform in
+                accountEntry(stored.entry, host: \.host, username: \.username, owner: \.accountUserID, using: transform)
+                    .map { .init(automationAuthor: stored.automationAuthor, entry: $0) }
+            }, scope: { _ in nil })
+        field(\.feedbackSuggestionDecisions, \.feedbackSuggestionDecisions, Key.feedbackSuggestionDecisions,
+            split: \.accountEntries, combine: FeedbackSuggestionDecisions.init(accountEntries:),
+            mapTarget: { entry, transform in transform(entry.target).map(entry.replacingTarget) },
+            scope: { MRSettingsKey($0.target) })
 
         if case .load = transfer { return true }
-        if changedMRKeys.contains(Key.reviewerApprovals) { updatedKeys.insert(Key.reviewerApprovals) }
+        if case .rebind = transfer { return true }
+        for archiveOnlyKey in [Key.reviewerApprovals, Key.automation] where changedMRKeys.contains(archiveOnlyKey) {
+            updatedKeys.insert(archiveOnlyKey)
+        }
         if updatedKeys.contains(Key.newReviewTargets) {
-            archive.replace(\.newReviewGenerations, with: newReviewGenerations.map { .init(target: $0.key, value: $0.value) },
+            archive.replace(\.newReviewGenerations, with: newReviewGenerations.map {
+                .init(target: canonicalTarget($0.key, projectedFor: activeGitLabAccount), value: $0.value)
+            },
                 keyedBy: { MRSettingsKey($0.target) })
         }
         if updatedKeys.contains(Key.ignoredMergeRequests) {
@@ -878,7 +1167,20 @@ extension SettingsManager {
             archive.emptyActionOptIns = Set(automaticActionOptIns.compactMap { $0.value.isEmpty ? $0.key : nil })
         }
         if !updatedKeys.isEmpty { archive.discardEmptyRecords() }
-        guard persistenceStore.save(archive, forKey: Key.mergeRequestRecords, changed: !updatedKeys.isEmpty) else { return false }
+        let hasAccountRecords = !archive.accountNames.isEmpty
+        let archiveKey = hasAccountRecords ? Key.mergeRequestAccountRecords : Key.mergeRequestRecords
+        guard persistenceStore.save(archive, forKey: archiveKey, changed: !updatedKeys.isEmpty) else { return false }
+        if hasAccountRecords {
+            // The previous app can always read the legacy collections directly.
+            // Its archive must never take precedence over a newer username mirror.
+            var legacy = MRSettingsArchive()
+            for (key, record) in archive.records {
+                guard let approvals = record.reviewerApprovals, !approvals.isEmpty,
+                      let legacyKey = MRSettingsKey(host: key.host, projectID: key.request.projectID, iid: key.request.iid) else { continue }
+                legacy.setReviewerApprovals((legacy.records[legacyKey]?.reviewerApprovals ?? []) + approvals, for: legacyKey)
+            }
+            guard persistenceStore.save(legacy, forKey: Key.mergeRequestRecords) else { return false }
+        }
         mrSettingsArchive = archive
         changedMRKeys.subtract(updatedKeys)
         if case .savePreference = transfer { return failedKeys.isEmpty }

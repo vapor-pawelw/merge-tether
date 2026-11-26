@@ -8,7 +8,7 @@ struct MRTodoIntent: Codable, Identifiable, Sendable {
     enum Kind: String, Codable, Hashable, Sendable { case review, followUp, pipeline, conflict, refresh }
     enum State: String, Codable, Hashable, Sendable { case pending, verifying, running, failed, completed }
     let id: UUID
-    let target: MRAutomationScope.Target
+    var target: MRAutomationScope.Target
     let kind: Kind
     var state: State
     var todoIDs: Set<Int>
@@ -71,7 +71,7 @@ struct MRTodoIntent: Codable, Identifiable, Sendable {
 }
 
 struct MRTodoRouteReceipt: Codable, Hashable, Sendable {
-    let target: MRAutomationScope.Target
+    var target: MRAutomationScope.Target
     let event: Todo.FeedbackIdentity
     let intentID: UUID?
 }

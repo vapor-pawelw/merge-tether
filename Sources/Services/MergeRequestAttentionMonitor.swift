@@ -757,7 +757,7 @@ final class MergeRequestAttentionMonitor {
     @discardableResult
     func retireConfirmedLifecycle(_ request: GitLabMergeRequest, host: String, user: GitLabAuthenticatedUser,
                                   revision: UInt64, readStartedAt: Date) async -> Bool {
-        let account = Account(host: host, username: user.username)
+        let account = user.account(on: host)
         let target = MRAutomationScope.Target.mergeRequest(host: host, username: user.username,
             projectID: request.projectID, iid: request.iid)
         guard let settings, MergeRequestFinishedState(request) != nil,
@@ -770,14 +770,22 @@ final class MergeRequestAttentionMonitor {
         let terminalSince = settings.mrLifecycleLedger.terminalObservedAt(for: target, state: request.state) ?? readStartedAt
         settings.retireMRProgress(for: target, state: request.state, terminalSince: terminalSince, now: readStartedAt, user: user)
         if request.state == .merged && !isConfirming(request.mergeRequestID)
-            && !settings.assistantHandoffs.contains(where: { $0.key.automationTarget == target && $0.execution?.state.isActive == true }) {
+            && !settings.assistantHandoffs.contains(where: {
+                $0.key.work == .init(host: host, projectID: request.projectID, iid: request.iid)
+                    && settings.handoffMatchesAccount($0, host: host, username: user.username) && $0.execution?.state.isActive == true
+            }) {
             let origins = AICommentProvenanceStore.Context(host: host, username: user.username, userID: user.id,
-                projectID: request.projectID, iid: request.iid)
+                projectID: request.projectID, iid: request.iid, legacyUsernames: settings.knownUsernames(for: account))
             let provenance = provenanceDirectory
             let assessments = authorFeedbackAssessmentDirectory
+            let assessmentTargets = [target.forAccount(account)] + settings.unambiguousLegacyUsernames(for: account).map {
+                target.forAccount(.init(host: host, username: $0))
+            }
             await Task.detached(priority: .utility) {
                 AICommentProvenanceStore.removeMergeRequest(origins, in: provenance)
-                if let assessments { AuthorFeedbackAssessmentStore.remove(target, in: assessments) }
+                if let assessments {
+                    for target in assessmentTargets { AuthorFeedbackAssessmentStore.remove(target, in: assessments) }
+                }
             }.value
         }
         return true
@@ -1730,7 +1738,7 @@ final class MergeRequestAttentionMonitor {
         user: GitLabAuthenticatedUser, before: [GitLabMergeRequestDiscussion]? = nil,
         automatic: Bool = false) async -> PublicationEvidence? {
         let context = AICommentProvenanceStore.Context(host: account.host, username: account.username, userID: user.id,
-            projectID: id.projectID, iid: id.iid)
+            projectID: id.projectID, iid: id.iid, legacyUsernames: settings?.knownUsernames(for: user.account(on: account.host)) ?? [])
         let generation = accountGeneration, revision = glab.accountRevision
         func current() -> Bool {
             !Task.isCancelled && generation == accountGeneration && isCurrent(account, revision: revision)

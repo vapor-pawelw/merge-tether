@@ -175,7 +175,7 @@ extension SettingsManager {
     func hasAutoMergeOptIn(host: String?, username: String?) -> Bool {
         guard let host, let username else { return false }
         return autoMergeOptIns.contains {
-            $0.host == host && $0.username == username && $0.iid != nil && actionPreference(.merge, for: $0) == .on
+            $0.account == .init(host: host, username: username) && $0.iid != nil && actionPreference(.merge, for: $0) == .on
         }
     }
 
@@ -184,7 +184,8 @@ extension SettingsManager {
             var optedIn = action == .merge ? autoMergeOptIns : automaticActionOptIns[action] ?? []
             if action == .approval { optedIn.formUnion(independentApprovalPreferences.keys) }
             return optedIn.contains { target in
-                target.iid != nil && (host == nil || host == target.host) && (username == nil || username == target.username)
+                target.iid != nil && (host == nil || host == target.host)
+                    && (username == nil || (target.userID == nil && username == target.username))
                     && actionPreference(action, for: target) == .on
             }
         }
@@ -219,7 +220,7 @@ extension SettingsManager {
     var effectiveAutomationScope: MRAutomationScope {
         assistantHandoffs.reduce(into: automation.scope) { scope, handoff in
             if handoff.execution?.pendingWorkerAudit != nil {
-                scope[handoff.key.automationTarget] = .paused
+                scope[scopedTarget(for: handoff)] = .paused
             }
         }
     }
@@ -229,7 +230,7 @@ extension SettingsManager {
     func permitsAutomaticAction(_ action: MRAutomaticAction, for request: GitLabMergeRequest,
                                 target: MRAutomationScope.Target, ignoringGlobalSuspension: Bool = false) -> Bool {
         let automation = ignoringGlobalSuspension ? configuredAutomation : automation
-        guard automaticActionsAllowed, automation.hasAutomaticPublicActionConsent,
+        guard automaticActionsAllowed, ignoringGlobalSuspension || accountReadyForWrites, automation.hasAutomaticPublicActionConsent,
               effectiveAutomationScope[target] != .paused else { return false }
         if action != .commentPublication, pendingCommentReviews.contains(target) { return false }
         guard request.projectID == target.projectID, request.iid == target.iid,

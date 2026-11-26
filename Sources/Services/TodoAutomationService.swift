@@ -70,7 +70,7 @@ final class TodoAutomationService {
         let tracked = settings.automationReceipts.union(settings.automationAttemptReceipts)
             .union(settings.pendingTodoAcknowledgements.map(receipt(for:))).union(ineligible)
         let missing = tracked.filter { key in
-            key.host == host && key.username == username && !fetchedIDs.contains(key.todoID) && !running.contains(key)
+            key.accountUserID == nil && key.host == host && key.username == username && !fetchedIDs.contains(key.todoID) && !running.contains(key)
         }
         // GitLab's offset pagination can skip an item when an earlier page changes.
         let confirmed = missing.intersection(unconfirmedMissingReceipts)
@@ -275,7 +275,7 @@ final class TodoAutomationService {
         var recovery: FeedbackRecovery?
         if verifiedFingerprint != nil {
             let attempts = settings.assistantHandoffs.filter {
-                $0.key.work == work && $0.key.username == username && $0.feedbackDecisionRevision == decisionContext
+                $0.key.work == work && settings.handoffMatchesAccount($0, host: work.host, username: username) && $0.feedbackDecisionRevision == decisionContext
                     && $0.execution?.state != .feedbackResolved
             }
             let target = MRAutomationScope.Target.mergeRequest(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
@@ -386,11 +386,11 @@ final class TodoAutomationService {
         guard let residual, settings.automation.allowFollowUpPush, settings.automation.hasAutomaticActionConsent,
               settings.effectiveAutomationScope.permits(request, host: work.host, username: username),
               !settings.ignoredMergeRequests.contains(target), request.author.username == username else { return nil }
-        let allAttempts = settings.assistantHandoffs.filter { $0.key.work == work && $0.key.username == username && !$0.isObsoleteReminder }
+        let allAttempts = settings.assistantHandoffs.filter { $0.key.work == work && settings.handoffMatchesAccount($0, host: work.host, username: username) && !$0.isObsoleteReminder }
         let attempts = allAttempts.filter { $0.feedbackDecisionRevision == decisionContext }
         guard !allAttempts.contains(where: { $0.operationalExecution?.state.isActive == true }) else { return nil }
         let completed = settings.assistantHandoffs.filter {
-            $0.key.work == work && $0.key.username == username && $0.workflow == .followUp && $0.draftRepair == nil
+            $0.key.work == work && settings.handoffMatchesAccount($0, host: work.host, username: username) && $0.workflow == .followUp && $0.draftRepair == nil
                 && $0.feedbackDecisionRevision == decisionContext
                 && $0.execution?.state == .succeeded && $0.execution?.finishedAt != nil
                 && !($0.feedbackNoteIDs ?? []).isEmpty
@@ -444,7 +444,7 @@ final class TodoAutomationService {
                 let receipt = AuthorFeedbackAttempt(target: target, noteID: note.noteID, revision: revision, recoveryRootID: rootID,
                     decisionRevision: decisionContext)
                 return !settings.authorFeedbackAttempts.contains(receipt) && !settings.assistantHandoffs.contains {
-                    $0.key.work == work && $0.key.username == username && $0.feedbackRecoveryRootID == rootID
+                    $0.key.work == work && settings.handoffMatchesAccount($0, host: work.host, username: username) && $0.feedbackRecoveryRootID == rootID
                         && $0.feedbackDecisionRevision == decisionContext
                         && $0.execution?.state != .feedbackResolved
                         && $0.verifiedFeedbackNotes?[note.noteID] == revision

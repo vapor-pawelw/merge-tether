@@ -20,7 +20,8 @@ enum AuthorFeedbackAssessmentStore {
         .appending(path: "author-feedback-assessments", directoryHint: .isDirectory)
 
     nonisolated static func fileURL(_ target: MRAutomationScope.Target, in directory: URL) -> URL {
-        let identity = UserAttentionSnapshot.digest("\(target.host)\n\(target.username)\n\(target.projectID)\n\(target.iid)")
+        let account = target.userID.map { "id:\($0)" } ?? target.username
+        let identity = UserAttentionSnapshot.digest("\(target.host)\n\(account)\n\(target.projectID)\n\(String(describing: target.iid))")
         return directory.appending(path: identity + ".json")
     }
 
@@ -38,11 +39,36 @@ enum AuthorFeedbackAssessmentStore {
         return record
     }
 
+    nonisolated static func loadForAuthenticatedAccount(_ target: MRAutomationScope.Target,
+        legacyUsernames: Set<String>, in directory: URL) -> Record? {
+        guard target.userID != nil else { return latest(target, in: directory) }
+        if let current = latest(target, in: directory) { return current }
+        for username in legacyUsernames.sorted() {
+            let legacyTarget = target.forAccount(.init(host: target.host, username: username))
+            guard let legacy = latest(legacyTarget, in: directory) else { continue }
+            let migrated = Record(version: legacy.version, target: target, keyDigest: legacy.keyDigest,
+                completedFollowUpJobID: legacy.completedFollowUpJobID, assessment: legacy.assessment,
+                noteRevisions: legacy.noteRevisions, diffDigest: legacy.diffDigest)
+            try? save(migrated, in: directory)
+            return migrated
+        }
+        return nil
+    }
+
     nonisolated static func save(_ record: Record, in directory: URL) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         try encoder.encode(record).write(to: fileURL(record.target, in: directory), options: .atomic)
+    }
+
+    nonisolated static func saveWithLegacyMirror(_ record: Record, in directory: URL) throws {
+        try save(record, in: directory)
+        let target = record.target
+        let legacy = Record(version: record.version, target: target.forAccount(.init(host: target.host, username: target.username)),
+            keyDigest: record.keyDigest, completedFollowUpJobID: record.completedFollowUpJobID, assessment: record.assessment,
+            noteRevisions: record.noteRevisions, diffDigest: record.diffDigest)
+        try save(legacy, in: directory)
     }
 
     nonisolated static func remove(_ target: MRAutomationScope.Target, in directory: URL) {

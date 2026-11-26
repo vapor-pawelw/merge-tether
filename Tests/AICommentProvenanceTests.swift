@@ -104,7 +104,7 @@ struct AICommentProvenanceTests: Sendable {
         #expect(!AICommentProvenanceStore.isGenerated(replacedAuthor, discussionID: "thread", context: context, in: directory))
     }
 
-    @Test(arguments: ["host", "username", "userID", "project", "mr"])
+    @Test(arguments: ["host", "userID", "project", "mr"])
     func generationEvidenceNeverCrossesAccountOrMergeRequest(_ changed: String) throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -112,9 +112,20 @@ struct AICommentProvenanceTests: Sendable {
         try AICommentProvenanceStore.recordGenerated([.init(id: 11, bodySHA256: AICommentAssessmentStore.digest(generated.note!))],
             baseline: [], current: [generated], context: context, runID: UUID(), headSHA: String(repeating: "a", count: 40), in: directory)
         let other = AICommentProvenanceStore.Context(host: changed == "host" ? "other.test" : context.host,
-            username: changed == "username" ? "other" : context.username, userID: changed == "userID" ? 99 : context.userID,
+            username: context.username, userID: changed == "userID" ? 99 : context.userID,
             projectID: changed == "project" ? 99 : context.projectID, iid: changed == "mr" ? 99 : context.iid)
         #expect(AICommentProvenanceStore.generation(for: generated, context: other, in: directory) == nil)
+    }
+
+    @Test func generatedDraftKeepsItsOriginAfterTheAccountIsRenamed() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let generated = draft(11), runID = UUID()
+        try AICommentProvenanceStore.recordGenerated([.init(id: 11, bodySHA256: AICommentAssessmentStore.digest(generated.note!))],
+            baseline: [], current: [generated], context: context, runID: runID, headSHA: String(repeating: "a", count: 40), in: directory)
+        let renamed = AICommentProvenanceStore.Context(host: context.host, username: "renamed",
+            userID: context.userID, projectID: context.projectID, iid: context.iid)
+        #expect(AICommentProvenanceStore.generation(for: generated, context: renamed, in: directory) == runID)
     }
 
     @Test(arguments: ["absent", "duplicate", "changed", "wrong-thread", "other-author", "system"])

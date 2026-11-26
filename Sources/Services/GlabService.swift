@@ -15,13 +15,16 @@ struct FeedbackAccountKindUpdate: Sendable {
 final class GlabService {
     var evidenceAccountContext: EvidenceContext {
         let account = resolvedHost.flatMap { host in
-            currentUsername.map { GitLabAccountIdentity(host: host, username: $0) }
+            currentUsername.map { GitLabAccountIdentity(host: host, username: $0, userID: authenticatedUserID) }
         }
         return .init(account: account, accountRevision: accountRevision)
     }
 
     typealias CommandRunner = @MainActor (URL, [String], [String: String], TimeInterval, (@MainActor @Sendable () -> Bool)?) async throws -> ProcessRunner.Output
     @ObservationIgnored private let commandRunner: CommandRunner
+    @ObservationIgnored var acceptAuthenticatedAccount: ((GitLabAccountIdentity) -> Bool)?
+    @ObservationIgnored var clearAuthenticatedAccount: (() -> Void)?
+    @ObservationIgnored var knownAccountUsernames: ((GitLabAccountIdentity) -> Set<String>)?
     @ObservationIgnored private var feedbackAccountObservers: [UUID: @MainActor (FeedbackAccountKindUpdate) -> Void] = [:]
     @ObservationIgnored private var feedbackAccountRevision: UInt64 = 0
     // This bounded cache only restores display after removing a local designation; policy reads remain fresh.
@@ -138,20 +141,36 @@ final class GlabService {
     var glabPath: URL? {
         didSet {
             if glabPath != oldValue {
-                recentDiscussions.removeAll()
-                clearReviewerActivity()
+                resetAccountIdentity()
             }
         }
     }
 
     /// Username on the default host, set only when that host is authenticated.
     var currentUsername: String? {
-        didSet { if currentUsername != oldValue { accountRevision &+= 1 } }
+        didSet { if currentUsername != oldValue { resetAccountIdentity() } }
     }
 
     /// Resolved GitLab host, e.g. `"gitlab.com"` or a self-hosted instance.
     var resolvedHost: String? {
-        didSet { if resolvedHost != oldValue { accountRevision &+= 1 } }
+        didSet { if resolvedHost != oldValue { resetAccountIdentity() } }
+    }
+
+    private(set) var authenticatedUserID: Int?
+
+    func resetAccountIdentity() {
+        authenticatedUserID = nil
+        accountRevision &+= 1
+        clearAuthenticatedAccount?()
+    }
+
+    func confirmAuthenticatedAccount(_ account: GitLabAccountIdentity, revision: UInt64) -> Bool {
+        guard resolvedHost == account.host, currentUsername == account.username, accountRevision == revision,
+              let userID = account.userID, userID > 0, !Task.isCancelled else { return false }
+        guard authenticatedUserID == nil || authenticatedUserID == userID else { return false }
+        authenticatedUserID = userID
+        _ = acceptAuthenticatedAccount?(account)
+        return true
     }
 
     /// A round-trip through another account must not revive earlier session data.

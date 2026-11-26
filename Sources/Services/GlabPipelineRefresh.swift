@@ -1,7 +1,7 @@
 import Foundation
 
 struct PipelineRefreshAttempt: Codable, Hashable {
-    let target: MRAutomationScope.Target
+    var target: MRAutomationScope.Target
     let userID: Int
     let oldPipelineID: Int
     let sourceProjectID: Int

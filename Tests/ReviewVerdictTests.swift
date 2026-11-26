@@ -103,6 +103,8 @@ import Testing
         #expect(ReviewVerdictStore.verdict(host: recorded.host, projectID: 1, iid: 2,
             user: .init(id: reviewer, username: "reviewer"), in: directory) == recorded)
         #expect(ReviewVerdictStore.verdict(host: recorded.host, projectID: 1, iid: 2,
+            user: .init(id: reviewer, username: "renamed"), in: directory) == recorded)
+        #expect(ReviewVerdictStore.verdict(host: recorded.host, projectID: 1, iid: 2,
             user: .init(id: 9, username: "other"), in: directory) == nil)
         #expect(ReviewVerdictStore.verdict(host: recorded.host, projectID: 1, iid: 2,
             user: .init(id: 9, username: "reviewer"), in: directory) == nil)
