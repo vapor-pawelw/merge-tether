@@ -140,7 +140,7 @@ struct ReviewingContext {
     init(row: MergeRequestBoardSnapshot.Row, workflowState: MergeWorkflowActivityState? = nil,
          assistantReady: Bool = true, assistantChecking: Bool = false,
          draftAutomationAllowed: Bool = false, viewerUsername: String? = nil) {
-        let item = row.item
+        let item = row.presented
         if let request = row.displayRequest, request.projectID == item.id.projectID,
            request.iid == item.id.iid, request.webURL == row.displayURL,
            let host = item.url.host, item.url.isGitLabMergeRequest(host: host, iid: item.id.iid),
@@ -238,7 +238,7 @@ struct ReviewingContext {
 
         if isMonitoringCompletedReview, row.evidenceMatchesCatalogContext {
             let discussionsBlockMerge = row.displayRequest.map {
-                $0.blockingDiscussionsResolved == false || $0.detailedMergeStatus == "discussions_not_resolved"
+                $0.blockingDiscussionsResolved == false || $0.detailedMergeStatus == .discussionsNotResolved
             } == true
             if discussionsBlockMerge, let activity, activity.otherOpenThreadCount > 0 {
                 status = .waitingForOtherDiscussions

@@ -6,6 +6,8 @@ import Testing
 
 @MainActor
 struct BoardAttentionPresenterTests {
+    private let account = GitLabAccountSession(host: "host", username: "me", revision: 1)
+    private let nextSession = GitLabAccountSession(host: "host", username: "me", revision: 2)
     @Test(arguments: ["reply", "question"], ["current", "head", "body", "discussion", "catalog", "account"])
     func semanticOnlyAttentionRequiresTheCurrentAccountAndFeedbackContext(_ kind: String, _ context: String) throws {
         let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Feature","web_url":"https://host/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"head","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
@@ -21,9 +23,9 @@ struct BoardAttentionPresenterTests {
             replyNoteIDs: kind == "reply" ? [20] : [])
         let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [],
             evidenceMatchesCatalogContext: context != "catalog")
-        let result = BoardAttentionPresenter.project(.init(account: "host/me/1", host: "host",
+        let result = BoardAttentionPresenter.project(.init(account: account, host: "host",
             username: context == "account" ? "other" : "me", rows: [
-                .init(row: row, item: item, confirmationState: nil, busy: false, automaticDraftIDs: [],
+                .init(row: row, item: row.presented, confirmationState: nil, busy: false, automaticDraftIDs: [],
                     checking: false, automaticIntentIDs: [])
             ], proposals: [], otherTodos: [], inboxLoading: false, assessingMentionNoteIDs: [],
             assistantReady: true, assistantPreparing: true))
@@ -33,22 +35,22 @@ struct BoardAttentionPresenterTests {
     @Test func confirmedAttentionIsObservableAndCannotCrossAnAccountEpoch() {
         let presenter = BoardAttentionPresenter()
         let changed = OSAllocatedUnfairLock(initialState: false)
-        withObservationTracking { _ = presenter.userAttention(account: "host/me/1") } onChange: {
+        withObservationTracking { _ = presenter.userAttention(account: account) } onChange: {
             changed.withLock { $0 = true }
         }
-        presenter.updateAttention(.init(account: "host/me/1", candidates: [
+        presenter.updateAttention(.init(account: account, candidates: [
             .init(id: "mr", title: "Example", actions: [.init(reason: .drafts, token: "draft")])
         ]))
         #expect(changed.withLock { $0 })
-        let confirmed = presenter.userAttention(account: "host/me/1")
-        presenter.updateAttention(.init(account: "host/me/1", candidates: [
+        let confirmed = presenter.userAttention(account: account)
+        presenter.updateAttention(.init(account: account, candidates: [
             .init(id: "mr", title: "Example", actions: [], working: true)
         ], checkingIDs: ["mr"]))
-        #expect(presenter.userAttention(account: "host/me/1") == confirmed)
-        #expect(!presenter.userAttention(account: "host/me/2").hasAttention)
+        #expect(presenter.userAttention(account: account) == confirmed)
+        #expect(!presenter.userAttention(account: nextSession).hasAttention)
         #expect(!presenter.userAttention(account: nil).hasAttention)
-        presenter.updateAttention(.init(account: "host/me/2"))
-        #expect(!presenter.userAttention(account: "host/me/1").hasAttention)
+        presenter.updateAttention(.init(account: nextSession))
+        #expect(!presenter.userAttention(account: account).hasAttention)
     }
 
     @Test func unchangedActivityDoesNotInvalidateObservationOrRestartTheStage() throws {
@@ -74,11 +76,10 @@ struct BoardAttentionPresenterTests {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
             url: URL(string: "https://host/group/repo/-/merge_requests/2")!)
         item.mergeRequest = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"author","name":"Author"},"title":"Example","web_url":"https://host/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"head","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
-        item.draftCount = 1
         item.drafts = [.init(id: 11, authorID: 7, note: "First reply", discussionID: "thread", position: nil)]
         func input(automatic: Set<Int> = [], checking: Bool = false, busy: Bool = false) -> BoardAttentionPresenter.ProjectionInput {
-            .init(account: "host/me/1", host: "host", username: "me", rows: [
-                .init(row: .init(item: item, latestJob: nil, intents: []), item: item,
+            .init(account: account, host: "host", username: "me", rows: [
+                .init(row: .init(item: item, latestJob: nil, intents: []), item: item.presentingVerifiedAuthorFeedback(),
                     confirmationState: nil, busy: busy, automaticDraftIDs: automatic,
                     checking: checking, automaticIntentIDs: [])
             ], proposals: [], otherTodos: [], inboxLoading: false, assessingMentionNoteIDs: [],
@@ -86,15 +87,15 @@ struct BoardAttentionPresenterTests {
         }
         let presenter = BoardAttentionPresenter()
         presenter.updateAttention(BoardAttentionPresenter.project(input()))
-        let confirmed = presenter.userAttention(account: "host/me/1")
+        let confirmed = presenter.userAttention(account: account)
         #expect(confirmed.hasAttention)
         #expect(!UserAttentionSnapshot(candidates: BoardAttentionPresenter.project(input(automatic: [11])).candidates).hasAttention)
         #expect(!UserAttentionSnapshot(candidates: BoardAttentionPresenter.project(input(busy: true)).candidates).hasAttention)
         item.drafts = [.init(id: 11, authorID: 7, note: "Edited reply", discussionID: "thread", position: nil)]
         presenter.updateAttention(BoardAttentionPresenter.project(input(checking: true)))
-        #expect(presenter.userAttention(account: "host/me/1") == confirmed)
+        #expect(presenter.userAttention(account: account) == confirmed)
         presenter.updateAttention(BoardAttentionPresenter.project(input()))
-        #expect(presenter.userAttention(account: "host/me/1").items.first?.signature != confirmed.items.first?.signature)
+        #expect(presenter.userAttention(account: account).items.first?.signature != confirmed.items.first?.signature)
     }
 
     @Test func executionOwnsProgressWhileReadFailureKeepsTheConfirmedProjection() {

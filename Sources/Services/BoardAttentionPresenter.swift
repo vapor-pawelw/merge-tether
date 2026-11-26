@@ -25,11 +25,11 @@ final class BoardAttentionPresenter {
 
     func updateAttention(_ input: ConfirmedAttentionSnapshot.Input) { confirmedAttention.update(input) }
 
-    func userAttention(account: String?) -> UserAttentionSnapshot {
+    func userAttention(account: GitLabAccountSession?) -> UserAttentionSnapshot {
         confirmedAttention.matches(account: account) ? confirmedAttention.snapshot : .empty
     }
 
-    func confirmedHumanAction(key: String?, account: String?) -> MRHumanAction? {
+    func confirmedHumanAction(key: String?, account: GitLabAccountSession?) -> MRHumanAction? {
         guard confirmedAttention.matches(account: account), let key else { return nil }
         return confirmedAttention.humanActions[key]
     }
@@ -59,12 +59,12 @@ final class BoardAttentionPresenter {
         let row = state.row
         guard !isExecuting(state), !row.hasIndependentStoppedWork else { return [] }
         var failures: [RefreshFailure] = []
-        if let feedback = row.item.authorFeedbackStatus, feedback.isReadOnlyFailure {
+        if let feedback = row.presented.authorFeedbackStatus, feedback.isReadOnlyFailure {
             failures.append(.init(check: .reviewerFeedback, cause: feedback.failureCause, detail: feedback.failureReason))
         }
         if row.item.draftProofRecoveryReadFailure { failures.append(.init(check: .replyDrafts)) }
         if refresh.workflowReadFailed { failures.append(.init(check: .workflow)) }
-        if max(row.item.draftCount, row.item.drafts.count) > 0,
+        if !row.item.drafts.isEmpty,
            refresh.needsAIAssessment, refresh.aiOriginReadFailed { failures.append(.init(check: .commentOrigin)) }
         // A failed catalog cannot confirm a replacement projection for any of its rows.
         if refresh.catalogReadFailed { failures.append(.init(check: .mergeRequests)) }
@@ -73,14 +73,14 @@ final class BoardAttentionPresenter {
 
     static func isRecheckingAttention(row state: RowState, refresh: RefreshState) -> Bool {
         guard !isExecuting(state) else { return false }
-        let item = state.row.item
+        let item = state.row.presented
         return refresh.catalogLoading || refresh.providerChecking || item.aiOriginChecking || item.draftProofRecoveryChecking
             || item.authorFeedbackStatus?.phase == .checking || item.reReviewReadiness == .checking
             || (!item.isAuthored && refresh.reviewingVerifying)
     }
     struct PresentedRow {
         let row: MergeRequestBoardSnapshot.Row
-        let item: MergeRequestAttentionMonitor.Item
+        let item: MergeRequestAttentionMonitor.ItemPresentation
         let confirmationState: MergeRequestAttentionMonitor.ConfirmationState?
         let busy: Bool
         let automaticDraftIDs: Set<Int>
@@ -88,7 +88,7 @@ final class BoardAttentionPresenter {
         let automaticIntentIDs: Set<UUID>
     }
     struct ProjectionInput {
-        let account: String?
+        let account: GitLabAccountSession?
         let host: String
         let username: String
         let rows: [PresentedRow]
@@ -120,8 +120,7 @@ final class BoardAttentionPresenter {
             }
             let drafts = item.drafts.filter { !automaticDrafts.contains($0.id ?? -1) }
             for draft in drafts { add(.drafts, "\(draft.id ?? -1):" + UserAttentionSnapshot.digest(draft.note ?? "")) }
-            if item.draftCount > 0 && item.drafts.isEmpty { add(.drafts, "unread-drafts") }
-            if row.item.requiresCommentReview, row.item.draftCount == 0, row.item.drafts.isEmpty {
+            if row.item.requiresCommentReview, row.item.drafts.isEmpty {
                 add(.reviewConfirmation, "comment-review:" + (row.item.commentReviewSnapshot?.discussionFingerprint ?? "unchecked"))
             }
             if (item.canApprove && !item.approvalWaitingForReadiness) || (item.autoApproveReady && !input.assistantPreparing) {
@@ -134,7 +133,7 @@ final class BoardAttentionPresenter {
             for note in item.feedback { add(.discussion, "\(note.id ?? 0):" + UserAttentionSnapshot.digest(note.body ?? "")) }
             if item.needsDiscussion && item.feedback.isEmpty { add(.discussion, item.reReviewFingerprint ?? "open-discussions") }
             if item.needsChanges { add(.discussion, "changes-requested") }
-            if let feedback = row.item.authorFeedbackStatus, feedback.needsAttention {
+            if let feedback = row.presented.authorFeedbackStatus, feedback.needsAttention {
                 if feedback.phase == .failed { add(.failedWork, "author-feedback:" + feedback.fingerprint) }
                 if row.evidenceMatchesCatalogContext, row.item.isAuthored,
                    let request = row.item.mergeRequest, request.author.username == input.username,
@@ -183,12 +182,10 @@ final class BoardAttentionPresenter {
             candidates.append(candidate)
             if presented.checking { checkingIDs.insert(id) }
             if UserAttentionSnapshot(candidates: [candidate]).hasAttention {
-                var confirmedItem = row.item
-                confirmedItem.humanActionRequired = true
-                let confirmedRow = MergeRequestBoardSnapshot.Row(item: confirmedItem, latestJob: row.latestJob,
-                    intents: row.intents, pipelineEvidence: row.pipelineEvidence,
-                    pipelineEvidenceCheckedAt: row.pipelineEvidenceCheckedAt, catalog: row.catalog,
-                    evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext)
+                var confirmedRow = row
+                var presentation = row.presented
+                presentation.humanActionRequired = true
+                confirmedRow.attentionPresentation = presentation
                 humanActions[id] = MRHumanAction(row: confirmedRow, assistantReady: input.assistantReady,
                     confirmationState: state, automaticallyPublishedDraftIDs: automaticDrafts)
             }

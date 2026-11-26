@@ -143,7 +143,7 @@ final class MRIssueCoordinator {
 
     private func eligibleWork(for target: Target, revision: UInt64, force: Bool) -> Work? {
         guard let current = observed[target], current.revision == revision,
-              inFlight[target] != current.generation, current.request.state == "opened",
+              inFlight[target] != current.generation, current.request.isOpen,
               isCurrentAccount(target, revision), isEligible(current.request, target) else { return nil }
         if !force {
             let timestamp = now()
@@ -233,7 +233,7 @@ final class MRIssueCoordinator {
 
     private func currentRequest(for work: Work) -> ObservedRequest? {
         guard !Task.isCancelled, let current = observed[work.target], current.generation == work.generation,
-              current.request.state == "opened", isCurrentAccount(work.target, current.revision),
+              current.request.isOpen, isCurrentAccount(work.target, current.revision),
               isEligible(current.request, work.target) else { return nil }
         return current
     }

@@ -2,13 +2,90 @@ import Foundation
 import Testing
 @testable import MergeTether
 
+@MainActor
+struct MRAttentionStatusTests {
+    typealias Item = MergeRequestAttentionMonitor.Item
+    typealias Status = MergeRequestAttentionMonitor.Status
+
+    @Test(arguments: Status.Blocker.allCases)
+    func eachOpenBlockerKeepsTheMRInTheOpenSection(_ blocker: Status.Blocker) {
+        var item = makeItem()
+        switch blocker {
+        case .discussion: item.discussionObservation = .unresolvedIncoming
+        case .conflict: item.catalogIssues.insert(.conflict)
+        case .changesRequested: item.catalogIssues.insert(.changesRequested)
+        case .failedPipeline: item.catalogIssues.insert(.failedPipeline)
+        case .pipelineHandoff: item.pipelineHandoffPending = true
+        case .merge: item.manualMergeAvailable = true
+        case .discussionRecheck: item.requiresDiscussionRecheck = true
+        case .reReviewUnconfirmed: item.reReviewUnconfirmed = true
+        case .feedback: item.feedback = [testFeedbackNote()]
+        case .reReviewReadiness: item.reReviewReadiness = .failed
+        case .feedbackAssessment:
+            item.authorFeedbackStatus = .init(head: "head", fingerprint: "text", phase: .failed)
+        }
+        #expect(item.status.primary == .actionRequired)
+        #expect(item.status.blockers == [blocker])
+        #expect(item.needsAttention && !item.needsConfirmation && item.section == .open)
+    }
+
+    @Test(arguments: [false, true])
+    func changesRequestedSupersedeApprovalAndDraftPlacement(_ draft: Bool) {
+        var item = makeItem()
+        item.draftFromTodo = draft
+        item.approvalObservation = .manualFallback
+        #expect(item.status.primary == .confirmationRequired)
+        #expect(item.section == (draft ? .draftMergeRequests : .unpublishedComments))
+
+        item.catalogIssues.insert(.changesRequested)
+        #expect(item.status.primary == .actionRequired)
+        #expect(!item.canApprove && !item.autoApproveReady && !item.needsConfirmation)
+        #expect(item.section == (draft ? .draftMergeRequests : .open))
+    }
+
+    @Test(arguments: Status.Confirmation.allCases)
+    func confirmationsRetainTheExistingSectionAndAttentionRules(_ confirmation: Status.Confirmation) {
+        var item = makeItem()
+        switch confirmation {
+        case .commentReview: item.requiresCommentReview = true
+        case .drafts: item.drafts = attentionFixtureDrafts(1)
+        case .approval: item.approvalObservation = .manualFallback
+        case .reReview:
+            item.reReviewReadiness = .manual
+            item.reReviewFeedbackChecked = true
+        }
+        #expect(item.status.confirmations == [confirmation])
+        #expect(item.needsAttention && item.needsConfirmation)
+        #expect(item.section == (confirmation == .reReview ? .open : .unpublishedComments))
+    }
+
+    @Test(arguments: [false, true])
+    func approvalReadinessDoesNotRequestConfirmationWhenItStillWaitsOrIsAutomatic(_ automatic: Bool) {
+        var item = makeItem()
+        item.approvalObservation = .checked(manualVerdictPermitsApproval: true,
+            automaticGatePassed: automatic, awaitsDiscussionReadiness: true)
+        #expect(item.status.primary == (automatic ? .automaticApproval : .waitingForApprovalReadiness))
+        #expect(item.canApprove == !automatic && item.autoApproveReady == automatic)
+        #expect(!item.needsAttention && !item.needsConfirmation && item.section == .open)
+    }
+
+    private func makeItem() -> Item {
+        .init(id: .init(projectID: 1, iid: 2), title: "Example",
+            url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!)
+    }
+
+    private func testFeedbackNote() -> GitLabMergeRequestDiscussion.Note {
+        .init(id: 32, author: nil, system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "Please check this change.")
+    }
+}
+
 struct AttentionAutomationTests {
     @MainActor @Test(arguments: [AuthorFeedbackPolicy.State.ready, .disabled])
     func verifiedCommentsDoNotDismissAnIndependentGitLabChangeRequest(_ state: AuthorFeedbackPolicy.State) throws {
         var original = try item()
         let request = try #require(original.mergeRequest)
-        original.needsChanges = true
-        original.needsDiscussion = true
+        original.catalogIssues.insert(.changesRequested)
+        original.discussionObservation = .unresolvedIncoming
         original.observedDiscussionFingerprint = "current"
         original.feedback = [.init(id: 9, author: .init(id: 8, username: "alice", name: nil),
             system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "Please cover retries")]
@@ -19,7 +96,7 @@ struct AttentionAutomationTests {
             addressedNoteIDs: [9])
         let visible = original.presentingVerifiedAuthorFeedback()
         #expect(visible.needsChanges && visible.feedback.isEmpty && !visible.needsDiscussion)
-        let row = MergeRequestBoardSnapshot.Row(item: visible, latestJob: nil, intents: [])
+        let row = MergeRequestBoardSnapshot.Row(item: original, latestJob: nil, intents: [], attentionPresentation: visible)
         let action = try #require(MRHumanAction(row: row, assistantReady: true))
         #expect(action.action == .reviewFeedback)
         #expect(action.explanation == "GitLab reports requested changes. Review the current feedback.")
@@ -40,7 +117,7 @@ struct AttentionAutomationTests {
     @Test(arguments: [AutomationPackageDecision.undecided, .disabled])
     func permissionsWithoutConsentCannotHideManualAttentionReasons(_ decision: AutomationPackageDecision) throws {
         var original = try item()
-        original.hasConflict = true
+        original.catalogIssues.insert(.conflict)
         var configuration = AutomationSettings()
         configuration.conflictTasksEnabled = true
         configuration.packageDecision = decision
@@ -49,7 +126,7 @@ struct AttentionAutomationTests {
 
     @Test func conflictVisibilityFollowsScopeAndSettingWithoutLosingTheReason() throws {
         var original = try item()
-        original.hasConflict = true
+        original.catalogIssues.insert(.conflict)
         var config = AutomationSettings()
         config.packageDecision = .enabled
         config.scope.mode = .selected
@@ -67,8 +144,8 @@ struct AttentionAutomationTests {
 
     @Test func mixedReasonsKeepDraftsAndFailedAutomationVisible() throws {
         var original = try item()
-        original.hasConflict = true
-        original.draftCount = 2
+        original.catalogIssues.insert(.conflict)
+        original.drafts = attentionFixtureDrafts(2)
         original.reReviewUnconfirmed = true
         var config = AutomationSettings()
         config.packageDecision = .enabled
@@ -83,8 +160,8 @@ struct AttentionAutomationTests {
 
     @Test func automaticFeedbackHidesOnlyCoveredDiscussionReasons() throws {
         var original = try item()
-        original.needsDiscussion = true
-        original.needsChanges = true
+        original.discussionObservation = .unresolvedIncoming
+        original.catalogIssues.insert(.changesRequested)
         original.feedback = [.init(id: 9, author: .init(id: 8, username: "alice", name: "Alice"),
                                    system: false, resolvable: true, resolved: false, resolvedBy: nil)]
         var config = AutomationSettings()
@@ -114,7 +191,7 @@ struct AttentionAutomationTests {
         let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: object))
         let head = try #require(request.sha)
         original.mergeRequest = request
-        original.needsChanges = true
+        original.catalogIssues.insert(.changesRequested)
         original.changeRequestReviewers = scenario == "reviewers-unavailable" ? nil
             : scenario == "reviewers-empty" ? [] : scenario == "other-reviewer" ? ["alice", "bob"] : ["alice"]
         original.reReviewRequested = true
@@ -130,7 +207,7 @@ struct AttentionAutomationTests {
             pendingDraftCount: scenario == "pending-draft" ? 1 : 0,
             followUpNoteIDs: scenario == "follow-up" ? [9] : [],
             replyNoteIDs: scenario == "reply" ? [9] : [], addressedNoteIDs: [9])
-        if scenario == "draft" { original.draftCount = 1 }
+        if scenario == "draft" { original.drafts = attentionFixtureDrafts(1) }
         if scenario == "ignored" { original.authorFeedbackStatus?.ignoredNoteIDs = [99] }
         if scenario == "uncovered" {
             original.feedback = [.init(id: 40, author: .init(id: 9, username: "bob", name: nil),
@@ -149,26 +226,33 @@ struct AttentionAutomationTests {
         #expect(visible.needsChanges == (scenario != "verified"))
         #expect(visible.needsAttention == (scenario != "verified"))
         #expect(original.needsChanges)
-        #expect(visible.mergeRequest?.detailedMergeStatus == "requested_changes")
+        #expect(visible.mergeRequest?.detailedMergeStatus == .requestedChanges)
         let serverStatus = AuthoredMergeRequestStatus(request: request, approvals: nil, discussionsResolved: true,
             projectRequiresResolvedDiscussions: true, autoMergeEnabled: true)
         #expect(serverStatus.blockers.contains(.changesRequested))
-        #expect(!serverStatus.mayAutoMerge && !visible.canOfferMerge(using: serverStatus))
+        #expect(!serverStatus.mayAutoMerge && !visible.evidence.canOfferMerge(using: serverStatus))
     }
 
     @Test func pipelineAutomationPreservesOwnershipConfirmationAndFailures() throws {
         var original = try item()
-        original.failedPipeline = true
+        original.catalogIssues.insert(.failedPipeline)
         var config = AutomationSettings()
         config.packageDecision = .enabled
         config.workflowRules[.pipelineFailure].mode = .assistant
         #expect(original.requiringUserAttention(automation: config, target: target).failedPipeline)
         #expect(!original.requiringUserAttention(automation: config, target: target, pipelineOwnedAutomatically: true).needsAttention)
-        original.needsPipelineHandoff = true
+        original.pipelineHandoffPending = true
         #expect(original.requiringUserAttention(automation: config, target: target).failedPipeline)
-        original.needsPipelineHandoff = false
+        original.pipelineHandoffPending = false
         #expect(original.requiringUserAttention(automation: config, target: target, failedTriggers: [.pipelineFailure]).failedPipeline)
         config.workflowRules[.pipelineFailure].mode = .off
         #expect(original.requiringUserAttention(automation: config, target: target).failedPipeline)
+    }
+}
+
+
+func attentionFixtureDrafts(_ count: Int) -> [GitLabDraftNote] {
+    (0..<count).map { index in
+        .init(id: index + 1, authorID: 3, note: "Pending comment \(index + 1)", discussionID: nil, position: nil)
     }
 }

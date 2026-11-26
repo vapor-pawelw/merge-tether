@@ -9,7 +9,7 @@ struct MRCatalogStalenessTests {
     @Test func readyMergeActionMustRemainInInboxWhenOwnViewIsReadOnly() {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 1), title: "Ready",
             url: URL(string: "https://gitlab.example.org/g/p/-/merge_requests/1")!)
-        item.needsMerge = true
+        item.manualMergeAvailable = true
         #expect(item.needsAttention)
     }
 
@@ -276,7 +276,7 @@ struct MRCatalogStalenessTests {
         try #require(!(path == "authored" ? authored.isLoading : h.monitor.isLoading))
         let latest = try #require(h.settings.mrLifecycleLedger.request(for: target))
         if state == "draft" { #expect(latest.draft == true) }
-        else { #expect(latest.state == "merged") }
+        else { #expect(latest.state == .merged) }
         #expect(h.settings.mrLifecycleLedger.takeTransitions(host: host, username: "me").map(\.kind.rawValue) == [state])
     }
 
@@ -463,7 +463,7 @@ struct MRCatalogStalenessTests {
         #expect(h.monitor.currentOpenItems.first { $0.id.iid == freshID }?.title == "Fresh title")
         if ownedFails {
             let retained = try #require(h.monitor.currentOpenItems.first { $0.id.iid == 1 })
-            #expect(retained.mergeRequest?.state == "opened")
+            #expect(retained.mergeRequest?.state == .opened)
             #expect(retained.url.absoluteString == "https://gitlab.example.org/g/p/-/merge_requests/1")
             let calls = h.gitlab.text("calls")
             #expect(calls.split(separator: "\n").contains("/projects/1/merge_requests/1"))
@@ -490,7 +490,7 @@ struct MRCatalogStalenessTests {
         try await h.poll()
         #expect(!h.monitor.hasError)
         #expect(h.monitor.currentOpenItems.isEmpty)
-        #expect(h.settings.mrLifecycleLedger.request(for: target)?.state == state)
+        #expect(h.settings.mrLifecycleLedger.request(for: target)?.state == .init(rawValue: state))
         #expect(h.settings.automation.scope[target] == .active)
         #expect(h.settings.automation.scope.isManaged(target))
         let restartedSettings = SettingsManager(defaults: h.defaults)
@@ -508,7 +508,7 @@ struct MRCatalogStalenessTests {
         try await h.poll()
         // The exact endpoint is deliberately unavailable in this fixture.
         #expect(h.monitor.hasError)
-        #expect(h.monitor.currentOpenItems.contains { $0.id.iid == 1 && $0.mergeRequest?.state == "opened" })
+        #expect(h.monitor.currentOpenItems.contains { $0.id.iid == 1 && $0.mergeRequest?.state == .opened })
         #expect(h.settings.mrLifecycleLedger.takeTransitions(host: host, username: "me").isEmpty)
     }
 
@@ -550,7 +550,7 @@ struct MRCatalogStalenessTests {
             project: .init(id: 1, nameWithNamespace: "Group / Project", pathWithNamespace: "g/p"),
             author: .init(id: 9, username: "alice", name: "Alice", avatarURL: nil),
             target: .init(id: 1, iid: 1, title: "Fix", state: "opened", draft: false, workInProgress: false))
-        let inbox = InboxSnapshot(todos: [todo], attention: [item], host: host, username: "me")
+        let inbox = InboxSnapshot(todos: [todo], attention: [item.presentingVerifiedAuthorFeedback()], host: host, username: "me")
         #expect(inbox.attention.first?.hasOtherUnresolvedDiscussions == true)
         #expect(inbox.attention.first?.needsDiscussion == true)
 

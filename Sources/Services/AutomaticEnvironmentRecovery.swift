@@ -54,7 +54,7 @@ final class AutomaticEnvironmentRecovery {
                 guard let next = settings.assistantHandoffs.firstIndex(where: { $0.id == replacement.id }) else { continue }
                 settings.assistantHandoffs[next].environmentRecoveryOf = original.id
                 settings.save()
-                let target = MRAutomationScope.Target(host: host, username: username,
+                let target = MRAutomationScope.Target.mergeRequest(host: host, username: username,
                     projectID: original.key.work.projectID, iid: original.key.work.iid)
                 settings.recordAutomationEvent(target: target, action: .retry, origin: .automatic, state: .queued,
                     message: String(localized: .AutomationHistory.automationHistoryEnvironmentRecoveryQueued),
@@ -71,8 +71,7 @@ final class AutomaticEnvironmentRecovery {
     private func eligible(_ original: AssistantAutomationRunner.Handoff) -> Bool {
         let configuration = settings.automation
         let project = original.mergeRequestURL?.gitLabProjectPath ?? ""
-        let target = MRAutomationScope.Target(host: original.key.work.host, username: original.key.username,
-            projectID: original.key.work.projectID, iid: original.key.work.iid)
+        let target = original.key.automationTarget
         guard configuration.hasAutomaticActionConsent, configuration.allowFollowUpPush,
               configuration.assistant == original.key.assistant, configuration.scope.resolve(target).active,
               original.key.access != .configuredTools || configuration.permitsAssistantTools(project: project),
@@ -99,7 +98,7 @@ final class AutomaticEnvironmentRecovery {
         return snapshot.user.username == original.key.username && request.author.id == snapshot.user.id
             && request.projectID == original.key.work.projectID && request.iid == original.key.work.iid
             && request.webURL.isGitLabMergeRequest(host: original.key.work.host, iid: request.iid)
-            && request.state == "opened"
+            && request.isOpen
             && configuration.scope.permits(request, host: original.key.work.host, username: original.key.username)
             && request.sha != nil && request.sha == original.expectedHeadSHA
             && originPermission(for: original, request: request)

@@ -5,6 +5,7 @@ struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, Additio
     let item: MergeRequestAttentionMonitor.Item
     let monitor: TodoMonitorService
     var evidenceMatchesCatalogContext = true
+    var projectedControls: MRManualMergePresentation? = nil
     var actionsBlocked = false
     var onReviewFeedback: (() -> Void)? = nil
     /// Cards keep the longer scope explanation in the button help; Details shows it inline.
@@ -40,7 +41,7 @@ struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, Additio
     @State private var resolutionMessage: String?
 
     init(item: MergeRequestAttentionMonitor.Item, monitor: TodoMonitorService, evidenceMatchesCatalogContext: Bool = true,
-         actionsBlocked: Bool = false, onReviewFeedback: (() -> Void)? = nil, showsExplanations: Bool = true,
+         actionsBlocked: Bool = false, projectedControls: MRManualMergePresentation? = nil, onReviewFeedback: (() -> Void)? = nil, showsExplanations: Bool = true,
          showsReplySources: Bool = true,
          showsRecoveryActions: Bool = true, showsFeedbackVerification: Bool = true, showsStatusCard: Bool = false,
          textFont: Font = .subheadline, coveredBlockers: Set<MergeRequestBlocker> = [],
@@ -51,7 +52,7 @@ struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, Additio
          @ViewBuilder additionalActions: @escaping (Bool) -> AdditionalActions) {
         self.item = item; self.monitor = monitor
         self.evidenceMatchesCatalogContext = evidenceMatchesCatalogContext
-        self.actionsBlocked = actionsBlocked; self.onReviewFeedback = onReviewFeedback
+        self.actionsBlocked = actionsBlocked; self.projectedControls = projectedControls; self.onReviewFeedback = onReviewFeedback
         self.showsExplanations = showsExplanations; self.showsReplySources = showsReplySources
         self.showsRecoveryActions = showsRecoveryActions
         self.showsFeedbackVerification = showsFeedbackVerification
@@ -65,29 +66,23 @@ struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, Additio
         self.statusTrailer = statusTrailer; self.additionalActions = additionalActions
     }
 
-    private var status: AuthoredMergeRequestStatus? {
-        guard evidenceMatchesCatalogContext, monitor.authoredMergeRequests.hasSyncedCurrentCatalog,
-              let request = item.mergeRequest, request.webURL == item.url else { return nil }
-        return monitor.authoredMergeRequests.requests.first { $0.matchesCurrentRequest(request) }
+    private var controls: MRManualMergePresentation {
+        if let projectedControls { return projectedControls }
+        let candidate = MRManualMergePresentation.candidate(for: item, in: monitor.authoredMergeRequests.requests)
+        return .init(item: item, candidate: candidate, evidenceMatchesCatalogContext: evidenceMatchesCatalogContext,
+            hasCurrentCatalog: monitor.authoredMergeRequests.hasSyncedCurrentCatalog)
     }
+    private var status: AuthoredMergeRequestStatus? { controls.status }
     private var owned: Bool {
-        item.isAuthored && item.mergeRequest?.state == "opened" && item.mergeRequest?.author.username == monitor.glab.currentUsername
+        item.isAuthored && item.mergeRequest?.state == .opened && item.mergeRequest?.author.username == monitor.glab.currentUsername
     }
-    private var blocker: ManualMergeBlocker? {
-        guard evidenceMatchesCatalogContext else { return .context }
-        guard monitor.authoredMergeRequests.hasSyncedCurrentCatalog else { return .checking }
-        if status == nil, let request = item.mergeRequest,
-           monitor.authoredMergeRequests.requests.contains(where: {
-               $0.request.projectID == request.projectID && $0.request.iid == request.iid
-           }) { return .context }
-        return item.manualMergeBlocker(using: status)
-    }
+    private var blocker: ManualMergeBlocker? { controls.blocker }
     private var state: MergeSubmissionState { result ?? status?.submissionState ?? .none }
     private var displayedState: MergeSubmissionState { result ?? status?.displayedSubmissionState ?? .none }
     private var submissionTitle: LocalizedStringResource? {
         displayedState == highlightedSubmission ? nil : displayedState.title
     }
-    private var hasDiscussionBlock: Bool { status?.blockers.contains(.discussions) == true || item.mergeRequest?.blockingDiscussionsResolved == false }
+    private var hasDiscussionBlock: Bool { controls.hasDiscussionBlock }
     private var shownBlocker: ManualMergeBlocker? {
         if case .prerequisite(let reason) = blocker, coveredBlockers.contains(reason) { return nil }
         return blocker
@@ -100,21 +95,17 @@ struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, Additio
     private var directMergeAction: MergeSubmissionAction? {
         if case let .merge(action) = pendingAction { return action }
         let canConfirmChangedAction = state == .changed && status?.action != attemptedAction
-        guard owned, state == .none || canConfirmChangedAction, blocker == nil, !hidesActions,
-              item.reReviewReadiness?.hasConcreteConcerns != true else { return nil }
-        return status?.action
+        guard owned, state == .none || canConfirmChangedAction, !hidesActions else { return nil }
+        return controls.action
     }
     private var needsGitLabCheck: Bool {
         displayedState == .uncertain || displayedState == .changed || status?.action == nil && status != nil
     }
-    private var feedbackRecovery: ManualFeedbackRecovery? {
-        guard evidenceMatchesCatalogContext, monitor.authoredMergeRequests.hasSyncedCurrentCatalog else { return nil }
-        return item.manualFeedbackRecovery()
-    }
+    private var feedbackRecovery: ManualFeedbackRecovery? { controls.feedbackRecovery }
     private var feedbackRecheckRoute: ManualFeedbackRecheckRoute {
         guard let request = item.mergeRequest, let host = monitor.glab.resolvedHost,
               let username = monitor.glab.currentUsername else { return .review }
-        let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
         return .init(backgroundCheckAllowed: AuthorFeedbackCoordinator.permitsBackgroundCheck(for: request,
             configuration: monitor.settings.automation, host: host, username: username,
             mergeOptedIn: monitor.settings.autoMergePreference(for: target) == .on))

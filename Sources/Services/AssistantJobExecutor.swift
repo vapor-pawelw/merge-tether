@@ -67,8 +67,7 @@ enum AssistantJobExecutor {
             throw ExecutionError.wrongAccount
         }
         let accountRevision = glab.accountRevision
-        let feedbackTarget = MRAutomationScope.Target(host: handoff.key.work.host, username: handoff.key.username,
-            projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
+        let feedbackTarget = handoff.key.automationTarget
         let followUpNotes = handoff.selectedFollowUpNotes
         @MainActor @Sendable func stopIfFeedbackResolved(_ request: GitLabMergeRequest) async throws {
             guard !followUpNotes.isEmpty else { return }
@@ -80,7 +79,7 @@ enum AssistantJobExecutor {
         let user = try await glab.fetchAuthenticatedUser(host: handoff.key.work.host, expectedUsername: handoff.key.username)
         let request = try await glab.fetchMergeRequest(projectID: handoff.key.work.projectID,
                                                       iid: handoff.key.work.iid, host: handoff.key.work.host)
-        guard request.state == "opened" else { throw ExecutionError.inactiveMergeRequest }
+        guard request.isOpen else { throw ExecutionError.inactiveMergeRequest }
         if request.sha != handoff.expectedHeadSHA { try await stopIfFeedbackResolved(request) }
         try validateHeadSnapshot(expected: handoff.expectedHeadSHA, actual: request.sha)
         try validateReviewOwnership(isReview: handoff.workflow == .review || handoff.reviewModel != nil,
@@ -444,7 +443,7 @@ enum AssistantJobExecutor {
             let discussions = try await glab.fetchMergeRequestDiscussions(projectID: work.projectID, iid: work.iid, host: work.host)
             let drafts = try await glab.fetchOwnDraftNotes(projectID: work.projectID, iid: work.iid, host: work.host, userID: user.id)
             guard current(), authenticated == user, request.projectID == work.projectID, request.iid == work.iid,
-                  request.state == "opened", request.author.id != user.id, request.sha == expectedHead,
+                  request.isOpen, request.author.id != user.id, request.sha == expectedHead,
                   request.webURL == handoff.mergeRequestURL,
                   verdict.discussionFingerprint == ReviewVerdict.fingerprint(discussions),
                   verdict.semanticContextFingerprint == nil || verdict.semanticContextFingerprint == request.semanticContextFingerprint,
@@ -489,7 +488,7 @@ enum AssistantJobExecutor {
             guard current(), authenticated == user, live.projectID == request.projectID, live.iid == request.iid,
                   live.webURL == request.webURL, live.sourceProjectID == request.sourceProjectID,
                   live.sourceBranch == request.sourceBranch, live.targetProjectID == request.targetProjectID,
-                  live.targetBranch == request.targetBranch, live.state == "opened", let head = live.sha, !head.isEmpty,
+                  live.targetBranch == request.targetBranch, live.isOpen, let head = live.sha, !head.isEmpty,
                   live.sha == request.sha || handoff.followUpPushAllowed == true || handoff.allowsPush else { return }
             let drafts = try await glab.fetchOwnDraftNotes(projectID: work.projectID, iid: work.iid, host: work.host, userID: user.id)
             guard current() else { return }
@@ -532,8 +531,7 @@ enum AssistantJobExecutor {
         let previous = settings.assistantHandoffs[index].feedbackDecisionRevision
         settings.assistantHandoffs[index].feedbackDecisionRevision = revision
         guard previous != revision else { return }
-        let target = MRAutomationScope.Target(host: handoff.key.work.host, username: handoff.key.username,
-            projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
+        let target = handoff.key.automationTarget
         let notes = handoff.verifiedFeedbackNotes ?? [:]
         let corresponding = settings.authorFeedbackAttempts.filter {
             $0.target == target && notes[$0.noteID] == $0.revision && $0.decisionRevision == previous
@@ -560,8 +558,7 @@ enum AssistantJobExecutor {
     }
 
     static func validateIgnoredTarget(_ handoff: AssistantAutomationRunner.Handoff, ignored: Set<MRAutomationScope.Target>) throws {
-        let target = MRAutomationScope.Target(host: handoff.key.work.host, username: handoff.key.username,
-                                              projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
+        let target = handoff.key.automationTarget
         guard !ignored.contains(target) else { throw ExecutionError.disabledPermission }
     }
 
@@ -629,9 +626,9 @@ enum AssistantJobExecutor {
         }
     }
 
-    static func validateMergeRequestContext(state: String, head: String?) throws -> String {
-        if state == "closed" || state == "merged" { throw ExecutionError.inactiveMergeRequest }
-        guard state == "opened", let head, GlabService.isFullGitSHA(head) else { throw ExecutionError.contextUnavailable }
+    static func validateMergeRequestContext(state: GitLabMergeRequestState, head: String?) throws -> String {
+        if state == .closed || state == .merged { throw ExecutionError.inactiveMergeRequest }
+        guard state == .opened, let head, GlabService.isFullGitSHA(head) else { throw ExecutionError.contextUnavailable }
         return head
     }
 

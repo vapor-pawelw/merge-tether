@@ -108,7 +108,7 @@ final class MRFeedbackLaunchCoordinator {
         AssistantAutomationRunner.feedbackDecisionRevision(work: work(account, id), username: account.username, settings: settings)
     }
     private func noteIDs(for item: Item, account: Account) -> [Int] {
-        let notes = TodoAutomationEvent.feedbackWithoutTodo(item.feedback, todos: inbox.allTodos,
+        let notes = TodoAutomationEvent.feedbackWithoutTodo(item.verifiedFeedback.outstandingNotes, todos: inbox.allTodos,
             host: account.host, projectID: item.id.projectID, iid: item.id.iid, username: account.username).compactMap(\.id)
         var manualDecisions: Set<Int> = []
         if let status = item.authorFeedbackStatus, let request = item.authoredRequest,
@@ -124,7 +124,7 @@ final class MRFeedbackLaunchCoordinator {
     }
     func automaticallyHandlesFeedback(_ item: Item) -> Bool {
         guard settings.automaticWritesAllowed, let account, let request = item.authoredRequest,
-              request.state == "opened", request.author.username == account.username,
+              request.isOpen, request.author.username == account.username,
               item.url.isGitLabMergeRequest(host: account.host, iid: item.id.iid),
               settings.effectiveAutomationScope.permits(request, host: account.host, username: account.username) else { return false }
         let rule = settings.automation.workflowRules[.newDiscussion], feedback = settings.automation.authorFeedback

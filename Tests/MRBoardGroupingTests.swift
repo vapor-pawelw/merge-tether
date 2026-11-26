@@ -103,7 +103,7 @@ struct MRBoardGroupingTests {
         let rows = try (1...4).map { iid in
             let request = try request(iid, draft: false)
             let item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: iid),
-                title: request.title, url: request.webURL, needsDiscussion: iid != 4, mergeRequest: request)
+                title: request.title, url: request.webURL, discussionObservation: iid != 4 ? .unresolvedIncoming : .resolved, mergeRequest: request)
             return MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
         }
         let entries = CommandCenterBoardView.laneEntries(rows, automationOffExpanded: expanded,
@@ -126,7 +126,7 @@ struct MRBoardGroupingTests {
         let rows = (1...5).map { iid in
             let item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: iid),
                 title: "MR", url: URL(string: "https://\(host)/g/p/-/merge_requests/\(iid)")!,
-                needsDiscussion: iid == 3 || iid == 4)
+                discussionObservation: iid == 3 || iid == 4 ? .unresolvedIncoming : .resolved)
             return MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [],
                 newReviewAssignedAt: iid == 1 || iid == 4 ? Date() : nil)
         }

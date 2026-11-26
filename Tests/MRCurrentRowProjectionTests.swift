@@ -16,9 +16,10 @@ struct MRCurrentRowProjectionTests {
         }
         let checked = try request()
         var evidence = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 42), title: checked.title,
-            url: checked.webURL, draftCount: 1, requiresCommentReview: true, automaticDraftIDs: [7],
-            observedDiscussionFingerprint: "conversation-a", canApprove: true, autoApproveReady: true,
-            needsMerge: true, canConfirmReReview: true, mergeRequest: checked, isAuthored: true)
+            url: checked.webURL, requiresCommentReview: true, drafts: attentionFixtureDrafts(1), automaticDraftIDs: [7],
+            observedDiscussionFingerprint: "conversation-a",
+            approvalObservation: .manualFallback,
+            manualMergeAvailable: true, reReviewReadiness: .manual, reReviewFeedbackChecked: true, mergeRequest: checked, isAuthored: true)
         evidence.drafts = [.init(id: 7, authorID: 3, note: "Private A", discussionID: nil, position: nil)]
         switch change {
         case "same": data["head_pipeline"] = ["id": 9, "status": "success"]
@@ -44,9 +45,10 @@ struct MRCurrentRowProjectionTests {
         #expect(projection.item.mergeRequest?.semanticContextFingerprint == checked.semanticContextFingerprint)
         #expect(projection.item.mergeRequest?.sha == "a")
         #expect(projection.item.mergeRequest?.draft == false)
-        #expect(projection.item.canApprove == (change == "same"))
-        #expect(projection.item.autoApproveReady == (change == "same"))
-        #expect(projection.item.canConfirmReReview == (change == "same"))
+        #expect(!projection.item.canApprove)
+        #expect(projection.item.approvalObservation == (change == "same" ? .manualFallback : .unchecked))
+        #expect(!projection.item.autoApproveReady)
+        #expect(!projection.item.canConfirmReReview)
         #expect(projection.item.needsMerge == (change == "same"))
         #expect(projection.item.automaticDraftIDs == (change == "same" ? [7] : []))
         #expect(projection.item.requiresDiscussionRecheck == (change != "same"))

@@ -17,35 +17,35 @@ struct InboxSnapshotTests {
         .init(id: .init(projectID: 1, iid: 42), title: "Fix", url: URL(string: "https://\(host)/g/p/-/merge_requests/42")!)
     }
     private func snapshot(_ todos: [Todo], _ items: [MergeRequestAttentionMonitor.Item]) -> InboxSnapshot {
-        .init(todos: todos, attention: items, host: host, username: "me")
+        .init(todos: todos, attention: items.map { .init(evidence: $0, verifiesFeedback: false) }, host: host, username: "me")
     }
 
     @Test func samePipelineOrConflictIsCountedOnlyAsItsGitLabTodo() {
         var item = attention()
-        item.failedPipeline = true
-        item.hasConflict = true
+        item.catalogIssues.insert(.failedPipeline)
+        item.catalogIssues.insert(.conflict)
         let result = snapshot([todo(action: .buildFailed), todo(2, action: .unmergeable)], [item])
         #expect(result.count == 2)
         #expect(result.attention.isEmpty)
         #expect(item.failedPipeline && item.hasConflict)
     }
 
-    @Test func draftsApprovalAndOtherActionsSurviveAnUnrelatedTodoOnTheSameMR() {
+    @Test func draftsAndUncertainReReviewSurviveAnUnrelatedTodoOnTheSameMR() {
         var item = attention()
-        item.hasConflict = true
-        item.draftCount = 2
-        item.canApprove = true
+        item.catalogIssues.insert(.conflict)
+        item.drafts = attentionFixtureDrafts(2)
+        item.approvalObservation = .manualFallback
         item.reReviewUnconfirmed = true
         let result = snapshot([todo(action: .unmergeable)], [item])
         #expect(result.count == 2)
         let visible = result.attention.first
         #expect(visible?.hasConflict == false)
-        #expect(visible?.draftCount == 2 && visible?.canApprove == true && visible?.reReviewUnconfirmed == true)
+        #expect(visible?.draftCount == 2 && visible?.canApprove == false && visible?.reReviewUnconfirmed == true)
     }
 
     @Test func onlyCoveredFeedbackDisappearsAndMarkingTodoReadRevealsItsReason() {
         var item = attention()
-        item.needsDiscussion = true
+        item.discussionObservation = .unresolvedIncoming
         item.feedback = [42, 43].map {
             .init(id: $0, author: .init(id: 7, username: "reviewer", name: "Reviewer"), system: false,
                   resolvable: true, resolved: false, resolvedBy: nil)
@@ -60,7 +60,7 @@ struct InboxSnapshotTests {
 
     @Test func targetIdentityIncludesHostProjectAndTargetType() {
         var item = attention()
-        item.hasConflict = true
+        item.catalogIssues.insert(.conflict)
         for other in [todo(action: .unmergeable, projectID: 9), todo(action: .unmergeable, iid: 9),
                       todo(action: .unmergeable, host: "other.example.org"), todo(action: .unmergeable, targetType: .issue)] {
             #expect(snapshot([other], [item]).attention.first?.hasConflict == true)
@@ -69,9 +69,9 @@ struct InboxSnapshotTests {
 
     @Test func notificationDoesNotHidePipelineOwnershipConfirmationOrUnverifiedThreads() {
         var item = attention()
-        item.failedPipeline = true
-        item.needsPipelineHandoff = true
-        item.needsDiscussion = true
+        item.catalogIssues.insert(.failedPipeline)
+        item.pipelineHandoffPending = true
+        item.discussionObservation = .unresolvedIncoming
         let result = snapshot([todo(action: .buildFailed), todo(2, action: .marked)], [item])
         #expect(result.attention.first?.failedPipeline == false)
         #expect(result.attention.first?.needsPipelineHandoff == true && result.attention.first?.needsDiscussion == true)
@@ -79,7 +79,7 @@ struct InboxSnapshotTests {
 
     @Test func approvalTodoKeepsItsVerifiedApproveActionWithoutAnExtraAttentionCard() {
         var item = attention()
-        item.canApprove = true
+        item.approvalObservation = .manualFallback
         let result = snapshot([todo(action: .approvalRequired)], [item])
         #expect(result.count == 1 && result.attention.isEmpty)
         #expect(result.todoApprovals[1] == item.id)
@@ -89,9 +89,9 @@ struct InboxSnapshotTests {
 
     @Test func submittedReviewCoversTheSameRequestedChangesButKeepsUnpublishedDrafts() {
         var item = attention()
-        item.needsChanges = true
-        item.needsDiscussion = true
-        item.draftCount = 1
+        item.catalogIssues.insert(.changesRequested)
+        item.discussionObservation = .unresolvedIncoming
+        item.drafts = attentionFixtureDrafts(1)
         item.feedback = [.init(id: 42, author: .init(id: 7, username: "reviewer", name: "Reviewer"),
                                system: false, resolvable: true, resolved: false, resolvedBy: nil)]
         let result = snapshot([todo(action: .reviewSubmitted)], [item])

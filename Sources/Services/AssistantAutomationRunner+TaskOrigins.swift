@@ -70,8 +70,7 @@ extension AssistantAutomationRunner {
         }
         if job.workflow == .followUp {
             let rule = configuration.authorFeedback
-            let target = MRAutomationScope.Target(host: job.key.work.host, username: job.key.username,
-                projectID: job.key.work.projectID, iid: job.key.work.iid)
+            let target = job.key.automationTarget
             return rule.isEnabled && rule.runner == .assistant && rule.isConfigured && rule.includes(project: project)
                 && (request.map { configuration.scope.permits($0, host: target.host, username: target.username) } ?? true)
         }

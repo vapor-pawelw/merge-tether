@@ -756,8 +756,7 @@ enum TodoAutomationEvent: String, Sendable {
     case authorFeedback = "author_feedback"
 
     init?(todo: Todo, username: String) {
-        guard todo.targetType == .mergeRequest,
-              todo.target.state == "opened",
+        guard todo.mergeRequestState == .opened,
               todo.author.username != username
         else { return nil }
 

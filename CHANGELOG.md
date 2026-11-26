@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Match Mac card actions on iPhone and iPad when drafts need review or unresolved feedback blocks a merge.
+
 - Size the ChatGPT and Claude action icons to fit native menus, including **Run review**.
 
 - Option-click a Mac board or Inbox card to open it in GitLab. The card menus show the gesture next to Open in GitLab.

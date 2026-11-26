@@ -146,7 +146,7 @@ struct MRFeedbackLaunchCoordinatorTests {
         await f.owner.runAttentionFeedback(for: old)
         #expect(f.owner.failures.isEmpty && f.settings.assistantHandoffs.isEmpty)
         #expect(f.owner.action(for: old) == .ready(.assistant))
-        var current = old; current.feedback = []; current.needsDiscussion = false
+        var current = old; current.feedback = []; current.discussionObservation = .resolved
         #expect(f.owner.action(for: current) == nil)
     }
 
@@ -299,7 +299,7 @@ struct MRFeedbackLaunchCoordinatorTests {
         func item() throws -> MergeRequestAttentionMonitor.Item {
             let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: gitlab.data("discussions"))
             return .init(id: .init(projectID: 1, iid: 2), title: request.title, url: request.webURL,
-                observedDiscussionFingerprint: ReviewVerdict.fingerprint(discussions), needsDiscussion: true,
+                observedDiscussionFingerprint: ReviewVerdict.fingerprint(discussions), discussionObservation: .unresolvedIncoming,
                 mergeRequest: request, isAuthored: true, feedback: discussions.flatMap(\.notes))
         }
         func readyForRaw() async throws {

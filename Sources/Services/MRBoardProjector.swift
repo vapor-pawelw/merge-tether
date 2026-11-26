@@ -4,19 +4,15 @@ import Foundation
 @MainActor
 struct MRBoardProjector {
     typealias Item = MergeRequestAttentionMonitor.Item
-    struct Account: Equatable {
-        let host: String
-        let username: String
-        let revision: UInt64
-        var presentationKey: String { "\(host)/\(username)/\(revision)" }
-    }
+    typealias ItemPresentation = MergeRequestAttentionMonitor.ItemPresentation
+    typealias Account = GitLabAccountSession
     struct RequestFacts {
         /// Includes the mutable fields consumed by CI/conflict/policy readers; envelope compatibility is weaker.
         private struct Fields: Hashable {
             struct Pipeline: Hashable {
                 let id: Int?
                 let projectID: Int?
-                let status: String
+                let status: GitLabPipelineStatus
                 let sha: String?
                 let ref: String?
                 init(_ value: GitLabMergeRequest.Pipeline) {
@@ -31,7 +27,7 @@ struct MRBoardProjector {
             let hasConflicts: Bool?
             let trainConflict: MergeTrainPreparationConflict?
             let trainEvidenceUnavailable: Bool
-            let detailedMergeStatus: String?
+            let detailedMergeStatus: GitLabDetailedMergeStatus?
             let blockingDiscussionsResolved: Bool?
             let mergeWhenPipelineSucceeds: Bool?
             let canMerge: Bool?
@@ -180,7 +176,7 @@ struct MRBoardProjector {
     }
     private func scopeTarget(projectID: Int, iid: Int, url: URL) -> MRAutomationScope.Target? {
         guard projectID > 0, iid > 0, url.isGitLabMergeRequest(host: input.account.host, iid: iid) else { return nil }
-        return .init(host: input.account.host, username: input.account.username, projectID: projectID, iid: iid)
+        return .mergeRequest(host: input.account.host, username: input.account.username, projectID: projectID, iid: iid)
     }
     private func facts(for request: GitLabMergeRequest?) -> RequestFacts? {
         guard let request else { return nil }
@@ -200,13 +196,13 @@ struct MRBoardProjector {
         var rows = Dictionary((attentionSnapshot?.catalog ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for entry in input.reviewAssignments ?? [] {
             let request = entry.request
-            let id = Item.ID(projectID: request.projectID, iid: request.iid)
+            let id = request.mergeRequestID
             if rows[id] == nil {
                 rows[id] = .init(id: id, title: request.title, url: request.webURL, mergeRequest: request)
             }
         }
         for request in input.retainedRequests {
-            let id = Item.ID(projectID: request.projectID, iid: request.iid)
+            let id = request.mergeRequestID
             guard let target = scopeTarget(projectID: id.projectID, iid: id.iid, url: request.webURL) else { continue }
             if !MRAttentionRecord.sameContext(rows[id]?.mergeRequest, request) {
                 rows[id] = .init(id: id, title: request.title, url: request.webURL,
@@ -234,32 +230,35 @@ struct MRBoardProjector {
             Set($0.map { Item.ID(projectID: $0.request.projectID, iid: $0.request.iid) })
         }
         return browser.reviewed.filter { item in
-            guard item.mergeRequest?.state == "opened",
+            guard item.mergeRequest?.state == .opened,
                   let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
                   !input.ignoredTargets.contains(target) else { return false }
             return assignments?.contains(item.id) ?? input.trackedReviewedTargets.contains(target)
         }
     }
 
-    var attentionItems: [MergeRequestAttentionMonitor.Item] {
-        var items = (attentionSnapshot?.attention ?? []).compactMap { item -> MergeRequestAttentionMonitor.Item? in
+    var attentionItems: [ItemPresentation] {
+        var items = (attentionSnapshot?.attention ?? []).compactMap { evidence -> ItemPresentation? in
+            var item = evidence.presentingVerifiedAuthorFeedback()
             guard !item.feedback.isEmpty else { return item }
             let remaining = input.remainingFeedbackIDs[item.id] ?? Set(item.feedback.compactMap(\.id))
-            var item = item
-            item.feedback.removeAll { $0.id.map { !remaining.contains($0) } ?? false }
-            if item.feedback.isEmpty { item.needsDiscussion = item.hasOtherUnresolvedDiscussions }
+            item.filterFeedback(item.feedback.filter { $0.id.map(remaining.contains) ?? true })
             return item.needsAttention ? item : nil
+        }
+        func include(_ request: GitLabMergeRequest, isAuthored: Bool = false, update: (inout Item) -> Void) {
+            let index = items.firstIndex { $0.id == request.mergeRequestID }
+            let previous = index.map { items[$0] }
+            var evidence = previous?.evidence ?? Item(id: request.mergeRequestID, title: request.title, url: request.webURL,
+                mergeRequest: request, isAuthored: isAuthored)
+            if evidence.mergeRequest == nil { evidence.mergeRequest = request }
+            update(&evidence)
+            let item = previous?.replacingEvidence(evidence) ?? evidence.presentingVerifiedAuthorFeedback()
+            if let index { items[index] = item }
+            else { items.append(item) }
         }
         let handoffs = input.pipelineHandoffs
         for handoff in handoffs {
-            let mr = handoff.event.mergeRequest
-            let id = MergeRequestAttentionMonitor.Item.ID(projectID: mr.projectID, iid: mr.iid)
-            if let index = items.firstIndex(where: { $0.id == id }) {
-                items[index].needsPipelineHandoff = true
-                if items[index].mergeRequest == nil { items[index].mergeRequest = mr }
-            } else {
-                items.append(.init(id: id, title: mr.title, url: mr.webURL, needsPipelineHandoff: true, mergeRequest: mr))
-            }
+            include(handoff.event.mergeRequest) { $0.pipelineHandoffPending = true }
         }
         if !input.mrCatalogReadFailed {
             let host = input.account.host, username = input.account.username
@@ -271,14 +270,13 @@ struct MRBoardProjector {
                           $0.id.projectID == request.projectID && $0.id.iid == request.iid
                       }), current.mergeRequest?.author.username == username, current.canOfferManualMerge(using: status)
                 else { continue }
-                let id = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
+                let id = request.mergeRequestID
                 guard (items.first(where: { $0.id == id })?.draftCount ?? 0) == 0 else { continue }
                 guard !canMergeAutomatically(status, item: current) else { continue }
-                if let index = items.firstIndex(where: { $0.id == id }) { items[index].needsMerge = true }
-                else { items.append(.init(id: id, title: request.title, url: request.webURL, needsMerge: true, mergeRequest: request, isAuthored: true)) }
+                include(request, isAuthored: true) { $0.manualMergeAvailable = true }
             }
         }
-        let visible = items.compactMap { item -> MergeRequestAttentionMonitor.Item? in
+        let visible = items.compactMap { item -> ItemPresentation? in
             guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) else { return item }
             let currentEvents = input.workflowEntries.filter {
                 $0.event.mergeRequest.projectID == item.id.projectID && $0.event.mergeRequest.iid == item.id.iid
@@ -288,7 +286,7 @@ struct MRBoardProjector {
                 guard let entry = currentEvents.first(where: { $0.event.kind == trigger }) else { return false }
                 return entry.state == .failed && !entry.isReadOnlyFailure
             })
-            if input.feedbackLaunchFailures.contains(where: { $0.matches(item, host: input.account.host,
+            if input.feedbackLaunchFailures.contains(where: { $0.matches(item.evidence, host: input.account.host,
                 username: input.account.username, revision: input.account.revision, configuration: input.automation,
                 decisionRevision: input.feedbackDecisionRevisions[item.id]) }) {
                 failures.insert(.newDiscussion)
@@ -304,13 +302,13 @@ struct MRBoardProjector {
                                                      pipelineOwnedAutomatically: pipelineOwned, feedbackOwnedAutomatically: feedbackOwned)
             return visible.needsAttention ? visible : nil
         }
-        return MergeRequestAttentionMonitor.Item.ordered(visible)
+        return ItemPresentation.ordered(visible)
     }
 
     func attentionIntentIsAutomatic(_ intent: MRTodoIntent, ready: Bool) -> Bool {
         let configuration = input.automation
         guard configuration.hasAutomaticActionConsent, configuration.scope.resolve(intent.target).active,
-              !input.ignoredTargets.contains(intent.target), intent.request.state == "opened",
+              !input.ignoredTargets.contains(intent.target), intent.request.isOpen,
               intent.isDeferredReview || (ready && configuration.scope.permits(intent.request,
                   host: intent.target.host, username: intent.target.username)) else { return false }
         let project = intent.request.webURL.gitLabProjectPath
@@ -402,28 +400,31 @@ struct MRBoardProjector {
             return (.init(projectID: entry.request.projectID, iid: entry.request.iid), date)
         }, uniquingKeysWith: min)
         let attention = attentionItems
+        let byID = Dictionary(attention.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let evidence = attentionSnapshot?.evidence ?? []
         let prepared = Dictionary((browser.own + reviewed).map { catalog in
-            (catalog.id, MRCurrentRowProjection(evidence: attention.first { $0.id == catalog.id }
-                ?? evidence.first { $0.id == catalog.id } ?? catalog, catalog: catalog, username: input.account.username))
+            let presentation = byID[catalog.id]
+            return (catalog.id, MRCurrentRowProjection(evidence: presentation?.evidence
+                ?? evidence.first { $0.id == catalog.id } ?? catalog, catalog: catalog, username: input.account.username,
+                presentation: presentation))
         }, uniquingKeysWith: { first, _ in first })
         let automaticMerges = Set(input.authored.compactMap { status -> Item.ID? in
             let request = status.request
-            let id = Item.ID(projectID: request.projectID, iid: request.iid)
+            let id = request.mergeRequestID
             guard !input.mrCatalogReadFailed, request.author.username == input.account.username,
                   let projection = prepared[id], projection.evidenceMatchesCatalogContext,
                   projection.item.canOfferManualMerge(using: status),
                   canMergeAutomatically(status, item: projection.item) else { return nil }
             return id
         })
-        return .init(own: browser.own, reviewed: reviewed, todos: input.todos, attention: attention,
+        return .init(own: browser.own, reviewed: reviewed, todos: input.todos, attention: attention.map(\.evidence),
             handoffs: input.handoffs, host: input.account.host, username: input.account.username,
             intents: input.intents, routedTodoIDs: input.routedTodoIDs, ignoredTargets: input.hiddenTargets,
             humanAttention: humanAttention, pinnedCards: input.pins, pipelineEvidence: input.pipelineEvidence,
             pipelineEvidenceCheckedAt: input.pipelineEvidenceCheckedAt, preservedOrder: preservedOrder,
             automation: input.automation, displayRequests: input.displayRequests, grouping: input.grouping,
             completions: input.completions, hiddenReviewNotifications: input.hiddenReviewNotifications,
-            currentRows: prepared, automaticMerges: automaticMerges,
+            currentRows: prepared, automaticMerges: automaticMerges, attentionPresentations: byID,
             assignmentsAreAuthoritative: input.reviewAssignments != nil, newReviewAssignments: newAssignments)
     }
 
@@ -433,32 +434,33 @@ struct MRBoardProjector {
         let attention = attentionItems
         var rows: [BoardAttentionPresenter.PresentedRow] = []
         for row in board.own + board.reviewed {
-            guard row.displayRequest?.state == "opened" else { continue }
-            let target = MRAutomationScope.Target(host: input.account.host, username: input.account.username,
+            guard row.displayRequest?.state == .opened else { continue }
+            let target = MRAutomationScope.Target.mergeRequest(host: input.account.host, username: input.account.username,
                 projectID: row.id.projectID, iid: row.id.iid)
             guard !input.ignoredTargets.contains(target) else { continue }
-            let classified = row.item.presentingHumanAttention(filtered: attention.first { $0.id == row.id },
+            let classified = ItemPresentation.forHumanAttention(catalog: row.item,
+                filtered: attention.first { $0.id == row.id },
                 unfiltered: attentionSnapshot?.attention.first { $0.id == row.id }, assistantReady: preparing)
-            let item = MRCurrentRowProjection(evidence: classified, catalog: row.displayItem,
-                username: input.account.username).item
+            let item = MRCurrentRowProjection(evidence: classified.evidence, catalog: row.displayItem,
+                username: input.account.username, presentation: classified).presentation
             let state = input.confirmationStates[row.id]
             let facts = facts(for: row.item.mergeRequest)
             let recoveryWaitsForHuman = (row.item.draftProofRecoveryChecking || row.isCheckingReadOnlyReconciliation)
                 && row.hasIndependentStoppedWork
             let busy = row.latestJob?.operationalExecution?.state.isActive == true || state?.isBusy == true
                 || row.item.aiOriginChecking
-                || (!recoveryWaitsForHuman && (row.item.authorFeedbackStatus?.phase == .checking || row.item.draftProofRecoveryChecking))
+                || (!recoveryWaitsForHuman && (row.presented.authorFeedbackStatus?.phase == .checking || row.item.draftProofRecoveryChecking))
                 || facts?.conflictProcessing == true || facts?.pipelineProcessing == true
                 || (!recoveryWaitsForHuman && !row.item.isAuthored && reviewingContext(for: row).isAutomaticProcessing)
             let automaticDrafts = row.evidenceMatchesCatalogContext ? input.publicationPolicies[target].map {
-                item.draftIDsHandledAutomatically(automation: input.automation, target: target,
+                item.evidence.draftIDsHandledAutomatically(automation: input.automation, target: target,
                     assistantPreparing: preparing, publicationPolicy: $0)
             } ?? [] : []
             rows.append(.init(row: row, item: item, confirmationState: state, busy: busy,
                 automaticDraftIDs: automaticDrafts, checking: isRecheckingAttention(for: row) || attentionRefreshFailed(for: row),
                 automaticIntentIDs: Set(row.attentionIntents.filter { attentionIntentIsAutomatic($0, ready: preparing) }.map(\.id))))
         }
-        return BoardAttentionPresenter.project(.init(account: input.account.presentationKey,
+        return BoardAttentionPresenter.project(.init(account: input.account,
             host: input.account.host, username: input.account.username, rows: rows, proposals: board.proposals,
             otherTodos: board.otherTodos, inboxLoading: input.inboxLoading,
             assessingMentionNoteIDs: input.assessingMentionNoteIDs,
@@ -469,12 +471,12 @@ struct MRBoardProjector {
         host: String, username: String, ownCatalogIsAuthoritative: Bool, draftsLast: Bool) -> (own: [Item], reviewed: [Item]) {
         var rows = Dictionary(uniqueKeysWithValues: openItems.map { ($0.id, $0) })
         let currentAuthored = authored.filter {
-            $0.request.author.username == username && $0.request.state == "opened"
+            $0.request.author.username == username && $0.request.isOpen
                 && $0.request.webURL.isGitLabMergeRequest(host: host, iid: $0.request.iid)
         }
         for status in currentAuthored {
             let request = status.request
-            let id = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
+            let id = request.mergeRequestID
             if ownCatalogIsAuthoritative && rows[id] == nil { continue }
             if let currentHead = rows[id]?.mergeRequest?.sha, currentHead != request.sha { continue }
             var item = rows[id] ?? .init(id: id, title: request.title, url: request.webURL)
@@ -483,16 +485,17 @@ struct MRBoardProjector {
                current.semanticContextFingerprint == request.semanticContextFingerprint, current.draft == request.draft {
                 item.mergeRequest?.mergeTrainConflict = request.mergeTrainConflict
                 item.mergeRequest?.mergeTrainEvidenceUnavailable = request.mergeTrainEvidenceUnavailable
-                if request.mergeTrainConflict != nil { item.hasConflict = true }
+                if request.mergeTrainConflict != nil { item.catalogIssues.insert(.conflict) }
             }
             item.isAuthored = true
             rows[id] = item
         }
-        let items = MergeRequestAttentionMonitor.Item.ordered(rows.values.filter {
-            ["opened", "merged", "closed"].contains($0.mergeRequest?.state ?? "")
+        let visible = rows.values.filter {
+            [.opened, .merged, .closed].contains($0.mergeRequest?.state)
                 && $0.url.isGitLabMergeRequest(host: host, iid: $0.id.iid)
                 && $0.mergeRequest?.webURL.isGitLabMergeRequest(host: host, iid: $0.id.iid) == true
-        }, draftsLast: draftsLast)
+        }.map { $0.presentingVerifiedAuthorFeedback() }
+        let items = ItemPresentation.ordered(visible, draftsLast: draftsLast).map(\.evidence)
         let matchingStatuses = currentAuthored.filter { status in
             let id = MergeRequestAttentionMonitor.Item.ID(projectID: status.request.projectID, iid: status.request.iid)
             guard let item = rows[id], item.mergeRequest?.sha == status.request.sha else { return false }

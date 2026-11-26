@@ -16,25 +16,25 @@ extension GlabService {
     func verifiedFailedPipeline(
         for request: GitLabMergeRequest, host: String, expectedUser: GitLabAuthenticatedUser? = nil
     ) async throws -> GitLabMergeRequest.Pipeline {
-        try await verifiedPipeline(for: request, host: host, expectedStatus: "failed", expectedUser: expectedUser)
+        try await verifiedPipeline(for: request, host: host, expectedStatus: .failed, expectedUser: expectedUser)
     }
 
     func verifiedSuccessfulPipeline(
         for request: GitLabMergeRequest, host: String, expectedUser: GitLabAuthenticatedUser? = nil
     ) async throws -> GitLabMergeRequest.Pipeline {
-        try await verifiedPipeline(for: request, host: host, expectedStatus: "success", expectedUser: expectedUser)
+        try await verifiedPipeline(for: request, host: host, expectedStatus: .success, expectedUser: expectedUser)
     }
 
     /// A merge-result SHA belongs to GitLab's synthetic merge commit, not the
     /// source branch. Bind the immutable pipeline commit to both live parents;
     /// GitLab can regenerate the merge ref without replacing head_pipeline.
     private func verifiedPipeline(
-        for request: GitLabMergeRequest, host: String, expectedStatus: String,
+        for request: GitLabMergeRequest, host: String, expectedStatus: GitLabPipelineStatus,
         expectedUser: GitLabAuthenticatedUser?
     ) async throws -> GitLabMergeRequest.Pipeline {
         let revision = accountRevision
         guard resolvedHost == host, let username = currentUsername,
-              request.state == "opened", request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
+              request.isOpen, request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
               let source = request.sha, Self.isFullGitSHA(source),
               let sourceProject = request.sourceProjectID, sourceProject > 0,
               let targetProject = request.targetProjectID, targetProject == request.projectID,
@@ -54,7 +54,7 @@ extension GlabService {
         let mergeRef = "refs/merge-requests/\(request.iid)/merge"
         let headRef = "refs/merge-requests/\(request.iid)/head"
         let mergedResult = ref == mergeRef
-        let failedTrain = ref == "refs/merge-requests/\(request.iid)/train" && expectedStatus == "failed"
+        let failedTrain = ref == "refs/merge-requests/\(request.iid)/train" && expectedStatus == .failed
         if mergedResult || failedTrain {
             guard project == targetProject else { throw CancellationError() }
         } else {

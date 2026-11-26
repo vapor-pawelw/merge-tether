@@ -238,7 +238,7 @@ extension SettingsManager {
         case .commentPublication: publicationPolicy(for: target).mode != .manual
         case .merge:
             request.author.username == target.username && request.draft == false
-                && request.detailedMergeStatus != "draft_status"
+                && request.detailedMergeStatus != .draftStatus
                 && automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath,
                     optedIn: autoMergePreference(for: target) == .on)
         case .approval: automation.autoApproveEnabled || actionPreference(.approval, for: target) == .on

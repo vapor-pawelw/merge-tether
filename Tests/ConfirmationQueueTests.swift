@@ -42,9 +42,10 @@ import MergeTetherRemote
 
         let item = try #require(harness.monitor.currentOpenItems.first)
         let waiting = evidence == "pending" || evidence == "started"
-        #expect(item.mergeRequest?.detailedMergeStatus == "requested_changes")
+        #expect(item.mergeRequest?.detailedMergeStatus == .requestedChanges)
         #expect(item.authorFeedbackStatus?.waitingForReviewer == true)
-        #expect(item.needsChanges != waiting)
+        #expect(item.needsChanges)
+        #expect(item.presentingVerifiedAuthorFeedback().needsChanges != waiting)
         #expect(harness.log("re-review.log").isEmpty)
     }
 
@@ -88,7 +89,7 @@ import MergeTetherRemote
         let projector = MRBoardProjector(input: input)
         let presenter = BoardAttentionPresenter()
         presenter.updateAttention(projector.pendingUserAttention)
-        let attention = presenter.userAttention(account: account.presentationKey)
+        let attention = presenter.userAttention(account: account)
         let row = try #require(projector.board(humanAttention: attention).own.first)
         let model = MRCardPresentation(row: row, reviewingContext: projector.reviewingContext(for: row),
             allowsRemoval: false, assistantReady: true)

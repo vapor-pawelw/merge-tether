@@ -39,8 +39,7 @@ extension TodoMonitorService {
 
     func canAutomaticallyRetry(_ job: AssistantAutomationRunner.Handoff, assistantReady: Bool? = nil, pipelineWorkDetector: ExistingPipelineWorkDetector = .init()) -> Bool {
         let configuration = settings.automation
-        let target = MRAutomationScope.Target(host: job.key.work.host, username: job.key.username,
-            projectID: job.key.work.projectID, iid: job.key.work.iid)
+        let target = job.key.automationTarget
         guard settings.automaticWritesAllowed, configuration.hasAutomaticActionConsent,
               glab.resolvedHost == target.host, glab.currentUsername == target.username,
               !settings.ignoredMergeRequests.contains(target), configuration.scope.resolve(target).active,
@@ -85,8 +84,8 @@ extension TodoMonitorService {
               canAutomaticallyRetry(job, assistantReady: assistantReady, pipelineWorkDetector: pipelineWorkDetector), user.username == job.key.username else { return .deferred }
         guard request.projectID == job.key.work.projectID, request.iid == job.key.work.iid,
               request.webURL.isGitLabMergeRequest(host: job.key.work.host, iid: job.key.work.iid) else { return .deferred }
-        if request.state == "closed" || request.state == "merged" { return .obsolete }
-        guard request.state == "opened", let head = request.sha, GlabService.isFullGitSHA(head),
+        if request.state == .closed || request.state == .merged { return .obsolete }
+        guard request.isOpen, let head = request.sha, GlabService.isFullGitSHA(head),
               let expected = job.expectedHeadSHA, GlabService.isFullGitSHA(expected) else { return .deferred }
         guard head == expected else { return .obsolete }
         if job.taskIntent == .conflictResolution, !request.hasMergeConflict { return .obsolete }
@@ -105,8 +104,8 @@ extension TodoMonitorService {
         }
         if let priorID = job.pipelineReservation?.pipelineID ?? job.foreignPipelineDiagnosis?.pipelineID {
             guard let pipeline = request.headPipeline, let currentID = pipeline.id else { return .deferred }
-            if currentID != priorID || pipeline.status == "success" { return .obsolete }
-            guard pipeline.status == "failed" else { return .deferred }
+            if currentID != priorID || pipeline.status == .success { return .obsolete }
+            guard pipeline.status == .failed else { return .deferred }
         }
         guard configuration.scope.permits(request, host: job.key.work.host, username: job.key.username),
               automaticRetryPermission(job, request: request),

@@ -8,8 +8,7 @@ struct IgnoredFeedbackWorkerInstructions {
     @MainActor
     static func load(for handoff: AssistantAutomationRunner.Handoff, settings: SettingsManager,
                      glab: GlabService) async throws -> Self {
-        let target = MRAutomationScope.Target(host: handoff.key.work.host, username: handoff.key.username,
-            projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
+        let target = handoff.key.automationTarget
         let discussions: [GitLabMergeRequestDiscussion]
         if settings.feedbackSuggestionDecisions.entries(for: target).isEmpty { discussions = [] }
         else {

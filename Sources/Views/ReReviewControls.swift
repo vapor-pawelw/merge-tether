@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ReReviewControls: View {
-    let item: MergeRequestAttentionMonitor.Item
+    let item: MergeRequestAttentionMonitor.ItemPresentation
     let monitor: MergeRequestAttentionMonitor
     let requireAssistant: () -> Bool
     let assistant: AutomationAssistant

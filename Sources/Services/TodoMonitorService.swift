@@ -55,9 +55,9 @@ final class TodoMonitorService {
     }
 
     private let boardAttentionPresenter = BoardAttentionPresenter()
-    private var attentionPresentationAccount: String? {
+    private var attentionPresentationAccount: GitLabAccountSession? {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return nil }
-        return "\(host)/\(username)/\(glab.accountRevision)"
+        return .init(host: host, username: username, revision: glab.accountRevision)
     }
     var userAttention: UserAttentionSnapshot {
         boardAttentionPresenter.userAttention(account: attentionPresentationAccount)
@@ -244,7 +244,7 @@ final class TodoMonitorService {
                   self.glab.currentUsername == user.username else { return .uncertain }
             let configuration = self.settings.automation
             let revision = self.glab.accountRevision
-            let target = MRAutomationScope.Target(host: host, username: user.username,
+            let target = MRAutomationScope.Target.mergeRequest(host: host, username: user.username,
                 projectID: request.projectID, iid: request.iid)
             guard configuration.canClassifyIncomingNotices, configuration.scope.permits(request, host: host, username: user.username),
                   !self.settings.ignoredMergeRequests.contains(target) else { return .uncertain }
@@ -355,7 +355,7 @@ final class TodoMonitorService {
             guard let self, let host = self.glab.resolvedHost, let username = self.glab.currentUsername,
                   let fingerprint = ReviewVerdict.fingerprint(discussions),
                   let assessment = self.attention.authorFeedbackCoordinator?.assessment(for: request, fingerprint: fingerprint) else { return false }
-            let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
+            let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
             return assessment.hasNoRemainingAuthorWork(in: discussions, authorID: authorID,
                 ignoredSuggestions: self.settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target),
                 excludedReplyAuthorIDs: self.settings.reviewParticipationPreferences.excludedIDs(host: host, username: username))
@@ -608,7 +608,7 @@ final class TodoMonitorService {
         input.attention = snapshot
         input.reviewAssignments = settings.reviewAssignments.entries(host: host, username: username)?.filter { entry in
             settings.addNewReviewsToReviewed
-                || trackedReviewTarget(.init(host: host, username: username, projectID: entry.request.projectID, iid: entry.request.iid))
+                || trackedReviewTarget(.mergeRequest(host: host, username: username, projectID: entry.request.projectID, iid: entry.request.iid))
         }
         input.authored = authoredMergeRequests.requests
         input.retainedRequests = settings.mrLifecycleLedger.retainedRequests(host: host, username: username)
@@ -624,7 +624,7 @@ final class TodoMonitorService {
         let workflowEntries = authoredMergeRequests.workflow.entries
         var requestFacts = MRBoardProjector.RequestFacts.Index()
         for request in requests {
-            let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
+            let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
             if trackedReviewTarget(target) { input.trackedReviewedTargets.insert(target) }
             let publication = settings.publicationPolicy(for: target)
             if publication.mode != .manual { input.publicationPolicies[target] = publication }
@@ -688,7 +688,7 @@ final class TodoMonitorService {
         return Set(allTodos.filter { todo in
             guard let iid = todo.target.iid, todo.targetType == .mergeRequest,
                   todo.targetURL.gitLabTodoMergeRequestURL(host: host, iid: iid) != nil else { return false }
-            let target = MRAutomationScope.Target(host: host, username: username, projectID: todo.project.id, iid: iid)
+            let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: todo.project.id, iid: iid)
             return settings.routedMRTodoReceipts.contains { $0.target == target && $0.event == todo.feedbackIdentity }
                 || currentMRTodoIntents.contains { $0.target == target && $0.sourceEvents.contains(todo.feedbackIdentity) }
         }.map(\.id))
@@ -808,7 +808,7 @@ final class TodoMonitorService {
         for todo in currentAccountTodos where MRTodoIntent.kind(for: todo, username: username) == .review {
             guard let iid = todo.target.iid, todo.targetType == .mergeRequest,
                   todo.targetURL.gitLabTodoMergeRequestURL(host: host, iid: iid) != nil else { continue }
-            let target = MRAutomationScope.Target(host: host, username: username, projectID: todo.project.id, iid: iid)
+            let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: todo.project.id, iid: iid)
             let paused = settings.automation.scope[target] == .paused
                 || (settings.automation.scope[target] == .inherit && settings.automation.scope[target.repository] == .paused)
             guard !settings.ignoredMergeRequests.contains(target), !paused, !trackedReviewTarget(target),
@@ -824,7 +824,7 @@ final class TodoMonitorService {
             guard !Task.isCancelled, glab.resolvedHost == host, glab.currentUsername == username,
                   glab.accountRevision == revision, settings.addNewReviewsToReviewed,
                   settings.automation.reviewRequested.runner == .assistant,
-                  request.projectID == target.projectID, request.iid == iid, request.state == "opened",
+                  request.projectID == target.projectID, request.iid == iid, request.isOpen,
                   request.author.username != username, request.webURL.isGitLabMergeRequest(host: host, iid: iid),
                   !settings.ignoredMergeRequests.contains(target), !settings.intakeFilterHolds(target) else { continue }
             let siblings = currentAccountTodos.filter {
@@ -854,7 +854,7 @@ final class TodoMonitorService {
         targets.formUnion(settings.pendingCommentReviews)
         targets.formUnion(settings.ignoredMergeRequests)
         targets.formUnion(settings.assistantHandoffs.map { job in
-            .init(host: job.key.work.host, username: job.key.username, projectID: job.key.work.projectID, iid: job.key.work.iid)
+            job.key.automationTarget
         })
         return targets
     }
@@ -955,7 +955,7 @@ final class TodoMonitorService {
         let managed = settings.mrLifecycleLedger.targets(host: account.host, username: account.username)
         let records = managed.compactMap { settings.mrLifecycleLedger.request(for: $0) }
         return records + boardDisplayMetadata.requests(account: account).filter { request in
-            !managed.contains(.init(host: account.host, username: account.username, projectID: request.projectID, iid: request.iid))
+            !managed.contains(.mergeRequest(host: account.host, username: account.username, projectID: request.projectID, iid: request.iid))
         }
     }
 
@@ -980,7 +980,7 @@ final class TodoMonitorService {
     func scopeTarget(projectID: Int, iid: Int, url: URL) -> MRAutomationScope.Target? {
         guard projectID > 0, iid > 0, let host = glab.resolvedHost, let username = glab.currentUsername,
               url.isGitLabMergeRequest(host: host, iid: iid) else { return nil }
-        return .init(host: host, username: username, projectID: projectID, iid: iid)
+        return .mergeRequest(host: host, username: username, projectID: projectID, iid: iid)
     }
 
     func addAutomationTarget(from address: String) async throws {
@@ -1088,7 +1088,7 @@ final class TodoMonitorService {
             guard target.host == account.host, target.username == account.username, hidden[target] == nil else { return nil }
             return settings.mrLifecycleLedger.request(for: target)
         }
-        for request in assigned + retained where request.state == "opened" && request.author.username != account.username {
+        for request in assigned + retained where request.isOpen && request.author.username != account.username {
             guard let target = scopeTarget(projectID: request.projectID, iid: request.iid, url: request.webURL),
                   hidden[target] == nil, settings.canRestoreHiddenReview(target, now: now) else { continue }
             hidden[target] = .init(target: target, title: request.title, url: request.webURL)
@@ -1175,7 +1175,7 @@ final class TodoMonitorService {
                   glab.resolvedHost == host, glab.currentUsername == username,
                   glab.accountRevision == revision else { throw CancellationError() }
             try Self.requireOpenMergeRequest(request)
-            target = .init(host: host, username: username, projectID: projectID, iid: iid)
+            target = .mergeRequest(host: host, username: username, projectID: projectID, iid: iid)
         } else {
             let result = try await resolveAutomationTarget(from: raw)
             guard let resolved = result.request else { throw GlabError.decoding("Enter a merge request URL, or a number and repository") }
@@ -1235,16 +1235,17 @@ final class TodoMonitorService {
         guard glab.resolvedHost == host, glab.currentUsername == username,
               glab.accountRevision == revision else { throw CancellationError() }
         if let verified { try Self.requireOpenMergeRequest(verified) }
-        let target = MRAutomationScope.Target(host: host, username: username, projectID: projectID, iid: iid)
+        let target = iid.map { MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: projectID, iid: $0) }
+            ?? .repository(host: host, username: username, projectID: projectID)
         return (target, projectPath, verified)
     }
 
     private static func requireOpenMergeRequest(_ request: GitLabMergeRequest) throws {
         if let finished = MergeRequestFinishedState(request) { throw finished }
-        guard request.state == "opened" else { throw GlabError.decoding("The merge request is no longer open") }
+        guard request.isOpen else { throw GlabError.decoding("The merge request is no longer open") }
     }
 
-    var attentionItems: [MergeRequestAttentionMonitor.Item] { boardProjector?.attentionItems ?? [] }
+    var attentionItems: [MergeRequestAttentionMonitor.ItemPresentation] { boardProjector?.attentionItems ?? [] }
 
     var assistantHandoffs: [AssistantAutomationRunner.Handoff] {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return [] }
@@ -1475,7 +1476,7 @@ final class TodoMonitorService {
     }
 
     func handleFeedbackManually(for item: MergeRequestAttentionMonitor.Item) async {
-        if let status = item.authorFeedbackStatus, !status.followUpNoteIDs.isEmpty, let request = item.authoredRequest {
+        if let status = item.verifiedFeedback.assessment, !status.followUpNoteIDs.isEmpty, let request = item.authoredRequest {
             await runVerifiedAuthorFeedback(request: request, noteIDs: status.followUpNoteIDs, fingerprint: status.fingerprint)
         } else {
             await runAttentionFeedback(for: item)
@@ -1599,8 +1600,7 @@ final class TodoMonitorService {
         automation.cancelRunningScripts(outsideScope: scopeOnly ? cancellationScope : nil)
         for handoff in settings.assistantHandoffs where handoff.execution?.state.isActive == true {
             if scopeOnly {
-                let target = MRAutomationScope.Target(host: handoff.key.work.host, username: handoff.key.username,
-                    projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
+                let target = handoff.key.automationTarget
                 guard handoff.manual != true, !cancellationScope.resolve(target).active else { continue }
             }
             cancelPolicyJob(handoff.id, settings)
@@ -1624,7 +1624,7 @@ final class TodoMonitorService {
         let targets = settings.mrLifecycleLedger.targets(host: host, username: username)
         let latest = targets.compactMap { settings.mrLifecycleLedger.request(for: $0) }
         let fallback = attention.currentOpenItems.compactMap(\.mergeRequest).filter { request in
-            !targets.contains(.init(host: host, username: username, projectID: request.projectID, iid: request.iid))
+            !targets.contains(.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid))
         }
         return settings.automation.scope.cancellationScope(for: latest + fallback,
             host: host, username: username)
@@ -1637,14 +1637,14 @@ final class TodoMonitorService {
         return settings.ignoredMergeRequests.union(suppressed).union(settings.mrLifecycleLedger.targets(host: host, username: username)
             .filter { target in
                 let state = settings.mrLifecycleLedger.request(for: target)?.state
-                return state == "merged" || state == "closed"
+                return state == .merged || state == .closed
             })
     }
 
     private func recordOwnedLifecycleObservations(_ requests: [GitLabMergeRequest], observedAt: Date) {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return }
         for request in requests where request.author.username == username {
-            let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
+            let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
             guard !settings.ignoredMergeRequests.contains(target) else { continue }
             settings.mrLifecycleLedger.record(request, for: target, now: observedAt,
                 autoRemoveFinished: true)
@@ -1671,7 +1671,7 @@ final class TodoMonitorService {
               let current = settings.mrLifecycleLedger.request(for: target), current.webURL == item.url,
               current.state == item.mergeRequest?.state,
               settings.mrLifecycleLedger.completionID(for: target) == item.lifecycleCompletionID,
-              current.state == "merged" || current.state == "closed" else { return false }
+              current.state == .merged || current.state == .closed else { return false }
         return !settings.mrLifecycleLedger.isSuppressed(target)
     }
 
@@ -1713,9 +1713,9 @@ final class TodoMonitorService {
     func boardOrderingEntries(_ board: MergeRequestBoardSnapshot) -> [BoardPolicyOrder.Entry] {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return [] }
         return [board.own, board.reviewed].flatMap { rows in
-            rows.filter { $0.item.mergeRequest?.state == "opened" }.enumerated().compactMap { rank, row in
+            rows.filter { $0.item.mergeRequest?.state == .opened }.enumerated().compactMap { rank, row in
                 guard let request = row.item.mergeRequest else { return nil }
-                let target = MRAutomationScope.Target(host: host, username: username, projectID: row.id.projectID, iid: row.id.iid)
+                let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: row.id.projectID, iid: row.id.iid)
                 let pin = BoardCardPin.mergeRequest(host: host, username: username, projectID: row.id.projectID, iid: row.id.iid)
                 return .init(target: target, rank: rank, request: request,
                     discussionFingerprint: row.item.observedDiscussionFingerprint, jobID: row.latestJob?.id,
@@ -1732,8 +1732,7 @@ final class TodoMonitorService {
         automation.cancelRunningScripts(outsideScope: scope)
         FollowUpVerificationStore.synchronizeRuns(settings: settings)
         for handoff in settings.assistantHandoffs where handoff.execution?.state.isActive == true && handoff.manual != true {
-            let target = MRAutomationScope.Target(host: handoff.key.work.host, username: handoff.key.username,
-                projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
+            let target = handoff.key.automationTarget
             if !scope.resolve(target).active { cancelPolicyJob(handoff.id, settings) }
         }
         attention.authorFeedbackCoordinator?.cancel(outsideScope: scope)
@@ -1760,8 +1759,7 @@ final class TodoMonitorService {
     @discardableResult
     func retryAssistantJob(_ id: UUID) async -> AssistantJobRetryOutcome {
         guard let job = assistantHandoffs.first(where: { $0.id == id }), !job.isObsoleteReminder else { return .unavailable }
-        let target = MRAutomationScope.Target(host: job.key.work.host, username: job.key.username,
-            projectID: job.key.work.projectID, iid: job.key.work.iid)
+        let target = job.key.automationTarget
         settings.recordAutomationEvent(target: target, action: .retry, origin: .manual, state: .requested, jobID: id)
         assistantJobActionError = nil
         assistantJobActionNotices.removeValue(forKey: id)

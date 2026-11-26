@@ -22,12 +22,14 @@ enum ManualDiscussionResolution {
             return details.joined(separator: "\n\n")
         }
         func matches(_ discussions: [GitLabMergeRequestDiscussion]) -> Bool {
-            fingerprint != nil && fingerprint == ManualDiscussionResolution.fingerprint(discussions)
+            EvidenceContext(discussionState: ManualDiscussionResolution.discussionStateDigest(self.discussions))
+                .binds(to: .init(discussionState: ManualDiscussionResolution.discussionStateDigest(discussions)),
+                       policy: .discussionState)
         }
         func acceptingResolution(_ resolved: GitLabMergeRequestDiscussion) -> Self? {
             guard let index = discussions.firstIndex(where: { $0.id == resolved.id }), resolved.notes.first?.resolved == true,
-                  ManualDiscussionResolution.fingerprint([discussions[index]], includeRevisions: false)
-                    == ManualDiscussionResolution.fingerprint([resolved], includeRevisions: false) else { return nil }
+                  ManualDiscussionResolution.discussionStateDigest([discussions[index]], includeRevisions: false)
+                    == ManualDiscussionResolution.discussionStateDigest([resolved], includeRevisions: false) else { return nil }
             var next = discussions
             next[index] = resolved
             return .init(eligibleIDs: eligibleIDs, heldIDs: heldIDs, discussions: next)
@@ -76,9 +78,14 @@ enum ManualDiscussionResolution {
         return .init(eligibleIDs: eligible.sorted(), heldIDs: held.sorted(), discussions: discussions)
     }
 
+    static func fingerprint(_ discussions: [GitLabMergeRequestDiscussion], includeRevisions: Bool = true) -> String? {
+        discussionStateDigest(discussions, includeRevisions: includeRevisions)?.rawValue
+    }
+
     /// Bind IDs, topology and edit revisions as well as text. Resolution flags
     /// are intentionally excluded so completing one selected ID preserves the rest.
-    static func fingerprint(_ discussions: [GitLabMergeRequestDiscussion], includeRevisions: Bool = true) -> String? {
+    static func discussionStateDigest(_ discussions: [GitLabMergeRequestDiscussion],
+                                      includeRevisions: Bool = true) -> DiscussionStateDigest? {
         struct Row: Encodable {
             let discussion: String
             let note: Int
@@ -106,7 +113,7 @@ enum ManualDiscussionResolution {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         guard let data = try? encoder.encode(rows.sorted { ($0.discussion, $0.note) < ($1.discussion, $1.note) }) else { return nil }
-        return UserAttentionSnapshot.digest(String(decoding: data, as: UTF8.self))
+        return .init(UserAttentionSnapshot.digest(String(decoding: data, as: UTF8.self)))
     }
 
     @MainActor static func prepare(_ expected: GitLabMergeRequest, monitor: TodoMonitorService,
@@ -119,7 +126,7 @@ enum ManualDiscussionResolution {
         let participationRevision = settings.reviewParticipationPreferences.revision(host: host, username: username)
         let user = try await glab.fetchAuthenticatedUser(host: host, expectedUsername: username)
         let request = try await glab.fetchMergeRequest(projectID: expected.projectID, iid: expected.iid, host: host)
-        guard request.author.id == user.id, request.state == "opened",
+        guard request.author.id == user.id, request.isOpen,
               request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
               MergeRequestDependencySummary.Context(request) == .init(expected),
               request.semanticContextFingerprint == expected.semanticContextFingerprint else { throw CancellationError() }
@@ -133,7 +140,7 @@ enum ManualDiscussionResolution {
             assessment = try await ManualFeedbackVerification.assess(request: request, discussions: threads,
                 user: user, host: host, settings: settings, glab: glab)
         }
-        let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
         let plan = plan(discussions: threads, assessment: assessment, authorID: user.id, pendingDraftCount: drafts,
             ignoredSuggestions: settings.feedbackSuggestionDecisions.applicable(in: threads, for: target),
             excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: username))
@@ -167,7 +174,7 @@ enum ManualDiscussionResolution {
                 let drafts = try await glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid,
                     host: prepared.host, userID: prepared.user.id)
                 let threads = try await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: prepared.host)
-                guard user == prepared.user, live.author.id == user.id, live.state == "opened", drafts == 0,
+                guard user == prepared.user, live.author.id == user.id, live.isOpen, drafts == 0,
                       MergeRequestDependencySummary.Context(live) == .init(request),
                       live.semanticContextFingerprint == request.semanticContextFingerprint,
                       checked.matches(threads), let thread = threads.first(where: { $0.id == id }),

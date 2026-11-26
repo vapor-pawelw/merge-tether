@@ -49,7 +49,7 @@ struct MRTodoIntent: Codable, Identifiable, Sendable {
     /// Accepted review requests remain tracked while their author finishes a Draft.
     var isDeferredReview: Bool {
         kind == .review && state == .pending && jobID == nil
-            && request.state == "opened" && request.draft == true
+            && request.isOpen && request.draft == true
     }
 
     /// Only candidates with a concrete meaning are proposed. Discussion events

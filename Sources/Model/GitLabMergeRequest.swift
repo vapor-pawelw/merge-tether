@@ -46,9 +46,9 @@ struct MergeRequestApprovalProgress: Equatable, Sendable {
 
     func viewerApproval(username: String?, reviewers: [Todo.Author], isOwnMergeRequest: Bool) -> ViewerApproval? {
         guard !isOwnMergeRequest,
-              let username = username?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              let username = username.map({ GitLabAccountIdentity.normalize($0.trimmingCharacters(in: .whitespacesAndNewlines)) }),
               !username.isEmpty,
-              let viewer = participants(reviewers: reviewers).first(where: { $0.author.username.lowercased() == username })
+              let viewer = participants(reviewers: reviewers).first(where: { GitLabAccountIdentity.normalize($0.author.username) == username })
         else { return nil }
         switch viewer.status {
         case .approved: return .approved(viewer.author)
@@ -162,14 +162,14 @@ struct GitLabMergeRequest: Codable, Sendable {
     let title: String
     let description: String?
     let webURL: URL
-    let state: String
+    let state: GitLabMergeRequestState
     let draft: Bool?
     let sha: String?
     let sourceProjectID: Int?
     let sourceBranch: String
     let targetProjectID: Int?
     let targetBranch: String
-    let detailedMergeStatus: String?
+    let detailedMergeStatus: GitLabDetailedMergeStatus?
     let hasConflicts: Bool?
     let labels: [String]
     let blockingDiscussionsResolved: Bool?
@@ -183,12 +183,34 @@ struct GitLabMergeRequest: Codable, Sendable {
     var mergeTrainConflict: MergeTrainPreparationConflict? = nil
     var mergeTrainEvidenceUnavailable = false
 
+    var mergeRequestID: GitLabMergeRequestID { .init(projectID: projectID, iid: iid) }
+    var isOpen: Bool { state == .opened }
+    var isDraft: Bool { isDraft(fallback: false) }
+
+    func isDraft(fallback: Bool) -> Bool {
+        detailedMergeStatus == .draftStatus || (draft ?? fallback)
+    }
+
     var canMerge: Bool? { user?.canMerge }
 
     /// Semantic feedback checks depend on MR text as well as code and discussions.
-    var semanticContextFingerprint: String {
+    var semanticContextDigest: SemanticContextDigest {
         let body = description ?? ""
-        return UserAttentionSnapshot.digest("\(title.utf8.count):\(title)\(body.utf8.count):\(body)")
+        return .init(UserAttentionSnapshot.digest("\(title.utf8.count):\(title)\(body.utf8.count):\(body)"))
+    }
+
+    var semanticContextFingerprint: String { semanticContextDigest.rawValue }
+
+    /// A target is usable when GitLab supplied diff refs for this exact source head.
+    var evidenceTarget: EvidenceContext.Target? {
+        guard let sha, !sha.isEmpty, let targetProjectID, targetProjectID > 0, !targetBranch.isEmpty,
+              let diffRefs, diffRefs.headSHA == sha, let base = diffRefs.baseSHA, !base.isEmpty else { return nil }
+        return .init(projectID: targetProjectID, branch: targetBranch, base: base)
+    }
+
+    func evidenceContext(discussionContent: DiscussionContentDigest? = nil) -> EvidenceContext {
+        .init(mergeRequestID: mergeRequestID, head: sha, target: evidenceTarget, discussionContent: discussionContent,
+              semanticContext: semanticContextDigest)
     }
 
     struct DiffRefs: Codable, Equatable, Sendable {
@@ -206,7 +228,7 @@ struct GitLabMergeRequest: Codable, Sendable {
     struct Pipeline: Codable, Sendable {
         let id: Int?
         let projectID: Int?
-        let status: String
+        let status: GitLabPipelineStatus
         let sha: String?
         var ref: String? = nil
 

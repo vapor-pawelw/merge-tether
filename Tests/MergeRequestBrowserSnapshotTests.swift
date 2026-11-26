@@ -130,7 +130,7 @@ struct MergeRequestBrowserSnapshotTests {
         #expect(!acknowledged.ignoredMergeRequests.contains(target))
         acknowledged.mrLifecycleLedger.record(try request(2, username: "alice"), for: target)
         #expect(!acknowledged.mrLifecycleLedger.isSuppressed(target))
-        #expect(acknowledged.mrLifecycleLedger.retainedRequests(host: host, username: "me").first?.state == "opened")
+        #expect(acknowledged.mrLifecycleLedger.retainedRequests(host: host, username: "me").first?.state == .opened)
     }
 
     @Test func lifecycleRecordsOnlyVerifiedAccountTargetsAndEmitsRealDraftTransitionsOnce() throws {
@@ -166,7 +166,7 @@ struct MergeRequestBrowserSnapshotTests {
         ledger.record(try request(2, username: "alice", state: "merged"), for: target, now: start.addingTimeInterval(4))
         ledger.acknowledgeFinished(target)
         ledger.record(try request(2, username: "alice"), for: target, now: start.addingTimeInterval(3))
-        #expect(ledger.request(for: target)?.state == "merged")
+        #expect(ledger.request(for: target)?.state == .merged)
         #expect(ledger.isSuppressed(target))
     }
 
@@ -217,10 +217,10 @@ struct MergeRequestBrowserSnapshotTests {
         let ready = try status(request, approved: true)
         var current = item(request)
         #expect(current.canOfferMerge(using: ready))
-        current.needsDiscussion = true
+        current.discussionObservation = .unresolvedIncoming
         #expect(!current.canOfferMerge(using: ready))
-        current.needsDiscussion = false
-        current.draftCount = 1
+        current.discussionObservation = .resolved
+        current.drafts = attentionFixtureDrafts(1)
         #expect(!current.canOfferMerge(using: ready))
     }
 

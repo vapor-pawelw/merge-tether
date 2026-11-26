@@ -27,7 +27,7 @@ GROUPS = {
                      "MRActivityTimelineTests", "BoardApprovalProgressTests", "CommentReviewSnapshotTests",
                      "AuthorFeedbackCoordinatorTests", "BoardPresentationCacheTests", "CommandCenterDisplayFrameTests",
                      "ConfirmationQueueTests", "MRBoardManualOrderTests", "MRBoardProjectorTests",
-                     "MREffectivePolicyPresentationTests", "MRWaitingStatusTests", "MergeSubmissionTests",
+                     "MREffectivePolicyPresentationTests", "MRWaitingStatusTests", "MergeActionReadinessTests", "MergeSubmissionTests",
                      "RemoteHostDetailTests"],
     "feedback": ["AuthorFeedbackPolicyTests", "AuthorFeedbackCoordinatorTests", "AuthorFeedbackMergeTests",
                  "ReReviewAssessmentTests", "ReReviewVerifierTests", "VerifiedAuthorFeedbackTests",
@@ -37,7 +37,8 @@ GROUPS = {
                  "FeedbackSuggestionDecisionsTests", "FeedbackSuggestionDecisionActionTests",
                  "CommentReviewSnapshotTests", "AuthoredMergeRequestStatusTests", "GlabMergeRequestAPITests",
                  # Verdict invalidation, readiness, discussion and routing consumers of the mapped types.
-                 "AssistantJobExecutionTests", "AssistantJobInvocationTests", "AssistantWorkerAdmissionTests", "AttentionAutomationTests",
+                 "AssistantJobExecutionTests", "AssistantJobInvocationTests", "AssistantWorkerAdmissionTests",
+                 "AttentionAutomationTests", "MRAttentionStatusTests",
                  "AuthorFeedbackPresentationTests", "AutoHandledEventBannerTests", "BoardAttentionPresenterTests",
                  "CommandCenterDisplayFrameTests", "MRCommentCitationTests", "MRDiscussionMarkdownCacheTests",
                  "MRDiscussionPresentationTests", "MRDiscussionSnapshotTests", "ManualDiscussionResolutionTests",

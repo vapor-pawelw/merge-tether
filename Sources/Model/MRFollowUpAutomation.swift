@@ -32,7 +32,7 @@ extension AutomationSettings {
                                 requiresTodoRouting: Bool = true) -> MRFollowUpAutomationHold? {
         if !hasAutomaticActionConsent { return .packageDisabled }
         if ignored { return .ignored }
-        if request.state != "opened" { return .closed }
+        if !request.isOpen { return .closed }
         if !scope.resolve(target).active { return .scopePaused }
         let rule = authorFeedback
         let workflow = workflowRules[.newDiscussion]
@@ -47,8 +47,8 @@ extension AutomationSettings {
             }
         }
         if includeDraftPolicy, !scope.permits(request, host: target.host, username: target.username) {
-            if request.draft == nil && request.detailedMergeStatus != "draft_status" { return .readinessUnknown }
-            return request.draft == true || request.detailedMergeStatus == "draft_status" ? .draftPaused : .scopePaused
+            if request.draft == nil && !request.isDraft { return .readinessUnknown }
+            return request.isDraft ? .draftPaused : .scopePaused
         }
         return nil
     }

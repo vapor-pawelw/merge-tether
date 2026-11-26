@@ -4,6 +4,29 @@ import MergeTetherRemote
 @testable import MergeTether
 
 @MainActor @Suite struct RemoteBoardAdapterTests {
+    @Test(arguments: ["ready", "quickAction", "unchecked", "duplicate", "refresh", "neutral"])
+    func phoneUsesMacCardActivityAndDraftOffer(_ scenario: String) throws {
+        let request = try MRDependencyPresentationTests().request(2, project: 1)
+        var evidence = MergeRequestAttentionMonitor.Item(id: request.mergeRequestID, title: request.title,
+            url: request.webURL, drafts: attentionFixtureDrafts(1), mergeRequest: request)
+        if scenario == "quickAction" { evidence.drafts[0] = evidence.drafts[0].replacingBody("/resolve") }
+        if scenario == "unchecked" { evidence.requiresDiscussionRecheck = true }
+        if scenario == "duplicate" {
+            evidence.drafts[0] = .init(id: 1, authorID: 3, note: "Already sent", discussionID: "thread", position: nil)
+            evidence.rememberPublishedReply(evidence.drafts[0])
+        }
+        let row = MergeRequestBoardSnapshot.Row(item: evidence, latestJob: nil, intents: [],
+            attentionPresentation: .init(evidence: evidence, humanActionRequired: scenario != "neutral"))
+        let mac = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
+            allowsRemoval: true, assistantReady: true, isRefreshingAttention: scenario == "refresh")
+        let phone = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(evidence, account: "me@host"), model: mac)
+        #expect(phone.presentation?.working == mac.working)
+        #expect(phone.presentation?.status == mac.status)
+        #expect(phone.actions.contains { $0.kind == .publish } == !mac.confirmationOffers.publishableDraftIDs.isEmpty)
+        #expect(phone.actions.contains { $0.kind == .publish } == (scenario == "ready"))
+        if mac.actionsBlocked { #expect(phone.actions.isEmpty) }
+    }
+
     @Test(arguments: ["assigned", "none", "unavailable"])
     func phoneCardCountsAssignedReviewersSeparatelyFromApprovalParticipants(_ scenario: String) throws {
         var item = try item()
@@ -187,7 +210,7 @@ import MergeTetherRemote
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "MR",
             url: URL(string: "https://gitlab.example.test/g/p/-/merge_requests/2")!, isAuthored: true)
         item.mergeRequest = try MRDependencyPresentationTests().request(2, project: 1)
-        item.canConfirmReReview = true
+        item.reReviewFeedbackChecked = true
         item.reReviewFingerprint = "current"
         item.reReviewReadiness = .uncertain([.init(noteID: 42, reason: "The required test could not be verified.")])
         #expect(!RemoteBoardAdapter.card(item, account: "me").actions.contains { $0.kind == .reReview })
@@ -283,7 +306,6 @@ import MergeTetherRemote
             .init(id: 12, authorID: 3, note: "First reply", discussionID: "one", position: nil),
             .init(id: 13, authorID: 3, note: "Second reply", discussionID: "two", position: nil),
         ]
-        item.draftCount = item.drafts.count
         let original = RemoteBoardAdapter.card(item, account: "me@host")
         let originalPublish = try #require(original.actions.first { $0.kind == .publish })
 
@@ -345,7 +367,7 @@ import MergeTetherRemote
             dependencyReadiness: gate == "dependencies" ? .waitingForDependencies : .ready,
             action: gate == "replyCapability" ? nil : .enqueue, submissionState: gate == "queued" ? .queued : .none)
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
-            url: request.webURL, humanActionRequired: false, mergeRequest: request, isAuthored: true)
+            url: request.webURL, mergeRequest: request, isAuthored: true)
         item.observedDiscussionFingerprint = "current-conversation"
         if ["reply", "replyDiscussions", "replyCapability", "question", "failed"].contains(gate) {
             item.authorFeedbackStatus = .init(head: request.sha!, fingerprint: "current-conversation",
@@ -354,7 +376,8 @@ import MergeTetherRemote
                     kind: .potentialDefect, summary: "Check retry context", question: "Does the retry preserve identity?")] : [],
                 replyNoteIDs: ["reply", "replyDiscussions", "replyCapability"].contains(gate) ? [20] : [])
         }
-        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [],
+            attentionPresentation: .init(evidence: item, humanActionRequired: false))
         let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row, assistantReady: true),
             allowsRemoval: false, assistantReady: true)
         let original = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "me@gitlab.example.test"), model: model)
@@ -456,7 +479,7 @@ import MergeTetherRemote
 
     @Test func phoneCompletionBindsTheCurrentCommentReviewAndDiscussionText() throws {
         var item = try item()
-        item.drafts = []; item.draftCount = 0
+        item.drafts = []
         item.mergeRequest = try MRDependencyPresentationTests().request(2, project: 1)
         item.requiresCommentReview = true
         item.observedDiscussionFingerprint = "comments"
@@ -475,7 +498,6 @@ import MergeTetherRemote
     @Test func phoneDeletionActionsAreBoundToEachExactDraft() throws {
         var item = try item()
         item.drafts = [.init(id: 11, authorID: 3, note: "Draft", discussionID: nil, position: nil)]
-        item.draftCount = 1
         let before = RemoteBoardAdapter.card(item, account: "me@gitlab.example.org")
         let deletion = try #require(before.actions.first { $0.kind == .deleteDraft })
         #expect(deletion.id == "deleteDraft:11")
@@ -647,7 +669,7 @@ import MergeTetherRemote
         defer { monitor.stopTimer() }
         let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Feature","labels":[],"web_url":"https://gitlab.example.test/g/p/-/merge_requests/2","state":"opened","draft":false,"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_project_id":1,"target_project_id":1,"source_branch":"feature","target_branch":"main","detailed_merge_status":"discussions_not_resolved","has_conflicts":false,"blocking_discussions_resolved":false,"user":{"can_merge":true}}"#.utf8))
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title, url: request.webURL,
-            needsDiscussion: true, mergeRequest: request, isAuthored: true)
+            discussionObservation: .unresolvedIncoming, mergeRequest: request, isAuthored: true)
         let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"checked","notes":[{"id":10,"author":{"id":7},"body":"Please fix","system":false,"resolvable":true,"resolved":false},{"id":11,"author":{"id":3},"body":"Fixed and verified","system":false,"resolvable":true,"resolved":false}]}]"#.utf8))
         item.observedDiscussionFingerprint = ReviewVerdict.fingerprint(threads)
         let card = RemoteBoardAdapter.mergeActions(RemoteBoardAdapter.card(item, account: "me@host"),
@@ -670,7 +692,6 @@ import MergeTetherRemote
         var item = try item()
         item.drafts = [.init(id: 11, authorID: 3, note: "Reply", discussionID: "thread", position: nil),
                        .init(id: 12, authorID: 3, note: "General", discussionID: nil, position: nil)]
-        item.draftCount = 2
         item.replyRecipients = ["thread": [.init(name: "Pragmatic Reviewer", username: "ext_pragmatic_pw1")]]
         let card = RemoteBoardAdapter.card(item, account: "me@host")
         #expect(card.drafts.first?.replyRecipients == [.init(name: "Pragmatic Reviewer", username: "ext_pragmatic_pw1")])
@@ -685,7 +706,6 @@ import MergeTetherRemote
             url: URL(string: "https://gitlab.example.org/group/project/-/merge_requests/2")!)
         item.drafts = try JSONDecoder().decode([GitLabDraftNote].self,
             from: Data(#"[{"id":11,"author_id":3,"note":"Please handle nil","position":{"new_path":"Sources/A.swift","new_line":12}}]"#.utf8))
-        item.draftCount = 1
         return item
     }
     @Test func cardPreservesTheExactDraftTextAndBindsActionsToAccountAndContext() throws {
@@ -753,10 +773,10 @@ import MergeTetherRemote
     }
 
     private func projected(_ item: MergeRequestAttentionMonitor.Item,
-                           jobs: [AssistantAutomationRunner.Handoff] = []) throws -> [String: Any] {
+                           jobs: [AssistantAutomationRunner.Handoff] = [], humanAttention: Bool? = nil) throws -> [String: Any] {
         let board = MergeRequestBoardSnapshot(own: item.isAuthored ? [item] : [], reviewed: item.isAuthored ? [] : [item], todos: [], attention: [],
             handoffs: jobs, host: "gitlab.example.org", username: "me",
-            humanAttention: item.humanActionRequired == false ? .empty : nil)
+            humanAttention: humanAttention == false ? .empty : nil)
         let phone = RemoteBoardAdapter.project(board: board, other: [], session: UUID(), account: "me@host")
         return try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(phone.cards[0])) as? [String: Any])
     }
@@ -776,9 +796,9 @@ import MergeTetherRemote
 
     @Test func pipelineOwnershipOffersReviewHandoffWithoutInventingAWrite() throws {
         var item = try item()
-        item.drafts = []; item.draftCount = 0
+        item.drafts = []
         item.isAuthored = true
-        item.needsPipelineHandoff = true
+        item.pipelineHandoffPending = true
         let card = try projected(item)
         #expect(card["needsAttention"] as? Bool == true)
         let cta = try #require(card["primaryCTA"] as? [String: Any])
@@ -790,8 +810,7 @@ import MergeTetherRemote
     @Test func neutralCardPreservesTheMacAttentionDecisionDespiteDrafts() throws {
         var item = try item()
         item.isAuthored = true
-        item.humanActionRequired = false
-        let card = try projected(item)
+        let card = try projected(item, humanAttention: false)
         #expect(card["needsAttention"] as? Bool == false)
         #expect(card["primaryCTA"] == nil)
     }
@@ -815,8 +834,8 @@ import MergeTetherRemote
     @Test func workingAndPublishingCardsKeepReadOnlyContentWithoutOfferingATask() throws {
         var item = try item()
         item.isAuthored = true
-        item.humanActionRequired = true
-        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [],
+            attentionPresentation: .init(evidence: item, humanActionRequired: true, verifiesFeedback: false))
         let original = RemoteBoardAdapter.card(item, account: "me@host", extraActions: [.prepare])
         #expect(!original.actions.isEmpty)
         let working = RemoteBoardAdapter.presentation(original, row: row, busy: true)
@@ -831,10 +850,9 @@ import MergeTetherRemote
 
     @Test func neutralReviewedCardUsesTheExactMacStatusAndNextStepTexts() throws {
         var item = try item()
-        item.drafts = []; item.draftCount = 0
-        item.humanActionRequired = false
+        item.drafts = []
         item.reviewingProgress = .waitingForOtherDiscussions
-        let card = try projected(item)
+        let card = try projected(item, humanAttention: false)
         let texts = try #require(card["presentation"] as? [String: Any])
         #expect(texts["status"] as? String == String(localized: .ReviewingContext.reviewingOtherThreadsOpen))
         #expect(texts["nextStep"] as? String == String(localized: .ReviewingContext.reviewingWaitingOtherThreads))
@@ -847,8 +865,8 @@ import MergeTetherRemote
     func phoneTextsAreTheMacPresentationForHumanAndNeutralCards(_ needsAttention: Bool) throws {
         var item = try item()
         item.isAuthored = true
-        item.humanActionRequired = needsAttention
-        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [],
+            attentionPresentation: .init(evidence: item, humanActionRequired: needsAttention, verifiesFeedback: false))
         let mac = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
             allowsRemoval: false, assistantReady: true)
         let phone = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "me@host"), model: mac)
@@ -862,7 +880,7 @@ import MergeTetherRemote
 
     @Test func ownLaneDoesNotAcquireReviewedStatusFromAnAuthorsIdentity() throws {
         var item = try item()
-        item.drafts = []; item.draftCount = 0
+        item.drafts = []
         let board = MergeRequestBoardSnapshot(own: [item], reviewed: [], todos: [], attention: [],
             handoffs: [], host: "gitlab.example.org", username: "me", humanAttention: .empty)
         let phone = RemoteBoardAdapter.project(board: board, other: [], session: UUID(), account: "me@host")
@@ -874,9 +892,9 @@ import MergeTetherRemote
 
     @Test func dependencyCheckingKeepsTheMacSetupLabelUntilTheAssistantIsReady() throws {
         var item = try item()
-        item.drafts = []; item.draftCount = 0; item.reviewingProgress = .needsReview
-        item.humanActionRequired = false
-        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        item.drafts = []; item.reviewingProgress = .needsReview
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [],
+            attentionPresentation: .init(evidence: item, humanActionRequired: false, verifiesFeedback: false))
         let context = ReviewingContext(row: row, assistantReady: false, assistantChecking: true)
         #expect(context.nextStep == .runReview)
         let model = MRCardPresentation(row: row, reviewingContext: context, allowsRemoval: true, assistantReady: false)
@@ -905,10 +923,10 @@ import MergeTetherRemote
     @Test func pipelineRefreshShowsSharedProgressUntilANewerPipelineIsVisible() throws {
         var item = try item()
         item.isAuthored = true
-        item.drafts = []; item.draftCount = 0
-        item.failedPipeline = true
-        item.humanActionRequired = false
-        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        item.drafts = []
+        item.catalogIssues.insert(.failedPipeline)
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [],
+            attentionPresentation: .init(evidence: item, humanActionRequired: false, verifiesFeedback: false))
         let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
             allowsRemoval: false, assistantReady: true, automaticPipelineProgress: true)
         #expect(model.busy && model.working)

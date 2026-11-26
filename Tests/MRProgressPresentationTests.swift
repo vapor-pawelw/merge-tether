@@ -4,6 +4,29 @@ import Testing
 
 @MainActor
 struct MRProgressPresentationTests {
+    @Test(arguments: ["finished", "confirmation", "cli", "quietRead", "visibleRead", "idle"])
+    func cardActivityChoosesOneState(_ scenario: String) throws {
+        let original = presentation(scenario == "cli" ? "followUp" : "idle", state: scenario == "cli" ? .queued : nil)
+        var item = original.row.item
+        if scenario == "finished" {
+            let request = try mergeRequestWithAutoMerge()
+            var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+            json["state"] = "merged"
+            item.mergeRequest = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: json))
+        }
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: original.row.latestJob, intents: original.row.intents)
+        let model = MRCardPresentation(row: row, reviewingContext: original.reviewingContext, allowsRemoval: false,
+            assistantReady: true, confirmationState: ["finished", "confirmation"].contains(scenario) ? .publishing : nil,
+            isRefreshingAttention: scenario != "idle", showsReadProgress: scenario != "quietRead", cliHoldKind: .rateLimited)
+        switch (scenario, model.cardActivity) {
+        case ("finished", .finished), ("confirmation", .working), ("cli", .waitingOnCLI),
+             ("quietRead", .readCheck), ("visibleRead", .readCheck), ("idle", .idle): break
+        default: Issue.record("Unexpected activity for \(scenario): \(model.cardActivity)")
+        }
+        #expect(model.working == ["confirmation", "visibleRead"].contains(scenario))
+        #expect(model.actionsBlocked == (scenario != "idle"))
+    }
+
     @Test func aHeldQueueHasAFactualPausedStatusWithoutASpinner() {
         let queued = presentation("followUp", state: .queued)
         let model = MRCardPresentation(row: queued.row, reviewingContext: queued.reviewingContext,
@@ -42,7 +65,7 @@ struct MRProgressPresentationTests {
         let idle = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
         #expect(MRCardPresentation(row: idle, reviewingContext: ReviewingContext(row: idle), allowsRemoval: !authored,
             assistantReady: true).stepChain == nil)
-        item.draftCount = 1
+        item.drafts = attentionFixtureDrafts(1)
         let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
         let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row), allowsRemoval: !authored,
             assistantReady: true)
@@ -67,7 +90,7 @@ struct MRProgressPresentationTests {
     func independentStoppedWorkDoesNotAcquireFakeReviewPreparationWhileProofIsChecked(_ aiChecking: Bool) {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
             url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!)
-        item.draftCount = 1
+        item.drafts = attentionFixtureDrafts(1)
         item.draftProofRecoveryChecking = true
         item.aiOriginChecking = aiChecking
         let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
@@ -160,10 +183,10 @@ struct MRProgressPresentationTests {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example", url: url)
         item.mergeRequest = request
         item.isAuthored = state == "merged"
-        item.hasConflict = true
-        item.failedPipeline = true
-        item.needsMerge = true
-        item.draftCount = 1
+        item.catalogIssues.insert(.conflict)
+        item.catalogIssues.insert(.failedPipeline)
+        item.manualMergeAvailable = true
+        item.drafts = attentionFixtureDrafts(1)
         let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
             work: .init(host: "gitlab.example.test", projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
             title: "Earlier work", prompt: "Check", createdAt: Date(), allowsPush: false,

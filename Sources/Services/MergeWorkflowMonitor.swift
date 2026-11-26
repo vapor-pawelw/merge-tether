@@ -60,7 +60,7 @@ final class MergeWorkflowMonitor {
     }
 
     private struct BlockerCheckpoint: Codable, Equatable {
-        var status: String?
+        var status: GitLabDetailedMergeStatus?
         var inTrain: Bool?
         var revision = 0
     }
@@ -134,9 +134,9 @@ final class MergeWorkflowMonitor {
         isPolling = true
         defer { isPolling = false }
 
-        let account = Account(host: host.lowercased(), userID: user.id)
+        let account = Account(host: GitLabAccountIdentity.normalize(host), userID: user.id)
         let owned = authored.filter {
-            $0.state == "opened" && $0.author.id == user.id && $0.webURL.isGitLabMergeRequest(host: host, iid: $0.iid)
+            $0.state == .opened && $0.author.id == user.id && $0.webURL.isGitLabMergeRequest(host: host, iid: $0.iid)
         }
         let eligibleOwned = owned.filter { automationScope.permits($0, host: host, username: user.username) }
         let prior = baselines[account] ?? Baselines()
@@ -209,7 +209,7 @@ final class MergeWorkflowMonitor {
         // The authored list omits head_pipeline. Only the detail response
         // can distinguish an MR without a pipeline from unavailable data.
         guard request.canMerge != nil || request.headPipeline != nil else { return nil }
-        guard let pipeline = request.headPipeline, pipeline.status == "failed" else {
+        guard let pipeline = request.headPipeline, pipeline.status == .failed else {
             if snapshot.failedPipelineIDs == nil { snapshot.failedPipelineIDs = [] }
             return nil
         }
@@ -228,7 +228,7 @@ final class MergeWorkflowMonitor {
         snapshot.reportedPipelineFailures = reported
         // Old checkpoints knew only that the pipeline had already been reported.
         if isFirstObservation, snapshot.failedPipelineIDs?.contains(id) == true { return nil }
-        let failed = jobs.filter { $0.status == "failed" && $0.id > 0 }
+        let failed = jobs.filter { $0.status == .failed && $0.id > 0 }
         let hardFailures = failed.filter { $0.allowFailure != true }
         let onlyFailure = hardFailures.count == 1 ? hardFailures.first : nil
         let infrastructure = onlyFailure?.allowFailure == false
@@ -258,7 +258,7 @@ final class MergeWorkflowMonitor {
             .compactMap(\.id))
         let previous = snapshot.discussionNoteIDs
         snapshot.discussionNoteIDs = (previous ?? []).union(ids)
-        let requestedChanges = request.detailedMergeStatus == "requested_changes"
+        let requestedChanges = request.detailedMergeStatus == .requestedChanges
         let requestedNow = requestedChanges && snapshot.changesRequested == false
         if let status = request.detailedMergeStatus, Self.stableMergeStatuses.contains(status) {
             snapshot.changesRequested = requestedChanges
@@ -275,11 +275,11 @@ final class MergeWorkflowMonitor {
         )
     }
 
-    private static let stableMergeStatuses: Set<String> = [
-        "blocked_status", "ci_must_pass", "commits_status", "conflict", "discussions_not_resolved",
-        "draft_status", "external_status_checks", "jira_association_missing", "mergeable",
-        "merge_request_blocked", "merge_time", "need_rebase", "not_approved", "requested_changes",
-        "security_policy_violations", "status_checks_must_pass", "title_regex", "locked_paths", "locked_lfs_files"
+    private static let stableMergeStatuses: Set<GitLabDetailedMergeStatus> = [
+        .blockedStatus, .ciMustPass, .commitsStatus, .conflict, .discussionsNotResolved,
+        .draftStatus, .externalStatusChecks, .jiraAssociationMissing, .mergeable,
+        .mergeRequestBlocked, .mergeTime, .needRebase, .notApproved, .requestedChanges,
+        .securityPolicyViolations, .statusChecksMustPass, .titleRegex, .lockedPaths, .lockedLfsFiles
     ]
 
     private func blockerChange(
@@ -295,7 +295,7 @@ final class MergeWorkflowMonitor {
 
         var changes: [String] = []
         if let old = previous.status, let status, old != status {
-            changes.append("Merge status changed from \(old) to \(status).")
+            changes.append("Merge status changed from \(old.rawValue) to \(status.rawValue).")
         }
         let leftMergeTrain = previous.inTrain == true && inTrain == false
         if leftMergeTrain {
@@ -322,9 +322,9 @@ final class MergeWorkflowMonitor {
             guard let parent = try? await observation.glab.fetchMergeRequest(
                 projectID: tracked.projectID, iid: tracked.iid, host: observation.account.host
             ) else { return nil }
-            guard parent.state != "opened" else { return nil }
+            guard !parent.isOpen else { return nil }
             snapshot.parent = nil
-            guard parent.state == "merged", Self.matchesStackRelationship(parent, child: child, tracked: tracked),
+            guard parent.state == .merged, Self.matchesStackRelationship(parent, child: child, tracked: tracked),
                   snapshot.reportedParents.insert(tracked.key).inserted else { return nil }
             return observation.event(
                 .stackDependencyMerged, token: tracked.key,
@@ -348,7 +348,7 @@ final class MergeWorkflowMonitor {
     }
 
     private static func isOpenStackParent(_ parent: GitLabMergeRequest, of child: GitLabMergeRequest) -> Bool {
-        parent.state == "opened" && key(parent) != key(child)
+        parent.isOpen && key(parent) != key(child)
             && parent.sourceProjectID == child.targetProjectID && parent.targetProjectID == child.targetProjectID
             && child.targetProjectID != nil && parent.sourceBranch == child.targetBranch
             && parent.sourceBranch != parent.targetBranch
@@ -371,7 +371,7 @@ final class MergeWorkflowMonitor {
                 projectID: request.projectID, iid: request.iid, host: observation.account.host
               ) else { return nil }
         let overdue = reviewers.compactMap { reviewer -> (key: String, userID: Int)? in
-            guard reviewer.state == "unreviewed", reviewer.user.id > 0,
+            guard reviewer.state == .unreviewed, reviewer.user.id > 0,
                   reviewer.user.id != observation.account.userID,
                   let raw = reviewer.createdAt, let since = Self.parseDate(raw),
                   now.timeIntervalSince(since) >= seconds else { return nil }
@@ -397,7 +397,7 @@ final class MergeWorkflowMonitor {
         let assigned = try? await glab.fetchReviewAssignedMergeRequests(userID: account.userID, host: account.host)
         var candidates = assigned ?? []
         var known = Set(candidates.map(Self.key))
-        var retained = Set(tracked.filter { $0.host.lowercased() == account.host })
+        var retained = Set(tracked.filter { GitLabAccountIdentity.normalize($0.host) == account.host })
         var merged = baselines.mergedReviews ?? []
         var failedDetailReads: Set<String> = []
         for (key, checkpoint) in baselines.reviews where checkpoint.hasReviewed {
@@ -413,31 +413,31 @@ final class MergeWorkflowMonitor {
                 failedDetailReads.insert(key)
                 continue
             }
-            if request.state == "merged" { merged.insert(key); continue }
+            if request.state == .merged { merged.insert(key); continue }
             candidates.append(request)
             known.insert(key)
         }
-        for request in candidates where request.state == "opened" { merged.remove(Self.key(request)) }
+        for request in candidates where request.isOpen { merged.remove(Self.key(request)) }
         baselines.mergedReviews = merged.isEmpty ? nil : merged
         let otherRequests = candidates.filter {
             $0.author.id != account.userID
                 && $0.webURL.isGitLabMergeRequest(host: account.host, iid: $0.iid)
         }
-        let nonterminalKeys = Set(otherRequests.lazy.filter { $0.state != "merged" && $0.state != "closed" }.map(Self.key))
+        let nonterminalKeys = Set(otherRequests.lazy.filter { $0.state != .merged && $0.state != .closed }.map(Self.key))
         baselines.reviews = baselines.reviews.filter { key, _ in
             guard !ownedKeys.contains(key), !merged.contains(key) else { return false }
             return nonterminalKeys.contains(key) || failedDetailReads.contains(key)
                 || (assigned == nil && !known.contains(key))
         }
         var events: [MergeWorkflowEvent] = []
-        for request in otherRequests where request.state == "opened" {
+        for request in otherRequests where request.isOpen {
             guard !Task.isCancelled else { return [] }
             guard automationScope.permits(request, host: account.host, username: username),
                   let head = request.sha, !head.isEmpty else { continue }
             let reviewers = try? await glab.fetchMergeRequestReviewers(projectID: request.projectID, iid: request.iid, host: account.host)
             let reviewer = reviewers?.first(where: { $0.user.id == account.userID })
             let key = Self.key(request)
-            let reviewed = reviewer.map { ["reviewed", "approved", "requested_changes"].contains($0.state) } ?? false
+            let reviewed = reviewer.map { [.reviewed, .approved, .requestedChanges].contains($0.state) } ?? false
             let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: account.host)
             let replies = discussions.map { threads in
                 Set(GitLabMergeRequestDiscussion.activeForReview(threads).flatMap { thread -> [Int] in
@@ -644,7 +644,7 @@ final class MergeWorkflowMonitor {
         let live: GitLabMergeRequest?
         if ReviewTargetBinding(request) != nil { live = request }
         else { live = try? await glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host) }
-        guard let live, live.state == "opened", live.webURL == request.webURL,
+        guard let live, live.isOpen, live.webURL == request.webURL,
               let current = ReviewTargetBinding(live), current.headSHA == head, current != reviewed else { return nil }
         return current
     }

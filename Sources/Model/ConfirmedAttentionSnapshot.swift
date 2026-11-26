@@ -4,17 +4,17 @@ import Foundation
 @MainActor
 struct ConfirmedAttentionSnapshot {
     struct Input {
-        var account: String?
+        var account: GitLabAccountSession?
         var candidates: [UserAttentionSnapshot.Candidate] = []
         var checkingIDs: Set<String> = []
         var humanActions: [String: MRHumanAction] = [:]
     }
-    private var account: String?
+    private var account: GitLabAccountSession?
     private var confirmed: [String: [UserAttentionSnapshot.Candidate]] = [:]
     private(set) var humanActions: [String: MRHumanAction] = [:]
     var snapshot: UserAttentionSnapshot { .init(candidates: confirmed.values.flatMap { $0 }) }
 
-    func matches(account: String?) -> Bool { account != nil && self.account == account }
+    func matches(account: GitLabAccountSession?) -> Bool { account != nil && self.account == account }
 
     mutating func update(_ input: Input) {
         if account != input.account || input.account == nil {

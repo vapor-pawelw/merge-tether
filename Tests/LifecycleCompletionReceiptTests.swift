@@ -54,11 +54,11 @@ struct LifecycleCompletionReceiptTests {
         let acknowledgementResult3 = ledger.acknowledgeCompletion(id: event.id, host: target.host, username: target.username)
         #expect(acknowledgementResult3)
         #expect(receipts(try restart(ledger)).isEmpty)
-        #expect(ledger.request(for: target)?.state == "closed")
+        #expect(ledger.request(for: target)?.state == .closed)
         #expect(ledger.targets(host: target.host, username: target.username).contains(target))
         ledger.record(try request(), for: target, now: start.addingTimeInterval(2))
         #expect(!ledger.isSuppressed(target))
-        #expect(ledger.retainedRequests(host: target.host, username: target.username).first?.state == "opened")
+        #expect(ledger.retainedRequests(host: target.host, username: target.username).first?.state == .opened)
     }
 
     @Test func reopenedMRKeepsOriginalReceiptUntilNextTerminalEventReplacesIt() throws {
@@ -139,7 +139,7 @@ struct LifecycleCompletionReceiptTests {
         ledger.record(try request(state: "merged"), for: target, now: start.addingTimeInterval(0.5))
         let otherHost = MRAutomationScope.Target(host: "other.example.test", username: target.username, projectID: 7, iid: 11)
         ledger.record(try request(state: "merged"), for: otherHost, now: start.addingTimeInterval(5))
-        #expect(ledger.request(for: target)?.state == "closed")
+        #expect(ledger.request(for: target)?.state == .closed)
         #expect(receipts(ledger).map(\.id) == [event.id])
         #expect(ledger.unreadCompletions(host: otherHost.host, username: otherHost.username, showMerged: true, showClosed: true).isEmpty)
     }
@@ -177,7 +177,7 @@ struct LifecycleCompletionReceiptTests {
         }
         payload["entries"] = entries
         let restored = try JSONDecoder().decode(MergeRequestLifecycleLedger.self, from: JSONSerialization.data(withJSONObject: payload))
-        #expect(restored.request(for: target)?.state == "closed")
+        #expect(restored.request(for: target)?.state == .closed)
         #expect(restored.retainedRequests(host: target.host, username: target.username).count == 1)
         #expect(receipts(restored).isEmpty)
     }

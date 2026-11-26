@@ -152,7 +152,7 @@ final class AssistantJobCoordinator {
     private func recordResolvedFeedback(_ id: UUID, settings: SettingsManager) {
         guard let handoff = settings.assistantHandoffs.first(where: { $0.id == id }) else { return }
         let work = handoff.key.work
-        let target = MRAutomationScope.Target(host: work.host, username: handoff.key.username,
+        let target = MRAutomationScope.Target.mergeRequest(host: work.host, username: handoff.key.username,
             projectID: work.projectID, iid: work.iid)
         // A skipped run cannot consume the retry budget if the same feedback is reopened.
         let attempts = settings.assistantHandoffs.filter {

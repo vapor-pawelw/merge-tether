@@ -49,7 +49,7 @@ enum DraftProofRecoveryVerifier {
               drafts.allSatisfy({ origin.owns($0, request: snapshot.request, host: snapshot.host, user: snapshot.user) && AutomaticPublicationPolicy.safeForAutomaticPublication($0) }),
               let head = snapshot.request.sha, snapshot.branchHead == head,
               head == origin.headSHA || input.currentFiles != nil,
-              snapshot.request.state == "opened",
+              snapshot.request.isOpen,
               input.configuration.map({ $0.scope.permits(snapshot.request, host: snapshot.host, username: snapshot.user.username) })
                 ?? (snapshot.request.draft == false),
               let fingerprint = ReviewVerdict.fingerprint(snapshot.discussions),

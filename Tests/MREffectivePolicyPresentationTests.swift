@@ -228,8 +228,8 @@ struct MREffectivePolicyPresentationTests {
             data[field] = "changed"
             let current = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: data))
             let evidence = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: checked.title,
-                url: checked.webURL, automaticDraftIDs: [7], canApprove: true, autoApproveReady: true,
-                needsMerge: true, canConfirmReReview: true, mergeRequest: checked, isAuthored: true)
+                url: checked.webURL, automaticDraftIDs: [7], approvalObservation: .manualFallback,
+                manualMergeAvailable: true, reReviewReadiness: .manual, reReviewFeedbackChecked: true, mergeRequest: checked, isAuthored: true)
             let catalog = MergeRequestAttentionMonitor.Item(id: evidence.id, title: current.title,
                 url: current.webURL, mergeRequest: current, isAuthored: true)
             let projection = MRCurrentRowProjection(evidence: evidence, catalog: catalog, username: target.username)

@@ -704,7 +704,7 @@ struct ReReviewVerifierTests {
             title: "Synthetic MR", description: "Fallback is documented", diff: "No code changes", discussions: discussions,
             target: .init(host: "gitlab.example.test", projectID: 1, iid: 2,
                 url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!, expectedUsername: "me"),
-            semanticContextFingerprint: "expected-context")
+            semanticContextFingerprint: .init("expected-context"))
         #expect(input.thinking == .high)
         input.thinking = thinking
 
@@ -785,7 +785,7 @@ struct ReReviewVerifierTests {
         }
         input.target = .init(host: "gitlab.example.test", projectID: 1, iid: 2,
             url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!, expectedUsername: "me")
-        input.semanticContextFingerprint = "expected-context"
+        input.semanticContextFingerprint = .init("expected-context")
         input.thinking = .low
 
         let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })

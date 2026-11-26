@@ -10,7 +10,7 @@ struct BoardCardPinTests {
     }
     private func item(_ iid: Int, attention: Bool = false, draft: Bool = false) -> MergeRequestAttentionMonitor.Item {
         var result = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: iid), title: "MR \(iid)",
-            url: URL(string: "https://\(host)/g/p/-/merge_requests/\(iid)")!, needsDiscussion: attention)
+            url: URL(string: "https://\(host)/g/p/-/merge_requests/\(iid)")!, discussionObservation: attention ? .unresolvedIncoming : .resolved)
         result.draftFromTodo = draft
         return result
     }

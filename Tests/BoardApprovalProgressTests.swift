@@ -148,7 +148,7 @@ import Testing
             .replacingOccurrences(of: "AUTHOR", with: author)
         let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(json.utf8))
         let item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 42), title: request.title,
-            url: request.webURL, needsDiscussion: false, mergeRequest: request, isAuthored: isAuthored)
+            url: request.webURL, mergeRequest: request, isAuthored: isAuthored)
         return .init(item: item, latestJob: nil, intents: [])
     }
 

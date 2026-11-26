@@ -122,7 +122,7 @@ struct CommandCenterDisplayFrameTests {
         defer { monitor.stopTimer() }
         var checkpoint = try item(request(head: "head-a", title: "Checked"))
         checkpoint.requiresCommentReview = true
-        checkpoint.draftCount = 1
+        checkpoint.drafts = attentionFixtureDrafts(1)
         var latest = job(42)
         if change == "running" { latest.execution = .init(state: .running) }
         let row = MergeRequestBoardSnapshot.Row(item: checkpoint, latestJob: change == "running" ? latest : nil, intents: [])
@@ -177,7 +177,6 @@ struct CommandCenterDisplayFrameTests {
         // given
         var checkpoint = try item(request(head: "head-a", title: "Checked"))
         checkpoint.drafts = [.init(id: 7, authorID: 3, note: "Private reply", discussionID: nil, position: nil)]
-        checkpoint.draftCount = 1
         checkpoint.observedDiscussionFingerprint = "checked-discussion"
         let other = item(43)
         let todo = todo(8)

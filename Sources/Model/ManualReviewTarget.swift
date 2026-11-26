@@ -12,7 +12,7 @@ struct ManualReviewTarget: Sendable {
     }
 
     func accepts(_ request: GitLabMergeRequest) -> Bool {
-        request.state == "opened" && request.projectID == projectID && request.iid == iid
+        request.isOpen && request.projectID == projectID && request.iid == iid
             && request.webURL == url && url.isGitLabMergeRequest(host: host, iid: iid)
             && request.author.username != username && request.sha?.isEmpty == false
     }

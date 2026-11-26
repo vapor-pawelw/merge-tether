@@ -25,7 +25,7 @@ struct MergeRequestLifecycleLedger: Codable, Sendable {
     private struct Entry: Codable, Sendable {
         var request: GitLabMergeRequest
         var observedAt: Date
-        var acknowledgedTerminalState: String?
+        var acknowledgedTerminalState: GitLabMergeRequestState?
         var terminalObservedAt: Date?
         var terminalReceiptRecorded: Bool?
     }
@@ -59,7 +59,7 @@ struct MergeRequestLifecycleLedger: Codable, Sendable {
             $0.id == id && $0.target.host == host && $0.target.username == username
         }) else { return false }
         completions.removeValue(forKey: receipt.target)
-        if entries[receipt.target]?.request.state == receipt.kind.rawValue {
+        if entries[receipt.target]?.request.state.rawValue == receipt.kind.rawValue {
             entries[receipt.target]?.terminalReceiptRecorded = true
             suppressFinished(receipt.target)
         }
@@ -102,7 +102,7 @@ struct MergeRequestLifecycleLedger: Codable, Sendable {
 
     mutating func acknowledgeFinished(_ target: MRAutomationScope.Target) {
         guard let entry = entries[target], Self.isFinished(entry.request) else { return }
-        if completions[target]?.kind.rawValue == entry.request.state { completions.removeValue(forKey: target) }
+        if completions[target]?.kind.rawValue == entry.request.state.rawValue { completions.removeValue(forKey: target) }
         entries[target]?.terminalReceiptRecorded = true
         suppressFinished(target)
     }
@@ -116,14 +116,14 @@ struct MergeRequestLifecycleLedger: Codable, Sendable {
         guard let iid = target.iid, iid > 0, target.projectID > 0, !target.username.isEmpty,
               request.projectID == target.projectID, request.iid == iid,
               request.webURL.isGitLabMergeRequest(host: target.host, iid: iid),
-              ["opened", "closed", "merged"].contains(request.state) else { return }
+              [.opened, .closed, .merged].contains(request.state) else { return }
         let previous = entries[target]
         guard previous.map({ now >= $0.observedAt }) ?? true else { return }
         var kind: Transition.Kind?
         if let old = previous?.request {
             if old.state != request.state, Self.isFinished(request) {
-                kind = request.state == "merged" ? .merged : .closed
-            } else if old.state == "opened", request.state == "opened",
+                kind = request.state == .merged ? .merged : .closed
+            } else if old.isOpen, request.isOpen,
                       let wasDraft = old.draft, let isDraft = request.draft, wasDraft != isDraft {
                 kind = isDraft ? .draft : .ready
             }
@@ -152,7 +152,7 @@ struct MergeRequestLifecycleLedger: Codable, Sendable {
     private mutating func retainCompletion(_ request: GitLabMergeRequest, for target: MRAutomationScope.Target,
                                           id: UUID, observedAt: Date, replacing: Bool = true) {
         guard Self.isFinished(request), replacing || (completions[target] == nil && entries[target]?.terminalReceiptRecorded != true) else { return }
-        completions[target] = .init(id: id, target: target, kind: request.state == "merged" ? .merged : .closed,
+        completions[target] = .init(id: id, target: target, kind: request.state == .merged ? .merged : .closed,
             title: request.title, url: request.webURL, observedAt: observedAt, author: request.author)
         // Receipt acknowledgement survives restoring a finished row to the board.
         entries[target]?.terminalReceiptRecorded = true
@@ -165,7 +165,7 @@ struct MergeRequestLifecycleLedger: Codable, Sendable {
     }
 
     private static func isFinished(_ request: GitLabMergeRequest) -> Bool {
-        request.state == "merged" || request.state == "closed"
+        request.state == .merged || request.state == .closed
     }
 }
 
@@ -197,7 +197,7 @@ struct ReviewAssignmentLedger: Codable, Sendable {
 
     func assignmentTargets(host: String, username: String) -> Set<MRAutomationScope.Target> {
         Set((entries(host: host, username: username) ?? []).map {
-            .init(host: host, username: username, projectID: $0.request.projectID, iid: $0.request.iid)
+            .mergeRequest(host: host, username: username, projectID: $0.request.projectID, iid: $0.request.iid)
         })
     }
 
@@ -222,13 +222,13 @@ struct ReviewAssignmentLedger: Codable, Sendable {
         let previous = listings[account]
         let establishingBaseline = needsBaseline(host: host, username: username)
         var next: [ID: Entry] = [:]
-        for request in requests where request.state == "opened" && request.projectID > 0 && request.iid > 0
+        for request in requests where request.isOpen && request.projectID > 0 && request.iid > 0
             && request.author.username != username && request.webURL.isGitLabMergeRequest(host: host, iid: request.iid) {
             let id = ID(projectID: request.projectID, iid: request.iid)
             guard next[id] == nil else { continue }
             let newSince: Date?
             if establishingBaseline {
-                let target = MRAutomationScope.Target(host: host, username: username, projectID: id.projectID, iid: id.iid)
+                let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: id.projectID, iid: id.iid)
                 let newlyVisible = !previouslyVisible.isEmpty && !previouslyVisible.contains(target)
                 newSince = previous?[id]?.newSince ?? (newlyVisible ? date : nil)
             } else if let old = previous?[id] {

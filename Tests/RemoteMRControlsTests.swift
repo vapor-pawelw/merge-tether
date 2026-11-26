@@ -76,7 +76,7 @@ import MergeTetherRemote
     private func item(phase: AuthorFeedbackStatus.Phase = .complete, staleHead: Bool = false) throws -> MergeRequestAttentionMonitor.Item {
         let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Feature","labels":[],"web_url":"https://gitlab.example.test/g/p/-/merge_requests/2","state":"opened","draft":false,"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_branch":"feature","target_branch":"main"}"#.utf8))
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
-            url: request.webURL, humanActionRequired: true, mergeRequest: request, isAuthored: true)
+            url: request.webURL, mergeRequest: request, isAuthored: true)
         item.observedDiscussionFingerprint = "conversation"
         item.authorFeedbackStatus = .init(head: staleHead ? String(repeating: "b", count: 40) : request.sha!,
             fingerprint: "conversation", semanticContextFingerprint: request.semanticContextFingerprint, phase: phase,

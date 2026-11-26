@@ -17,8 +17,9 @@ struct ReviewingContextTests {
               system: system, resolvable: true, resolved: resolved, resolvedBy: nil, body: "Comment")
     }
     private func row(_ item: MergeRequestAttentionMonitor.Item, job: AssistantAutomationRunner.Handoff? = nil,
-                     intents: [MRTodoIntent] = []) -> MergeRequestBoardSnapshot.Row {
-        .init(item: item, latestJob: job, intents: intents)
+                     intents: [MRTodoIntent] = [], humanAttention: Bool? = nil) -> MergeRequestBoardSnapshot.Row {
+        .init(item: item, latestJob: job, intents: intents,
+            attentionPresentation: .init(evidence: item, humanActionRequired: humanAttention, verifiesFeedback: false))
     }
     private func reviewJob(_ state: AssistantJobExecution.State) -> AssistantAutomationRunner.Handoff {
         .init(id: UUID(), key: .init(assistant: .codex,
@@ -145,8 +146,8 @@ struct ReviewingContextTests {
     @Test func resolvedOwnCommentsAreStillRecordedWithoutAnOpenThread() throws {
         let activity = ReviewingActivity(discussions: [.init(id: "thread", notes: [note(10, user: 3, resolved: true)])], reviewerID: 3, authorID: 7)
         #expect(activity.publishedCommentCount == 1 && activity.openThreadCount == 0)
-        var item = try item(); item.reviewingActivity = activity; item.humanActionRequired = false
-        let original = row(item)
+        var item = try item(); item.reviewingActivity = activity
+        let original = row(item, humanAttention: false)
         #expect(ReviewingContext(row: original).status == .commented(1))
         #expect(!original.needsAttention)
     }
@@ -161,10 +162,10 @@ struct ReviewingContextTests {
     }
 
     @Test func pendingDraftsAndActiveRunsExplainCurrentProgress() throws {
-        var item = try item(); item.draftCount = 2
+        var item = try item(); item.drafts = attentionFixtureDrafts(2)
         #expect(ReviewingContext(row: row(item)).status == .drafts(2))
         #expect(ReviewingContext(row: row(item, job: reviewJob(.running))).status == .running)
-        item.draftCount = 0
+        item.drafts = []
         #expect(ReviewingContext(row: row(item, job: reviewJob(.succeeded))).status == .reviewCompleted)
     }
 
@@ -226,8 +227,8 @@ struct ReviewingContextTests {
             note(10, user: 3, resolved: true), note(11, user: 7, resolved: true)
         ])], reviewerID: 3, authorID: 7)
         #expect(activity.authorReplyCount == 0)
-        var item = try item(); item.reviewingActivity = activity; item.humanActionRequired = false
-        let snapshot = row(item)
+        var item = try item(); item.reviewingActivity = activity
+        let snapshot = row(item, humanAttention: false)
         let context = ReviewingContext(row: snapshot)
         #expect(context.status == .commented(1))
         #expect(context.nextStep == .monitoring)
@@ -322,15 +323,14 @@ struct ReviewingContextTests {
     func queuedAutomaticReviewDoesNotAskForASecondManualRun(_ state: MergeWorkflowActivityState) throws {
         var item = try item()
         item.reviewingActivity = ReviewingActivity(discussions: [], reviewerID: 3, authorID: 7)
-        item.humanActionRequired = false
-        let context = ReviewingContext(row: row(item), workflowState: state)
+        let context = ReviewingContext(row: row(item, humanAttention: false), workflowState: state)
         #expect(context.nextStep == .automaticReview)
         #expect(context.actionLabel == nil)
     }
 
     @Test func automaticallyHandledDraftsDoNotAskForManualReviewComments() throws {
-        var item = try item(); item.draftCount = 2; item.humanActionRequired = false
-        let context = ReviewingContext(row: row(item))
+        var item = try item(); item.drafts = attentionFixtureDrafts(2)
+        let context = ReviewingContext(row: row(item, humanAttention: false))
         #expect(context.nextStep == .automaticReview)
         #expect(context.actionLabel == nil)
     }
@@ -377,8 +377,7 @@ struct ReviewingContextTests {
 
     @Test func waitingForOtherReviewThreadsIsReadOnlyAndDoesNotInventApproval() throws {
         var item = try item(); item.reviewingProgress = .waitingForOtherDiscussions
-        item.humanActionRequired = false
-        let snapshot = row(item)
+        let snapshot = row(item, humanAttention: false)
         let context = ReviewingContext(row: snapshot)
         #expect(context.nextStep == .monitoring)
         #expect(String(localized: context.nextStepMessage) == "No action needed. Waiting for other review threads to be resolved.")
@@ -388,8 +387,7 @@ struct ReviewingContextTests {
 
     @Test func freshReviewEvidenceSupersedesAnOlderFailedWorkflow() throws {
         var item = try item(); item.reviewingProgress = .current
-        item.humanActionRequired = false
-        let context = ReviewingContext(row: row(item), workflowState: .failed, assistantReady: false)
+        let context = ReviewingContext(row: row(item, humanAttention: false), workflowState: .failed, assistantReady: false)
         #expect(context.status == .reviewCompleted)
         #expect(context.nextStep == .monitoring)
         #expect(!context.isAutomaticProcessing)
@@ -401,7 +399,6 @@ struct ReviewingContextTests {
     func completedReviewKeepsItsSummaryInDetailsWithoutACardAction(_ openThread: Bool) throws {
         var item = try item()
         item.reviewingProgress = .current
-        item.humanActionRequired = false
         item.approvalProgress = .init(completed: 2, required: 2, approvedBy: [
             .init(id: 3, username: "user3", name: "Reviewer", avatarURL: nil),
             .init(id: 4, username: "user4", name: "Other reviewer", avatarURL: nil)
@@ -409,7 +406,7 @@ struct ReviewingContextTests {
         let discussions: [GitLabMergeRequestDiscussion] = openThread
             ? [.init(id: "thread", notes: [note(1, user: 3)])] : []
         item.reviewingActivity = ReviewingActivity(discussions: discussions, reviewerID: 3, authorID: 7)
-        let snapshot = row(item)
+        let snapshot = row(item, humanAttention: false)
         let model = MRCardPresentation(row: snapshot, reviewingContext: ReviewingContext(row: snapshot, viewerUsername: "user3"),
             allowsRemoval: true, assistantReady: true)
 
@@ -434,7 +431,6 @@ struct ReviewingContextTests {
         item.mergeRequest = try request(discussionsResolved: false)
         item.approvalProgress = .init(completed: 0, required: 2)
         item.reviewingProgress = .current
-        item.humanActionRequired = false
         item.reviewingActivity = .init(discussions: [.init(id: "thread", notes: [note(1, user: 4)])],
             reviewerID: 3, authorID: 7)
         let snapshot = row(item)
@@ -454,7 +450,6 @@ struct ReviewingContextTests {
     func completedReviewKeepsPendingApprovalVisible(_ viewerApproved: Bool) throws {
         var item = try item()
         item.reviewingProgress = .current
-        item.humanActionRequired = false
         let approvers: [Todo.Author] = viewerApproved ? [
             .init(id: 3, username: "user3", name: "Reviewer", avatarURL: nil)
         ] : [
@@ -476,8 +471,7 @@ struct ReviewingContextTests {
 
     @Test func freshWaitingForOtherThreadsSupersedesAnOlderFailedWorkflow() throws {
         var item = try item(); item.reviewingProgress = .waitingForOtherDiscussions
-        item.humanActionRequired = false
-        let context = ReviewingContext(row: row(item), workflowState: .failed, assistantReady: false)
+        let context = ReviewingContext(row: row(item, humanAttention: false), workflowState: .failed, assistantReady: false)
         #expect(context.status == .waitingForOtherDiscussions)
         #expect(context.nextStep == .monitoring)
         #expect(!context.isAutomaticProcessing)

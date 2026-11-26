@@ -25,7 +25,7 @@ struct CommandCenterMRDetail: View {
         let selected = CommandCenterDisplayFrame.Detail(item: item, board: monitor.boardSnapshot,
             host: monitor.glab.resolvedHost, username: monitor.glab.currentUsername)
         let row = selected.row
-        let required = row?.item.humanActionRequired ?? item.humanActionRequired ?? needsHumanAttention
+        let required = row?.presented.humanActionRequired ?? needsHumanAttention
         CommandCenterMRDetailContent(item: selected.item, catalogRow: row, isReviewed: selected.isReviewed,
             monitor: monitor, initialSection: initialSection, needsHumanAttention: required)
             .overlay(alignment: .bottomTrailing) {
@@ -93,7 +93,7 @@ private struct CommandCenterMRDetailContent: View {
     private var work: AssistantAutomationRunner.MergeRequestWork? {
         target.map { .init(host: $0.host, projectID: item.id.projectID, iid: item.id.iid) }
     }
-    private var presentationItem: MergeRequestAttentionMonitor.Item { presentationRow.item }
+    private var presentationItem: MergeRequestAttentionMonitor.ItemPresentation { presentationRow.presented }
     private var jobs: [AssistantAutomationRunner.Handoff] {
         guard let work, let target else { return [] }
         let matchingJobs = monitor.assistantHandoffs.filter { job in
@@ -191,7 +191,7 @@ private struct CommandCenterMRDetailContent: View {
                         VStack(alignment: .leading, spacing: 8) {
                             MergeActionsView(item: item, monitor: monitor,
                                 evidenceMatchesCatalogContext: presentationRow.evidenceMatchesCatalogContext,
-                                actionsBlocked: isStartingReview || isRetrying, onReviewFeedback: {
+                                actionsBlocked: isStartingReview || isRetrying, projectedControls: presentation.mergeControls, onReviewFeedback: {
                                     feedbackExpanded = showsFeedbackDetails
                                     commentsExpanded = true
                                     Task { await scroll(to: .feedbackStatus, proxy: proxy) }
@@ -256,7 +256,7 @@ private struct CommandCenterMRDetailContent: View {
             }
             let withTasks = withInsets.task(id: initialSection) {
                 pendingInitialAnchor = nil
-                if needsHumanAttention && item.authorFeedbackStatus?.needsAttention == true { feedbackExpanded = true }
+                if needsHumanAttention && presentationItem.authorFeedbackStatus?.needsAttention == true { feedbackExpanded = true }
                 switch initialSection {
                 case .overview: return
                 case .drafts:
@@ -340,7 +340,7 @@ private struct CommandCenterMRDetailContent: View {
                 self.feedbackRecheck = nil
             }
             .onChange(of: needsHumanAttention) { _, required in
-                if required && item.authorFeedbackStatus?.needsAttention == true { feedbackExpanded = true }
+                if required && presentationItem.authorFeedbackStatus?.needsAttention == true { feedbackExpanded = true }
             }
             .onDisappear {
                 discussionStore.cancel()
@@ -897,10 +897,10 @@ private struct CommandCenterMRDetailContent: View {
                             metadata(.CommandCenter.commandCenterTarget, value: request.targetBranch)
                             if let sha = request.sha { metadata(.CommandCenter.commandCenterCommit, value: sha, monospaced: true) }
                             metadata(.CommandCenter.commandCenterMergeState,
-                                value: request.detailedMergeStatus.map(Self.readableStatus)
+                                value: request.detailedMergeStatus.map { Self.readableStatus($0.rawValue) }
                                     ?? String(localized: .CommandCenter.commandCenterStatusUnavailable))
                             metadata(.CommandCenter.commandCenterPipeline,
-                                value: request.headPipeline.map { Self.readableStatus($0.status) }
+                                value: request.headPipeline.map { Self.readableStatus($0.status.rawValue) }
                                     ?? String(localized: .CommandCenter.commandCenterNoPipeline))
                         }
                     }
@@ -930,7 +930,7 @@ private struct CommandCenterMRDetailContent: View {
 
     /// Emergency action kept at the bottom of Details: discards incremental review state for a full fresh pass.
     @ViewBuilder private var reviewResetButton: some View {
-        if item.mergeRequest?.state == "opened" {
+        if item.mergeRequest?.state == .opened {
             Button { confirmReviewReset() } label: {
                 Label { Text(isResettingReview ? .ReviewReset.reviewResetRunning : .ReviewReset.reviewResetButton) }
                     icon: { Image(systemName: "arrow.counterclockwise") }
@@ -1022,12 +1022,12 @@ private struct CommandCenterMRDetailContent: View {
 
     @ViewBuilder
     private var statusReasons: some View {
-        if item.hasConflict { reason(.Menu.menuAttentionConflict) }
-        if item.failedPipeline { reason(.Menu.menuAttentionPipeline) }
-        if item.needsChanges { reason(.Menu.menuAttentionChanges) }
-        if item.needsDiscussion { reason(.Menu.menuAttentionDiscussions) }
-        if item.reReviewRequested { reason(.Menu.menuScopeReReviewRequested) }
-        if item.reReviewUnconfirmed { reason(.Menu.menuAttentionReReviewUnconfirmed) }
+        if presentationItem.hasConflict { reason(.Menu.menuAttentionConflict) }
+        if presentationItem.failedPipeline { reason(.Menu.menuAttentionPipeline) }
+        if presentationItem.needsChanges { reason(.Menu.menuAttentionChanges) }
+        if presentationItem.needsDiscussion { reason(.Menu.menuAttentionDiscussions) }
+        if presentationItem.reReviewRequested { reason(.Menu.menuScopeReReviewRequested) }
+        if presentationItem.reReviewUnconfirmed { reason(.Menu.menuAttentionReReviewUnconfirmed) }
     }
 
     private func reason(_ text: LocalizedStringResource) -> some View {

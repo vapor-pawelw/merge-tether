@@ -635,7 +635,7 @@ import Testing
             if scenario == "newFeedback" {
                 #expect(assessedNoteIDs == [10])
                 #expect(writes.isEmpty)
-                #expect(monitor.requests.first?.request.headPipeline?.status == "success")
+                #expect(monitor.requests.first?.request.headPipeline?.status == .success)
                 #expect(monitor.requests.first?.submissionState == MergeSubmissionState.none)
                 #expect(settings.mergeSubmissions.isEmpty)
             } else {
@@ -1096,7 +1096,7 @@ import Testing
                 ? "Auto-merge requires GitLab to enforce resolved discussions." : "Monitoring MR"
             #expect(model.status == expected)
             #expect(phone.presentation?.status == expected)
-            item.needsMerge = true
+            item.manualMergeAvailable = true
             let decisionRow = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
             let decision = MRCardPresentation(row: decisionRow, reviewingContext: ReviewingContext(row: decisionRow),
                 allowsRemoval: false, assistantReady: true, mergeStatus: status, showsAutomaticMergePolicyHold: mergeEnabled)

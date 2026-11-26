@@ -114,7 +114,7 @@ final class VerifiedAuthorReplyDrafts {
     func receipt(for draft: GitLabDraftNote, request: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion],
                  user: GitLabAuthenticatedUser, host: String) -> Receipt? {
         guard let draftID = draft.id, draftID > 0 else { return nil }
-        let target = MRAutomationScope.Target(host: host, username: user.username, projectID: request.projectID, iid: request.iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: user.username, projectID: request.projectID, iid: request.iid)
         let url = receiptURL(for: draftID, target: target)
         if !AssistantJobJournal.isKeyReady, FileManager.default.fileExists(atPath: url.path) {
             Task { _ = await AssistantJobJournal.loadKey() }
@@ -156,7 +156,7 @@ final class VerifiedAuthorReplyDrafts {
     private func context(request: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion],
                          user: GitLabAuthenticatedUser, host: String, discussionID: String,
                          noteID: Int, semanticOptOutIDs: [Int]) -> Context? {
-        guard let head = request.sha, !head.isEmpty, request.state == "opened", request.draft != nil,
+        guard let head = request.sha, !head.isEmpty, request.isOpen, request.draft != nil,
               request.author.id == user.id, request.author.username == user.username,
               request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
               let fingerprint = ManualDiscussionResolution.fingerprint(discussions),
@@ -164,7 +164,7 @@ final class VerifiedAuthorReplyDrafts {
               discussions.contains(where: { $0.id == discussionID && !$0.isResolvedForReview && $0.reviewRoot?.id == noteID }) else {
             return nil
         }
-        let target = MRAutomationScope.Target(host: host, username: user.username, projectID: request.projectID, iid: request.iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: user.username, projectID: request.projectID, iid: request.iid)
         return .init(target: target, userID: user.id, sourceHead: head,
             requestFingerprint: request.draftProofRecoveryContextFingerprint, discussionFingerprint: fingerprint,
             activeDiscussionFingerprint: activeFingerprint, discussionID: discussionID, sourceNoteID: noteID,
