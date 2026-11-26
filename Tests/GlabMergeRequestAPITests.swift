@@ -258,6 +258,91 @@ struct GlabMergeRequestAPITests {
         }
     }
 
+    @Test func personalCatalogIncludesOnlySoleAssignmentsAndDoesNotDuplicateAuthoredRequests() async throws {
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let settings = try soleAssigneeSettings()
+        let glab = gitlab.service(host: host, username: "alice")
+        glab.ownershipSettings = settings
+        let mine = soleAssignmentRequest(iid: 12, authored: true)
+        let delegated = soleAssignmentRequest(iid: 13)
+        let shared = soleAssignmentRequest(iid: 14, shared: true)
+        gitlab.handler = { call in
+            switch call.endpoint {
+            case "/merge_requests?scope=created_by_me&state=opened&with_merge_status_recheck=true&per_page=100":
+                return InMemoryGitLab.output("[\(mine)]")
+            case "/merge_requests?scope=all&state=opened&assignee_id=8&with_merge_status_recheck=true&per_page=100":
+                #expect(call.arguments.contains("--paginate"))
+                return InMemoryGitLab.output("[\(mine),\(delegated),\(shared)]")
+            default:
+                return try gitlab.unexpected(call)
+            }
+        }
+
+        let owned = try await glab.fetchOwnedMergeRequests(userID: 8, host: host)
+        #expect(owned.map(\.iid) == [12, 13])
+        #expect(owned.last?.author.username == "author")
+        settings.treatSoleAssigneeAsOwn = false
+        gitlab.requests.removeAll()
+        #expect(try await glab.fetchOwnedMergeRequests(userID: 8, host: host).map(\.iid) == [12])
+        #expect(gitlab.requests.count == 1)
+    }
+
+    @Test(arguments: ["valid", "shared", "disabled"])
+    func mergeRechecksSoleAssignmentAndPreferenceAtTheWrite(_ scenario: String) async throws {
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let settings = try soleAssigneeSettings()
+        let glab = gitlab.service(host: host, username: "alice")
+        glab.ownershipSettings = settings
+        let assigned = soleAssignmentRequest(iid: 12)
+        let shared = soleAssignmentRequest(iid: 12, shared: true)
+        var detailReads = 0
+        gitlab.handler = { call in
+            switch call.endpoint {
+            case "/user": return InMemoryGitLab.output(#"{"id":8,"username":"alice"}"#)
+            case "/projects/34/merge_requests/12":
+                detailReads += 1
+                return InMemoryGitLab.output(scenario == "shared" && detailReads > 1 ? shared : assigned)
+            case "/projects/34/merge_requests?state=opened&scope=all&per_page=100":
+                return InMemoryGitLab.output("[\(assigned)]")
+            case "/projects/34/merge_requests/12/blocks?per_page=100": return InMemoryGitLab.output("[]")
+            case "/projects/34": return InMemoryGitLab.output(#"{"default_branch":"main"}"#)
+            case "/projects/34/merge_requests/12/merge":
+                #expect(call.method == "PUT")
+                return InMemoryGitLab.output(#"{"project_id":34,"iid":12,"state":"merged"}"#)
+            default: return try gitlab.unexpected(call)
+            }
+        }
+        let merge = {
+            try await glab.mergeMergeRequest(projectID: 34, iid: 12, headSHA: sha, host: host,
+                expectedUser: .init(id: 8, username: "alice"), beforeWrite: { _ in
+                    if scenario == "disabled" { settings.treatSoleAssigneeAsOwn = false }
+                }, shouldProceed: { true })
+        }
+        if scenario == "valid" { #expect(try await merge() == .merged) }
+        else { await #expect(throws: CancellationError.self) { _ = try await merge() } }
+        #expect(detailReads == 2)
+        #expect(gitlab.requests.contains { $0.method == "PUT" } == (scenario == "valid"))
+    }
+
+    private func soleAssigneeSettings() throws -> SettingsManager {
+        let defaults = try #require(UserDefaults(suiteName: "SoleAssignmentAPI.\(UUID())"))
+        return SettingsManager(defaults: defaults)
+    }
+
+    private func soleAssignmentRequest(iid: Int, authored: Bool = false, shared: Bool = false) -> String {
+        let alice = #"{"id":8,"username":"alice","name":"Alice"}"#
+        let author = #"{"id":7,"username":"author","name":"Author"}"#
+        return """
+        {"project_id":34,"iid":\(iid),"author":\(authored ? alice : author),"title":"Sample MR",
+         "assignees":[\(alice)\(shared ? "," + author : "")],"web_url":"https://\(host)/group/repo/-/merge_requests/\(iid)",
+         "state":"opened","draft":false,"sha":"\(sha)","source_project_id":34,"source_branch":"feature",
+         "target_project_id":34,"target_branch":"main","detailed_merge_status":"mergeable","has_conflicts":false,
+         "labels":[],"blocking_discussions_resolved":true,"head_pipeline":{"status":"success","sha":"\(sha)"},"user":{"can_merge":true}}
+        """
+    }
+
     @Test func managedRepositoryURLResolvesToTheCanonicalProjectID() async throws {
         try await withFakeGlab { glab in
             let project = try await glab.resolveAutomationProject(path: "group/repo", host: host)

@@ -150,7 +150,7 @@ enum PersonalMRApproval: Equatable {
     }
 }
 
-struct GitLabAuthenticatedUser: Codable, Equatable, Sendable {
+struct GitLabAuthenticatedUser: Codable, Hashable, Sendable {
     let id: Int
     let username: String
 }
@@ -196,6 +196,7 @@ struct GitLabMergeRequest: Codable, Sendable {
     let mergeWhenPipelineSucceeds: Bool?
     let headPipeline: Pipeline?
     let reviewers: [Todo.Author]?
+    let assignees: [Todo.Author]?
     private let user: UserPermissions?
     /// Present on single-MR reads only. Approval proof binds the reviewed diff to its base.
     var diffRefs: DiffRefs? = nil
@@ -206,6 +207,19 @@ struct GitLabMergeRequest: Codable, Sendable {
     var mergeRequestID: GitLabMergeRequestID { .init(projectID: projectID, iid: iid) }
     var isOpen: Bool { state == .opened }
     var isDraft: Bool { isDraft(fallback: false) }
+
+    var soleAssignee: GitLabAuthenticatedUser? {
+        guard let assignees, assignees.count == 1, let assignee = assignees.first, assignee.id > 0 else { return nil }
+        return .init(id: assignee.id, username: assignee.username)
+    }
+
+    func isOwned(by userID: Int, includingSoleAssignee: Bool) -> Bool {
+        userID > 0 && (author.id == userID || (includingSoleAssignee && soleAssignee?.id == userID))
+    }
+
+    func isOwned(by username: String, includingSoleAssignee: Bool) -> Bool {
+        !username.isEmpty && (author.username == username || (includingSoleAssignee && soleAssignee?.username == username))
+    }
 
     func isDraft(fallback: Bool) -> Bool {
         detailedMergeStatus == .draftStatus || (draft ?? fallback)
@@ -281,7 +295,7 @@ struct GitLabMergeRequest: Codable, Sendable {
         case blockingDiscussionsResolved = "blocking_discussions_resolved"
         case mergeWhenPipelineSucceeds = "merge_when_pipeline_succeeds"
         case headPipeline = "head_pipeline"
-        case user, reviewers
+        case user, reviewers, assignees
         case diffRefs = "diff_refs"
     }
 }

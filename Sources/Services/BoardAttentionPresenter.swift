@@ -136,7 +136,7 @@ final class BoardAttentionPresenter {
             if let feedback = row.presented.authorFeedbackStatus, feedback.needsAttention {
                 if feedback.phase == .failed { add(.failedWork, "author-feedback:" + feedback.fingerprint) }
                 if row.evidenceMatchesCatalogContext, row.item.isAuthored,
-                   let request = row.item.mergeRequest, request.author.username == input.username,
+                   let request = row.item.mergeRequest, request.isOwned(by: input.username, includingSoleAssignee: true),
                    request.webURL.isGitLabMergeRequest(host: input.host, iid: request.iid),
                    feedback.head == request.sha, feedback.semanticContextFingerprint == request.semanticContextFingerprint,
                    feedback.fingerprint == row.item.observedDiscussionFingerprint {

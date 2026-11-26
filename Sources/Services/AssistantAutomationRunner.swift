@@ -207,6 +207,7 @@ enum AssistantAutomationRunner {
         var pipelineHandoffConfirmation: PipelineHandoffConfirmation? = nil
         var readOnlyReview: Bool? = nil
         var blockerDiagnosis: MergeBlockerDiagnosis? = nil
+        var requiresSoleAssignment: Bool? = nil
 
         var deliveredFeedbackTodos: [Todo.FeedbackIdentity] {
             if let execution { return execution.state == .succeeded ? feedbackTodos ?? [] : [] }
@@ -434,6 +435,7 @@ enum AssistantAutomationRunner {
         var semanticContextFingerprint: String?
         var reviewer: GitLabAuthenticatedUser?
         var pipelineDiagnosis: ForeignPipelineDiagnosis?
+        var requiresSoleAssignment = false
         if foreignDiagnosis || jobCoordinator == nil || configurationSnapshot != nil || blockerDiagnosis != nil
             || (reviewRetry != nil && glab != nil) {
             let service = glab ?? GlabService()
@@ -463,6 +465,18 @@ enum AssistantAutomationRunner {
             }
             if let pipelineReservation {
                 try validateOwnedPipelineState(snapshot.request, reservation: pipelineReservation)
+            }
+            if mrWorkflow == .followUp || allowsPush || pipelineReservation != nil {
+                guard settings.owns(snapshot.request, userID: snapshot.user.id) else {
+                    throw AssistantJobExecutor.ExecutionError.disabledPermission
+                }
+            }
+            requiresSoleAssignment = snapshot.request.author.id != snapshot.user.id
+                && settings.owns(snapshot.request, userID: snapshot.user.id)
+            if let retryOf, settings.assistantHandoffs.first(where: { $0.id == retryOf })?.requiresSoleAssignment == true {
+                guard settings.owns(snapshot.request, userID: snapshot.user.id) else {
+                    throw AssistantJobExecutor.ExecutionError.disabledPermission
+                }
             }
             headSHA = snapshot.request.sha
             semanticContextFingerprint = snapshot.request.semanticContextFingerprint
@@ -617,7 +631,7 @@ enum AssistantAutomationRunner {
             workflowEventKind: workflowEventKind, workflowOriginKnown: true,
             pipelineHandoffConfirmation: pipelineHandoffConfirmation,
             readOnlyReview: usesReadOnlyReview ? true : nil,
-            blockerDiagnosis: blockerDiagnosis
+            blockerDiagnosis: blockerDiagnosis, requiresSoleAssignment: requiresSoleAssignment ? true : nil
         )
         for (noteID, revision) in verifiedFeedbackNotes ?? [:] {
             settings.authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision,
@@ -723,6 +737,7 @@ enum AssistantAutomationRunner {
         var retryHead = expectedHeadSHA
         if let prior = handoff.pipelineReservation {
             let glab = glab ?? GlabService()
+        glab.ownershipSettings = settings
             if let executable = settings.glabPath { glab.glabPath = executable }
             else { glab.glabPath = await OnboardingDetector.findGlabExecutable() }
             guard await glab.recheck() == nil, glab.authStatus == .authenticated,
@@ -737,7 +752,7 @@ enum AssistantAutomationRunner {
                   prior.mergeRequestIID == request.iid else {
                 throw AssistantJobExecutor.ExecutionError.contextUnavailable
             }
-            guard request.author.id == user.id else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
+            guard settings.owns(request, userID: user.id) else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
             try AssistantJobExecutor.validateHeadSnapshot(expected: handoff.expectedHeadSHA, actual: request.sha)
             if let expectedHeadSHA {
                 try AssistantJobExecutor.validateHeadSnapshot(expected: expectedHeadSHA, actual: request.sha)
@@ -914,6 +929,7 @@ enum AssistantAutomationRunner {
                                      isReview: Bool, glab: GlabService? = nil) async throws
         -> (request: GitLabMergeRequest, user: GitLabAuthenticatedUser) {
         let glab = glab ?? GlabService()
+        glab.ownershipSettings = settings
         if let executable = settings.glabPath { glab.glabPath = executable }
         else { glab.glabPath = await OnboardingDetector.findGlabExecutable() }
         let probeError = await glab.recheck()
@@ -929,7 +945,7 @@ enum AssistantAutomationRunner {
             throw AssistantJobExecutor.ExecutionError.contextUnavailable
         }
         _ = try AssistantJobExecutor.validateMergeRequestContext(state: request.state, head: request.sha)
-        try AssistantJobExecutor.validateReviewOwnership(isReview: isReview, authorID: request.author.id, userID: user.id)
+        try AssistantJobExecutor.validateReviewOwnership(isReview: isReview, owned: settings.owns(request, userID: user.id))
         return (request, user)
     }
 

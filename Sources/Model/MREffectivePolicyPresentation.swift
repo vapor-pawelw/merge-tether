@@ -77,7 +77,7 @@ struct MREffectivePolicyPresentation {
             approvalAllowed = bound.flatMap { request in
                 target.map { settings.permitsAutomaticAction(.approval, for: request, target: $0, ignoringGlobalSuspension: true) }
             } == true
-            owned = bound?.author.username == target?.username && target != nil
+            owned = bound.flatMap { request in target.map { settings.owns(request, username: $0.username) } } == true
             localDelivery = bound.flatMap { request in
                 target.map { automation.followUpAutomationHold(for: request, target: $0) == nil }
             } == true && !automation.allowFollowUpPush

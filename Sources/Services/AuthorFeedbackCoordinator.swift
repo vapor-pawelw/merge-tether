@@ -38,7 +38,7 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
               let state = job.operationalExecution?.state, [.failed, .interrupted, .cancelled, .blocked].contains(state),
               let selected = job.feedbackNoteIDs, !selected.isEmpty, selected.allSatisfy({ $0 > 0 }),
               job.key.work.projectID == request.projectID, job.key.work.iid == request.iid,
-              request.author.username == job.key.username, request.isOpen,
+              request.isOwned(by: job.key.username, includingSoleAssignee: job.requiresSoleAssignment == true), request.isOpen,
               request.webURL.isGitLabMergeRequest(host: job.key.work.host, iid: request.iid) else { return false }
         return state != .blocked || (job.expectedHeadSHA == request.sha && job.draftRepair == nil
             && job.execution?.finishedAt != nil && blockedContext(for: job) != nil)
@@ -329,7 +329,7 @@ final class AuthorFeedbackCoordinator {
                  host: String, user: GitLabAuthenticatedUser, approvalRevision: String? = nil, scopedRefresh: Bool = false) {
         let target = MRAutomationScope.Target.mergeRequest(host: host, username: user.username, projectID: request.projectID, iid: request.iid)
         let configuration = settings.automation
-        guard request.author.id == user.id, request.isOpen, request.draft != nil,
+        guard settings.owns(request, userID: user.id), request.isOpen, request.draft != nil,
               Self.permitsBackgroundCheck(for: request, configuration: configuration, host: host, username: user.username,
                   mergeOptedIn: settings.autoMergePreference(for: target) == .on),
               let fingerprint = ReviewVerdict.fingerprint(discussions), request.sha != nil else { return }
@@ -510,6 +510,7 @@ final class AuthorFeedbackCoordinator {
             && settings.feedbackSuggestionDecisions.revision(for: input.target) == input.decisionRevision
             && settings.reviewParticipationPreferences.revision(host: input.target.host, username: input.user.username) == input.reviewParticipationRevision
             && settings.automation == input.configuration
+            && settings.owns(input.request, userID: input.user.id)
             && completedFollowUpJob(for: input.request, target: input.target)?.id == input.completedFollowUpJobID
             && settings.automation.hasAutomaticActionConsent
             && !settings.ignoredMergeRequests.contains(input.target)
@@ -761,7 +762,7 @@ final class AuthorFeedbackCoordinator {
         guard isCurrent(input) else { throw CancellationError() }
         let current = try await glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
         guard isCurrent(input), request.evidenceContext().binds(to: current.evidenceContext(), policy: .requestText),
-              current.state == .opened, current.draft == request.draft, current.author.id == input.user.id,
+              current.state == .opened, current.draft == request.draft, settings.owns(current, userID: input.user.id),
               current.webURL == request.webURL else { throw CancellationError() }
         if input.readOnly || !stoppedFollowUps.isEmpty || !input.ignoredSuggestions.isEmpty {
             async let liveThreads = glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
@@ -933,7 +934,7 @@ final class AuthorFeedbackCoordinator {
             approved = liveApproved
             guard settings.automaticPublicWritesAllowed else { break }
             guard isCurrent(input), live.isOpen, input.matchesFeedback(in: live, discussions: discussions),
-                  live.author.id == input.user.id, user == input.user, count == 0,
+                  settings.owns(live, userID: input.user.id), user == input.user, count == 0,
                   settings.automation.scope.permits(live, host: host, username: user.username),
                   live.webURL == request.webURL else { throw CancellationError() }
             threads = discussions
@@ -1076,7 +1077,7 @@ final class AuthorFeedbackCoordinator {
         async let currentDrafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: input.user.id)
         let (live, discussions, user, count) = try await (currentMR, currentThreads, currentUser, currentDrafts)
         guard settings.automaticPublicWritesAllowed, isCurrent(input), live.isOpen,
-              live.author.id == input.user.id, user == input.user, count == 0, live.webURL == request.webURL,
+              settings.owns(live, userID: input.user.id), user == input.user, count == 0, live.webURL == request.webURL,
               settings.automation.scope.permits(live, host: host, username: user.username),
               input.matchesFeedback(in: live, discussions: discussions) else { throw CancellationError() }
         return discussions

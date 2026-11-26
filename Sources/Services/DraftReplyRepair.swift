@@ -479,7 +479,8 @@ enum DraftReplyRepair {
         let predecessor = try isAutomaticRecovery
             ? automaticRecoveryPredecessor(context, runID: excludingRunID, snapshot: snapshot, settings: settings, directory: directory)
             : retryPredecessor(context, runID: excludingRunID, settings: settings)
-        guard preparationAllowed(snapshot.request, configuration: settings.automation),
+        guard settings.owns(snapshot.request, userID: snapshot.user.id),
+              preparationAllowed(snapshot.request, configuration: settings.automation),
               glab.resolvedHost == snapshot.host, glab.currentUsername == snapshot.user.username,
               settings.automation.assistant == context.assistant,
               settings.automation.scope.permits(snapshot.request, host: snapshot.host, username: snapshot.user.username),
@@ -493,7 +494,7 @@ enum DraftReplyRepair {
         async let threads = glab.fetchMergeRequestDiscussions(projectID: snapshot.request.projectID, iid: snapshot.request.iid, host: snapshot.host)
         async let drafts = glab.fetchOwnDraftNotes(projectID: snapshot.request.projectID, iid: snapshot.request.iid, host: snapshot.host, userID: snapshot.user.id)
         let (liveUser, liveRequest, liveThreads, liveDrafts) = try await (user, request, threads, drafts)
-        guard let source = liveRequest.sourceProjectID else { throw AssistantJobExecutor.ExecutionError.inactiveMergeRequest }
+        guard settings.owns(liveRequest, userID: liveUser.id), let source = liveRequest.sourceProjectID else { throw AssistantJobExecutor.ExecutionError.inactiveMergeRequest }
         let branch = try await glab.fetchBranchHeadSHA(projectID: source, branch: liveRequest.sourceBranch, host: snapshot.host)
         let live = DraftProofRecoveryCoordinator.Snapshot(request: liveRequest, discussions: liveThreads, drafts: liveDrafts,
             user: liveUser, host: snapshot.host, branchHead: branch)

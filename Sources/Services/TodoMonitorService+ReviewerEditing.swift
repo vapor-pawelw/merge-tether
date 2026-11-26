@@ -4,13 +4,13 @@ import MergeTetherRemote
 extension TodoMonitorService {
     func canEditReviewers(of request: GitLabMergeRequest) -> Bool {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return false }
-        return request.isOpen && request.author.username == username
+        return request.isOpen && settings.owns(request, username: username)
             && request.webURL.isGitLabMergeRequest(host: host, iid: request.iid)
     }
 
     func selfReviewerRemoval(for request: GitLabMergeRequest) -> ReviewerChange? {
         guard let target = scopeTarget(projectID: request.projectID, iid: request.iid, url: request.webURL),
-              request.isOpen, request.author.username != target.username,
+              request.isOpen, !settings.owns(request, username: target.username),
               let reviewer = request.reviewers?.first(where: { $0.username == target.username }), reviewer.id > 0
         else { return nil }
         return .init(.remove, reviewerID: reviewer.id, username: reviewer.username)
@@ -127,7 +127,7 @@ extension GlabService {
         guard shouldProceed(), live.projectID == displayed.projectID, live.iid == displayed.iid,
               live.webURL.isGitLabMergeRequest(host: host, iid: live.iid),
               live.webURL.gitLabProjectPath == displayed.webURL.gitLabProjectPath,
-              live.isOpen, live.author.id == user.id || leavingReview, let reviewers = live.reviewers else {
+              live.isOpen, owns(live, userID: user.id) || leavingReview, let reviewers = live.reviewers else {
             throw CancellationError()
         }
 

@@ -630,7 +630,7 @@ final class DraftProofRecoveryCoordinator {
     private func matchesOwnership(_ snapshot: Snapshot, origin: FollowUpVerification, draftIDs: [Int]) -> Bool {
         settings.automation.scope.permits(snapshot.request, host: snapshot.host, username: snapshot.user.username)
             && snapshot.request.webURL.isGitLabMergeRequest(host: snapshot.host, iid: snapshot.request.iid)
-            && snapshot.request.isOpen && snapshot.request.author.id == snapshot.user.id
+            && snapshot.request.isOpen && settings.owns(snapshot.request, userID: snapshot.user.id)
             && snapshot.branchHead == snapshot.request.sha && draftIDs.allSatisfy { draftID in
                 let matching = snapshot.drafts.filter { $0.id == draftID }
                 return matching.count == 1 && AutomaticPublicationPolicy.safeForAutomaticPublication(matching[0])
@@ -644,7 +644,7 @@ final class DraftProofRecoveryCoordinator {
         return recorded.binds(to: current, policy: .accountAndRequest)
             && recorded.binds(to: current, policy: .draftRecovery)
             && live.user.id == original.user.id && live.request.webURL == original.request.webURL
-            && live.branchHead == original.branchHead && live.request.isOpen && live.request.author.id == original.user.id
+            && live.branchHead == original.branchHead && live.request.isOpen && settings.owns(live.request, userID: original.user.id)
             && live.request.sourceProjectID == original.request.sourceProjectID
             && live.request.sourceBranch == original.request.sourceBranch
             && ReviewVerdict.discussionContentDigest(original.discussions).map { discussionMatches($0, snapshot: live) } == true

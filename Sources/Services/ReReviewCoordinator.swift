@@ -107,7 +107,7 @@ final class ReReviewCoordinator {
     func discussionAssessment(for request: GitLabMergeRequest, fingerprint: String, activeFingerprint: String,
                               context: Context) -> ReReviewAssessment? {
         guard isCurrent(context), request.projectID == context.projectID, request.iid == context.iid,
-              let result = discussionAssessments[context], result.authorID == request.author.id,
+              let result = discussionAssessments[context], settings.owns(request, userID: result.authorID),
               result.key == reReviewKey(request, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context)
         else { return nil }
         return result.assessment
@@ -140,7 +140,7 @@ final class ReReviewCoordinator {
     func confirmedPendingReviewers(for request: GitLabMergeRequest, reviewers: [GitLabMergeRequestReviewer],
                                    history: MergeRequestReviewHistory, context: Context, authorID: Int) -> Set<String> {
         guard isCurrent(context), request.projectID == context.projectID, request.iid == context.iid,
-              request.author.id == authorID, let head = request.sha, !head.isEmpty else { return [] }
+              settings.owns(request, userID: authorID), let head = request.sha, !head.isEmpty else { return [] }
         return Set(reviewers.compactMap { reviewer in
             let id = reviewer.user.id
             let key = ReReviewReceipt.Key(host: context.host, authorID: authorID, projectID: context.projectID,
@@ -215,7 +215,7 @@ final class ReReviewCoordinator {
             return
         }
         guard let request = try? await glab.fetchMergeRequest(projectID: context.projectID, iid: context.iid, host: context.host),
-              request.author.id == user.id,
+              settings.owns(request, userID: user.id),
               let drafts = try? await glab.fetchOwnDraftNotes(projectID: context.projectID, iid: context.iid, host: context.host, userID: user.id),
               let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: context.projectID, iid: context.iid, host: context.host),
               isCurrent(context) else { return }
@@ -283,7 +283,7 @@ final class ReReviewCoordinator {
             async let pending = glab.fetchOwnDraftNoteCount(projectID: context.projectID, iid: context.iid, host: context.host, userID: user.id)
             let (request, discussions, draftCount) = try await (current, threads, pending)
             guard let activeFingerprint = ReviewVerdict.fingerprint(GitLabMergeRequestDiscussion.activeForReview(discussions)),
-                  isCurrent(context), request.author.id == user.id, draftCount == 0,
+                  isCurrent(context), settings.owns(request, userID: user.id), draftCount == 0,
                   reReviewChecks[context]?.key == displayedKey,
                   reReviewKey(request, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == displayedKey,
                   EvidenceContext(head: head, discussionContent: .init(fingerprint)).binds(
@@ -309,7 +309,7 @@ final class ReReviewCoordinator {
         guard request.projectID == context.projectID, request.iid == context.iid, isCurrent(context) else { return }
         guard runtimePermitsReReview(context) else { return }
         guard settings.automation.hasAutomaticActionConsent, settings.automation.autoReReviewEnabled,
-              isCurrent(context), request.isOpen, request.author.id == user.id,
+              isCurrent(context), request.isOpen, settings.owns(request, userID: user.id),
               settings.effectiveAutomationScope.permits(request, host: context.host, username: context.username) else {
             reReviewTasks.removeValue(forKey: context)?.task.cancel()
             reReviewChecks.removeValue(forKey: context)
@@ -631,7 +631,7 @@ final class ReReviewCoordinator {
                 async let drafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: user.id)
                 let (current, liveDiscussions, liveDraftCount) = try await (fresh, threads, drafts)
                 guard liveDraftCount == 0, !settings.pendingCommentReviews.contains(target), current.state == .opened,
-                      current.author.id == user.id, current.webURL.isGitLabMergeRequest(host: host, iid: current.iid),
+                      settings.owns(current, userID: user.id), current.webURL.isGitLabMergeRequest(host: host, iid: current.iid),
                       liveReReviewKey(current, discussions: liveDiscussions, context: context) == key,
                       try await glab.fetchAuthenticatedUser(host: host, expectedUsername: context.username) == user,
                       isCurrent(context), settings.automation.autoReReviewEnabled,
@@ -677,7 +677,7 @@ final class ReReviewCoordinator {
                       runtimePermitsReReview(context),
                       settings.automation == finalConfiguration, settings.automation.autoReReviewEnabled,
                       checkedDraftCount == 0, !settings.pendingCommentReviews.contains(target), checkedMR.isOpen,
-                      checkedMR.author.id == user.id,
+                      settings.owns(checkedMR, userID: user.id),
                       checkedMR.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
                       liveReReviewKey(checkedMR, discussions: checkedThreads, context: context) == key,
                       reReviewChecks[context]?.key == key,

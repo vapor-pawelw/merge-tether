@@ -74,7 +74,9 @@ struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, Additio
     }
     private var status: AuthoredMergeRequestStatus? { controls.status }
     private var owned: Bool {
-        item.isAuthored && item.mergeRequest?.state == .opened && item.mergeRequest?.author.username == monitor.glab.currentUsername
+        guard item.isAuthored, let request = item.mergeRequest, request.isOpen,
+              let username = monitor.glab.currentUsername else { return false }
+        return monitor.settings.owns(request, username: username)
     }
     private var blocker: ManualMergeBlocker? { controls.blocker }
     private var state: MergeSubmissionState { result ?? status?.submissionState ?? .none }

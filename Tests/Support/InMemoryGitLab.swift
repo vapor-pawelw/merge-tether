@@ -78,6 +78,10 @@ final class InMemoryGitLab {
         .init(stdout: try JSONSerialization.data(withJSONObject: value), stderr: "", exitCode: 0)
     }
     func unexpected(_ request: Request) throws -> ProcessRunner.Output {
+        // Fixtures without delegated MRs model an empty personal assignment catalog.
+        if request.method == "GET", request.endpoint.hasPrefix("/merge_requests?scope=all&state=opened&assignee_id=") {
+            return Self.output("[]")
+        }
         Issue.record("Unexpected GitLab command: \(request.command)")
         throw GlabError.unknown("Unexpected fixture request")
     }

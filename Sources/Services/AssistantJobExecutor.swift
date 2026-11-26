@@ -65,6 +65,7 @@ enum AssistantJobExecutor {
         }
         try Task.checkCancellation()
         let glab = injectedGlab ?? GlabService()
+        glab.ownershipSettings = settings
         if let executable = settings.glabPath { glab.glabPath = executable }
         else { glab.glabPath = await OnboardingDetector.findGlabExecutable() }
         guard await glab.recheck() == nil, glab.authStatus == .authenticated,
@@ -88,10 +89,10 @@ enum AssistantJobExecutor {
         if request.sha != handoff.expectedHeadSHA { try await stopIfFeedbackResolved(request) }
         try validateHeadSnapshot(expected: handoff.expectedHeadSHA, actual: request.sha)
         try validateReviewOwnership(isReview: handoff.workflow == .review || handoff.reviewModel != nil,
-            authorID: request.author.id, userID: user.id)
+            owned: settings.owns(request, userID: user.id))
         try validateWorkerAdmission(handoff, settings: settings, request: request, detector: pipelineWorkDetector)
         if handoff.followUpPushAllowed == true {
-            guard settings.automation.permitsFollowUpPush(manual: handoff.manual == true), request.author.id == user.id else { throw ExecutionError.disabledPermission }
+            guard settings.automation.permitsFollowUpPush(manual: handoff.manual == true), settings.owns(request, userID: user.id) else { throw ExecutionError.disabledPermission }
         }
         if let repair = handoff.draftRepair {
             guard handoff.workflow == .followUp, handoff.followUpPushAllowed == true,
@@ -102,7 +103,7 @@ enum AssistantJobExecutor {
             try await DraftReplyRepair.validate(repair, snapshot: snapshot, settings: settings, glab: glab, directory: followUpDirectory, excludingRunID: handoff.id)
         }
         if let reservation = handoff.pipelineReservation {
-            guard request.author.id == user.id, request.headPipeline?.id == reservation.pipelineID,
+            guard settings.owns(request, userID: user.id), request.headPipeline?.id == reservation.pipelineID,
                   reservation.host == handoff.key.work.host, reservation.projectID == request.projectID,
                   reservation.mergeRequestIID == request.iid else { throw ExecutionError.inactiveMergeRequest }
             _ = try await glab.verifiedFailedPipeline(for: request, host: handoff.key.work.host, expectedUser: user)
@@ -166,7 +167,17 @@ enum AssistantJobExecutor {
             try DraftReplyRepair.validateReservedDraft(repair, drafts: generationBaseline, request: request,
                 user: user, host: handoff.key.work.host)
         }
-        let completionInstructions = request.author.id == user.id ? """
+        let requiresOwnership = handoff.requiresSoleAssignment == true || settings.owns(request, userID: user.id)
+            || handoff.workflow == .followUp || handoff.followUpPushAllowed == true
+            || handoff.pipelineReservation != nil || handoff.allowsPush
+        if requiresOwnership, !settings.owns(request, userID: user.id) { throw ExecutionError.disabledPermission }
+        let assignmentInstructions = requiresOwnership && request.author.id != user.id ? """
+            The signed-in GitLab account is the sole assignee and may perform this author workflow within the permissions below.
+            Before pushing, saving a completion draft, or making any other GitLab change, re-read the MR and authenticated user
+            with glab. Proceed only while the assignees array contains exactly that user. Otherwise stop and report the change.
+
+            """ : ""
+        let completionInstructions = settings.owns(request, userID: user.id) ? """
             For an author follow-up that owes a reviewer reply, implementing and verifying the warranted fix and saving,
             re-fetching and sealing its private reply completes the worker's part. Publication belongs to MergeTether's separate policy checks.
             If no incoming reviewer reply is owed, skip drafting and sealing. Complete the assigned repair and required
@@ -252,7 +263,7 @@ enum AssistantJobExecutor {
             The verified account is \(handoff.key.username) on \(handoff.key.work.host); recheck before remote writes.
             Use only the task's explicit permissions. If a command needs unavailable approval or evidence, stop with status blocked.
             In your final structured result, status succeeded means the assigned work finished; it never substitutes for remote verification receipts.
-            \(completionInstructions)
+            \(assignmentInstructions + completionInstructions)
             When only publication, reviewer acceptance, approval or merge is pending, report succeeded with those next
             steps in summary; do not wait for publication or classify that wait as unfinished worker work.
             Return status blocked if assigned code, tests, remote delivery or reply preparation remains unfinished,
@@ -294,14 +305,15 @@ enum AssistantJobExecutor {
             }
             // Unattended runs need comparable evidence afterwards; without a baseline they do not start.
             if handoff.manual != true, authorization.auditBaseline?.isComplete != true { throw ExecutionError.auditUnavailable }
-            if requiresLiveWorkflowRule(handoff) || handoff.draftRepair != nil || handoff.pipelineReservation != nil {
+            if requiresLiveWorkflowRule(handoff) || handoff.draftRepair != nil || handoff.pipelineReservation != nil
+                || requiresOwnership && request.author.id != user.id {
                 let latest = try await glab.fetchMergeRequest(projectID: handoff.key.work.projectID,
                     iid: handoff.key.work.iid, host: handoff.key.work.host)
                 _ = try validateMergeRequestContext(state: latest.state, head: latest.sha)
                 if latest.sha != handoff.expectedHeadSHA { try await stopIfFeedbackResolved(latest) }
                 try validateHeadSnapshot(expected: handoff.expectedHeadSHA, actual: latest.sha)
                 try validateReviewOwnership(isReview: handoff.workflow == .review || handoff.reviewModel != nil,
-                    authorID: latest.author.id, userID: user.id)
+                    owned: settings.owns(latest, userID: user.id))
                 authorization.request = latest
             }
             let latest = authorization.request
@@ -332,6 +344,9 @@ enum AssistantJobExecutor {
                 guard glab.accountRevision == accountRevision, glab.resolvedHost == handoff.key.work.host,
                       glab.currentUsername == handoff.key.username else { throw ExecutionError.wrongAccount }
                 try validateWorkerAdmission(handoff, settings: settings, request: authorization.request, detector: pipelineWorkDetector)
+                if requiresOwnership {
+                    guard settings.owns(authorization.request, userID: user.id) else { throw ExecutionError.disabledPermission }
+                }
                 return true
             } catch {
                 authorization.denial = error
@@ -473,7 +488,7 @@ enum AssistantJobExecutor {
             let discussions = try await glab.fetchMergeRequestDiscussions(projectID: work.projectID, iid: work.iid, host: work.host)
             let drafts = try await glab.fetchOwnDraftNotes(projectID: work.projectID, iid: work.iid, host: work.host, userID: user.id)
             guard current(), authenticated == user, request.projectID == work.projectID, request.iid == work.iid,
-                  request.isOpen, request.author.id != user.id, request.sha == expectedHead,
+                  request.isOpen, !settings.owns(request, userID: user.id), request.sha == expectedHead,
                   request.webURL == handoff.mergeRequestURL,
                   verdict.discussionFingerprint == ReviewVerdict.fingerprint(discussions),
                   verdict.semanticContextFingerprint == nil || verdict.semanticContextFingerprint == request.semanticContextFingerprint,
@@ -519,6 +534,8 @@ enum AssistantJobExecutor {
                   live.webURL == request.webURL, live.sourceProjectID == request.sourceProjectID,
                   live.sourceBranch == request.sourceBranch, live.targetProjectID == request.targetProjectID,
                   live.targetBranch == request.targetBranch, live.isOpen, let head = live.sha, !head.isEmpty,
+                  settings.owns(request, userID: user.id) == settings.owns(live, userID: user.id),
+                  handoff.requiresSoleAssignment != true || settings.owns(live, userID: user.id),
                   live.sha == request.sha || handoff.followUpPushAllowed == true || handoff.allowsPush else { return }
             let drafts = try await glab.fetchOwnDraftNotes(projectID: work.projectID, iid: work.iid, host: work.host, userID: user.id)
             guard current() else { return }
@@ -667,8 +684,8 @@ enum AssistantJobExecutor {
         guard let expected, !expected.isEmpty, actual == expected else { throw ExecutionError.headChanged }
     }
 
-    static func validateReviewOwnership(isReview: Bool, authorID: Int, userID: Int) throws {
-        guard !isReview || authorID != userID else { throw ExecutionError.disabledPermission }
+    static func validateReviewOwnership(isReview: Bool, owned: Bool) throws {
+        guard !isReview || !owned else { throw ExecutionError.disabledPermission }
     }
 
     static let pushGuardInstructions = """

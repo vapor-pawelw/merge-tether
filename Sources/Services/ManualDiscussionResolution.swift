@@ -126,7 +126,7 @@ enum ManualDiscussionResolution {
         let participationRevision = settings.reviewParticipationPreferences.revision(host: host, username: username)
         let user = try await glab.fetchAuthenticatedUser(host: host, expectedUsername: username)
         let request = try await glab.fetchMergeRequest(projectID: expected.projectID, iid: expected.iid, host: host)
-        guard request.author.id == user.id, request.isOpen,
+        guard settings.owns(request, userID: user.id), request.isOpen,
               request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
               MergeRequestDependencySummary.Context(request) == .init(expected),
               request.semanticContextFingerprint == expected.semanticContextFingerprint else { throw CancellationError() }
@@ -174,14 +174,14 @@ enum ManualDiscussionResolution {
                 let drafts = try await glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid,
                     host: prepared.host, userID: prepared.user.id)
                 let threads = try await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: prepared.host)
-                guard user == prepared.user, live.author.id == user.id, live.isOpen, drafts == 0,
+                guard user == prepared.user, settings.owns(live, userID: user.id), live.isOpen, drafts == 0,
                       MergeRequestDependencySummary.Context(live) == .init(request),
                       live.semanticContextFingerprint == request.semanticContextFingerprint,
                       checked.matches(threads), let thread = threads.first(where: { $0.id == id }),
                       thread.notes.first?.resolvable == true else { break }
                 if thread.notes.first?.resolved == true { resolved += 1; continue }
                 let final = try await glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: prepared.host)
-                guard final.author.id == user.id, MergeRequestDependencySummary.Context(final) == .init(request),
+                guard settings.owns(final, userID: user.id), MergeRequestDependencySummary.Context(final) == .init(request),
                       final.semanticContextFingerprint == request.semanticContextFingerprint else { break }
                 try checkSession()
                 let response = try await glab.resolveAcceptedDiscussion(projectID: request.projectID, iid: request.iid, discussionID: id, host: prepared.host) {

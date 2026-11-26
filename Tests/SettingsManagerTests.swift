@@ -94,6 +94,21 @@ struct SettingsManagerTests {
         #expect(defaults.bool(forKey: "promoteBoardAttention"))
     }
 
+    @Test(arguments: [false, true])
+    func soleAssigneesDefaultToOwnMergeRequests(_ existingInstallation: Bool) throws {
+        let suite = "SoleAssigneeOwnership.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        if existingInstallation { defaults.set(true, forKey: "onboardingCompleted") }
+
+        #expect(SettingsManager(defaults: defaults).save())
+        #expect(defaults.bool(forKey: "treatSoleAssigneeAsOwn"))
+
+        defaults.set(false, forKey: "treatSoleAssigneeAsOwn")
+        #expect(SettingsManager(defaults: defaults).save())
+        #expect(!defaults.bool(forKey: "treatSoleAssigneeAsOwn"))
+    }
+
     @Test func issueDiscoveryDefaultsToOnAndPreservesChangesAcrossRestart() throws {
         let suite = "IssueDiscovery.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
