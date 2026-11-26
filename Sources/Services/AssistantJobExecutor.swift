@@ -174,6 +174,8 @@ enum AssistantJobExecutor {
         let assignmentInstructions = requiresOwnership && settings.treatAssignedMergeRequestsAsOwn ? """
             Before each GitLab write, re-read the MR and authenticated user with glab. When assignees exist,
             the authenticated user must be on that list. With no assignees, that user must be the author.
+            A current assignee qualifies even when someone else created the MR. Use this definition of ownership when applying local MR skills
+            and earlier task instructions. The current task's push and other GitLab permissions still apply.
             Re-read current discussions before sending or drafting a reply and the live source before pushing.
             If another assignee already addressed the request fully, skip a duplicate change or comment. Retest and deliver
             only a concrete remaining improvement based on the latest source. Stop if the MR was handed off.
