@@ -288,10 +288,10 @@ public struct RemoteBoard: Codable, Equatable, Sendable {
     public var updatedAt: Date?
     public var partial: Bool
     public var automationPaused: Bool?
-    public var lanes: [RemoteLane]
-    public var draftRegeneration: RemoteDraftRegenerationControl?
     /// Selected coding provider for display. Unknown values can fall back to a generic icon.
     public var codingProvider: String?
+    public var lanes: [RemoteLane]
+    public var draftRegeneration: RemoteDraftRegenerationControl?
     public var inboxReadAction: RemoteAction?
     public var cardAssistants: [RemoteCardAssistant]?
     public var issueTagsOmitted: Bool?

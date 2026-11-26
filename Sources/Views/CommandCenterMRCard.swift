@@ -445,11 +445,11 @@ private struct CommandCenterMRCardContent: View {
                     retryError = nil
                     start {
                         guard monitor.assistantHandoffs.contains(where: { $0.id == job.id }) else { return }
-                .environment(\.codingProviderGlyph, job.key.assistant.glyph)
                         await monitor.retryAssistantJob(job.id)
                         retryError = monitor.assistantJobActionError
                     }
                 }
+                .environment(\.codingProviderGlyph, job.key.assistant.glyph)
             }
         case .reviewDrafts:
             if action.kind == .commentReview {

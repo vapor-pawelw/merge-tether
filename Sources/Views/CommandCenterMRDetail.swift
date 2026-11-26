@@ -73,8 +73,8 @@ private struct CommandCenterMRDetailContent: View {
     @State private var isManuallyRefreshingDiscussions = false
     @State private var feedbackDecisionConfirmation: FeedbackDecisionConfirmation?
     @State private var isUpdatingFeedbackDecision = false
-    @State private var feedbackRecheck: MRFeedbackRecheckProgress?
     @State private var feedbackDecisionError: String?
+    @State private var feedbackRecheck: MRFeedbackRecheckProgress?
     @State private var originChangeFailed = false
     @State private var regenerationPresentation: DraftRegenerationPresentation?
     @State private var discussionNavigation: MRDiscussionNavigation?
@@ -174,8 +174,8 @@ private struct CommandCenterMRDetailContent: View {
         let discussions = discussionSnapshot
         let row = presentationRow
         let presentation = MRCardPresentation(row: row, monitor: monitor, allowsRemoval: isReviewed)
-        let feedbackRecheck = activeFeedbackRecheck
         let humanAction = presentation.humanAction
+        let feedbackRecheck = activeFeedbackRecheck
         let failedFollowUp = showsDecisions ? humanAction?.failedFollowUp(in: row, jobs: jobs) : nil
         ScrollViewReader { proxy in
             let scrollView = ScrollView {
@@ -318,10 +318,10 @@ private struct CommandCenterMRDetailContent: View {
             .onChange(of: monitor.commentOrigins.revision) { _, _ in
                 Task { await discussionStore.reloadOrigins(glab: monitor.glab) }
             }
+            .onChange(of: jobs.first?.id) { _, _ in retryError = nil }
             .onChange(of: feedbackRecheck != nil) { _, checking in
                 if !checking { self.feedbackRecheck = nil }
             }
-            .onChange(of: jobs.first?.id) { _, _ in retryError = nil }
             .onAppear {
                 publicationSession.open(with: item.drafts, accountAvailable: discussionTarget != nil,
                     duplicateIDs: item.duplicateDraftIDs)
@@ -336,8 +336,8 @@ private struct CommandCenterMRDetailContent: View {
                 regenerationPresentation = nil
                 reviewStartError = nil
                 feedbackDecisionConfirmation = nil
-                self.feedbackRecheck = nil
                 feedbackDecisionError = nil
+                self.feedbackRecheck = nil
             }
             .onChange(of: needsHumanAttention) { _, required in
                 if required && item.authorFeedbackStatus?.needsAttention == true { feedbackExpanded = true }
@@ -535,10 +535,10 @@ private struct CommandCenterMRDetailContent: View {
             guard activeFeedbackRecheck == nil,
                   confirmMRAction(.verifyFeedback, title: .AuthorFeedback.authorFeedbackRecheck, monitor: monitor),
                   let target else { return }
+            monitor.attention.retryAuthorFeedback(item.id)
             if monitor.attention.isLoading {
                 feedbackRecheck = .init(target: target, accountRevision: monitor.glab.accountRevision, retryIntentID: retryIntentID)
             }
-            monitor.attention.retryAuthorFeedback(item.id)
         } label: {
             MRActionLabel(title: .AuthorFeedback.authorFeedbackRecheck, cta: .verifyFeedback)
         }
@@ -685,8 +685,8 @@ private struct CommandCenterMRDetailContent: View {
             }
         } label: {
             MRActionLabel(title: title, cta: .retryRun, working: isRetrying)
-        .environment(\.codingProviderGlyph, job.key.assistant.glyph)
         }
+        .environment(\.codingProviderGlyph, job.key.assistant.glyph)
         .mrActionHelp(.retryRun)
         .disabled(isRetrying || job.execution?.state.isActive != false
                   || AssistantAutomationRunner.isWorking(on: job.key.work))
