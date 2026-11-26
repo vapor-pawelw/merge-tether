@@ -156,6 +156,13 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Otwórz w GitLabie"}}
       }
     },
+    "commandCenter.openGitLab.optionClick": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Open in GitLab (⌥ + click)"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwórz w GitLabie (⌥ + kliknięcie)"}}
+      }
+    },
     "commandCenter.add": {
       "extractionState": "manual",
       "localizations": {

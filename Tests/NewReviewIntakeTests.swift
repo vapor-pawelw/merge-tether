@@ -1,5 +1,6 @@
-import Foundation
+import AppKit
 import MergeTetherRemote
+import SwiftUI
 import Testing
 @testable import MergeTether
 
@@ -104,7 +105,23 @@ struct NewReviewIntakeTests {
             let newRow = row()
             #expect((newRow.newReviewAssignedAt != nil) == confirmedAssignment)
             try #require(monitor.isNewReviewAssignment(newRow))
-            CommandCenterMRCard(row: newRow, monitor: monitor) { detailsOpened += 1 }.activate()
+            let optionClick = try #require(NSEvent.mouseEvent(with: .leftMouseUp, location: .zero,
+                modifierFlags: .option, timestamp: 0, windowNumber: 0, context: nil,
+                eventNumber: 0, clickCount: 1, pressure: 0))
+            var openedURLs: [URL] = []
+            let openURL = OpenURLAction { url in
+                openedURLs.append(url)
+                return .handled
+            }
+            let newCard = CommandCenterMRCard(row: newRow, monitor: monitor) { detailsOpened += 1 }
+            BoardCardActivation.perform(gitLabURL: newRow.displayURL, event: optionClick,
+                openURL: openURL, onActivate: newCard.activate)
+            #expect(openedURLs == [request.webURL])
+            #expect(detailsOpened == 0)
+            try #require(monitor.isNewReviewAssignment(row()))
+
+            BoardCardActivation.perform(gitLabURL: newRow.displayURL, event: nil,
+                openURL: openURL, onActivate: newCard.activate)
 
             #expect(detailsOpened == 0)
             #expect(settings.heldNewReviewTargets.contains(target))

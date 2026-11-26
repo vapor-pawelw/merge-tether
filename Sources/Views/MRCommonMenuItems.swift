@@ -112,14 +112,13 @@ struct MRCommonMenuItems: View {
     let item: MergeRequestAttentionMonitor.Item
     let monitor: TodoMonitorService
     var boardPin: BoardCardPin? = nil
+    var boardGitLabURL: URL? = nil
     var onRemove: (() -> Void)? = nil
     @State private var startingReview = false
     private var isFinished: Bool { MergeRequestFinishedState(item.mergeRequest) != nil }
 
     var body: some View {
-        Link(destination: item.url) {
-            Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
-        }
+        OpenInGitLabMenuLink(url: boardGitLabURL ?? item.url, showsOptionClick: boardGitLabURL != nil)
         CopyMergeRequestLinkButton(url: item.url)
         GitLabRefreshButton(monitor: monitor, itemID: item.id)
         if isFinished {

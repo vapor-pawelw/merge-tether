@@ -62,7 +62,7 @@ struct BoardCompactJobCard: View {
         .padding(12).controlSize(.small)
         .frame(maxWidth: .infinity, alignment: .leading)
         .boardCardInteraction(title: handoff.title, repositoryPath: repositoryPath,
-            iid: handoff.key.work.iid) { showingDetails = true }
+            iid: handoff.key.work.iid, gitLabURL: handoff.mergeRequestURL) { showingDetails = true }
         .contextMenu { menuItems }
         .sheet(isPresented: $showingDetails) {
             BoardItemDetailSheet {
@@ -83,9 +83,7 @@ struct BoardCompactJobCard: View {
         GitLabRefreshButton(monitor: monitor,
             itemID: .init(projectID: handoff.key.work.projectID, iid: handoff.key.work.iid))
         if let url = handoff.mergeRequestURL {
-            Link(destination: url) {
-                Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
-            }
+            OpenInGitLabMenuLink(url: url)
             CopyMergeRequestLinkButton(url: url)
             AssistantContextMenu(mergeRequestURL: url, settings: monitor.settings)
         }

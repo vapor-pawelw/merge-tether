@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Option-click a Mac board or Inbox card to open it in GitLab. The card menus show the gesture next to Open in GitLab.
+
 - Keep review thread statuses and their waiting messages closer together on Mac cards.
 
 - Launch MergeTether 2.0.0, a complete rebuild of GitLabTodos with a merge request board, automation, and a companion app for iPhone and iPad. The launch notes are available on GitHub.

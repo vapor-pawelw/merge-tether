@@ -71,11 +71,10 @@ struct BoardMRProposalCard: View {
         VStack(alignment: .leading, spacing: 9) {
             metadataHeader
             VStack(alignment: .leading, spacing: 3) {
-                Button { showingDetails = true } label: {
+                BoardCardButton(gitLabURL: proposal.url, onActivate: { showingDetails = true }) {
                     BoardCardTitle(title: proposal.title, repositoryPath: proposal.url.gitLabProjectPath,
                         titleColor: isMuted ? .secondary : .primary)
                 }
-                .buttonStyle(.plain)
                 BoardMRReferenceLine(iid: proposal.target.iid, projectID: proposal.target.projectID,
                     repositoryPath: proposal.url.gitLabProjectPath,
                     dependencies: proposal.target.iid == nil ? nil : proposal.item?.dependencies)
@@ -149,7 +148,7 @@ struct BoardMRProposalCard: View {
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.12), lineWidth: 0.5))
         .boardCardInteraction(title: proposal.title, repositoryPath: proposal.url.gitLabProjectPath,
-            iid: proposal.target.iid) { showingDetails = true }
+            iid: proposal.target.iid, gitLabURL: proposal.url) { showingDetails = true }
         .contextMenu { menuItems }
         .task(id: authorTaskID) { await authorLoader.load(proposal, displayMetadata: true) }
         .sheet(isPresented: $showingDetails) {
@@ -212,9 +211,7 @@ struct BoardMRProposalCard: View {
         Button { showingDetails = true } label: {
             Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
         }
-        Link(destination: proposal.url) {
-            Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
-        }
+        OpenInGitLabMenuLink(url: proposal.url)
         CopyMergeRequestLinkButton(url: proposal.url)
         GitLabRefreshButton(monitor: monitor,
             itemID: proposal.target.iid.map { .init(projectID: proposal.target.projectID, iid: $0) }) {

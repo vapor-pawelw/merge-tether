@@ -139,7 +139,8 @@ private struct CommandCenterMRCardContent: View {
             .allowsHitTesting(false)
         }
         .boardCardInteraction(title: row.displayTitle, repositoryPath: row.displayURL.gitLabProjectPath,
-            iid: item.id.iid, background: colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(white: 0.95),
+            iid: item.id.iid, gitLabURL: row.displayURL,
+            background: colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(white: 0.95),
             backgroundOpacity: contentOpacity, actionLabel: newReviewActionLabel, onActivate: onActivate)
         .contextMenu { menuItems }
         .environment(\.gitLabPersonSourceURL, row.displayURL)
@@ -148,13 +149,12 @@ private struct CommandCenterMRCardContent: View {
     @ViewBuilder private var cardHeading: some View {
         let actionTitle: LocalizedStringResource = isNewReview ? .Board.boardReviewAssignmentSeen : .Board.boardDetails
         cardReference
-        Button(action: onActivate) {
+        BoardCardButton(gitLabURL: row.displayURL, onActivate: onActivate) {
             BoardCardTitle(title: row.displayTitle, repositoryPath: row.displayURL.gitLabProjectPath,
                 titleColor: !isDraft && isMuted ? .secondary : .primary)
                 .opacity(contentOpacity)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .help(Text(verbatim: "\(row.displayTitle)\n\(row.displayURL.gitLabProjectPath)\n") + Text(actionTitle))
         .accessibilityHint(Text(actionTitle))
         HStack(spacing: 0) {
@@ -566,7 +566,7 @@ private struct CommandCenterMRCardContent: View {
                 Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
             }
         }
-        MRCommonMenuItems(item: item, monitor: monitor, boardPin: cardPin,
+        MRCommonMenuItems(item: item, monitor: monitor, boardPin: cardPin, boardGitLabURL: row.displayURL,
             onRemove: allowsRemoval ? { monitor.removeReviewedMergeRequest(row.displayItem) } : nil)
     }
 
@@ -633,7 +633,7 @@ struct BoardTodoRow: View {
         VStack(alignment: .leading, spacing: 9) {
             metadataHeader
             VStack(alignment: .leading, spacing: 3) {
-                Button { showingDetails = true } label: {
+                BoardCardButton(gitLabURL: todo.targetURL, onActivate: { showingDetails = true }) {
                     ActionDescriptionText(todo: todo, currentUsername: monitor.glab.currentUsername,
                         repositoryPath: todo.project.pathWithNamespace)
                         .font(.callout).foregroundStyle(isMuted ? Color.secondary : Color.primary)
@@ -641,7 +641,6 @@ struct BoardTodoRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.plain)
                 .help(Text(verbatim: "\(todo.displayTitle)\n\(todo.project.pathWithNamespace)"))
                 if todo.targetType == .mergeRequest, let iid = todo.target.iid {
                     BoardMRReferenceLine(iid: iid, projectID: todo.project.id)
@@ -671,7 +670,7 @@ struct BoardTodoRow: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .boardCardInteraction(title: todo.displayTitle, repositoryPath: todo.project.pathWithNamespace,
-            iid: todo.targetType == .mergeRequest ? todo.target.iid : nil) { showingDetails = true }
+            iid: todo.targetType == .mergeRequest ? todo.target.iid : nil, gitLabURL: todo.targetURL) { showingDetails = true }
         .contextMenu { menuItems }
         .sheet(isPresented: $showingDetails) {
             BoardItemDetailSheet {
@@ -728,9 +727,7 @@ struct BoardTodoRow: View {
         Button { showingDetails = true } label: {
             Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
         }
-        Link(destination: todo.targetURL) {
-            Label { Text(.Board.boardEventOpen) } icon: { Image(systemName: "arrow.up.right.square") }
-        }
+        OpenInGitLabMenuLink(url: todo.targetURL)
         Button { monitor.markDoneWithUndo(todo) } label: {
             Label { Text(.Board.boardEventMarkRead) } icon: { Image(systemName: "checkmark") }
         }

@@ -29,10 +29,9 @@ struct BoardMRCompletionCard: View {
         VStack(alignment: .leading, spacing: sectionSpacing) {
             metadata
             VStack(alignment: .leading, spacing: 3) {
-                Button(action: openDetails) {
+                BoardCardButton(gitLabURL: completion.url, onActivate: openDetails) {
                     BoardCardTitle(title: completion.title, repositoryPath: completion.url.gitLabProjectPath)
                 }
-                .buttonStyle(.plain)
                 BoardMRReferenceLine(iid: completion.target.iid, projectID: completion.target.projectID,
                     repositoryPath: completion.url.gitLabProjectPath)
             }
@@ -51,7 +50,7 @@ struct BoardMRCompletionCard: View {
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.12), lineWidth: 0.5))
         .boardCardInteraction(title: completion.title, repositoryPath: completion.url.gitLabProjectPath,
-            iid: completion.target.iid, onActivate: openDetails)
+            iid: completion.target.iid, gitLabURL: completion.url, onActivate: openDetails)
         .contextMenu { menuItems }
         .onChange(of: isCurrentAccount) { _, current in
             if !current { showingDetails = false }
@@ -113,9 +112,7 @@ struct BoardMRCompletionCard: View {
         Button(action: openDetails) {
             Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
         }
-        Link(destination: completion.url) {
-            Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
-        }
+        OpenInGitLabMenuLink(url: completion.url)
         CopyMergeRequestLinkButton(url: completion.url)
         AssistantContextMenu(mergeRequestURL: completion.url, settings: monitor.settings)
         Divider()

@@ -4,6 +4,7 @@ struct BoardHiddenReviewCard: View {
     let review: HiddenReview
     let notice: HiddenReview.InboxNotification
     let monitor: TodoMonitorService
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -39,5 +40,8 @@ struct BoardHiddenReviewCard: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.12), lineWidth: 0.5))
+        .contentShape(RoundedRectangle(cornerRadius: 8))
+        .gesture(TapGesture().modifiers(.option).onEnded { openURL(review.url) })
+        .contextMenu { OpenInGitLabMenuLink(url: review.url) }
     }
 }
