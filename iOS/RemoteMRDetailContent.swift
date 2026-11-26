@@ -203,7 +203,7 @@ struct RemoteMRDetailContent: View {
         VStack(alignment: .leading, spacing: 5) {
             if let person, personIsLabel {
                 HStack(spacing: 8) {
-                    PersonLabel(person: person, avatarSize: 20).font(.subheadline.weight(.medium))
+                    PersonLabel(person: person, avatarSize: 20, showsViewerSuffix: true).font(.subheadline.weight(.medium))
                     if let url = safeLink(field.url, to: card.url) {
                         Spacer(minLength: 4)
                         Link(destination: url) { Image(systemName: "arrow.up.right.square") }

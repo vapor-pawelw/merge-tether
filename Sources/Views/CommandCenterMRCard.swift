@@ -147,6 +147,7 @@ private struct CommandCenterMRCardContent: View {
             backgroundOpacity: contentOpacity, actionLabel: newReviewActionLabel, onActivate: onActivate)
         .contextMenu { menuItems }
         .environment(\.gitLabPersonSourceURL, row.displayURL)
+        .environment(\.gitLabViewerUsername, monitor.glab.currentUsername)
     }
 
     @ViewBuilder private var cardHeading: some View {

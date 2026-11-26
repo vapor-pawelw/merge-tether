@@ -384,6 +384,13 @@
         "pl": { "stringUnit": { "state": "translated", "value": "Pokazuje nazwę użytkownika GitLab" } }
       }
     },
+    "board.person.viewerSuffix": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "(you)" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "(Ty)" } }
+      }
+    },
     "board.approvals.received.%lld": {
       "extractionState": "manual",
       "localizations": {
@@ -445,13 +452,6 @@
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Your earlier approval no longer counts" } },
         "pl": { "stringUnit": { "state": "translated", "value": "Twoje wcześniejsze zatwierdzenie już się nie liczy" } }
-      }
-    },
-    "board.approvals.viewerSuffix": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "(you)" } },
-        "pl": { "stringUnit": { "state": "translated", "value": "(Ty)" } }
       }
     },
     "board.approvals.approved": {

@@ -364,6 +364,7 @@ private struct CommandCenterMRDetailContent: View {
             } message: { Text(.MRDiscussions.mrDiscussionsOriginChangeFailedMessage) }
             .sheet(item: $regenerationPresentation) { monitor.draftRegenerationSheet($0) }
             .environment(\.gitLabPersonSourceURL, item.url)
+            .environment(\.gitLabViewerUsername, monitor.glab.currentUsername)
         }
     }
 

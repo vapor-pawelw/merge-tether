@@ -143,7 +143,7 @@ struct RemoteApprovalPersonRow: View {
             HStack(spacing: 6) {
                 PersonLabel(person: .init(name: person.name, username: person.username, avatarURL: person.avatarURL), avatarSize: 24)
                     .font(.body.weight(.medium))
-                if isViewer { Text(.Board.boardApprovalsViewerSuffix).font(.callout).foregroundStyle(.secondary) }
+                if isViewer { Text(.Board.boardPersonViewerSuffix).font(.callout).foregroundStyle(.secondary) }
                 if let reviewerEditor, reviewerEditor.isEditing, let reviewer = person.assignedReviewer {
                     ReviewerRemovalButton(person: reviewer, revealed: true, state: reviewerEditor)
                 }

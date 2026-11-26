@@ -27,6 +27,12 @@ struct PersonIdentity: Equatable, Hashable, Sendable {
     var handle: String? { normalizedUsername.map { "@" + $0 } }
     var messageName: String? { trimmedName ?? handle }
 
+    func viewerSuffix(for viewerUsername: String?) -> LocalizedStringResource? {
+        guard let username = normalizedUsername, let viewerUsername,
+              username.caseInsensitiveCompare(viewerUsername) == .orderedSame else { return nil }
+        return .Board.boardPersonViewerSuffix
+    }
+
     /// The display name followed by the handle, so assistive technologies keep both.
     var accessibilityName: String? {
         guard let displayName else { return handle }
@@ -46,10 +52,19 @@ private struct GitLabPersonSourceURLKey: EnvironmentKey {
     static let defaultValue: URL? = nil
 }
 
+private struct GitLabViewerUsernameKey: EnvironmentKey {
+    static let defaultValue: String? = nil
+}
+
 extension EnvironmentValues {
     var gitLabPersonSourceURL: URL? {
         get { self[GitLabPersonSourceURLKey.self] }
         set { self[GitLabPersonSourceURLKey.self] = newValue }
+    }
+
+    var gitLabViewerUsername: String? {
+        get { self[GitLabViewerUsernameKey.self] }
+        set { self[GitLabViewerUsernameKey.self] = newValue }
     }
 }
 
@@ -62,8 +77,10 @@ struct PersonLabel: View {
     /// Shown when GitLab returned neither a name nor a username.
     var fallback: Text? = nil
     var contentOpacity = 1.0
+    var showsViewerSuffix = false
 
     @Environment(\.gitLabPersonSourceURL) private var sourceURL
+    @Environment(\.gitLabViewerUsername) private var viewerUsername
     @State private var showsHandle = false
 
     private var profileURL: URL? {
@@ -72,7 +89,14 @@ struct PersonLabel: View {
 
     var body: some View {
         if let name = person.displayName {
-            labeled(name)
+            if showsViewerSuffix, let suffix = person.viewerSuffix(for: viewerUsername) {
+                HStack(spacing: 4) {
+                    labeled(name)
+                    Text(suffix).fontWeight(.regular).foregroundStyle(Color.secondary).fixedSize()
+                }
+            } else {
+                labeled(name)
+            }
         } else if let fallback {
             HStack(spacing: 5) {
                 if showsAvatar { PersonAvatar(url: nil, size: avatarSize).accessibilityHidden(true) }
@@ -197,7 +221,7 @@ struct PeopleMessageLabel: View {
             ForEach(Array(message.people.prefix(2).enumerated()), id: \.offset) { index, person in
                 HStack(spacing: index == 0 ? 0 : 4) {
                     if index == 1, message.remainingCount == 0 { Text(verbatim: message.conjunction) }
-                    PersonLabel(person: .init(person), showsAvatar: false, showsHandleWhenUnnamed: true)
+                    PersonLabel(person: .init(person), showsAvatar: false, showsHandleWhenUnnamed: true, showsViewerSuffix: true)
                         .fontWeight(.semibold)
                         .foregroundStyle(Color.accentColor)
                     if index == 0, message.remainingCount > 0 { Text(verbatim: ",") }

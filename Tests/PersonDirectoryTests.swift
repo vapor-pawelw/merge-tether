@@ -19,6 +19,17 @@ import MergeTetherRemote
         #expect(unknown.displayName == nil && unknown.handle == nil && unknown.accessibilityName == nil)
     }
 
+    @Test func viewerSuffixIdentifiesTheSignedInAccountByUsername() {
+        let viewer = PersonIdentity(name: "Sam Reviewer", username: " @Sam ")
+        let namesake = PersonIdentity(name: "Sam Reviewer", username: "another-sam")
+        let unknown = PersonIdentity(name: "Sam Reviewer", username: nil)
+
+        #expect(viewer.viewerSuffix(for: "sam").map { String(localized: $0) } == "(you)")
+        #expect(viewer.viewerSuffix(for: nil) == nil)
+        #expect(namesake.viewerSuffix(for: "sam") == nil)
+        #expect(unknown.viewerSuffix(for: "sam") == nil)
+    }
+
     @Test func directoryResolvesHandlesCaseInsensitivelyAndFallsBackToTheHandle() {
         let avatar = URL(string: "https://gitlab.example.test/alice.png")
         var directory = PersonDirectory([.init(name: nil, username: "Alice", avatarURL: avatar)])

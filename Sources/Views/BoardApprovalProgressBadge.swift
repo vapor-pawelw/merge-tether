@@ -223,7 +223,7 @@ struct BoardApprovalProgressBadge: View {
                         PersonLabel(person: person.author.person, avatarSize: 20)
                             .font(.callout).foregroundStyle(.primary)
                         if person.id == viewerApproval?.author.id {
-                            Text(.Board.boardApprovalsViewerSuffix).font(.callout).foregroundStyle(.secondary)
+                            Text(.Board.boardPersonViewerSuffix).font(.callout).foregroundStyle(.secondary)
                         }
                     } status: {
                         switch person.status {

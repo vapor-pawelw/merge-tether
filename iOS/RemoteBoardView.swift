@@ -10,6 +10,14 @@ struct RemoteBoardView: View {
     @State private var showingHiddenReviews = false
     @State private var pendingInboxCard: RemoteCardSelection?
     @State private var regenerationPresentation: DraftRegenerationPresentation?
+
+    private var viewerUsername: String? {
+        guard let account = model.state.board?.account else { return nil }
+        let parts = account.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
+        return String(parts[0])
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -155,6 +163,7 @@ struct RemoteBoardView: View {
                 Text(.Remote.remoteBoardOrderRejectedHelp)
             }
         }
+        .environment(\.gitLabViewerUsername, viewerUsername)
     }
 
     private func draftRegenerationStatus(_ batch: DraftRegenerationBatch) -> some View {
