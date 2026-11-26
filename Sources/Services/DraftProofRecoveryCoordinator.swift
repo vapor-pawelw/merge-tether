@@ -27,7 +27,7 @@ final class DraftProofRecoveryCoordinator {
         }
         var evidenceContext: EvidenceContext {
             var context = request.draftRecoveryEvidence
-            context.account = .init(host: host, username: user.username)
+            context.account = user.account(on: host)
             return context
         }
     }
@@ -219,8 +219,10 @@ final class DraftProofRecoveryCoordinator {
               let workRevision = FollowUpVerificationStore.recoveryWorkRevision(work: snapshot.work,
                   username: snapshot.user.username, settings: settings),
               let fingerprint = ReviewVerdict.fingerprint(snapshot.discussions),
-              let key = try? verdictContextKey(snapshot, configuration: configuration, stoppedRepairRevision: stoppedRevision, workRevision: workRevision),
-              let legacyKey = try? verdictContextKey(snapshot, configuration: configuration, stoppedRepairRevision: stoppedRevision, workRevision: nil) else { return }
+              let key = try? verdictContextKey(snapshot, origin: origin, configuration: configuration,
+                  stoppedRepairRevision: stoppedRevision, workRevision: workRevision),
+              let legacyKey = try? verdictContextKey(snapshot, origin: origin, configuration: configuration,
+                  stoppedRepairRevision: stoppedRevision, workRevision: nil) else { return }
         attemptAccounts[snapshot.work] = snapshot.user.username
         let presentation = presentationContext(request: snapshot.request, fingerprint: fingerprint, configuration: configuration, workRevision: workRevision)
         discussionRoots[snapshot.work] = Dictionary(snapshot.drafts.compactMap { draft -> (Int, Int)? in
@@ -306,11 +308,16 @@ final class DraftProofRecoveryCoordinator {
         tasks[work]?.cancel(); repairTasks[work]?.cancel(); pending.removeValue(forKey: work)
         states.removeValue(forKey: work); presentationContexts.removeValue(forKey: work); discussionRoots.removeValue(forKey: work)
         semanticCache.removeValue(forKey: work)
-        let folder = attemptFolder(work: work, username: username)
         do {
-            if FileManager.default.fileExists(atPath: folder.path) { try FileManager.default.removeItem(at: folder) }
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            try JSONEncoder().encode(UUID()).write(to: folder.appending(path: "retry-generation.json"), options: .atomic)
+            let folders = attemptFolders(work: work, username: username)
+            let generation = try JSONEncoder().encode(UUID())
+            for folder in folders {
+                if FileManager.default.fileExists(atPath: folder.path) { try FileManager.default.removeItem(at: folder) }
+            }
+            for folder in attemptWriteFolders(work: work, username: username) {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                try generation.write(to: folder.appending(path: "retry-generation.json"), options: .atomic)
+            }
         } catch {
             markPersistenceFailure(work: work)
         }
@@ -653,13 +660,33 @@ final class DraftProofRecoveryCoordinator {
     private func attemptFolder(work: AssistantAutomationRunner.MergeRequestWork, username: String) -> URL {
         FollowUpVerificationStore.recordURL(kind: "follow-up-proof-recovery-attempts", work: work, username: username, in: directory).deletingPathExtension()
     }
+
+    private func attemptFolders(work: AssistantAutomationRunner.MergeRequestWork, username: String) -> [URL] {
+        let id = settings.authenticatedAccountID(host: work.host, username: username)
+        let account = GitLabAccountIdentity(host: work.host, username: username, userID: id)
+        let aliases = settings.unambiguousLegacyUsernames(for: account).sorted()
+        return ((id.map { ["id:\($0)"] } ?? []) + aliases).map { attemptFolder(work: work, username: $0) }
+    }
+
+    private func attemptWriteFolders(work: AssistantAutomationRunner.MergeRequestWork, username: String) -> [URL] {
+        let id = settings.authenticatedAccountID(host: work.host, username: username)
+        return ((id.map { ["id:\($0)"] } ?? []) + [username]).map { attemptFolder(work: work, username: $0) }
+    }
+
+    private func retryGeneration(work: AssistantAutomationRunner.MergeRequestWork, username: String) -> Data? {
+        for folder in attemptFolders(work: work, username: username) {
+            if let data = try? Data(contentsOf: folder.appending(path: "retry-generation.json")) { return data }
+        }
+        return nil
+    }
     private func pipelineEvidence(_ request: GitLabMergeRequest) -> String {
         (try? JSONEncoder.sorted.encode(request.headPipeline)).map { String(decoding: $0, as: UTF8.self) } ?? "unknown"
     }
 
     private func stoppedRepairRuns(snapshot: Snapshot, draftIDs: [Int]) -> [AssistantAutomationRunner.Handoff] {
         settings.assistantHandoffs.filter { job in
-            guard job.key.work == snapshot.work, job.key.username == snapshot.user.username,
+            guard job.key.work == snapshot.work,
+                  settings.handoffMatchesAccount(job, host: snapshot.host, username: snapshot.user.username),
                   job.workflow == .followUp, job.followUpPushAllowed == true,
                   let repair = job.draftRepair, job.key.assistant == repair.assistant,
                   job.expectedHeadSHA == repair.headSHA, let execution = job.execution,
@@ -672,12 +699,12 @@ final class DraftProofRecoveryCoordinator {
         }.sorted { $0.id.uuidString < $1.id.uuidString }
     }
 
-    private func verdictContextKey(_ snapshot: Snapshot, configuration: AutomationSettings, stoppedRepairRevision: String, workRevision: String?) throws -> String {
-        let folder = attemptFolder(work: snapshot.work, username: snapshot.user.username)
-        let epoch = (try? Data(contentsOf: folder.appending(path: "retry-generation.json"))) ?? Data()
+    private func verdictContextKey(_ snapshot: Snapshot, origin: FollowUpVerification, configuration: AutomationSettings,
+                                   stoppedRepairRevision: String, workRevision: String?) throws -> String {
+        let epoch = retryGeneration(work: snapshot.work, username: snapshot.user.username) ?? Data()
         let model = configuration.assistant == .codex ? configuration.codexVerificationModel.rawValue : configuration.claudeVerificationModel.rawValue
         // Publication policy and unrelated scope adoption do not alter a claim's truth.
-        return AICommentAssessmentStore.digest("draft-verdict-v1|\(snapshot.host)|\(snapshot.user.id)|\(snapshot.user.username)"
+        return AICommentAssessmentStore.digest("draft-verdict-v1|\(snapshot.host)|\(snapshot.user.id)|\(origin.username)"
             + "|\(snapshot.request.sha ?? "")|\(snapshot.branchHead)|\(snapshot.request.draftProofRecoveryContextFingerprint)"
             + "|\(configuration.assistant.rawValue)|\(model)|\(DraftProofRecoveryVerifier.criteriaVersion)"
             + "|" + pipelineEvidence(snapshot.request) + "|" + AICommentAssessmentStore.digest(String(decoding: epoch, as: UTF8.self))
@@ -706,7 +733,13 @@ final class DraftProofRecoveryCoordinator {
     }
 
     private func storedAttempts(work: AssistantAutomationRunner.MergeRequestWork, username: String) -> [Attempt] {
-        let folder = attemptFolder(work: work, username: username)
+        var seen: Set<String> = []
+        return attemptFolders(work: work, username: username).flatMap { folder in
+            storedAttempts(work: work, in: folder)
+        }.filter { seen.insert($0.id).inserted }
+    }
+
+    private func storedAttempts(work: AssistantAutomationRunner.MergeRequestWork, in folder: URL) -> [Attempt] {
         let paths: [URL]
         do {
             let values = try folder.resourceValues(forKeys: [.isSymbolicLinkKey])
@@ -756,8 +789,7 @@ final class DraftProofRecoveryCoordinator {
 
     private func priorAttempts(snapshot: Snapshot, origin: FollowUpVerification, configuration: AutomationSettings, key: String) -> [Attempt] {
         var attempts = storedAttempts(work: snapshot.work, username: snapshot.user.username)
-        let folder = attemptFolder(work: snapshot.work, username: snapshot.user.username)
-        guard !FileManager.default.fileExists(atPath: folder.appending(path: "retry-generation.json").path) else { return attempts }
+        guard retryGeneration(work: snapshot.work, username: snapshot.user.username) == nil else { return attempts }
         let model = configuration.assistant == .codex ? configuration.codexVerificationModel.rawValue : configuration.claudeVerificationModel.rawValue
         for record in FollowUpVerificationStore.recoveryRecords(work: snapshot.work, username: snapshot.user.username,
             settings: settings, in: directory) {
@@ -796,10 +828,12 @@ final class DraftProofRecoveryCoordinator {
         // Recheck before every replacement, including corruption arriving after scheduling.
         _ = storedAttempts(work: work, username: username)
         guard !settings.persistenceDegraded.contains("draftProofRecoveryAttempts") else { return false }
-        let folder = attemptFolder(work: work, username: username)
         do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            try JSONEncoder().encode(attempt).write(to: folder.appending(path: "\(attempt.id).json"), options: .atomic)
+            let data = try JSONEncoder().encode(attempt)
+            for folder in attemptWriteFolders(work: work, username: username) {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                try data.write(to: folder.appending(path: "\(attempt.id).json"), options: .atomic)
+            }
             return true
         } catch {
             markPersistenceFailure(work: work)

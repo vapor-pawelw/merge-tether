@@ -274,7 +274,7 @@ struct HiddenReview: Codable, Identifiable, Sendable {
         let reason: String?
     }
 
-    let target: MRAutomationScope.Target
+    var target: MRAutomationScope.Target
     let title: String
     let url: URL
     var inboxNotification: InboxNotification? = nil

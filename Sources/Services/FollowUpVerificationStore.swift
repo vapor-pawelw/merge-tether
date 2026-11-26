@@ -25,7 +25,7 @@ struct FollowUpVerification: Codable, Equatable, Sendable {
     var repairIntent: RepairIntent? = nil
 
     var evidenceContext: EvidenceContext {
-        .init(account: .init(host: host, username: username), mergeRequestID: .init(projectID: projectID, iid: iid),
+        .init(account: .init(host: host, username: username, userID: userID), mergeRequestID: .init(projectID: projectID, iid: iid),
               head: headSHA, discussionContent: discussionFingerprint.map(DiscussionContentDigest.init),
               semanticContext: semanticContextFingerprint.map(SemanticContextDigest.init),
               recoveryContext: recoveryContextFingerprint.map(DraftRecoveryDigest.init))
@@ -34,7 +34,7 @@ struct FollowUpVerification: Codable, Equatable, Sendable {
     /// Historical identity establishes ownership only; fresh verification must establish current truth.
     func owns(_ draft: GitLabDraftNote, request: GitLabMergeRequest, host: String, user: GitLabAuthenticatedUser) -> Bool {
         version == 1 && sealed && evidenceContext.binds(
-            to: .init(account: .init(host: host, username: user.username), mergeRequestID: request.mergeRequestID),
+            to: .init(account: user.account(on: host), mergeRequestID: request.mergeRequestID),
             policy: .accountAndRequest)
             && userID == user.id && request.author.id == user.id && request.isOpen
             && sourceProjectID == request.sourceProjectID && sourceBranch == request.sourceBranch
@@ -72,7 +72,10 @@ enum FollowUpVerificationStore {
 
     @MainActor
     static func latestRun(for work: AssistantAutomationRunner.MergeRequestWork, username: String, settings: SettingsManager) -> AssistantAutomationRunner.Handoff? {
-        settings.assistantHandoffs.filter { $0.key.work == work && $0.key.username == username && $0.followUpPushAllowed != nil }
+        settings.assistantHandoffs.filter {
+            $0.key.work == work && settings.handoffMatchesAccount($0, host: work.host, username: username)
+                && $0.followUpPushAllowed != nil
+        }
             .max { $0.createdAt < $1.createdAt }
     }
 
@@ -162,13 +165,31 @@ enum FollowUpVerificationStore {
         let assistant: AutomationAssistant
         let authenticatedRecoveries: [String: Data]
         var legacyEvidenceDirectory: URL? = nil
+        var userID: Int? = nil
+
+        func owns(_ run: AssistantAutomationRunner.Handoff, username: String) -> Bool {
+            if let userID, let owner = run.accountUserID { return userID == owner }
+            return run.key.username == username
+        }
+
+        func owns(_ proof: FollowUpVerification, run: AssistantAutomationRunner.Handoff) -> Bool {
+            guard userID == nil || userID == proof.userID else { return false }
+            if let owner = run.accountUserID { return owner == proof.userID }
+            return proof.username == run.key.username
+        }
     }
 
     @MainActor
     static func receiptReadInput(work: AssistantAutomationRunner.MergeRequestWork, username: String,
                                  settings: SettingsManager, in directory: URL = directory) -> ReceiptReadInput {
-        let folder = recordURL(kind: "follow-up-proof-recoveries", work: work, username: username, in: directory).deletingPathExtension()
-        let paths = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        let userID = settings.authenticatedAccountID(host: work.host, username: username)
+        let user = GitLabAccountIdentity(host: work.host, username: username, userID: userID)
+        let aliases = settings.knownUsernames(for: user).sorted()
+        let names = (userID.map { ["id:\($0)"] } ?? []) + aliases
+        let paths = names.flatMap { name in
+            let folder = recordURL(kind: "follow-up-proof-recoveries", work: work, username: name, in: directory).deletingPathExtension()
+            return (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        }
         if !paths.isEmpty && !AssistantJobJournal.isKeyReady {
             Task { _ = await AssistantJobJournal.loadKey() }
         }
@@ -178,14 +199,16 @@ enum FollowUpVerificationStore {
                   let size = try? path.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 1_500_000,
                   let data = try? Data(contentsOf: path),
                   let payload = AssistantJobJournal.authenticatedEvidence(data, context: "follow-up-proof-recovery") else { continue }
-            authenticated[path.lastPathComponent] = payload
+            if authenticated[path.lastPathComponent] == nil { authenticated[path.lastPathComponent] = payload }
         }
         let legacy = directory.standardizedFileURL == Self.directory.standardizedFileURL
             && InstallationStorage.current.root != InstallationStorage.current.legacy.root
             ? InstallationStorage.current.legacy.evidence : nil
-        return .init(handoffs: settings.assistantHandoffs.filter { $0.key.work == work && $0.key.username == username },
+        return .init(handoffs: settings.assistantHandoffs.filter {
+            $0.key.work == work && settings.handoffMatchesAccount($0, host: work.host, username: username)
+        },
               events: settings.automationEvents, assistant: settings.automation.assistant,
-              authenticatedRecoveries: authenticated, legacyEvidenceDirectory: legacy)
+              authenticatedRecoveries: authenticated, legacyEvidenceDirectory: legacy, userID: userID)
     }
 
     @MainActor
@@ -198,26 +221,28 @@ enum FollowUpVerificationStore {
     nonisolated static func contextReceipts(work: AssistantAutomationRunner.MergeRequestWork, username: String,
                                            input: ReceiptReadInput, in directory: URL) -> [FollowUpVerification] {
         let runs = input.handoffs.filter {
-            $0.key.work == work && $0.key.username == username && $0.followUpPushAllowed != nil
+            $0.key.work == work && input.owns($0, username: username) && $0.followUpPushAllowed != nil
         }
         let origins = runs.filter { origin in
             origin.followUpPushAllowed == true && origin.execution?.state == .succeeded
                 && origin.key.assistant == input.assistant
                 && !runs.contains { $0.createdAt > origin.createdAt && $0.execution?.state != .succeeded }
         }
-        let originIDs = Set(origins.map(\.id))
+        let runsByID = Dictionary(origins.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let recovered = recoveryRecords(work: work, username: username, input: input, in: directory).map(\.proof)
-        guard !originIDs.isEmpty else { return recovered }
+        guard !runsByID.isEmpty else { return recovered }
         var candidates: [FollowUpVerification] = []
-        let latest = recordURL(kind: "follow-up-verifications", work: work, username: username, in: directory)
-        if let proof = readPublicationReceipt(at: latest) { candidates.append(proof) }
-        let archive = recordURL(kind: "follow-up-verifications-archive", work: work, username: username,
-                                in: directory).deletingPathExtension()
-        for path in (try? FileManager.default.contentsOfDirectory(at: archive, includingPropertiesForKeys: nil)) ?? []
-            where path.pathExtension == "json" {
-            if let proof = readPublicationReceipt(at: path),
-               UUID(uuidString: path.deletingPathExtension().lastPathComponent) == proof.verificationID {
-                candidates.append(proof)
+        for name in Set(origins.map(\.key.username)) {
+            let latest = recordURL(kind: "follow-up-verifications", work: work, username: name, in: directory)
+            if let proof = readPublicationReceipt(at: latest) { candidates.append(proof) }
+            let archive = recordURL(kind: "follow-up-verifications-archive", work: work, username: name,
+                                    in: directory).deletingPathExtension()
+            for path in (try? FileManager.default.contentsOfDirectory(at: archive, includingPropertiesForKeys: nil)) ?? []
+                where path.pathExtension == "json" {
+                if let proof = readPublicationReceipt(at: path),
+                   UUID(uuidString: path.deletingPathExtension().lastPathComponent) == proof.verificationID {
+                    candidates.append(proof)
+                }
             }
         }
         // Legacy helpers returned a machine receipt in the exact app-owned run directory.
@@ -234,8 +259,8 @@ enum FollowUpVerificationStore {
         }
         var proofs: [UUID: FollowUpVerification] = [:]
         var ambiguous: Set<UUID> = []
-        for proof in candidates where originIDs.contains(proof.runID) && proof.host == work.host
-            && proof.projectID == work.projectID && proof.iid == work.iid && proof.username == username {
+        for proof in candidates where proof.host == work.host && proof.projectID == work.projectID && proof.iid == work.iid {
+            guard let run = runsByID[proof.runID], input.owns(proof, run: run) else { continue }
             if let existing = proofs[proof.verificationID], existing != proof {
                 ambiguous.insert(proof.verificationID)
             } else { proofs[proof.verificationID] = proof }
@@ -321,7 +346,7 @@ extension FollowUpVerificationStore {
         excludingPredecessorID: UUID? = nil) -> [FollowUpVerification] {
         let runs = input.handoffs.filter {
             $0.id != excludingRunID && $0.id != excludingPredecessorID
-                && $0.key.work == work && $0.key.username == username && $0.followUpPushAllowed != nil
+                && $0.key.work == work && input.owns($0, username: username) && $0.followUpPushAllowed != nil
         }
         let origins = runs.filter { origin in
             origin.followUpPushAllowed == true
@@ -332,11 +357,13 @@ extension FollowUpVerificationStore {
         var archives: Set<URL> = []
         // Legacy records are candidates only for exact persisted runs; no legacy recovery authorizes publication.
         for evidence in [directory] + (input.legacyEvidenceDirectory.map { [$0] } ?? []) {
-            paths.append(recordURL(kind: "follow-up-verifications", work: work, username: username, in: evidence))
-            let archive = recordURL(kind: "follow-up-verifications-archive", work: work, username: username, in: evidence).deletingPathExtension()
-            archives.insert(archive.standardizedFileURL)
-            paths += ((try? FileManager.default.contentsOfDirectory(at: archive, includingPropertiesForKeys: nil)) ?? [])
-                .filter { $0.pathExtension == "json" }
+            for name in Set(origins.map(\.key.username)) {
+                paths.append(recordURL(kind: "follow-up-verifications", work: work, username: name, in: evidence))
+                let archive = recordURL(kind: "follow-up-verifications-archive", work: work, username: name, in: evidence).deletingPathExtension()
+                archives.insert(archive.standardizedFileURL)
+                paths += ((try? FileManager.default.contentsOfDirectory(at: archive, includingPropertiesForKeys: nil)) ?? [])
+                    .filter { $0.pathExtension == "json" }
+            }
             for origin in origins {
                 let folder = evidence.deletingLastPathComponent().appending(path: "Assistant Runs/\(origin.id.uuidString)")
                 if let working = origin.execution?.workingDirectory,
@@ -352,14 +379,14 @@ extension FollowUpVerificationStore {
             guard (try? path.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
                   let proof = readPublicationReceipt(at: path, requiresFingerprint: false),
                   proof.host == work.host, proof.projectID == work.projectID, proof.iid == work.iid,
-                  proof.username == username, let origin = origins.first(where: { $0.id == proof.runID }),
+                  let origin = origins.first(where: { $0.id == proof.runID }), input.owns(proof, run: origin),
                   origin.execution?.state != .blocked || proof.discussionFingerprint != nil else { continue }
             if let repair = origin.draftRepair {
                 guard proof.drafts.count == 1, proof.drafts[0].id == repair.draftID,
                       proof.drafts[0].bodySHA256 != repair.bodySHA256,
                       proof.repairIntent?.draftID == repair.draftID,
                       proof.repairIntent?.bodySHA256 == proof.drafts[0].bodySHA256,
-                      proof.host == repair.origin.host, proof.username == repair.origin.username,
+                      proof.host == repair.origin.host,
                       proof.userID == repair.origin.userID, proof.projectID == repair.origin.projectID,
                       proof.iid == repair.origin.iid, proof.sourceProjectID == repair.origin.sourceProjectID,
                       proof.sourceBranch == repair.origin.sourceBranch else { continue }
@@ -399,13 +426,15 @@ extension FollowUpVerificationStore {
     @MainActor
     static func recoveryWorkRevision(work: AssistantAutomationRunner.MergeRequestWork, username: String,
                                      settings: SettingsManager) -> String? {
-        recoveryWorkRevision(work: work, username: username, handoffs: settings.assistantHandoffs)
+        recoveryWorkRevision(work: work, handoffs: settings.assistantHandoffs.filter {
+            settings.handoffMatchesAccount($0, host: work.host, username: username)
+        })
     }
 
-    private nonisolated static func recoveryWorkRevision(work: AssistantAutomationRunner.MergeRequestWork, username: String,
+    private nonisolated static func recoveryWorkRevision(work: AssistantAutomationRunner.MergeRequestWork,
                                                          handoffs: [AssistantAutomationRunner.Handoff]) -> String? {
         let states = handoffs.filter {
-            $0.key.work == work && $0.key.username == username && $0.draftRepair == nil
+            $0.key.work == work && $0.draftRepair == nil
                 && ($0.followUpPushAllowed == true || $0.allowsPush)
         }.sorted { $0.id.uuidString < $1.id.uuidString }.map {
             RecoveryWorkState(id: $0.id, createdAt: $0.createdAt, state: $0.execution?.state,
@@ -421,24 +450,26 @@ extension FollowUpVerificationStore {
     @MainActor
     static func recoveryWorkIsSettled(origin: FollowUpVerification, work: AssistantAutomationRunner.MergeRequestWork,
                                       username: String, settings: SettingsManager) -> Bool {
-        recoveryWorkIsSettled(origin: origin, work: work, username: username, handoffs: settings.assistantHandoffs)
+        recoveryWorkIsSettled(origin: origin, work: work, handoffs: settings.assistantHandoffs.filter {
+            settings.handoffMatchesAccount($0, host: work.host, username: username)
+        })
     }
 
     private nonisolated static func recoveryWorkIsSettled(origin: FollowUpVerification,
-        work: AssistantAutomationRunner.MergeRequestWork, username: String,
+        work: AssistantAutomationRunner.MergeRequestWork,
         handoffs: [AssistantAutomationRunner.Handoff]) -> Bool {
-        let runs = handoffs.filter { $0.key.work == work && $0.key.username == username }
+        let runs = handoffs.filter { $0.key.work == work }
         var root = origin
         var visited: Set<UUID> = []
         while let producer = runs.first(where: { $0.id == root.runID }), let repair = producer.draftRepair {
             guard visited.insert(root.verificationID).inserted,
                   repair.origin.host == work.host, repair.origin.projectID == work.projectID,
-                  repair.origin.iid == work.iid, repair.origin.username == username else { return false }
+                  repair.origin.iid == work.iid, repair.origin.userID == origin.userID else { return false }
             root = repair.origin
         }
         guard let producer = runs.first(where: { $0.id == root.runID }) else { return false }
-        return !handoffs.contains {
-            $0.key.work == work && $0.key.username == username && $0.createdAt > producer.createdAt
+        return !runs.contains {
+            $0.createdAt > producer.createdAt
                 && $0.draftRepair == nil && ($0.followUpPushAllowed == true || $0.allowsPush)
                 && ($0.execution == nil || $0.execution?.state.isActive == true)
         }
@@ -455,7 +486,7 @@ extension FollowUpVerificationStore {
     private nonisolated static func legacyRecoveryIsCurrent(origin proof: FollowUpVerification,
         input: ReceiptReadInput, origins: [FollowUpVerification]) -> Bool {
         let work = AssistantAutomationRunner.MergeRequestWork(host: proof.host, projectID: proof.projectID, iid: proof.iid)
-        let runs = input.handoffs.filter { $0.key.work == work && $0.key.username == proof.username }
+        let runs = input.handoffs.filter { $0.key.work == work && input.owns($0, username: proof.username) }
         var root = proof
         var visited: Set<UUID> = []
         while let producer = runs.first(where: { $0.id == root.runID }), let repair = producer.draftRepair {
@@ -498,10 +529,12 @@ extension FollowUpVerificationStore {
     @MainActor
     static func persistRecovery(_ record: RecoveryRecord, work: AssistantAutomationRunner.MergeRequestWork,
                                 username: String, in directory: URL) throws {
-        let folder = recordURL(kind: "follow-up-proof-recoveries", work: work, username: username, in: directory).deletingPathExtension()
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let sealed = try AssistantJobJournal.sealEvidence(JSONEncoder().encode(record), context: "follow-up-proof-recovery")
-        try sealed.write(to: folder.appending(path: "\(record.attemptID).json"), options: .atomic)
+        for name in ["id:\(record.proof.userID)", username] {
+            let folder = recordURL(kind: "follow-up-proof-recoveries", work: work, username: name, in: directory).deletingPathExtension()
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try sealed.write(to: folder.appending(path: "\(record.attemptID).json"), options: .atomic)
+        }
     }
 
     @MainActor
@@ -532,22 +565,20 @@ extension FollowUpVerificationStore {
                                                     input: ReceiptReadInput, in directory: URL) -> [RecoveryRecord] {
         let origins = recoveryOrigins(work: work, username: username, input: input, in: directory)
         guard !origins.isEmpty else { return [] }
-        let folder = recordURL(kind: "follow-up-proof-recoveries", work: work, username: username, in: directory).deletingPathExtension()
-        return ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []).compactMap { path in
-            guard path.pathExtension == "json", (try? path.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
-                  let data = input.authenticatedRecoveries[path.lastPathComponent],
-                  let record = try? JSONDecoder().decode(RecoveryRecord.self, from: data),
-                  [1, 2, 3].contains(record.version), path.deletingPathExtension().lastPathComponent == record.attemptID,
+        let handoffs = input.handoffs.filter { input.owns($0, username: username) }
+        return input.authenticatedRecoveries.compactMap { name, data in
+            guard let record = try? JSONDecoder().decode(RecoveryRecord.self, from: data),
+                  [1, 2, 3].contains(record.version), name == "\(record.attemptID).json",
                   isHex(record.attemptID, lengths: [64]), origins.contains(record.origin),
                   record.assistant == input.assistant, !record.model.isEmpty,
                   record.assessmentID != record.origin.verificationID,
                   let fingerprint = record.proof.discussionFingerprint, isHex(fingerprint, lengths: [64]),
                   let context = record.proof.semanticContextFingerprint, isHex(context, lengths: [64]),
                   let recoveryContext = record.proof.recoveryContextFingerprint, isHex(recoveryContext, lengths: [64]) else { return nil }
-            guard recoveryWorkIsSettled(origin: record.origin, work: work, username: username, handoffs: input.handoffs) else { return nil }
+            guard recoveryWorkIsSettled(origin: record.origin, work: work, handoffs: handoffs) else { return nil }
             if record.version == 3 {
                 guard let revision = record.workRevision, isHex(revision, lengths: [64]),
-                      revision == recoveryWorkRevision(work: work, username: username, handoffs: input.handoffs) else { return nil }
+                      revision == recoveryWorkRevision(work: work, handoffs: handoffs) else { return nil }
             } else if !legacyRecoveryIsCurrent(origin: record.origin, input: input, origins: origins) { return nil }
             // Old records assessed their complete origin. New records retain that origin
             // unchanged and explicitly identify the exact subset independently assessed.

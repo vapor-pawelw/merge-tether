@@ -4,12 +4,28 @@ struct ReviewParticipationPreferences: Codable, Equatable, Sendable {
     struct Entry: Codable, Equatable, Identifiable, Sendable {
         let id: UUID
         let host: String
-        let username: String
+        var username: String
+        var accountUserID: Int? = nil
         let reviewerID: Int
         let label: String
     }
     private(set) var entries: [Entry] = []
     private(set) var localAutomationAuthors: [Entry] = []
+
+    struct StoredEntry: Codable {
+        let automationAuthor: Bool
+        let entry: Entry
+    }
+
+    var storedEntries: [StoredEntry] {
+        entries.map { .init(automationAuthor: false, entry: $0) }
+            + localAutomationAuthors.map { .init(automationAuthor: true, entry: $0) }
+    }
+
+    init(storedEntries: [StoredEntry]) {
+        entries = storedEntries.filter { !$0.automationAuthor }.map(\.entry)
+        localAutomationAuthors = storedEntries.filter(\.automationAuthor).map(\.entry)
+    }
 
     private enum CodingKeys: String, CodingKey { case entries, localAutomationAuthors }
 
@@ -19,7 +35,7 @@ struct ReviewParticipationPreferences: Codable, Equatable, Sendable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         entries = try values.decode([Entry].self, forKey: .entries)
         localAutomationAuthors = try values.decodeIfPresent([Entry].self, forKey: .localAutomationAuthors) ?? []
-        let identities = localAutomationAuthors.map { "\($0.host)/\($0.username)/\($0.reviewerID)" }
+        let identities = localAutomationAuthors.map { "\($0.host)/\($0.accountUserID.map(String.init) ?? $0.username)/\($0.reviewerID)" }
         guard localAutomationAuthors.allSatisfy({
             !$0.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 && !$0.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -46,7 +62,7 @@ struct ReviewParticipationPreferences: Codable, Equatable, Sendable {
     }
 
     func excludedIDs(host: String, username: String) -> Set<Int> {
-        Set(entries.filter { $0.host == host && $0.username == username }.map(\.reviewerID))
+        Set(entries.filter { $0.accountUserID == nil && $0.host == host && $0.username == username }.map(\.reviewerID))
     }
 
     func revision(host: String, username: String) -> String {
@@ -69,13 +85,13 @@ struct ReviewParticipationPreferences: Codable, Equatable, Sendable {
     }
 
     @discardableResult mutating func unmarkAutomationAuthor(_ id: UUID, host: String, username: String) -> Bool {
-        guard localAutomationAuthors.contains(where: { $0.id == id && $0.host == host && $0.username == username }) else { return false }
-        localAutomationAuthors.removeAll { $0.id == id && $0.host == host && $0.username == username }
+        guard localAutomationAuthors.contains(where: { $0.id == id && $0.accountUserID == nil && $0.host == host && $0.username == username }) else { return false }
+        localAutomationAuthors.removeAll { $0.id == id && $0.accountUserID == nil && $0.host == host && $0.username == username }
         return true
     }
 
     func botIDs(host: String, username: String) -> Set<Int> {
-        Set(localAutomationAuthors.filter { $0.host == host && $0.username == username }.map(\.reviewerID))
+        Set(localAutomationAuthors.filter { $0.accountUserID == nil && $0.host == host && $0.username == username }.map(\.reviewerID))
     }
 
     func isDeclaredAutomation(host: String, username: String, userID: Int) -> Bool {
@@ -103,7 +119,7 @@ struct ReviewParticipationPreferences: Codable, Equatable, Sendable {
     }
 
     func workerInstructions(host: String, username: String) -> String {
-        let excluded = entries.filter { $0.host == host && $0.username == username }
+        let excluded = entries.filter { $0.accountUserID == nil && $0.host == host && $0.username == username }
         guard !excluded.isEmpty else { return "" }
         let identities = excluded.map { "\($0.reviewerID) (\($0.label))" }.joined(separator: ", ")
         return """

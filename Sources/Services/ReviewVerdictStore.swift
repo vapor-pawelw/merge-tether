@@ -65,7 +65,7 @@ struct ReviewVerdict: Codable, Equatable, Sendable {
     var draftBodyDigests: [String: String]? = nil
 
     var evidenceContext: EvidenceContext {
-        .init(account: username.map { .init(host: host, username: $0) },
+        .init(account: username.map { .init(host: host, username: $0, userID: userID) },
               mergeRequestID: .init(projectID: projectID, iid: iid), head: headSHA,
               discussionContent: discussionFingerprint.map(DiscussionContentDigest.init),
               semanticContext: semanticContextFingerprint.map(SemanticContextDigest.init))
@@ -174,24 +174,34 @@ enum ReviewVerdictStore {
     nonisolated static let directory = InstallationStorage.current.evidence
         .appending(path: "verdicts", directoryHint: .isDirectory)
 
-    nonisolated static func fileURL(host: String, projectID: Int, iid: Int, in directory: URL = directory) -> URL {
-        directory.appending(path: host, directoryHint: .isDirectory).appending(path: "\(projectID)-\(iid).json")
+    nonisolated static func fileURL(host: String, projectID: Int, iid: Int, userID: Int? = nil, in directory: URL = directory) -> URL {
+        let hostDirectory = directory.appending(path: host, directoryHint: .isDirectory)
+        let accountDirectory = userID.map { hostDirectory.appending(path: "user-\($0)", directoryHint: .isDirectory) }
+        return (accountDirectory ?? hostDirectory).appending(path: "\(projectID)-\(iid).json")
     }
 
-    nonisolated static func verdict(host: String, projectID: Int, iid: Int, in directory: URL = directory) -> ReviewVerdict? {
-        let url = fileURL(host: host, projectID: projectID, iid: iid, in: directory)
+    nonisolated static func verdict(host: String, projectID: Int, iid: Int, userID: Int? = nil, in directory: URL = directory) -> ReviewVerdict? {
+        let url = fileURL(host: host, projectID: projectID, iid: iid, userID: userID, in: directory)
         guard let data = try? Data(contentsOf: url), data.count < 65_536,
               let verdict = try? JSONDecoder().decode(ReviewVerdict.self, from: data),
-              verdict.host == host, verdict.projectID == projectID, verdict.iid == iid
+              verdict.host == host, verdict.projectID == projectID, verdict.iid == iid,
+              userID == nil || verdict.userID == userID
         else { return nil }
         return verdict
     }
 
     nonisolated static func verdict(host: String, projectID: Int, iid: Int, user: GitLabAuthenticatedUser,
                                    in directory: URL = directory) -> ReviewVerdict? {
-        guard let verdict = verdict(host: host, projectID: projectID, iid: iid, in: directory),
-              verdict.username == user.username, verdict.userID == user.id else { return nil }
-        return verdict
+        if let newest = verdict(host: host, projectID: projectID, iid: iid, in: directory), newest.userID == user.id {
+            return newest
+        }
+        return verdict(host: host, projectID: projectID, iid: iid, userID: user.id, in: directory)
+    }
+
+    nonisolated static func saveAuthenticatedVerdict(_ verdict: ReviewVerdict, in directory: URL) throws {
+        guard let userID = verdict.userID, userID > 0 else { return }
+        let url = fileURL(host: verdict.host, projectID: verdict.projectID, iid: verdict.iid, userID: userID, in: directory)
+        try persist(JSONEncoder().encode(verdict), to: url)
     }
 
     @MainActor
@@ -200,7 +210,8 @@ enum ReviewVerdictStore {
         guard let verdict = verdict(host: host, projectID: projectID, iid: iid, user: user, in: directory),
               let runID = verdict.runID, let settings,
               let run = settings.assistantHandoffs.first(where: { $0.id == runID }),
-              run.key.work == .init(host: host, projectID: projectID, iid: iid), run.key.username == user.username,
+              run.key.work == .init(host: host, projectID: projectID, iid: iid),
+              run.accountUserID.map({ $0 == user.id }) ?? (run.key.username == verdict.username),
               run.key.assistant == settings.automation.assistant, run.execution?.state == .succeeded,
               AssistantAutomationRunner.recordsReviewVerdict(for: run, history: settings.assistantHandoffs),
               AssistantJobJournal.reviewVerdict(for: run) == verdict else { return nil }
@@ -296,7 +307,7 @@ enum ReviewVerdictStore {
         discussions: [GitLabMergeRequestDiscussion], user: GitLabAuthenticatedUser, in directory: URL = directory) -> Bool {
         let recorded = verdict.evidenceContext
         guard verdict.version == 1, recorded.binds(to: .init(head: head), policy: .head),
-              verdict.username == user.username, verdict.userID == user.id, verdict.runID != nil,
+              verdict.userID == user.id, verdict.runID != nil,
               let fingerprint = ReviewVerdict.discussionContentDigest(discussions) else { return false }
         let current = EvidenceContext(head: head, discussionContent: fingerprint)
         if recorded.binds(to: current, policy: .reviewContent) { return true }
@@ -307,13 +318,16 @@ enum ReviewVerdictStore {
 
     @MainActor
     private static func normalizedPublication(_ verdict: ReviewVerdict, in directory: URL) -> NormalizedPublication? {
-        let path = publicationURL(verdict, in: directory)
-        guard let size = try? path.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 131_072,
-              let data = try? Data(contentsOf: path),
-              let payload = AssistantJobJournal.authenticatedEvidence(data, context: "review-publication-normalization"),
-              let record = try? JSONDecoder().decode(NormalizedPublication.self, from: payload),
-              record.verdict == verdict else { return nil }
-        return record
+        for path in publicationURLs(verdict, in: directory).reversed() {
+            guard FileManager.default.fileExists(atPath: path.path) else { continue }
+            guard let size = try? path.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 131_072,
+                  let data = try? Data(contentsOf: path),
+                  let payload = AssistantJobJournal.authenticatedEvidence(data, context: "review-publication-normalization"),
+                  let record = try? JSONDecoder().decode(NormalizedPublication.self, from: payload) else { return nil }
+            if record.verdict == verdict { return record }
+            if record.verdict.userID == verdict.userID { return nil }
+        }
+        return nil
     }
 
     @MainActor
@@ -336,7 +350,7 @@ enum ReviewVerdictStore {
     @MainActor
     static func recordPublication(_ publication: Publication, after: [GitLabMergeRequestDiscussion],
         user: GitLabAuthenticatedUser, in directory: URL = directory) throws {
-        guard publication.verdict.username == user.username, publication.verdict.userID == user.id else { return }
+        guard publication.verdict.userID == user.id else { return }
         let notes = after.flatMap { thread in thread.notes.map { (thread.id, $0) } }
         let ids = notes.compactMap { $0.1.id }
         guard ids.count == notes.count, ids.allSatisfy({ $0 > 0 }), Set(ids).count == ids.count,
@@ -347,7 +361,7 @@ enum ReviewVerdictStore {
         var publishedDraftRoots = publication.publishedDraftRoots
         for draft in publication.drafts {
             let candidates = added.filter { threadID, note in
-                note.author?.id == user.id && note.author?.username == user.username && note.body == draft.note
+                note.author?.id == user.id && note.body == draft.note
                     && (draft.discussionID == nil || draft.discussionID == threadID)
                     && draft.position == note.position
             }
@@ -363,15 +377,23 @@ enum ReviewVerdictStore {
         let record = NormalizedPublication(verdict: publication.verdict, fingerprint: fingerprint,
             publishedDraftRoots: publishedDraftRoots.isEmpty ? nil : publishedDraftRoots)
         let data = try AssistantJobJournal.sealEvidence(JSONEncoder().encode(record), context: "review-publication-normalization")
-        let path = publicationURL(publication.verdict, in: directory)
+        for path in publicationURLs(publication.verdict, in: directory) {
+            try persist(data, to: path)
+        }
+    }
+
+    private nonisolated static func persist(_ data: Data, to path: URL) throws {
         try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700])
         try data.write(to: path, options: .atomic)
     }
 
-    private nonisolated static func publicationURL(_ verdict: ReviewVerdict, in directory: URL) -> URL {
-        fileURL(host: verdict.host, projectID: verdict.projectID, iid: verdict.iid, in: directory)
-            .deletingPathExtension().appendingPathExtension("published.json")
+    private nonisolated static func publicationURLs(_ verdict: ReviewVerdict, in directory: URL) -> [URL] {
+        let accountIDs = (verdict.userID.map { [Optional($0)] } ?? []) + [nil]
+        return accountIDs.map {
+            fileURL(host: verdict.host, projectID: verdict.projectID, iid: verdict.iid, userID: $0, in: directory)
+                .deletingPathExtension().appendingPathExtension("published.json")
+        }
     }
 
     nonisolated static func draftsURL(host: String, projectID: Int, iid: Int, in directory: URL = directory) -> URL {

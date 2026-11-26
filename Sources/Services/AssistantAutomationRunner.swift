@@ -207,6 +207,7 @@ enum AssistantAutomationRunner {
         var pipelineHandoffConfirmation: PipelineHandoffConfirmation? = nil
         var readOnlyReview: Bool? = nil
         var blockerDiagnosis: MergeBlockerDiagnosis? = nil
+        var accountUserID: Int? = nil
 
         var deliveredFeedbackTodos: [Todo.FeedbackIdentity] {
             if let execution { return execution.state == .succeeded ? feedbackTodos ?? [] : [] }
@@ -284,7 +285,8 @@ enum AssistantAutomationRunner {
         // Generic event paths must not replay handled notes while a changed decision
         // awaits assessment. Only a fresh verified request opens a new bounded context.
         let handled = Set(settings.assistantHandoffs.lazy.filter {
-            $0.key.work == work && $0.key.username == username && $0.execution?.state != .feedbackResolved
+            $0.key.work == work && settings.handoffMatchesAccount($0, host: work.host, username: username)
+                && $0.execution?.state != .feedbackResolved
         }
             .flatMap { $0.feedbackNoteIDs ?? [] })
         return Array(Set(ids).subtracting(handled)).sorted()
@@ -299,7 +301,8 @@ enum AssistantAutomationRunner {
     static func attachFeedbackTodo(_ todo: Todo.FeedbackIdentity?, noteIDs: [Int], work: MergeRequestWork,
                                    username: String, settings: SettingsManager) -> Bool {
         guard let index = settings.assistantHandoffs.firstIndex(where: {
-            $0.key.work == work && $0.key.username == username && $0.execution?.state != .feedbackResolved
+            $0.key.work == work && settings.handoffMatchesAccount($0, host: work.host, username: username)
+                && $0.execution?.state != .feedbackResolved
                 && Set(noteIDs).isSubset(of: Set($0.feedbackNoteIDs ?? []))
         }) else { return false }
         if let todo, settings.assistantHandoffs[index].feedbackTodos?.contains(todo) != true {
@@ -383,7 +386,7 @@ enum AssistantAutomationRunner {
             if !manual, let retryOf {
                 guard glab?.accountRevision == launchAccountRevision,
                       let parent = settings.assistantHandoffs.first(where: { $0.id == retryOf }),
-                      parent.key.work == work, parent.key.username == username,
+                      parent.key.work == work, settings.handoffMatchesAccount(parent, host: work.host, username: username),
                       parent.execution?.cancellationOrigin != .user else {
                     throw AssistantJobExecutor.ExecutionError.disabledPermission
                 }
@@ -392,7 +395,7 @@ enum AssistantAutomationRunner {
                 guard glab?.accountRevision == launchAccountRevision else { throw AssistantJobExecutor.ExecutionError.wrongAccount }
                 guard let retryOf,
                       let parent = settings.assistantHandoffs.first(where: { $0.id == retryOf }),
-                      parent.key.work == work, parent.key.username == username,
+                      parent.key.work == work, settings.handoffMatchesAccount(parent, host: work.host, username: username),
                       parent.execution?.cancellationOrigin != .user,
                       parent.execution?.state == .failed || parent.execution?.state == .interrupted
                         || parent.execution?.state == .cancelled && parent.execution?.cancellationOrigin == .policy,
@@ -415,7 +418,8 @@ enum AssistantAutomationRunner {
         let review = isReview || mrWorkflow == .review
         let reviewRetry: Handoff? = if let retryOf, review, pipelineReservation == nil {
             settings.assistantHandoffs.first {
-                $0.id == retryOf && $0.key.work == work && $0.key.username == username
+                $0.id == retryOf && $0.key.work == work
+                    && ($0.key.username == username || settings.handoffMatchesAccount($0, host: work.host, username: username))
             }
         } else { nil }
         let intent = taskIntent ?? reviewRetry.map {
@@ -442,6 +446,9 @@ enum AssistantAutomationRunner {
                 snapshot = try await freshRequest(work: work, username: username, settings: settings, isReview: review, glab: service)
             } catch let error as GlabError where !manual && recordsReviewVerdict && retryOf == nil && error.isTransientReadFailure {
                 throw ReviewAdmissionReadFailure(cause: error)
+            }
+            if let retryOwner = reviewRetry?.accountUserID, retryOwner != snapshot.user.id {
+                throw AssistantJobExecutor.ExecutionError.wrongAccount
             }
             guard manual || settings.effectiveAutomationScope.permits(snapshot.request, host: work.host, username: username) else {
                 throw AssistantJobExecutor.ExecutionError.disabledPermission
@@ -617,7 +624,8 @@ enum AssistantAutomationRunner {
             workflowEventKind: workflowEventKind, workflowOriginKnown: true,
             pipelineHandoffConfirmation: pipelineHandoffConfirmation,
             readOnlyReview: usesReadOnlyReview ? true : nil,
-            blockerDiagnosis: blockerDiagnosis
+            blockerDiagnosis: blockerDiagnosis,
+            accountUserID: reviewer?.id ?? settings.authenticatedAccountID(host: work.host, username: username)
         )
         for (noteID, revision) in verifiedFeedbackNotes ?? [:] {
             settings.authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision,

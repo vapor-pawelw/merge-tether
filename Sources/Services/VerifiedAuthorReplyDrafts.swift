@@ -5,7 +5,7 @@ import Foundation
 @MainActor
 final class VerifiedAuthorReplyDrafts {
     fileprivate struct Context: Codable, Equatable, Sendable {
-        let target: MRAutomationScope.Target
+        var target: MRAutomationScope.Target
         let userID: Int
         let sourceHead: String
         let requestFingerprint: String
@@ -64,11 +64,12 @@ final class VerifiedAuthorReplyDrafts {
                 && permitsReply(preview, context: context, request: request, discussions: discussions, user: user)
         }
         let allowed: @MainActor @Sendable () -> Bool = { shouldProceed() && policyIsCurrent() }
-        guard allowed(), let reservation = reservationURL(for: context) else { return [] }
+        guard allowed(), let reservation = reservationURL(for: context),
+              let legacyReservation = reservationURL(for: context, legacy: true) else { return [] }
         guard preparing.insert(context.target).inserted else { return [noteID] }
         defer { preparing.remove(context.target) }
         guard await AssistantJobJournal.loadKey(), allowed() else { return [] }
-        if FileManager.default.fileExists(atPath: reservation.path) { return [noteID] }
+        if FileManager.default.fileExists(atPath: reservation.path) || hasLegacyReservation(context, user: user) { return [noteID] }
 
         let write = DraftWrite()
         do {
@@ -87,6 +88,7 @@ final class VerifiedAuthorReplyDrafts {
             // An ambiguous response may have created a private draft. Keep a durable
             // attempt fence for this snapshot instead of retrying or starting a worker.
             try save(context, to: reservation, kind: "verified-author-reply-attempt")
+            try save(context, to: legacyReservation, kind: "verified-author-reply-attempt")
             let draft = try await glab.createDraftReply(projectID: request.projectID, iid: request.iid,
                 host: host, userID: user.id, discussionID: discussionID, body: body, shouldProceed: {
                     guard allowed() else { return false }
@@ -98,13 +100,20 @@ final class VerifiedAuthorReplyDrafts {
             // The receipt still binds the original evidence and the exact read-back.
             if let draftID = draft.id, reloaded.filter({ $0.id == draftID || $0.discussionID == discussionID }) == [draft],
                policyIsCurrent() {
-                try save(Receipt(context: context, draft: draft), to: receiptURL(for: draftID, target: context.target),
+                let receipt = Receipt(context: context, draft: draft)
+                try save(receipt, to: receiptURL(for: draftID, target: context.target, userID: user.id),
+                    kind: "verified-author-reply")
+                try save(receipt, to: receiptURL(for: draftID, target: context.target),
                     kind: "verified-author-reply")
             }
             return [noteID]
         } catch {
-            if !write.admitted, let prior: Context = read(reservation, kind: "verified-author-reply-attempt"), prior == context {
-                try? FileManager.default.removeItem(at: reservation)
+            if !write.admitted {
+                for url in [reservation, legacyReservation] {
+                    if let prior: Context = read(url, kind: "verified-author-reply-attempt"), prior == context {
+                        try? FileManager.default.removeItem(at: url)
+                    }
+                }
             }
             Log.monitor.error("Could not prepare verified author reply: \(String(describing: error), privacy: .private)")
             return write.admitted ? [noteID] : []
@@ -115,11 +124,17 @@ final class VerifiedAuthorReplyDrafts {
                  user: GitLabAuthenticatedUser, host: String) -> Receipt? {
         guard let draftID = draft.id, draftID > 0 else { return nil }
         let target = MRAutomationScope.Target.mergeRequest(host: host, username: user.username, projectID: request.projectID, iid: request.iid)
-        let url = receiptURL(for: draftID, target: target)
-        if !AssistantJobJournal.isKeyReady, FileManager.default.fileExists(atPath: url.path) {
+        let account = user.account(on: host)
+        let currentURL = receiptURL(for: draftID, target: target, userID: user.id)
+        let legacyURLs = settings.knownUsernames(for: account).sorted().map { username in
+            receiptURL(for: draftID, target: target.forAccount(.init(host: host, username: username)))
+        }
+        let candidates = [currentURL] + legacyURLs
+        if !AssistantJobJournal.isKeyReady, candidates.contains(where: { FileManager.default.fileExists(atPath: $0.path) }) {
             Task { _ = await AssistantJobJournal.loadKey() }
         }
-        guard let receipt: Receipt = read(url, kind: "verified-author-reply"), receipt.draft == draft,
+        let receipts: [Receipt] = candidates.compactMap { read($0, kind: "verified-author-reply") }
+        guard let receipt = receipts.first(where: { $0.context.userID == user.id && $0.draft == draft }),
               let body = draft.note, let originalBody = receipt.draft.note, body.utf8.elementsEqual(originalBody.utf8),
               receipt.draft.position?.baseSHA == draft.position?.baseSHA,
               receipt.draft.position?.headSHA == draft.position?.headSHA,
@@ -157,7 +172,7 @@ final class VerifiedAuthorReplyDrafts {
                          user: GitLabAuthenticatedUser, host: String, discussionID: String,
                          noteID: Int, semanticOptOutIDs: [Int]) -> Context? {
         guard let head = request.sha, !head.isEmpty, request.isOpen, request.draft != nil,
-              request.author.id == user.id, request.author.username == user.username,
+              request.author.id == user.id,
               request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
               let fingerprint = ManualDiscussionResolution.fingerprint(discussions),
               let activeFingerprint = ManualDiscussionResolution.fingerprint(GitLabMergeRequestDiscussion.activeForReview(discussions)),
@@ -175,16 +190,19 @@ final class VerifiedAuthorReplyDrafts {
 
     private func matches(_ previouslyVerified: Context, request: GitLabMergeRequest,
                          discussions: [GitLabMergeRequestDiscussion], user: GitLabAuthenticatedUser, host: String) -> Bool {
-        context(request: request, discussions: discussions, user: user, host: host, discussionID: previouslyVerified.discussionID,
-            noteID: previouslyVerified.sourceNoteID, semanticOptOutIDs: previouslyVerified.semanticOptOutIDs) == previouslyVerified
+        guard previouslyVerified.target.host == host, previouslyVerified.userID == user.id else { return false }
+        var recorded = previouslyVerified
+        recorded.target = recorded.target.forAccount(.init(host: host, username: user.username))
+        return context(request: request, discussions: discussions, user: user, host: host, discussionID: recorded.discussionID,
+            noteID: recorded.sourceNoteID, semanticOptOutIDs: recorded.semanticOptOutIDs) == recorded
     }
 
     private func permitsReply(_ draft: GitLabDraftNote, context: Context, request: GitLabMergeRequest,
                               discussions: [GitLabMergeRequestDiscussion], user: GitLabAuthenticatedUser) -> Bool {
         let host = context.target.host
-        return glab.resolvedHost == host && glab.currentUsername == user.username
+        return EvidenceContext(account: user.account(on: host)).binds(to: glab.evidenceAccountContext, policy: .accountIdentity)
             && settings.automaticPublicWritesAllowed && settings.automation.permitsFollowUpPush(manual: false)
-            && !settings.ignoredMergeRequests.contains(context.target)
+            && !settings.ignoredMergeRequests.contains(context.target.forAccount(.init(host: host, username: user.username)))
             && settings.automation.scope.permits(request, host: host, username: user.username)
             && AutomaticPublicationPolicy.safeForAutomaticPublication(draft)
             && settings.reviewParticipationPreferences.permitsAutomaticReply(draft, discussions: discussions,
@@ -192,16 +210,29 @@ final class VerifiedAuthorReplyDrafts {
                 semanticOptOutIDs: Set(context.semanticOptOutIDs))
     }
 
-    private func reservationURL(for context: Context) -> URL? {
+    private func reservationURL(for context: Context, legacy: Bool = false) -> URL? {
+        var identity = context
+        if !legacy { identity.target = context.target.forAccount(.init(host: context.target.host, username: "", userID: context.userID)) }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(context) else { return nil }
+        guard let data = try? encoder.encode(identity) else { return nil }
         let key = UserAttentionSnapshot.digest(String(decoding: data, as: UTF8.self))
         return directory.appending(path: "attempt-\(key).json")
     }
 
-    private func receiptURL(for draftID: Int, target: MRAutomationScope.Target) -> URL {
-        let key = UserAttentionSnapshot.digest("\(target.host)/\(target.username)/\(target.projectID)/\(target.iid ?? 0)")
+    private func hasLegacyReservation(_ context: Context, user: GitLabAuthenticatedUser) -> Bool {
+        let account = user.account(on: context.target.host)
+        return settings.knownUsernames(for: account).contains { username in
+            var legacy = context
+            legacy.target = context.target.forAccount(.init(host: account.host, username: username))
+            guard let url = reservationURL(for: legacy, legacy: true) else { return false }
+            return FileManager.default.fileExists(atPath: url.path)
+        }
+    }
+
+    private func receiptURL(for draftID: Int, target: MRAutomationScope.Target, userID: Int? = nil) -> URL {
+        let accountKey = userID.map { "id:\($0)" } ?? target.username
+        let key = UserAttentionSnapshot.digest("\(target.host)/\(accountKey)/\(target.projectID)/\(target.iid ?? 0)")
         return directory.appending(path: "\(key)-\(draftID).json")
     }
 

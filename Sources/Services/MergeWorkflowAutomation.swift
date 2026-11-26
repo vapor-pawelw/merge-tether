@@ -21,7 +21,7 @@ struct PipelineClaimAssessmentLineage: Codable, Equatable, Sendable {
 }
 
 struct PipelineClaimAssessmentAttempt: Codable, Sendable {
-    let target: MRAutomationScope.Target
+    var target: MRAutomationScope.Target
     let userID: Int
     let lineage: PipelineClaimAssessmentLineage
     let assessmentActivityID: String
@@ -621,7 +621,8 @@ final class MergeWorkflowAutomation {
                 self.shouldProceed(entry) && self.glab.accountRevision == assessmentAccountRevision
                     && assessmentConfiguration.preservingScope(from: self.settings.automation) == self.settings.automation
             }, wait: retryWait) {
-                let authenticated = try await self.glab.fetchAuthenticatedUser(host: entry.host, expectedUsername: entry.user.username)
+                let authenticated = try await self.glab.fetchAuthenticatedUser(host: entry.host,
+                    expectedUsername: entry.user.username, expectedUserID: entry.user.id)
                 guard authenticated == entry.user else { throw CancellationError() }
                 let current = try await self.glab.fetchMergeRequest(projectID: original.projectID, iid: original.iid, host: entry.host)
                 guard current.state == .opened, current.sha == original.sha, current.sha != nil,
@@ -1009,7 +1010,7 @@ final class MergeWorkflowAutomation {
     }
 
     private func isCurrent(host: String, user: GitLabAuthenticatedUser) -> Bool {
-        glab.resolvedHost == host && glab.currentUsername == user.username
+        EvidenceContext(account: user.account(on: host)).binds(to: glab.evidenceAccountContext, policy: .accountIdentity)
     }
 
     private func reviewIsHeldByIntakeFilter(_ entry: MergeWorkflowActivityEntry) -> Bool {

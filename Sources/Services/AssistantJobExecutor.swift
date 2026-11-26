@@ -488,6 +488,7 @@ enum AssistantJobExecutor {
             // verdict still records the review, but automatic approval requires a fresh one.
             let target = ReviewTargetBinding(request)
             let launchTarget = reviewedRequest.flatMap(ReviewTargetBinding.init)
+            try? ReviewVerdictStore.saveAuthenticatedVerdict(verdict, in: directory)
             return .init(verdict: verdict, drafts: drafts,
                 target: reviewedRequest == nil || launchTarget == target ? target : nil,
                 launchTarget: launchTarget != target ? launchTarget : nil)

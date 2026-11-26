@@ -14,8 +14,32 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
         let username: String
         let projectID: Int
         let iid: Int?
+        let userID: Int?
 
-        // Retain the spelling used by existing on-disk keys and authorization checks.
+        init(host: String, username: String, projectID: Int, iid: Int?, userID: Int? = nil) {
+            self.host = host
+            self.username = username
+            self.projectID = projectID
+            self.iid = iid
+            self.userID = userID
+        }
+
+        var account: GitLabAccountIdentity { .init(host: host, username: username, userID: userID) }
+
+        func forAccount(_ account: GitLabAccountIdentity) -> Self {
+            .init(host: account.host, username: account.username, projectID: projectID, iid: iid, userID: account.userID)
+        }
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.account == rhs.account && lhs.projectID == rhs.projectID && lhs.iid == rhs.iid
+        }
+
+        func hash(into hasher: inout Hasher) {
+            hasher.combine(account)
+            hasher.combine(projectID)
+            hasher.combine(iid)
+        }
+
         static func mergeRequest(host: String, username: String, projectID: Int, iid: Int) -> Self {
             .init(host: host, username: username, projectID: projectID, iid: iid)
         }
@@ -29,7 +53,7 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
         }
 
         var repository: Self {
-            .repository(host: host, username: username, projectID: projectID)
+            .init(host: host, username: username, projectID: projectID, iid: nil, userID: userID)
         }
     }
 
@@ -41,6 +65,28 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
     var pauseDraftsByDefault = true
     /// Runtime-only global killswitch. It is never encoded, so stored overrides and presets stay unchanged.
     var isGloballySuspended = false
+
+    mutating func mapAccountTargets(_ transform: (Target) -> Target?) {
+        overrides = Dictionary(overrides.compactMap { target, choice in transform(target).map { ($0, choice) } },
+            uniquingKeysWith: { first, second in first == .paused || second == .paused ? .paused : first })
+        managedTargets = managedTargets.map { Set($0.compactMap(transform)) }
+        repositoryLabels = repositoryLabels.map {
+            Dictionary($0.compactMap { target, label in transform(target).map { ($0, label) } },
+                uniquingKeysWith: { first, _ in first })
+        }
+        targetsFollowingActionDefaults = targetsFollowingActionDefaults.map { Set($0.compactMap(transform)) }
+    }
+
+    mutating func retainAccountTargets(from other: Self) {
+        overrides.merge(other.overrides) { current, _ in current }
+        if let targets = other.managedTargets { managedTargets = (managedTargets ?? []).union(targets) }
+        if let labels = other.repositoryLabels {
+            repositoryLabels = (repositoryLabels ?? [:]).merging(labels) { current, _ in current }
+        }
+        if let targets = other.targetsFollowingActionDefaults {
+            targetsFollowingActionDefaults = (targetsFollowingActionDefaults ?? []).union(targets)
+        }
+    }
 
     init() {}
 
@@ -144,7 +190,7 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
     }
 
     func individualOverrides(host: String, username: String) -> [Target] {
-        overrides.keys.filter { $0.host == host && $0.username == username && $0.iid != nil }
+        overrides.keys.filter { $0.account == .init(host: host, username: username) && $0.iid != nil }
     }
 
     func isManaged(_ target: Target) -> Bool {
@@ -152,7 +198,7 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
     }
 
     func individualTargets(host: String, username: String) -> [Target] {
-        let managed = managedTargets?.filter { $0.host == host && $0.username == username && $0.iid != nil } ?? []
+        let managed = managedTargets?.filter { $0.account == .init(host: host, username: username) && $0.iid != nil } ?? []
         return Array(Set(individualOverrides(host: host, username: username)).union(managed))
     }
 
@@ -168,7 +214,7 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
     }
 
     func repositoryOverrides(host: String, username: String) -> [Target] {
-        overrides.keys.filter { $0.host == host && $0.username == username && $0.iid == nil }
+        overrides.keys.filter { $0.account == .init(host: host, username: username) && $0.iid == nil }
     }
 
     func repositoryLabel(for target: Target) -> String? {

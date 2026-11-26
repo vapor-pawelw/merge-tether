@@ -42,7 +42,7 @@ extension GlabService {
               let id = head.id, id > 0, let project = head.projectID, project > 0,
               let sha = head.sha, Self.isFullGitSHA(sha)
         else { throw CancellationError() }
-        let user = try await fetchAuthenticatedUser(host: host, expectedUsername: username)
+        let user = try await fetchAuthenticatedUser(host: host, expectedUsername: username, expectedUserID: expectedUser?.id)
         guard expectedUser == nil || expectedUser == user else { throw CancellationError() }
         let path = "/projects/\(project)/pipelines/\(id)"
         let pipeline: GitLabMergeRequest.Pipeline = try await mergeRequestAPI(path, host: host)
@@ -104,7 +104,7 @@ extension GlabService {
             guard finalTarget == targetHead else { throw CancellationError() }
         }
         let finalPipeline: GitLabMergeRequest.Pipeline = try await mergeRequestAPI(path, host: host)
-        let finalUser = try await fetchAuthenticatedUser(host: host, expectedUsername: username)
+        let finalUser = try await fetchAuthenticatedUser(host: host, expectedUsername: username, expectedUserID: user.id)
         guard finalPipeline.id == id, finalPipeline.projectID == project, finalPipeline.sha == sha,
               finalPipeline.status == expectedStatus, finalPipeline.ref == ref,
               finalUser == user, accountRevision == revision,

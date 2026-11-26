@@ -294,6 +294,11 @@ final class TodoMonitorService {
         commandCenterDisplayFrameCache = .init(scheduleNotification: schedulePresentationNotification)
         self.settings = settings
         self.glab = glab
+        glab.acceptAuthenticatedAccount = { [weak settings] account in
+            settings?.bindAuthenticatedAccount(account) ?? false
+        }
+        glab.clearAuthenticatedAccount = { [weak settings] in settings?.clearAuthenticatedAccount() }
+        glab.knownAccountUsernames = { [weak settings] account in settings?.knownUsernames(for: account) ?? [account.username] }
         self.todoStore = InboxTodoStore(settings: settings, glab: glab)
         self.notifications = notifications
         self.assistantDependencies = assistantDependencies
@@ -305,6 +310,7 @@ final class TodoMonitorService {
         self.cancelPolicyJob = cancelPolicyJob
         // Test hosts keep verifier results in memory so suites never share persisted assessments.
         let isApplication = ApplicationLaunchMode.resolve(environment: ProcessInfo.processInfo.environment) == .application
+        settings.requiresAuthenticatedGitLabAccount = isApplication
         let feedbackAssessments = isApplication ? AuthorFeedbackAssessmentStore.directory : nil
         self.attention = MergeRequestAttentionMonitor(glab: glab, settings: settings,
                                                        authorFeedbackAssessmentDirectory: feedbackAssessments)
@@ -684,7 +690,7 @@ final class TodoMonitorService {
 
     var currentMRTodoIntents: [MRTodoIntent] {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return [] }
-        return settings.mrActionIntents.filter { $0.target.host == host && $0.target.username == username }
+        return settings.mrActionIntents.filter { $0.target.account == .init(host: host, username: username) }
     }
 
     var routedMRTodoIDs: Set<Int> {
@@ -1063,7 +1069,7 @@ final class TodoMonitorService {
         guard let account = boardDisplayAccount else { return [] }
         let now = hiddenReviewDisplayTime
         return settings.filteredHiddenReviewDetails.values.filter {
-            $0.target.host == account.host && $0.target.username == account.username && $0.inboxNotification != nil
+            $0.target.account == .init(host: account.host, username: account.username) && $0.inboxNotification != nil
                 && settings.canRestoreHiddenReview($0.target, now: now)
         }.sorted { ($0.target.projectID, $0.target.iid ?? 0) < ($1.target.projectID, $1.target.iid ?? 0) }
     }
@@ -1084,12 +1090,12 @@ final class TodoMonitorService {
         guard let account = boardDisplayAccount else { return [] }
         let now = hiddenReviewDisplayTime
         var hidden = settings.hiddenReviewDetails.filter {
-            $0.key.host == account.host && $0.key.username == account.username
+            $0.key.account == .init(host: account.host, username: account.username)
                 && settings.canRestoreHiddenReview($0.key, now: now)
         }
         let assigned = settings.reviewAssignments.entries(host: account.host, username: account.username)?.map(\.request) ?? []
         let retained = settings.ignoredMergeRequests.compactMap { target -> GitLabMergeRequest? in
-            guard target.host == account.host, target.username == account.username, hidden[target] == nil else { return nil }
+            guard target.account == .init(host: account.host, username: account.username), hidden[target] == nil else { return nil }
             return settings.mrLifecycleLedger.request(for: target)
         }
         for request in assigned + retained where request.isOpen && request.author.username != account.username {
@@ -1253,7 +1259,7 @@ final class TodoMonitorService {
 
     var assistantHandoffs: [AssistantAutomationRunner.Handoff] {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return [] }
-        return settings.assistantHandoffs.filter { $0.key.work.host == host && $0.key.username == username }
+        return settings.assistantHandoffs.filter { settings.handoffMatchesAccount($0, host: host, username: username) }
     }
 
     func automaticConflictIsProcessing(for request: GitLabMergeRequest) -> Bool {
@@ -1385,6 +1391,9 @@ final class TodoMonitorService {
             if await recheckIntegration() != nil { return }
         }
         guard !Task.isCancelled else { return }
+        let authenticatedUser = try? await glab.refreshAuthenticatedAccount()
+        let account = glab.evidenceAccountContext
+        guard !Task.isCancelled else { return }
         authoredMergeRequests.refreshIfNeeded()
         guard let fetched = await todoStore.fetch() else { return }
         let host = fetched.host
@@ -1400,14 +1409,15 @@ final class TodoMonitorService {
                 self.failedAutomationTodoID = nil
             }
 
-            if let host, let username {
+            let authenticated = authenticatedUser != nil && account.binds(to: glab.evidenceAccountContext, policy: .accountSession)
+            if authenticated, let host, let username {
                 automation.prune(fetchedIDs: fetchedIDs, host: host, username: username, settings: settings)
             }
 
             settings.lastSeenTodoIDs = fetchedIDs
             settings.save()
 
-            if let host, let username {
+            if authenticated, let host, let username {
                 incomingReviewFilter.observeInbox(fetchedFiltered, host: host, username: username,
                     excluding: existingReviewTargets(host: host, username: username))
             }
@@ -1416,8 +1426,10 @@ final class TodoMonitorService {
                 if settings.onboardingCompleted {
                     attention.refresh(host: host, username: username, todos: currentAccountTodos)
                 }
-                await routeMRTodos(host: host, username: username)
-                await acknowledgeHandledTodos(host: host, username: username)
+                if authenticated {
+                    await routeMRTodos(host: host, username: username)
+                    await acknowledgeHandledTodos(host: host, username: username)
+                }
             }
 
         case .failure(let err):
@@ -1498,11 +1510,11 @@ final class TodoMonitorService {
         let revision = glab.accountRevision
         var handled = Set(assistantHandoffs.flatMap(\.deliveredFeedbackTodos))
         handled.formUnion(settings.pendingTodoAcknowledgements.lazy
-            .filter { $0.host == host && $0.username == username }.map(\.todo))
+            .filter { $0.accountUserID == nil && $0.host == host && $0.username == username }.map(\.todo))
         for todo in visibleTodos where handled.contains(todo.feedbackIdentity) {
             if todo.targetType == .mergeRequest,
-               !settings.routedMRTodoReceipts.contains(where: { $0.target.host == host && $0.target.username == username && $0.event == todo.feedbackIdentity }),
-               !settings.pendingTodoAcknowledgements.contains(where: { $0.host == host && $0.username == username && $0.todo == todo.feedbackIdentity }) { continue }
+               !settings.routedMRTodoReceipts.contains(where: { $0.target.account == .init(host: host, username: username) && $0.event == todo.feedbackIdentity }),
+               !settings.pendingTodoAcknowledgements.contains(where: { $0.accountUserID == nil && $0.host == host && $0.username == username && $0.todo == todo.feedbackIdentity }) { continue }
             guard settings.automaticWritesAllowed, glab.resolvedHost == host,
                   glab.currentUsername == username, glab.accountRevision == revision,
                   inboxHost == host else { return }

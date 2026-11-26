@@ -200,7 +200,7 @@ final class AuthorFeedbackCoordinator {
         let scopedRefresh: Bool
         var readOnly: Bool { drafts > 0 }
         var accountContext: EvidenceContext {
-            .init(account: .init(host: target.host, username: user.username), accountRevision: accountRevision)
+            .init(account: user.account(on: target.host), accountRevision: accountRevision)
         }
         var feedbackContext: EvidenceContext {
             request.evidenceContext(discussionContent: .init(fingerprint))
@@ -413,14 +413,32 @@ final class AuthorFeedbackCoordinator {
         let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: projectID, iid: iid)
         invalidate(projectID: projectID, iid: iid)
         priorPasses.removeValue(forKey: target)
-        if let assessmentDirectory { AuthorFeedbackAssessmentStore.remove(target, in: assessmentDirectory) }
+        if let assessmentDirectory {
+            let stored = assessmentTarget(for: target)
+            AuthorFeedbackAssessmentStore.remove(stored, in: assessmentDirectory)
+            for username in settings.unambiguousLegacyUsernames(for: stored.account) {
+                AuthorFeedbackAssessmentStore.remove(stored.forAccount(.init(host: host, username: username)), in: assessmentDirectory)
+            }
+        }
         fullReassessment.insert(target)
+    }
+
+    private func assessmentTarget(for target: MRAutomationScope.Target) -> MRAutomationScope.Target {
+        guard let id = settings.authenticatedAccountID(host: target.host, username: target.username) else { return target }
+        return target.forAccount(.init(host: target.host, username: target.username, userID: id))
+    }
+
+    private func storedAssessment(for target: MRAutomationScope.Target) -> AuthorFeedbackAssessmentStore.Record? {
+        guard let assessmentDirectory else { return nil }
+        let stored = assessmentTarget(for: target)
+        return AuthorFeedbackAssessmentStore.loadForAuthenticatedAccount(stored,
+            legacyUsernames: settings.unambiguousLegacyUsernames(for: stored.account), in: assessmentDirectory)
     }
 
     private func priorPass(for target: MRAutomationScope.Target) -> PriorPass? {
         guard !fullReassessment.contains(target) else { return nil }
         if let prior = priorPasses[target] { return prior }
-        guard let assessmentDirectory, let record = AuthorFeedbackAssessmentStore.latest(target, in: assessmentDirectory),
+        guard let record = storedAssessment(for: target),
               let revisions = record.noteRevisions, let digest = record.diffDigest else { return nil }
         return .init(assessment: record.assessment, noteRevisions: revisions, diffDigest: digest)
     }
@@ -720,8 +738,7 @@ final class AuthorFeedbackCoordinator {
                 && stored.input.request.draftRecoveryEvidence.binds(to: request.draftRecoveryEvidence, policy: .draftRecovery)
                 && Self.samePublicationDiscussions(stored.input.discussions, input.discussions)
         }
-        else if !bypass, let assessmentDirectory,
-                let record = AuthorFeedbackAssessmentStore.load(input.target, keyDigest: keyDigest, in: assessmentDirectory),
+        else if !bypass, let record = storedAssessment(for: input.target), record.keyDigest == keyDigest,
                 record.completedFollowUpJobID == input.completedFollowUpJobID,
                 (try? record.assessment.reviewers(in: input.discussions, authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions,
                     excludedReplyAuthorIDs: excludedReplyAuthors(input))) != nil {
@@ -750,7 +767,8 @@ final class AuthorFeedbackCoordinator {
             fullReassessment.remove(input.target)
             if let assessmentDirectory {
                 do {
-                    try AuthorFeedbackAssessmentStore.save(.init(version: AuthorFeedbackAssessmentStore.version, target: input.target,
+                    try AuthorFeedbackAssessmentStore.saveWithLegacyMirror(.init(
+                        version: AuthorFeedbackAssessmentStore.version, target: assessmentTarget(for: input.target),
                         keyDigest: keyDigest, completedFollowUpJobID: input.completedFollowUpJobID, assessment: assessment,
                         noteRevisions: revisions, diffDigest: diffDigest), in: assessmentDirectory)
                 } catch {

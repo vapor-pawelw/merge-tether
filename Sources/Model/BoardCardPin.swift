@@ -9,7 +9,8 @@ struct BoardCardPin: Codable, Hashable, Sendable {
         case hiddenReviewNotification(UUID)
     }
     let host: String
-    let username: String
+    var username: String
+    var accountUserID: Int? = nil
     let item: Item
 
     static func mergeRequest(host: String?, username: String?, projectID: Int, iid: Int) -> Self? {

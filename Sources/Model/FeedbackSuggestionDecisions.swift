@@ -2,7 +2,8 @@ import Foundation
 
 struct IgnoredFeedbackSuggestion: Codable, Equatable, Identifiable, Sendable {
     let id: UUID
-    let target: MRAutomationScope.Target
+    var target: MRAutomationScope.Target
+    var revisionTarget: MRAutomationScope.Target? = nil
     let sourceNoteID: Int
     let sourceAuthorID: Int
     var sourceAuthorUsername: String? = nil
@@ -27,11 +28,53 @@ struct IgnoredFeedbackSuggestion: Codable, Equatable, Identifiable, Sendable {
 
 struct FeedbackSuggestionDecisions: Codable, Equatable, Sendable {
     private var decisions: [IgnoredFeedbackSuggestion] = []
-    private struct Epoch: Codable, Equatable, Sendable {
-        let target: MRAutomationScope.Target
+    struct Epoch: Codable, Equatable, Sendable {
+        var target: MRAutomationScope.Target
         var id: UUID
     }
     private var epochs: [Epoch]? = nil
+
+    enum AccountEntry: Codable {
+        case decision(IgnoredFeedbackSuggestion)
+        case epoch(Epoch)
+
+        var target: MRAutomationScope.Target {
+            switch self {
+            case .decision(let decision): decision.target
+            case .epoch(let epoch): epoch.target
+            }
+        }
+
+        func replacingTarget(_ target: MRAutomationScope.Target) -> Self {
+            switch self {
+            case .decision(var decision):
+                // Preserve the digest already captured by attempt receipts and sealed draft evidence.
+                if decision.revisionTarget == nil, decision.target != target { decision.revisionTarget = decision.target }
+                decision.target = target
+                return .decision(decision)
+            case .epoch(var epoch):
+                epoch.target = target
+                return .epoch(epoch)
+            }
+        }
+    }
+
+    var accountEntries: [AccountEntry] {
+        decisions.map(AccountEntry.decision) + (epochs ?? []).map(AccountEntry.epoch)
+    }
+
+    init() {}
+
+    init(accountEntries: [AccountEntry]) {
+        for entry in accountEntries {
+            switch entry {
+            case .decision(let decision): decisions.append(decision)
+            case .epoch(let epoch):
+                if epochs == nil { epochs = [] }
+                epochs?.append(epoch)
+            }
+        }
+    }
 
     func entries(for target: MRAutomationScope.Target) -> [IgnoredFeedbackSuggestion] {
         decisions.filter { $0.target == target }
@@ -47,7 +90,12 @@ struct FeedbackSuggestionDecisions: Codable, Equatable, Sendable {
 
     /// Only an untouched empty ledger preserves the legacy no-exception context.
     func revision(for target: MRAutomationScope.Target) -> String {
-        let active = entries(for: target).sorted { $0.id.uuidString < $1.id.uuidString }
+        let active = entries(for: target).sorted { $0.id.uuidString < $1.id.uuidString }.map { entry in
+            var original = entry
+            original.target = entry.revisionTarget ?? entry.target
+            original.revisionTarget = nil
+            return original
+        }
         let epoch = epochs?.first(where: { $0.target == target })?.id.uuidString ?? ""
         guard !active.isEmpty else { return epoch }
         let encoder = JSONEncoder()

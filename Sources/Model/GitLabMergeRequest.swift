@@ -153,6 +153,12 @@ enum PersonalMRApproval: Equatable {
 struct GitLabAuthenticatedUser: Codable, Equatable, Sendable {
     let id: Int
     let username: String
+
+    func account(on host: String) -> GitLabAccountIdentity {
+        .init(host: host, username: username, userID: id)
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
 }
 
 /// Evidence for the reviewer's own GitLab approval, used to present review progress.

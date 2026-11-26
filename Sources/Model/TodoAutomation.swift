@@ -800,13 +800,15 @@ enum TodoAutomationEvent: String, Sendable {
 
 struct TodoAutomationReceipt: Codable, Hashable, Sendable {
     let host: String
-    let username: String
+    var username: String
+    var accountUserID: Int? = nil
     let todoID: Int
 }
 
 struct TodoActionAcknowledgement: Codable, Hashable {
     let host: String
-    let username: String
+    var username: String
+    var accountUserID: Int? = nil
     let todo: Todo.FeedbackIdentity
 }
 

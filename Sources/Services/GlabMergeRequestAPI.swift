@@ -12,9 +12,40 @@ extension GlabService {
         try await mergeRequestAPI("/projects/\(projectID)/merge_requests/\(iid)/approvals", host: host, timeout: timeout)
     }
 
-    func fetchAuthenticatedUser(host: String, expectedUsername: String) async throws -> GitLabAuthenticatedUser {
+    func fetchAuthenticatedUser(host: String, expectedUsername: String, expectedUserID: Int? = nil) async throws -> GitLabAuthenticatedUser {
+        let revision = accountRevision
+        let isDefaultAccount = resolvedHost == host && currentUsername == expectedUsername
+        let user = try await readAuthenticatedUser(host: host)
+        guard user.username == expectedUsername else { throw GlabError.notAuthenticated }
+        guard expectedUserID == nil || user.id == expectedUserID else { throw CancellationError() }
+        if isDefaultAccount, !confirmAuthenticatedAccount(user.account(on: host), revision: revision) {
+            throw GlabError.notAuthenticated
+        }
+        return user
+    }
+
+    /// Refresh the login name from GitLab before an inbox pass captures a new session.
+    func refreshAuthenticatedAccount() async throws -> GitLabAuthenticatedUser {
+        let session = evidenceAccountContext
+        guard let account = session.account else { throw GlabError.notAuthenticated }
+        let user = try await readAuthenticatedUser(host: account.host)
+        guard !Task.isCancelled, session.binds(to: evidenceAccountContext, policy: .accountSession) else {
+            throw GlabError.notAuthenticated
+        }
+        if user.username != account.username {
+            currentUsername = user.username
+        } else if let currentID = authenticatedUserID, currentID != user.id {
+            resetAccountIdentity()
+        }
+        guard confirmAuthenticatedAccount(user.account(on: account.host), revision: accountRevision) else {
+            throw GlabError.notAuthenticated
+        }
+        return user
+    }
+
+    private func readAuthenticatedUser(host: String) async throws -> GitLabAuthenticatedUser {
         let user: GitLabAuthenticatedUser = try await mergeRequestAPI("/user", host: host)
-        guard user.id > 0, user.username == expectedUsername else { throw GlabError.notAuthenticated }
+        guard user.id > 0, !user.username.isEmpty else { throw GlabError.notAuthenticated }
         return user
     }
 

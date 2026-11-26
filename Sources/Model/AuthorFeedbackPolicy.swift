@@ -2,7 +2,7 @@ import Foundation
 import MergeTetherRemote
 
 struct AuthorFeedbackAttempt: Codable, Hashable {
-    let target: MRAutomationScope.Target
+    var target: MRAutomationScope.Target
     let noteID: Int
     let revision: String
     var recoveryRootID: UUID? = nil
