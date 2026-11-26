@@ -250,7 +250,10 @@ struct IncomingReviewFilterTests {
         #expect(await hiddenContext.execute(.refresh) == .changed)
         let filteredRestore = try #require(filteredCard.actions.first { $0.id == RemoteAction.restoreHiddenReviewID })
         #expect(RemoteBoardAdapter.restoreHiddenReview(filteredCard, action: filteredRestore, monitor: monitor, account: account) == .completed)
-        #expect(SettingsManager(defaults: defaults).ignoredMergeRequests == [target(2)])
+        // Saved targets stay bound to the GitLab user ID until a restart reads /user again.
+        let restarted = SettingsManager(defaults: defaults)
+        #expect(restarted.bindAuthenticatedAccount(.init(host: host, username: "me", userID: 9)))
+        #expect(restarted.ignoredMergeRequests == [target(2)])
     }
 
     @Test func inboxNoticeSurvivesRestartAndAcknowledgingItKeepsTheMergeRequestHidden() throws {
