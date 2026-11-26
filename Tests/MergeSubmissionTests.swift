@@ -1122,8 +1122,8 @@ import Testing
         }
     }
 
-    @Test(arguments: [false, true])
-    func automaticMergeAuthorRestrictionAppliesToExplicitOptIn(_ authorOnly: Bool) async throws {
+    @Test(arguments: [MRAutomationPreference.default, .on, .off])
+    func explicitMergeChoiceOverridesGlobalAuthorPolicy(_ preference: MRAutomationPreference) async throws {
         try await fixture { glab, gitlab, _ in
             let suite = "MergePromptAuthorOnly.\(UUID())"
             let defaults = try #require(UserDefaults(suiteName: suite))
@@ -1132,9 +1132,9 @@ import Testing
             settings.onboardingCompleted = true
             settings.treatAssignedMergeRequestsAsOwn = true
             settings.automation.applyPreset(.full, for: .codex)
-            settings.automation.autoMergeAuthorOnly = authorOnly
+            settings.automation.autoMergeAuthorOnly = true
             settings.automation.requiresAssignmentClaim = false
-            settings.setAutoMergePreference(.on, for: .init(host: host, username: "me", projectID: 1, iid: 2))
+            settings.setAutoMergePreference(preference, for: .init(host: host, username: "me", projectID: 1, iid: 2))
             gitlab.write("assigned-by-others")
             gitlab.write("ordinary-project")
             gitlab.write("outcome", "merged")
@@ -1143,12 +1143,36 @@ import Testing
             monitor.refreshIfNeeded()
             while monitor.isLoading { await Task.yield() }
 
-            #expect(gitlab.requests.filter { $0.method == "PUT" }.count == (authorOnly ? 0 : 1))
-            if authorOnly {
+            #expect(gitlab.requests.filter { $0.method == "PUT" }.count == (preference == .on ? 1 : 0))
+            if preference != .on {
                 let item = try #require(monitor.requests.first)
                 #expect(item.mayMergeManually && !item.mayAutoMerge)
                 #expect(await monitor.mergeManually(item.request, action: .mergeNow) == .merged)
             }
+        }
+    }
+
+    @Test func choosingOnImmediatelyRechecksMergeDespiteTheGlobalProjectAndAssigneeFilters() async throws {
+        try await fixture { glab, gitlab, _ in
+            let suite = "ExplicitMergeOverride.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let settings = SettingsManager(defaults: defaults)
+            settings.onboardingCompleted = true
+            settings.automation.applyPreset(.full, for: .codex)
+            settings.automation.autoMergeMode = .off
+            settings.automation.autoMergeWithOtherAssignees = false
+            settings.automation.autoMergeProjects = "another/project"
+            gitlab.write("shared-assignment")
+            gitlab.write("ordinary-project")
+            gitlab.write("outcome", "merged")
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in true })
+
+            let target = MRAutomationScope.Target(host: host, username: user.username, projectID: 1, iid: 2)
+            settings.setAutoMergePreference(.on, for: target)
+            await monitor.resumeAutomaticMerge(for: target)
+
+            #expect(gitlab.requests.filter { $0.method == "PUT" }.count == 1)
         }
     }
 
@@ -1314,8 +1338,12 @@ import Testing
                 ? raw.replacingOccurrences(of: #""author":{"id":3,"username":"me","name":"Me"}"#,
                     with: #""author":{"id":7,"username":"creator","name":"Creator"},"assignees":[{"id":3,"username":"me","name":"Me"}]"#)
                 : raw
+            let assigned = gitlab.has("shared-assignment")
+                ? owned.replacingOccurrences(of: #""draft":false"#,
+                    with: #""draft":false,"assignees":[{"id":3,"username":"me","name":"Me"},{"id":7,"username":"other","name":"Other"}]"#)
+                : owned
             let listed = gitlab.has("current-head")
-                ? owned.replacingOccurrences(of: String(repeating: "a", count: 40), with: gitlab.text("current-head")) : owned
+                ? assigned.replacingOccurrences(of: String(repeating: "a", count: 40), with: gitlab.text("current-head")) : assigned
             switch call.endpoint {
             case "/user": return InMemoryGitLab.output(drift == "account" ? #"{"id":99,"username":"me"}"# : #"{"id":3,"username":"me"}"#)
             case "/version": return try InMemoryGitLab.json(["version": gitlab.has("version") ? gitlab.text("version") : "19.5.3-ee"])

@@ -307,11 +307,6 @@ struct AutomationSettingsTab: View {
                automaticWriteBlock != nil {
                 Text(.AutomationProfiles.manualJobsCanResolveThreads).font(.caption).foregroundStyle(.secondary)
             }
-            Toggle(isOn: $editor.draft.reviewRequested.markDoneOnSuccess) {
-                Text(.AutomationProfiles.reviewHandlerAcknowledgement)
-            }
-            .toggleStyle(.checkbox)
-            .disabled(!editor.draft.hasAutomaticActionConsent)
         } header: { Text(.AutomationProfiles.reviewerActionsSection) }
         footer: { automaticWriteNote }
     }
@@ -330,11 +325,6 @@ struct AutomationSettingsTab: View {
             } else {
                 Text(.Settings.settingsAutomationFollowUpPushHelp).font(.caption).foregroundStyle(.secondary)
             }
-            Toggle(isOn: $editor.draft.authorFeedback.markDoneOnSuccess) {
-                Text(.AutomationProfiles.feedbackHandlerAcknowledgement)
-            }
-            .toggleStyle(.checkbox)
-            .disabled(!editor.draft.hasAutomaticActionConsent)
         } header: { Text(.AutomationProfiles.authorFeedbackSection) }
         footer: { automaticWriteNote }
 

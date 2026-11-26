@@ -279,9 +279,11 @@ final class AuthoredMergeRequestMonitor {
     }
 
     private func permitsAutomaticMerge(_ request: GitLabMergeRequest, account: Account, userID: Int) -> Bool {
-        (!settings.automation.autoMergeAuthorOnly || request.author.id == userID)
-            && settings.permitsAutomaticAction(.merge, for: request, target: .init(host: account.host,
-                username: account.username, projectID: request.projectID, iid: request.iid))
+        let target = MRAutomationScope.Target.mergeRequest(host: account.host, username: account.username,
+            projectID: request.projectID, iid: request.iid)
+        guard settings.permitsAutomaticAction(.merge, for: request, target: target) else { return false }
+        return settings.autoMergePreference(for: target) == .on
+            || !settings.automation.autoMergeAuthorOnly || request.author.id == userID
     }
 
     private func refresh(_ account: Account, revision: UInt64,

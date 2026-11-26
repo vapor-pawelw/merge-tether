@@ -28,8 +28,8 @@
     },
     "automaticActions.mergeHelp": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "On enables auto-merge after the usual checks." } },
-        "pl": {"stringUnit": {"state": "translated", "value": "Włączenie zezwala na automatyczne scalanie po zwykłych kontrolach."}} }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Default follows Settings. On skips the prompt and the author, assignee and project filters. Merge readiness and permissions still apply. Off disables auto-merge for this MR." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Domyślne stosuje ustawienia globalne. Włączone pomija prompt oraz filtry autora, przypisania i projektu. Nadal obowiązują warunki gotowości i uprawnienia. Wyłączone blokuje auto merge dla tego MR-a."}} }
     },
     "automaticActions.approval": {
       "extractionState": "manual",
@@ -43,8 +43,8 @@
     },
     "automaticActions.approvalHelp": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "On uses the approval threshold in Settings." } },
-        "pl": {"stringUnit": {"state": "translated", "value": "Włączenie stosuje próg zatwierdzenia z ustawień."}} }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Default follows Settings. On uses the No major issues threshold and skips the prompt. Off disables auto-approval for this MR." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Domyślne stosuje ustawienia globalne. Włączone stosuje próg Brak poważnych problemów i pomija prompt. Wyłączone blokuje auto approve dla tego MR-a."}} }
     },
     "automaticActions.exceptionsHelp": {
       "extractionState": "manual",

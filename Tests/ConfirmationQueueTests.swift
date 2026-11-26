@@ -2966,6 +2966,31 @@ import MergeTetherRemote
         }
     }
 
+    @Test(arguments: [
+        (MRAutomationPreference.default, "minor_code", false),
+        (MRAutomationPreference.on, "minor_code", true),
+        (MRAutomationPreference.on, "major", false),
+        (MRAutomationPreference.off, "none", false)
+    ])
+    func explicitApprovalChoiceOverridesTheGlobalThreshold(_ scenario: (MRAutomationPreference, String, Bool)) async throws {
+        let (preference, finding, approves) = scenario
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.autoApprovalThreshold = .noIssues
+        try harness.write("discussions.json", othersThread)
+        try harness.recordVerdict("classified_findings", head: head, findingLevels: ["40": finding])
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        harness.settings.setActionPreference(.off, for: .approval, target: target)
+        try await harness.poll()
+        #expect(harness.log("approve.log").isEmpty)
+
+        harness.settings.setActionPreference(preference, for: .approval, target: target)
+        harness.settings.save()
+        await harness.monitor.resumeAutomaticAction(.approval, for: target)
+
+        #expect(harness.log("approve.log").contains("sha=\(head)") == approves)
+    }
+
     @Test func explicitAutoApprovalWaitsForEveryDiscussion() async throws {
         #expect(!AutomationSettings().autoApproveEnabled && AutomationSettings().autoApprovalThreshold == .noMajorIssues)
         let harness = try makeHarness(assistantWorked: true)

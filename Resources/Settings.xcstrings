@@ -160,13 +160,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This also applies when automatic merge is set to On for an individual request."
+            "value": "Applies to merge requests whose auto-merge choice is Default."
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Dotyczy również MR-ów z automatycznym scalaniem ustawionym na Włączone."
+            "value": "Dotyczy MR-ów z automatycznym scalaniem ustawionym na Domyślne."
           }
         }
       }
