@@ -28,25 +28,202 @@ struct ReviewingContextTests {
               execution: .init(state: state), workflow: .review, expectedHeadSHA: "abc")
     }
 
-    @Test func ownCurrentApprovalAcceptsObservedHeadButNotLaterChanges() throws {
-        typealias Baseline = MergeRequestAttentionMonitor.ApprovalBaseline
-        var progress = try #require(MergeRequestApprovalProgress(completed: 1, required: 2))
-        progress.currentApproverIDs = [5]
-        let first = Date(timeIntervalSince1970: 100)
-        progress.approvalDates[5] = first
-        let baseline = Baseline(head: "abc", semanticContext: "ctx", approvedAt: first)
-        // First sighting and unchanged head, even with open remarks, need no re-review.
-        #expect(Baseline.accepts(baseline: nil, progress: progress, userID: 5, head: "abc", semanticContext: "ctx"))
-        #expect(Baseline.accepts(baseline: baseline, progress: progress, userID: 5, head: "abc", semanticContext: "ctx"))
-        // A new head or edited MR text brings the review back until the reviewer approves again.
-        #expect(!Baseline.accepts(baseline: baseline, progress: progress, userID: 5, head: "def", semanticContext: "ctx"))
-        #expect(!Baseline.accepts(baseline: baseline, progress: progress, userID: 5, head: "abc", semanticContext: "new"))
-        progress.approvalDates[5] = Date(timeIntervalSince1970: 200)
-        #expect(Baseline.accepts(baseline: baseline, progress: progress, userID: 5, head: "def", semanticContext: "ctx"))
-        // Someone else's approval, or a withdrawn one, never accepts.
-        #expect(!Baseline.accepts(baseline: nil, progress: progress, userID: 6, head: "abc", semanticContext: "ctx"))
-        progress.currentApproverIDs = []
-        #expect(!Baseline.accepts(baseline: nil, progress: progress, userID: 5, head: "abc", semanticContext: "ctx"))
+    @Test(arguments: [true, false])
+    func legacyApprovalRequiresEvidenceItFollowsTheCurrentDiff(_ current: Bool) async throws {
+        let fixture = try ApprovalFixture()
+        defer { fixture.close() }
+        let legacy = SettingsManager(defaults: fixture.defaults)
+        legacy.autoPublishOptOuts.insert(fixture.target)
+        #expect(legacy.save())
+        fixture.approvalTime = current ? "2026-01-01T12:00:00Z" : "2026-01-01T10:00:00Z"
+
+        let monitor = fixture.monitor()
+        await fixture.refresh(monitor)
+
+        #expect(monitor.currentOpenItems.first?.reviewingProgress == (current ? .current : .needsReview))
+        #expect(fixture.gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
+    @Test(arguments: ["head", "target", "base", "title"])
+    func persistedApprovalBecomesStaleAfterDiffChanges(_ change: String) async throws {
+        let fixture = try ApprovalFixture()
+        defer { fixture.close() }
+        let initial = fixture.monitor()
+        await fixture.refresh(initial)
+        #expect(initial.currentOpenItems.first?.reviewingProgress == .current)
+
+        let restarted = fixture.monitor()
+        fixture.diffReadFails = true
+        await fixture.refresh(restarted)
+        #expect(restarted.currentOpenItems.first?.reviewingProgress == .current)
+
+        switch change {
+        case "head": fixture.head = "def"
+        case "target":
+            fixture.branch = "release"
+            fixture.metadataChange = "changed target branch from `main` to `release`"
+        case "title":
+            fixture.title = "Edited title"
+            fixture.metadataChange = "<p>changed title from Example to Edited title</p>"
+        default: fixture.base = "new-base"
+        }
+        fixture.diffReadFails = false
+        if fixture.metadataChange == nil { fixture.diffTime = "2026-01-02T11:00:00Z" }
+        let changedWhileClosed = fixture.monitor()
+        await fixture.refresh(changedWhileClosed)
+        #expect(changedWhileClosed.currentOpenItems.first?.reviewingProgress == .needsReview)
+
+        fixture.approvalTime = "2026-01-02T10:00:00Z"
+        await fixture.refresh(changedWhileClosed)
+        #expect(changedWhileClosed.currentOpenItems.first?.reviewingProgress == .needsReview)
+
+        fixture.approvalTime = "2026-01-02T12:00:00Z"
+        await fixture.refresh(changedWhileClosed)
+        #expect(changedWhileClosed.currentOpenItems.first?.reviewingProgress == .current)
+        #expect(fixture.gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
+    @Test func switchingAccountsDoesNotReuseTheOtherReviewersBaseline() async throws {
+        let fixture = try ApprovalFixture()
+        defer { fixture.close() }
+        let monitor = fixture.monitor()
+        await fixture.refresh(monitor)
+        #expect(monitor.currentOpenItems.first?.reviewingProgress == .current)
+
+        fixture.diffReadFails = true
+        fixture.glab.currentUsername = "other"
+        await fixture.refresh(monitor)
+        #expect(monitor.currentOpenItems.first?.reviewingProgress == .needsReview)
+
+        fixture.glab.currentUsername = fixture.target.username
+        fixture.userID = 6
+        await fixture.refresh(monitor)
+        #expect(monitor.currentOpenItems.first?.reviewingProgress == .needsReview)
+
+        fixture.userID = 5
+        await fixture.refresh(monitor)
+        #expect(monitor.currentOpenItems.first?.reviewingProgress == .current)
+    }
+
+    @Test(arguments: ["merged", "closed", "failed"])
+    func onlyConfirmedTerminalReadRemovesApprovalBaseline(_ outcome: String) async throws {
+        let fixture = try ApprovalFixture()
+        defer { fixture.close() }
+        await fixture.refresh(fixture.monitor())
+
+        fixture.listed = false
+        fixture.state = outcome == "merged" ? "merged" : "closed"
+        fixture.requestReadFails = outcome == "failed"
+        let cleanup = fixture.monitor()
+        await fixture.refresh(cleanup)
+        #expect(!cleanup.hasError)
+        #expect(fixture.gitlab.requests.filter { $0.endpoint == "/projects/1/merge_requests/2" }.count >= 2)
+
+        fixture.listed = true
+        fixture.state = "opened"
+        fixture.requestReadFails = false
+        fixture.diffReadFails = true
+        let reopened = fixture.monitor()
+        await fixture.refresh(reopened)
+        #expect(reopened.currentOpenItems.first?.reviewingProgress == (outcome == "failed" ? .current : .needsReview))
+    }
+
+    @Test func aFailedApprovalReadKeepsTheBaselineUntilWithdrawalIsObserved() async throws {
+        let fixture = try ApprovalFixture()
+        defer { fixture.close() }
+        let monitor = fixture.monitor()
+        await fixture.refresh(monitor)
+        #expect(monitor.currentOpenItems.first?.reviewingProgress == .current)
+
+        fixture.approvalReadFails = true
+        await fixture.refresh(monitor)
+        fixture.approvalReadFails = false
+        fixture.diffReadFails = true
+        await fixture.refresh(monitor)
+        #expect(monitor.currentOpenItems.first?.reviewingProgress == .current)
+
+        let approvedAt = fixture.approvalTime
+        fixture.approvalTime = nil
+        await fixture.refresh(monitor)
+        fixture.approvalTime = approvedAt
+        let restarted = fixture.monitor()
+        await fixture.refresh(restarted)
+        #expect(restarted.currentOpenItems.first?.reviewingProgress == .needsReview)
+    }
+
+    @MainActor
+    private final class ApprovalFixture {
+        let target = MRAutomationScope.Target.mergeRequest(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2)
+        let defaults: UserDefaults
+        let gitlab = InMemoryGitLab()
+        let glab: GlabService
+        private let suite = "ReviewingContextTests.\(UUID())"
+        private let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        var head = "abc"
+        var branch = "main"
+        var base = "base"
+        var title = "Example"
+        var state = "opened"
+        var userID = 5
+        var listed = true
+        var diffTime = "2026-01-01T11:00:00Z"
+        var metadataChange: String?
+        var approvalTime: String? = "2026-01-01T12:00:00Z"
+        var diffReadFails = false
+        var requestReadFails = false
+        var approvalReadFails = false
+
+        init() throws {
+            defaults = try #require(UserDefaults(suiteName: suite))
+            glab = gitlab.service(host: target.host, username: target.username)
+            gitlab.handler = { [unowned self] command in
+                let refs = #", "diff_refs":{"base_sha":"\#(base)","head_sha":"\#(head)","start_sha":"start"}"#
+                let mr = #"{"project_id":1,"iid":2,"author":{"id":7,"username":"alice","name":"Alice"},"title":"\#(title)","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"\#(state)","draft":false,"sha":"\#(head)","source_branch":"feature","target_project_id":1,"target_branch":"\#(branch)","labels":[]"#
+                let username = glab.currentUsername ?? target.username
+                switch command.endpoint {
+                case "/user": return InMemoryGitLab.output(#"{"id":\#(userID),"username":"\#(username)"}"#)
+                case let path where path.hasPrefix("/merge_requests?"):
+                    return InMemoryGitLab.output(!listed || path.contains("created_by_me") ? "[]" : "[\(mr)}]")
+                case "/projects/1/merge_requests/2":
+                    if requestReadFails { throw GlabError.unknown("MR read failed") }
+                    return InMemoryGitLab.output(mr + refs + "}")
+                case "/projects/1/merge_requests/2/approvals":
+                    if approvalReadFails { throw GlabError.unknown("approval read failed") }
+                    let approval = approvalTime.map { #"{"user":{"id":\#(userID),"username":"\#(username)"},"approved_at":"\#($0)"}"# } ?? ""
+                    return InMemoryGitLab.output(#"{"project_id":1,"iid":2,"approvals_required":1,"approvals_left":0,"approved_by":[\#(approval)]}"#)
+                case "/projects/1/merge_requests/2/versions?per_page=1":
+                    if diffReadFails { throw GlabError.unknown("diff read failed") }
+                    return InMemoryGitLab.output(#"[{"head_commit_sha":"\#(head)","base_commit_sha":"\#(base)","start_commit_sha":"start","created_at":"\#(diffTime)"}]"#)
+                case let path where path.hasPrefix("/projects/1/merge_requests/2/discussions"):
+                    if let metadataChange {
+                        return InMemoryGitLab.output(#"[{"id":"metadata","notes":[{"id":4,"system":true,"body":"\#(metadataChange)","created_at":"2026-01-02T11:00:00Z"}]}]"#)
+                    }
+                    return InMemoryGitLab.output("[]")
+                default: return InMemoryGitLab.output("[]")
+                }
+            }
+        }
+
+        func monitor() -> MergeRequestAttentionMonitor {
+            .init(glab: glab, settings: SettingsManager(defaults: defaults), verdictDirectory: directory,
+                  provenanceDirectory: directory, canAutomate: { _ in false })
+        }
+
+        func refresh(_ monitor: MergeRequestAttentionMonitor) async {
+            await withCheckedContinuation { continuation in
+                monitor.onRefreshed = {
+                    monitor.onRefreshed = nil
+                    continuation.resume()
+                }
+                monitor.refresh(host: target.host, username: glab.currentUsername ?? target.username, todos: [])
+            }
+        }
+
+        func close() {
+            gitlab.close()
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
     }
 
     @Test func detailsShowOneTaskRowPerKindPreferringRunningThenFailedWork() throws {

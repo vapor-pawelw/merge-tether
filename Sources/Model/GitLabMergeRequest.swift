@@ -155,6 +155,26 @@ struct GitLabAuthenticatedUser: Codable, Equatable, Sendable {
     let username: String
 }
 
+/// Evidence for the reviewer's own GitLab approval, used to present review progress.
+struct ReviewApprovalBaseline: Codable, Equatable, Sendable {
+    let reviewedTarget: ReviewTargetBinding
+    let semanticContext: SemanticContextDigest
+    let approvedAt: Date
+
+    init?(request: GitLabMergeRequest, approvedAt: Date) {
+        guard let reviewedTarget = ReviewTargetBinding(request) else { return nil }
+        self.reviewedTarget = reviewedTarget
+        self.semanticContext = request.semanticContextDigest
+        self.approvedAt = approvedAt
+    }
+
+    func covers(_ request: GitLabMergeRequest) -> Bool {
+        let current = request.evidenceContext()
+        return reviewedTarget.evidenceContext.binds(to: current, policy: .approvalTarget)
+            && EvidenceContext(semanticContext: semanticContext).binds(to: current, policy: .semanticText)
+    }
+}
+
 struct GitLabMergeRequest: Codable, Sendable {
     let projectID: Int
     let iid: Int

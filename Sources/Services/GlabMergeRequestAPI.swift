@@ -118,6 +118,26 @@ extension GlabService {
         return request
     }
 
+    func fetchCurrentDiffVersionDate(for request: GitLabMergeRequest, host: String) async throws -> Date? {
+        struct Version: Decodable {
+            let head: String
+            let base: String
+            let start: String?
+            let createdAt: String
+
+            enum CodingKeys: String, CodingKey {
+                case head = "head_commit_sha", base = "base_commit_sha", start = "start_commit_sha", createdAt = "created_at"
+            }
+        }
+
+        guard let target = request.evidenceTarget else { return nil }
+        let versions: [Version] = try await mergeRequestAPI(
+            "/projects/\(request.projectID)/merge_requests/\(request.iid)/versions?per_page=1", host: host)
+        guard let latest = versions.first, latest.head == request.sha, latest.base == target.base,
+              request.diffRefs?.startSHA.map({ $0 == latest.start }) != false else { return nil }
+        return MergeRequestReviewHistory.date(latest.createdAt)
+    }
+
     func fetchClosingIssues(projectID: Int, iid: Int, host: String) async throws -> [RemoteMRIssue] {
         guard projectID > 0, iid > 0 else { throw GlabError.decoding("Invalid merge request identity") }
         let issues: [GitLabClosingIssue] = try await fetchMergeRequestPages(

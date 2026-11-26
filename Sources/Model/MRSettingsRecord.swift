@@ -45,6 +45,11 @@ struct MRSettingsRecord: Codable {
         let value: ReReviewReceipt
     }
 
+    struct ReviewerApproval: Codable {
+        let user: GitLabAuthenticatedUser
+        let baseline: ReviewApprovalBaseline
+    }
+
     var autoApproveOptOuts: [Target]?
     var independentApprovalPreferences: [Scoped<MRAutomationPreference>]?
     var autoPublishOptOuts: [Target]?
@@ -74,6 +79,7 @@ struct MRSettingsRecord: Codable {
     var boardPins: [BoardCardPin]?
     var pendingCommentReviews: [Target]?
     var commentReviewProgress: [Scoped<SettingsManager.CommentReviewProgress>]?
+    var reviewerApprovals: [ReviewerApproval]?
 
     var isEmpty: Bool {
         autoApproveOptOuts == nil && independentApprovalPreferences == nil && autoPublishOptOuts == nil
@@ -86,7 +92,7 @@ struct MRSettingsRecord: Codable {
             && pipelineClaimAssessmentAttempts == nil && conflictReceipts == nil && reReviewReceipts == nil
             && reReviewDraftBaselines == nil && assistantHandoffs == nil && workflowActivity == nil
             && automationEvents == nil && mrActionIntents == nil && routedMRTodoReceipts == nil
-            && boardPins == nil && pendingCommentReviews == nil && commentReviewProgress == nil
+            && boardPins == nil && pendingCommentReviews == nil && commentReviewProgress == nil && reviewerApprovals == nil
     }
 }
 
@@ -120,6 +126,10 @@ struct MRSettingsArchive: Codable {
 
     func values<Value>(_ field: KeyPath<MRSettingsRecord, [Value]?>) -> [Value] {
         records.values.flatMap { $0[keyPath: field] ?? [] } + (unscoped[keyPath: field] ?? [])
+    }
+
+    mutating func setReviewerApprovals(_ values: [MRSettingsRecord.ReviewerApproval], for key: MRSettingsKey) {
+        records[key, default: .init()].reviewerApprovals = values.isEmpty ? nil : values
     }
 
     mutating func replace<Value>(_ field: WritableKeyPath<MRSettingsRecord, [Value]?>, with values: [Value],

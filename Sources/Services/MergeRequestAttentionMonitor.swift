@@ -227,9 +227,6 @@ final class MergeRequestAttentionMonitor {
     private var manualPublicationProgress: [Item.ID: ManualPublicationProgress] = [:]
     /// Heads approved here, until GitLab's reviewer state catches up.
     private var approvedHeads: [Item.ID: String] = [:]
-    /// Head and approval time at which the signed-in reviewer's own approval was first observed.
-    /// An approval that is still current for the same head accepts the code and discussions seen so far.
-    private var approvalBaselines: [Item.ID: ApprovalBaseline] = [:]
     /// Commits GitLab refused to auto-approve; retried only after a new commit or a manual approval.
     private var failedApprovalHeads: [Item.ID: String] = [:]
     private struct ApprovalReadContext: Equatable {
@@ -650,7 +647,6 @@ final class MergeRequestAttentionMonitor {
             publishedDrafts = [:]
             manualPublicationProgress = [:]
             approvedHeads = [:]
-            approvalBaselines = [:]
             failedApprovalHeads = [:]
             approvalReadFailures = [:]
             verifiedRemoteFiles = [:]
@@ -770,7 +766,7 @@ final class MergeRequestAttentionMonitor {
               settings.mrLifecycleLedger.accepts(request, for: target, observedAt: readStartedAt) else { return false }
 
         let terminalSince = settings.mrLifecycleLedger.terminalObservedAt(for: target, state: request.state) ?? readStartedAt
-        settings.retireMRProgress(for: target, state: request.state, terminalSince: terminalSince, now: readStartedAt)
+        settings.retireMRProgress(for: target, state: request.state, terminalSince: terminalSince, now: readStartedAt, user: user)
         if request.state == .merged && !isConfirming(request.mergeRequestID)
             && !settings.assistantHandoffs.contains(where: { $0.key.automationTarget == target && $0.execution?.state.isActive == true }) {
             let origins = AICommentProvenanceStore.Context(host: host, username: user.username, userID: user.id,
@@ -948,13 +944,16 @@ final class MergeRequestAttentionMonitor {
             $0.host == host && $0.username == user.username && settings?.canRestoreHiddenReview($0) == true
         } ?? []
         let historyCleanupTargets = settings?.retainedHistoryCandidates(host: host, username: user.username) ?? []
-        let lookupTargets = feedbackDecision == nil
+        let trackedLookupTargets = feedbackDecision == nil
             ? scopeTargets.union(recordedTargets).union(intentTargets).union(trackedTargets).union(hiddenTargets).union(transientTargets) : []
+        let approvalTargets = feedbackDecision == nil ? (settings?.approvalBaselineTargets(host: host, user: user) ?? []) : []
+        let lookupTargets = trackedLookupTargets.union(approvalTargets)
         var explicit: [GitLabMergeRequest] = []
         var recordedReviews: [GitLabMergeRequest] = []
         var explicitFetchFailed = false
         for target in lookupTargets.sorted(by: { ($0.projectID, $0.iid ?? 0) < ($1.projectID, $1.iid ?? 0) }) {
             let hidden = isIgnored(target)
+            let cleanupOnly = !trackedLookupTargets.contains(target)
             guard let iid = target.iid, !hidden || settings?.canRestoreHiddenReview(target) == true else { continue }
             let hideID = settings?.hiddenReviewDetails[target]?.hideID
             let id = Item.ID(projectID: target.projectID, iid: iid)
@@ -963,10 +962,11 @@ final class MergeRequestAttentionMonitor {
             // continue exact checks because they may reopen without assignment.
             if !hidden, terminalCatalogRequests.contains(id)
                 || (settings?.mrLifecycleLedger.request(for: target)?.state == .merged
-                    && !transientTargets.contains(target) && !historyCleanupTargets.contains(target)) { continue }
+                    && !transientTargets.contains(target) && !historyCleanupTargets.contains(target)
+                    && !approvalTargets.contains(target)) { continue }
             let requestReadStartedAt = Date()
             guard let request = try? await glab.fetchMergeRequest(projectID: target.projectID, iid: iid, host: host) else {
-                if hidden { continue }
+                if hidden || cleanupOnly { continue }
                 explicitFetchFailed = true
                 if var previous = previousCatalog[id] {
                     previous.approvalProgress = nil
@@ -978,7 +978,7 @@ final class MergeRequestAttentionMonitor {
             guard request.projectID == target.projectID, request.iid == iid,
                   request.webURL.isGitLabMergeRequest(host: host, iid: iid),
                   [.opened, .closed, .merged].contains(request.state) else {
-                if !hidden { explicitFetchFailed = true }
+                if !hidden && !cleanupOnly { explicitFetchFailed = true }
                 continue
             }
             if hidden {
@@ -996,16 +996,18 @@ final class MergeRequestAttentionMonitor {
                         readStartedAt: requestReadStartedAt)
                     guard isCurrent(account, revision: revision) else { return }
                     guard confirmed else {
-                        explicitFetchFailed = true
+                        if !cleanupOnly { explicitFetchFailed = true }
                         continue
                     }
                 }
                 if alreadyTracked { remember(request, readStartedAt: requestReadStartedAt) }
-                else { onDisplayMetadataObserved?(request, target, revision, requestReadStartedAt) }
+                else if !cleanupOnly { onDisplayMetadataObserved?(request, target, revision, requestReadStartedAt) }
                 if request.state == .merged { terminalCatalogRequests.insert(id) }
                 retainedCatalog.removeValue(forKey: id)
             } else {
                 terminalCatalogRequests.remove(id)
+                // A cached approval supplies a cleanup target without adopting an unassigned review.
+                guard !cleanupOnly else { continue }
                 remember(request, readStartedAt: requestReadStartedAt)
                 if scopeTargets.contains(target) || request.author.id == user.id { explicit.append(request) }
                 else { recordedReviews.append(request) }
@@ -1093,16 +1095,17 @@ final class MergeRequestAttentionMonitor {
             let reviewRevisions = Dictionary(uniqueKeysWithValues: batch.map {
                 ($0.id, settings?.commentReviewRevision(for: commentReviewTarget($0.id, account: account)) ?? 0)
             })
-            await withTaskGroup(of: (Item, Bool, ReReviewFeedback?, [GitLabMergeRequestDiscussion]?, Set<Int>, GitLabMergeRequest?, Date?).self) { group in
+            await withTaskGroup(of: (Item, Bool, ReReviewFeedback?, [GitLabMergeRequestDiscussion]?, Set<Int>,
+                                     GitLabMergeRequest?, Date?, ApprovalBaselineRead?).self) { group in
                 for item in batch {
                     let approvedHead = approvedHeads[item.id]
-                    let approvalBaseline = approvalBaselines[item.id]
                     let failedHead = failedApprovalHeads[item.id]
                     let autoApproves = item.mergeRequest.map {
                         autoApproveApplies(to: $0, host: host, username: account.username)
                     } ?? false
                     let approvalThreshold = settings?.automation.autoApprovalThreshold ?? .noMajorIssues
                     let target = commentReviewTarget(item.id, account: account)
+                    let approvalBaseline = settings?.approvalBaseline(for: target, user: user)
                     let approvalOptedOut = settings.map {
                         $0.automation.scope[target] != .paused && $0.actionPreference(.approval, for: target) == .off
                     } == true
@@ -1210,18 +1213,12 @@ final class MergeRequestAttentionMonitor {
                             updated.reviewingActivity = discussions.map {
                                 ReviewingActivity(discussions: $0, reviewerID: user.id, authorID: request.author.id)
                             }
-                            updated.reviewingProgress = Self.reviewingProgress(for: updated, request: request,
-                                discussions: discussions, host: host, user: user, verdictDirectory: verdictDirectory,
-                                approvedHead: approvedHead, approvalBaseline: approvalBaseline)
                         }
                         if hasDrafts {
                             let requestReadStartedAt = Date()
                             let live = try? await glab.fetchMergeRequest(projectID: item.id.projectID, iid: item.id.iid, host: host)
                             recoveryRequest = live
                             if live != nil { recoveryReadStartedAt = requestReadStartedAt }
-                            updated.reviewingProgress = Self.reviewingProgress(for: updated, request: live,
-                                discussions: discussions, host: host, user: user, verdictDirectory: verdictDirectory,
-                                approvedHead: approvedHead, approvalBaseline: approvalBaseline)
                             updated.requiresDiscussionRecheck = !Self.draftContextIsCurrent(
                                 request: live, drafts: drafts, discussions: discussions, host: host, user: user,
                                 verdictDirectory: verdictDirectory, followUpReceipts: followUpReceipts
@@ -1232,6 +1229,25 @@ final class MergeRequestAttentionMonitor {
                             }.compactMap(\.id))
                         } else {
                             updated.requiresDiscussionRecheck = false
+                        }
+                        var approvalRead: ApprovalBaselineRead?
+                        if !item.isAuthored, let displayed = item.mergeRequest {
+                            let ownApproval = updated.approvalProgress?.currentApproverIDs?.contains(user.id) == true
+                            let readStartedAt = recoveryReadStartedAt ?? Date()
+                            let request: GitLabMergeRequest? = if hasDrafts { recoveryRequest } else if ownApproval {
+                                try? await glab.fetchMergeRequest(projectID: item.id.projectID, iid: item.id.iid, host: host)
+                            } else { displayed }
+                            if ownApproval, let request, request.author.id != user.id,
+                               MRAttentionRecord.sameContext(displayed, request), let discussions,
+                               let baseline = await Self.observedApprovalBaseline(for: request, previous: approvalBaseline,
+                                   approvedAt: updated.approvalProgress?.approvalDates[user.id],
+                                   discussions: discussions, host: host, glab: glab) {
+                                approvalRead = .init(request: request, startedAt: readStartedAt, previous: approvalBaseline, baseline: baseline)
+                            }
+                            updated.reviewingProgress = Self.reviewingProgress(for: updated,
+                                request: request ?? (ownApproval && !hasDrafts ? displayed : nil),
+                                discussions: discussions, host: host, user: user, verdictDirectory: verdictDirectory,
+                                approvedHead: approvedHead, approvalBaseline: approvalRead?.baseline)
                         }
                         updated.replyRecipients = [:]
                         updated.incomingReplyDiscussionIDs = AutomaticPublicationPolicy.incomingDiscussionIDs(in: discussions, userID: user.id)
@@ -1246,14 +1262,14 @@ final class MergeRequestAttentionMonitor {
                             }
                         }
                         let feedback = discussions.map { ReReviewFeedback(discussions: $0, authorID: user.id) }
-                        return (updated, drafts != nil && (!(item.isAuthored || hasDrafts) || discussions != nil), feedback, discussions, contextDraftIDs, recoveryRequest, recoveryReadStartedAt)
+                        return (updated, drafts != nil && (!(item.isAuthored || hasDrafts) || discussions != nil),
+                            feedback, discussions, contextDraftIDs, recoveryRequest, recoveryReadStartedAt, approvalRead)
                     }
                 }
-                for await (var item, success, feedback, discussions, workerDraftIDs, recoveryRequest, recoveryReadStartedAt) in group {
+                for await (var item, success, feedback, discussions, workerDraftIDs, recoveryRequest, recoveryReadStartedAt, approvalRead) in group {
                     guard isCurrent(account, revision: revision) else { return }
                     settings?.observeCommentReview(item.drafts.filter { publishedDrafts[item.id]?.contains($0) != true },
                         for: commentReviewTarget(item.id, account: account), revision: reviewRevisions[item.id] ?? 0)
-                    recordApprovalBaseline(for: item, user: user)
                     item.requiresCommentReview = commentReviewPending(item.id, account: account)
                     if item.requiresCommentReview {
                         item.approvalObservation = .unchecked; item.reReviewFeedbackChecked = false
@@ -1267,6 +1283,18 @@ final class MergeRequestAttentionMonitor {
                         guard latest.isOpen, latest.evidenceContext().binds(
                             to: item.observedEvidenceContext, policy: .requestText) else { continue }
                         item.mergeRequest = latest
+                    }
+                    if !item.isAuthored, let approvers = item.approvalProgress?.currentApproverIDs, let settings {
+                        if !approvers.contains(user.id) {
+                            settings.setApprovalBaseline(nil, for: lifecycleTarget, user: user)
+                        } else if let approvalRead {
+                            if settings.approvalBaseline(for: lifecycleTarget, user: user) == approvalRead.previous,
+                               settings.mrLifecycleLedger.accepts(approvalRead.request, for: lifecycleTarget, observedAt: approvalRead.startedAt) {
+                                settings.setApprovalBaseline(approvalRead.baseline, for: lifecycleTarget, user: user)
+                            } else if item.reviewingProgress == .current {
+                                item.reviewingProgress = .needsReview
+                            }
+                        }
                     }
                     let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: item.id.projectID, iid: item.id.iid)
                     let verifiedReplyIDs = Set(item.drafts.compactMap { draft -> Int? in
@@ -1397,6 +1425,9 @@ final class MergeRequestAttentionMonitor {
                     reviewers: states ?? [], discussions: threads, authorID: request.author.id)
             }
             guard isCurrent(account, revision: revision) else { return }
+            if item.approvalProgress?.currentApproverIDs?.contains(user.id) == false {
+                settings?.setApprovalBaseline(nil, for: target(for: request), user: user)
+            }
             retainedCatalog[id] = item
         }
         if let settings, feedbackDecision == nil {
@@ -1555,42 +1586,50 @@ final class MergeRequestAttentionMonitor {
 
     // MARK: - Ready for your OK
 
-    struct ApprovalBaseline: Equatable, Sendable {
-        let head: String
-        let semanticContext: String
-        let approvedAt: Date?
-
-        /// True when the signed-in reviewer currently approves and nothing changed since that approval was observed.
-        static func accepts(baseline: ApprovalBaseline?, progress: MergeRequestApprovalProgress?,
-                            userID: Int, head: String, semanticContext: String) -> Bool {
-            guard progress?.currentApproverIDs?.contains(userID) == true else { return false }
-            guard let baseline else { return true }
-            let recorded = EvidenceContext(head: baseline.head, semanticContext: .init(baseline.semanticContext))
-            let current = EvidenceContext(head: head, semanticContext: .init(semanticContext))
-            if recorded.binds(to: current, policy: .requestText) { return true }
-            // A later approval timestamp means the reviewer approved again after the change.
-            if let at = progress?.approvalDates[userID], let previous = baseline.approvedAt { return at > previous }
-            return false
-        }
+    private struct ApprovalBaselineRead: Sendable {
+        let request: GitLabMergeRequest
+        let startedAt: Date
+        let previous: ReviewApprovalBaseline?
+        let baseline: ReviewApprovalBaseline
     }
 
-    private func recordApprovalBaseline(for item: Item, user: GitLabAuthenticatedUser) {
-        guard !item.isAuthored, let progress = item.approvalProgress, let ids = progress.currentApproverIDs,
-              let request = item.mergeRequest, let head = request.sha else { return }
-        guard ids.contains(user.id) else { approvalBaselines[item.id] = nil; return }
-        let current = ApprovalBaseline(head: head, semanticContext: request.semanticContextFingerprint,
-            approvedAt: progress.approvalDates[user.id])
-        let previous = approvalBaselines[item.id]
-        if previous == nil || ApprovalBaseline.accepts(baseline: previous, progress: progress, userID: user.id,
-            head: head, semanticContext: request.semanticContextFingerprint) {
-            approvalBaselines[item.id] = current
+    private static func observedApprovalBaseline(for request: GitLabMergeRequest, previous: ReviewApprovalBaseline?,
+                                                 approvedAt: Date?, discussions: [GitLabMergeRequestDiscussion],
+                                                 host: String, glab: GlabService) async -> ReviewApprovalBaseline? {
+        let metadataChangedAt = latestReviewMetadataChange(in: discussions)
+        if let previous, previous.covers(request), metadataChangedAt <= previous.approvedAt {
+            guard let approvedAt else { return previous }
+            guard approvedAt >= previous.approvedAt else { return nil }
+            return ReviewApprovalBaseline(request: request, approvedAt: approvedAt)
         }
+
+        // A Git commit may have been created long before it was pushed to this MR.
+        // Bootstrap older installations from the server's matching diff version instead.
+        guard let approvedAt, previous.map({ approvedAt > $0.approvedAt }) != false,
+              let versionAt = try? await glab.fetchCurrentDiffVersionDate(for: request, host: host) else { return nil }
+        let changedAt = max(versionAt, metadataChangedAt)
+        guard approvedAt >= changedAt else { return nil }
+        if let previous, !previous.reviewedTarget.evidenceContext.binds(to: request.evidenceContext(), policy: .approvalTarget),
+           changedAt <= previous.approvedAt { return nil }
+        return ReviewApprovalBaseline(request: request, approvedAt: approvedAt)
+    }
+
+    private nonisolated static func latestReviewMetadataChange(in discussions: [GitLabMergeRequestDiscussion]) -> Date {
+        // A retarget between branches at the same commit can leave all three diff SHAs unchanged.
+        discussions.lazy.flatMap(\.notes).compactMap { note in
+            guard note.system == true, let body = note.body else { return nil }
+            let retargeted = body.hasPrefix("changed target branch from ")
+                || (body.hasPrefix("deleted the `") && body.contains("This merge request now targets"))
+            let editedText = body == "changed the description" || body.hasPrefix("<p>changed title from ")
+            guard retargeted || editedText else { return nil }
+            return MergeRequestReviewHistory.date(note.createdAt)
+        }.max() ?? .distantPast
     }
 
     private nonisolated static func reviewingProgress(
         for item: Item, request: GitLabMergeRequest?, discussions: [GitLabMergeRequestDiscussion]?,
         host: String, user: GitLabAuthenticatedUser, verdictDirectory: URL, approvedHead: String?,
-        approvalBaseline: ApprovalBaseline? = nil
+        approvalBaseline: ReviewApprovalBaseline?
     ) -> ReviewingProgress? {
         guard !item.isAuthored, let request, let displayed = item.mergeRequest,
               request.projectID == item.id.projectID, request.iid == item.id.iid,
@@ -1600,16 +1639,17 @@ final class MergeRequestAttentionMonitor {
               let head = request.sha, !head.isEmpty,
               displayed.evidenceContext().binds(to: request.evidenceContext(), policy: .requestText),
               let discussions, ReviewVerdict.fingerprint(discussions) != nil else { return nil }
+        if item.approvalProgress?.currentApproverIDs?.contains(user.id) == true {
+            guard MRAttentionRecord.sameContext(displayed, request), let approvalBaseline, approvalBaseline.covers(request),
+                  latestReviewMetadataChange(in: discussions) <= approvalBaseline.approvedAt else { return .needsReview }
+            return .current
+        }
         let verdict = ReviewVerdictStore.verdict(host: host, projectID: request.projectID,
             iid: request.iid, user: user, in: verdictDirectory)
-        // The reviewer's own current approval, given anywhere, accepts the code seen so far.
-        // Only a new head, or changed MR text, brings the review back.
-        let approvalAccepts = ApprovalBaseline.accepts(baseline: approvalBaseline, progress: item.approvalProgress,
-            userID: user.id, head: head, semanticContext: request.semanticContextFingerprint)
-        guard approvalAccepts || (verdict?.requiresFreshReview(forSemanticContext: request.semanticContextFingerprint) != true
-              && verdict?.covers(head: head, discussions: discussions, reviewerID: user.id,
+        guard verdict?.requiresFreshReview(forSemanticContext: request.semanticContextFingerprint) != true,
+              verdict?.covers(head: head, discussions: discussions, reviewerID: user.id,
             publishedDrafts: ReviewVerdictStore.seenDrafts(host: host, projectID: request.projectID,
-                iid: request.iid, in: verdictDirectory)) == true) else { return .needsReview }
+                iid: request.iid, in: verdictDirectory)) == true else { return .needsReview }
         let ownOpen = discussions.flatMap(\.notes).contains {
             $0.system != true && $0.author?.id == user.id && $0.resolvable == true && $0.resolved != true
         }
@@ -3213,7 +3253,7 @@ final class MergeRequestAttentionMonitor {
                 }
                 $0.reviewingProgress = contextMatches ? Self.reviewingProgress(for: item, request: request,
                     discussions: discussions, host: account.host, user: user, verdictDirectory: verdictDirectory,
-                    approvedHead: approvedHeads[item.id], approvalBaseline: approvalBaselines[item.id]) : nil
+                    approvedHead: approvedHeads[item.id], approvalBaseline: settings?.approvalBaseline(for: target, user: user)) : nil
                 if !$0.isAuthored, let request {
                     $0.reviewingActivity = discussions.map {
                         ReviewingActivity(discussions: $0, reviewerID: user.id, authorID: request.author.id)

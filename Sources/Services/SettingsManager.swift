@@ -32,6 +32,31 @@ final class SettingsManager {
     @ObservationIgnored private var changedMRKeys: Set<String> = []
     @ObservationIgnored private var mrSettingsArchive = MRSettingsArchive()
 
+    func approvalBaseline(for target: MRAutomationScope.Target, user: GitLabAuthenticatedUser) -> ReviewApprovalBaseline? {
+        guard let key = MRSettingsKey(target), target.username == user.username else { return nil }
+        return mrSettingsArchive.records[key]?.reviewerApprovals?.first { $0.user == user }?.baseline
+    }
+
+    @discardableResult
+    func setApprovalBaseline(_ baseline: ReviewApprovalBaseline?, for target: MRAutomationScope.Target,
+                             user: GitLabAuthenticatedUser) -> Bool {
+        guard let key = MRSettingsKey(target), user.id > 0, target.username == user.username,
+              approvalBaseline(for: target, user: user) != baseline else { return false }
+        var approvals = mrSettingsArchive.records[key]?.reviewerApprovals ?? []
+        approvals.removeAll { $0.user == user }
+        if let baseline { approvals.append(.init(user: user, baseline: baseline)) }
+        mrSettingsArchive.setReviewerApprovals(approvals, for: key)
+        changedMRKeys.insert(Key.reviewerApprovals)
+        return true
+    }
+
+    func approvalBaselineTargets(host: String, user: GitLabAuthenticatedUser) -> Set<MRAutomationScope.Target> {
+        Set(mrSettingsArchive.records.compactMap { key, record in
+            guard key.host == host, record.reviewerApprovals?.contains(where: { $0.user == user }) == true else { return nil }
+            return .mergeRequest(host: host, username: user.username, projectID: key.request.projectID, iid: key.request.iid)
+        })
+    }
+
     var refreshInterval: RefreshInterval
     var unreadReminderInterval: UnreadReminderInterval
     var unreadReminderSound: ReminderSound
@@ -585,6 +610,7 @@ final class SettingsManager {
 
     private enum Key {
         static let mergeRequestRecords = "mergeRequestRecords"
+        static let reviewerApprovals = "reviewerApprovals"
         static let conversationDestination = "conversationDestination"
         static let automation = "automation"
         static let automationGloballyEnabled = "automationGloballyEnabled"
@@ -845,6 +871,7 @@ extension SettingsManager {
         scoped(\.commentReviewProgress, \.commentReviewProgress, Key.commentReviewProgress)
 
         if case .load = transfer { return true }
+        if changedMRKeys.contains(Key.reviewerApprovals) { updatedKeys.insert(Key.reviewerApprovals) }
         if updatedKeys.contains(Key.newReviewTargets) {
             archive.replace(\.newReviewGenerations, with: newReviewGenerations.map { .init(target: $0.key, value: $0.value) },
                 keyedBy: { MRSettingsKey($0.target) })

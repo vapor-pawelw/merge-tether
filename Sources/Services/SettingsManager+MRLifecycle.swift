@@ -14,14 +14,15 @@ extension SettingsManager {
     }
 
     func retireMRProgress(for target: MRAutomationScope.Target, state: GitLabMergeRequestState,
-                          terminalSince: Date, now: Date) {
+                          terminalSince: Date, now: Date, user: GitLabAuthenticatedUser? = nil) {
         guard state == .merged || state == .closed else { return }
         let removedNewMarker = newReviewTargets.contains(target)
         if removedNewMarker { newReviewTargets.remove(target) }
         let mayRetireHistory = state == .merged || now.timeIntervalSince(terminalSince) >= Self.closedHistoryRetention
         let removedHistory = mayRetireHistory && retireRunHistory(for: target)
         let removedPin = mayRetireHistory && retireCardPin(for: target)
-        if removedNewMarker || removedHistory || removedPin { save() }
+        let removedApproval = user.map { setApprovalBaseline(nil, for: target, user: $0) } ?? false
+        if removedNewMarker || removedHistory || removedPin || removedApproval { save() }
     }
 
     private func retireCardPin(for target: MRAutomationScope.Target) -> Bool {
