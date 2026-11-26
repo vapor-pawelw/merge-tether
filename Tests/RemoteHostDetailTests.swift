@@ -271,6 +271,29 @@ import MergeTetherRemote
         #expect(f.readerCount == 1 && f.gitlab.requests.count == count)
     }
 
+    @Test func phoneActivityDisplaysMacDiskAdmissionStatus() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        let key = AssistantAutomationRunner.JobKey(assistant: .codex,
+            work: .init(host: "gitlab.example.test", projectID: 1, iid: 2), username: "me",
+            workspace: "", access: .gitLabRead)
+        let problem = AssistantJobExecution.DiskAdmissionIssue(cause: .insufficientCapacity, requiredBytes: 1_000_000_000)
+        let waiting = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Waiting",
+            prompt: "Task", createdAt: .now, allowsPush: false,
+            execution: .init(state: .queued, diskAdmissionIssue: problem))
+        let failed = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Failed",
+            prompt: "Task", createdAt: .now, allowsPush: false,
+            execution: .init(state: .failed, finishedAt: .now, diskAdmissionIssue: problem))
+        f.monitor.settings.assistantHandoffs = [waiting, failed]
+        let board = try await f.board()
+        let card = try #require(board.cards.first { $0.id == "mr:1:2" })
+        let request = try RemoteDetailRequest(card: card, board: board)
+        await f.transport.onMessage?(.init(type: .detailRequest, detailRequest: request))
+        await f.host.detailTask?.value
+        let activity = try #require(f.transport.messages.last?.detailResponse?.details?.activity)
+        #expect(activity.first { $0.id == "job/\(waiting.id)" }?.status == String(localized: problem.waitingTitle))
+        #expect(activity.first { $0.id == "job/\(failed.id)" }?.summary == String(localized: problem.errorTitle))
+    }
+
     @Test func phoneEventLogInterleavesGitLabAndAppEventsAndKeepsLastKnownEventsOnPartialFailure() async throws {
         let f = try Fixture(); defer { f.clean() }
         f.usesLiveDetailReader = true

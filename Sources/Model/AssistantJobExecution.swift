@@ -23,6 +23,26 @@ struct AssistantJobExecution: Codable, Equatable, Sendable {
         var isActive: Bool { self == .queued || self == .running }
     }
 
+    struct DiskAdmissionIssue: Codable, Equatable, Sendable {
+        enum Cause: String, Codable, Sendable { case insufficientCapacity, capacityUnavailable }
+        let cause: Cause
+        let requiredBytes: Int64
+
+        var waitingTitle: LocalizedStringResource {
+            switch cause {
+            case .insufficientCapacity: .AssistantJobs.assistantJobsWaitingForMacDisk
+            case .capacityUnavailable: .AssistantJobs.assistantJobsWaitingToCheckMacDisk
+            }
+        }
+
+        var errorTitle: LocalizedStringResource {
+            switch cause {
+            case .insufficientCapacity: .AssistantJobs.assistantJobsErrorMacDiskFull
+            case .capacityUnavailable: .AssistantJobs.assistantJobsErrorMacDiskUnavailable
+            }
+        }
+    }
+
     struct SourceHeadChange: Codable, Equatable, Sendable {
         let previousSHA: String
         let currentSHA: String
@@ -48,9 +68,28 @@ struct AssistantJobExecution: Codable, Equatable, Sendable {
     var remoteEffects: [RemoteEffect]? = nil
     var pendingWorkerAudit: AssistantWorkerAudit.Pending? = nil
     var sourceHeadChange: SourceHeadChange? = nil
+    var diskAdmissionIssue: DiskAdmissionIssue? = nil
+
+    var prelaunchDiskFailure: DiskAdmissionIssue? {
+        state == .failed && startedAt == nil ? diskAdmissionIssue : nil
+    }
+
+    var statusTitle: LocalizedStringResource {
+        switch state {
+        case .queued: diskAdmissionIssue?.waitingTitle ?? .AssistantJobs.assistantJobsQueued
+        case .running: .AssistantJobs.assistantJobsRunning
+        case .succeeded: .AssistantJobs.assistantJobsSucceeded
+        case .blocked: .AssistantJobs.assistantJobsBlocked
+        case .failed: .AssistantJobs.assistantJobsFailed
+        case .cancelled: .AssistantJobs.assistantJobsCancelled
+        case .interrupted: .AssistantJobs.assistantJobsInterrupted
+        case .feedbackResolved: .AssistantJobs.assistantJobsFeedbackResolved
+        }
+    }
 
     var errorExplanation: String? {
-        error.map { GlabService.redactWorkflowEvidence(AssistantJobExecutor.ExecutionError.displayMessage(for: $0)) }
+        if let issue = prelaunchDiskFailure { return String(localized: issue.errorTitle) }
+        return error.map { GlabService.redactWorkflowEvidence(AssistantJobExecutor.ExecutionError.displayMessage(for: $0)) }
     }
 
     var attentionExplanation: String? {
@@ -75,7 +114,7 @@ struct AssistantJobExecution: Codable, Equatable, Sendable {
                                   feedbackStatus: AuthorFeedbackStatus? = nil,
                                   discussionFingerprint: String? = nil) -> Bool {
         if let currentRequest, let feedbackStatus, !feedbackStatus.codeReviewRequests.isEmpty,
-           currentRequest.author.username == username, currentRequest.projectID == work.projectID,
+           currentRequest.isOwned(by: username, includingSoleAssignee: true), currentRequest.projectID == work.projectID,
            currentRequest.iid == work.iid, currentRequest.webURL.isGitLabMergeRequest(host: work.host, iid: work.iid),
            feedbackStatus.head == currentRequest.sha, feedbackStatus.fingerprint == discussionFingerprint,
            feedbackStatus.semanticContextFingerprint == currentRequest.semanticContextFingerprint {
@@ -106,6 +145,7 @@ struct AssistantJobExecution: Codable, Equatable, Sendable {
         guard state.isActive else { return self }
         var recovered = self
         recovered.state = .interrupted
+        recovered.diskAdmissionIssue = nil
         recovered.finishedAt = now
         return recovered
     }

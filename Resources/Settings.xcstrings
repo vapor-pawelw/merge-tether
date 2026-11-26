@@ -45,8 +45,8 @@
     "settings.hiddenReviews.help": {
       "extractionState": "manual",
       "localizations": {
-        "en": {"stringUnit": {"state": "translated", "value": "Restore open merge requests within 3 days of hiding them. After that, use + on the board to add them again."}},
-        "pl": {"stringUnit": {"state": "translated", "value": "Otwarte MR-y możesz przywrócić w ciągu 3 dni od ukrycia. Później możesz je dodać ponownie przyciskiem + na tablicy."}}
+        "en": {"stringUnit": {"state": "translated", "value": "Hidden merge requests stay here while you’re a reviewer. You can restore an open merge request at any time."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Ukryte MR-y pozostają na tej liście, dopóki jesteś ich recenzentem. Otwarty MR możesz przywrócić w każdej chwili."}}
       }
     },
     "settings.hiddenReviews.empty": {
@@ -55,13 +55,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No merge requests to restore."
+            "value": "No hidden merge requests."
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Brak MR-ów do przywrócenia."
+            "value": "Brak ukrytych MR-ów."
           }
         }
       }
@@ -2291,6 +2291,20 @@
           }
         },
         "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzaj istniejące rezerwacje i atomowo rezerwuj obsługę wolnych awarii w Twoich MR. Wyłącz tę opcję, aby potwierdzać każde przekazanie. Dane pipeline’u i uprawnienie do wysyłania zmian są sprawdzane osobno."}}
+      }
+    },
+    "settings.soleAssignee.toggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Treat MRs assigned only to me as mine" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Traktuj MR-y przypisane wyłącznie do mnie jako moje" } }
+      }
+    },
+    "settings.soleAssignee.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "These merge requests appear under Mine and follow your automation profile, including fixes, pushes and merging when enabled." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Te MR-y trafiają do sekcji Moje. Aktywny profil określa, czy automatyzacja może je poprawiać, wysyłać zmiany i scalać." } }
       }
     },
     "settings.general.newReviews.section": {

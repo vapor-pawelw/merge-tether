@@ -36,6 +36,7 @@ enum ProcessRunner {
             case workspaceLost(URL)
             case standardOutputLimitExceeded
             case outputCaptureFailed(String)
+            case resultUnavailable
         }
 
         let reason: Reason

@@ -138,7 +138,7 @@ final class MergeWorkflowMonitor {
 
         let account = Account(host: GitLabAccountIdentity.normalize(host), userID: user.id)
         let owned = authored.filter {
-            $0.state == .opened && $0.author.id == user.id && $0.webURL.isGitLabMergeRequest(host: host, iid: $0.iid)
+            $0.state == .opened && glab.owns($0, userID: user.id) && $0.webURL.isGitLabMergeRequest(host: host, iid: $0.iid)
         }
         let eligibleOwned = owned.filter { automationScope.permits($0, host: host, username: user.username) }
         let prior = baselines[account] ?? Baselines()
@@ -422,7 +422,7 @@ final class MergeWorkflowMonitor {
         for request in candidates where request.isOpen { merged.remove(Self.key(request)) }
         baselines.mergedReviews = merged.isEmpty ? nil : merged
         let otherRequests = candidates.filter {
-            $0.author.id != account.userID
+            !glab.owns($0, userID: account.userID)
                 && $0.webURL.isGitLabMergeRequest(host: account.host, iid: $0.iid)
         }
         let nonterminalKeys = Set(otherRequests.lazy.filter { $0.state != .merged && $0.state != .closed }.map(Self.key))

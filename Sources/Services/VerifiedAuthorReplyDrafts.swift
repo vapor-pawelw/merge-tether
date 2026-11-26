@@ -172,7 +172,7 @@ final class VerifiedAuthorReplyDrafts {
                          user: GitLabAuthenticatedUser, host: String, discussionID: String,
                          noteID: Int, semanticOptOutIDs: [Int]) -> Context? {
         guard let head = request.sha, !head.isEmpty, request.isOpen, request.draft != nil,
-              request.author.id == user.id,
+              settings.owns(request, userID: user.id),
               request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
               let fingerprint = ManualDiscussionResolution.fingerprint(discussions),
               let activeFingerprint = ManualDiscussionResolution.fingerprint(GitLabMergeRequestDiscussion.activeForReview(discussions)),
@@ -206,7 +206,7 @@ final class VerifiedAuthorReplyDrafts {
             && settings.automation.scope.permits(request, host: host, username: user.username)
             && AutomaticPublicationPolicy.safeForAutomaticPublication(draft)
             && settings.reviewParticipationPreferences.permitsAutomaticReply(draft, discussions: discussions,
-                requestAuthorID: request.author.id, userID: user.id, host: host, username: user.username,
+                requestAuthorID: user.id, userID: user.id, host: host, username: user.username,
                 semanticOptOutIDs: Set(context.semanticOptOutIDs))
     }
 

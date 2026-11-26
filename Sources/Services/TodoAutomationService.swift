@@ -238,7 +238,7 @@ final class TodoAutomationService {
         guard rule.runner == .assistant, rule.isConfigured, shouldProceed() else { return .notAdmitted(.policyChanged) }
         let request = try await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: work.host)
         let project = request.webURL.gitLabProjectPath
-        guard request.isOpen, request.author.username == username,
+        guard request.isOpen, let ownerID = settings.ownerID(of: request, username: username),
               request.webURL.isGitLabMergeRequest(host: work.host, iid: work.iid), rule.includes(project: project) else { return .notAdmitted(.inactiveRequest) }
         let discussions = try await glab.fetchMergeRequestDiscussions(projectID: work.projectID, iid: work.iid, host: work.host)
         if let verifiedFingerprint {
@@ -254,7 +254,7 @@ final class TodoAutomationService {
                   requests.allSatisfy({ question in
                       noteIDs.contains(question.sourceNoteID)
                           && !ignored.contains(where: { $0.sourceNoteID == question.sourceNoteID })
-                          && discussions.flatMap(\.notes).contains(where: { question.matches($0, authorID: request.author.id) })
+                          && discussions.flatMap(\.notes).contains(where: { question.matches($0, authorID: ownerID) })
                           && verifiedResidual.notes.contains(where: {
                               $0.noteID == question.sourceNoteID && ($0.ignoredDecisionIDs ?? []).isEmpty
                                   && (question.kind == .potentialDefect
@@ -266,9 +266,9 @@ final class TodoAutomationService {
         var remaining = verifiedFingerprint == nil
             ? Set(AssistantAutomationRunner.unhandledFeedback(noteIDs, work: work, username: username, settings: settings)) : Set(noteIDs)
         let candidates = verifiedFingerprint == nil
-            ? GitLabMergeRequestDiscussion.unresolvedFeedback(in: discussions, excluding: request.author.id)
+            ? GitLabMergeRequestDiscussion.unresolvedFeedback(in: discussions, excluding: ownerID)
             : GitLabMergeRequestDiscussion.activeForReview(discussions).flatMap(\.notes)
-                .filter { $0.system == false && $0.author?.id != request.author.id }
+                .filter { $0.system == false && $0.author?.id != ownerID }
         func revision(_ note: GitLabMergeRequestDiscussion.Note) -> String {
             UserAttentionSnapshot.digest("\(note.author?.id ?? 0)\n" + (note.body ?? ""))
         }
@@ -385,7 +385,8 @@ final class TodoAutomationService {
         let decisionContext = AssistantAutomationRunner.feedbackDecisionRevision(work: work, username: username, settings: settings)
         guard let residual, settings.automation.allowFollowUpPush, settings.automation.hasAutomaticActionConsent,
               settings.effectiveAutomationScope.permits(request, host: work.host, username: username),
-              !settings.ignoredMergeRequests.contains(target), request.author.username == username else { return nil }
+              !settings.ignoredMergeRequests.contains(target),
+              let ownerID = settings.ownerID(of: request, username: username) else { return nil }
         let allAttempts = settings.assistantHandoffs.filter { $0.key.work == work && settings.handoffMatchesAccount($0, host: work.host, username: username) && !$0.isObsoleteReminder }
         let attempts = allAttempts.filter { $0.feedbackDecisionRevision == decisionContext }
         guard !allAttempts.contains(where: { $0.operationalExecution?.state.isActive == true }) else { return nil }
@@ -403,7 +404,7 @@ final class TodoAutomationService {
         let questionIDs = Set(residual.codeReviewRequests.map(\.sourceNoteID))
         let excluded = settings.reviewParticipationPreferences.excludedIDs(host: work.host, username: username)
         let owed = ReReviewAssessment(notes: residual.notes).missingPublishedReplyNoteIDs(in: discussions,
-            authorID: request.author.id, excludedReplyAuthorIDs: excluded)
+            authorID: ownerID, excludedReplyAuthorIDs: excluded)
         let outstanding = Dictionary(residual.notes.filter {
             selectedIDs.contains($0.noteID) && ($0.state == .blocking || $0.state == .uncertain
                 || owed.contains($0.noteID) || questionIDs.contains($0.noteID))
@@ -481,7 +482,7 @@ final class TodoAutomationService {
         return availableProofs.contains { proof in
             guard proof.version == 1, proof.runID == origin.id, proof.host == work.host,
                   proof.projectID == request.projectID, proof.iid == request.iid,
-                  proof.username == username, proof.userID == request.author.id,
+                  proof.username == username, settings.owns(request, userID: proof.userID),
                   proof.headSHA == request.sha, proof.sourceProjectID == request.sourceProjectID,
                   proof.sourceBranch == request.sourceBranch else { return false }
             guard !proof.files.isEmpty, proof.files.count <= 20 else { return false }

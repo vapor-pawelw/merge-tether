@@ -112,7 +112,7 @@ import MergeTetherRemote
 
     private var canRemove: Bool {
         guard !isFinished, isReviewed, let request = item?.mergeRequest else { return false }
-        return request.author.username != target.username && request.projectID == target.projectID
+        return !monitor.settings.owns(request, username: target.username) && request.projectID == target.projectID
             && request.iid == target.iid && request.webURL == url
     }
 

@@ -56,6 +56,24 @@ final class AssistantAutomaticRetryCoordinator {
         drainTask?.cancel()
     }
 
+    static func recordDiskDeferredAttempt(for child: Handoff, at date: Date, settings: SettingsManager) {
+        guard let identity = child.automaticRetryIdentity, let parent = child.retryOf else { return }
+        let work = child.key.work
+        let target = AssistantAutomaticRetryTarget(host: work.host, username: child.key.username,
+            projectID: work.projectID, iid: work.iid)
+        guard let index = settings.assistantAutomaticRetryAttempts.firstIndex(where: {
+            $0.identity == identity && $0.parentJobID == parent && $0.target == target && $0.diskDeferred != true
+                && ($0.state == .reserved && $0.replacementJobID == nil
+                    || $0.state == .started && $0.replacementJobID == child.id)
+        }) else { return }
+        var attempt = settings.assistantAutomaticRetryAttempts[index]
+        attempt.state = .started
+        attempt.finishedAt = date
+        attempt.replacementJobID = child.id
+        attempt.diskDeferred = true
+        settings.assistantAutomaticRetryAttempts[index] = attempt
+    }
+
     /// Startup-only, after job completion checkpoints have been recovered. An admission that did
     /// not record a child consumes its attempt; it never replays the same reservation.
     func recoverUnfinishedAdmissions() {
@@ -137,7 +155,9 @@ final class AssistantAutomaticRetryCoordinator {
 
     private func apply(_ result: LaunchResult, reservation: AssistantAutomaticRetryAttempt,
                        previousIdentity: AssistantAutomaticRetryIdentity?) {
-        guard let index = settings.assistantAutomaticRetryAttempts.firstIndex(where: { $0.id == reservation.id }) else { return }
+        guard let index = settings.assistantAutomaticRetryAttempts.firstIndex(where: {
+            $0.id == reservation.id && $0.diskDeferred != true
+        }) else { return }
         switch result {
         case .started(let child):
             settings.assistantAutomaticRetryAttempts[index].state = .started
@@ -197,7 +217,11 @@ final class AssistantAutomaticRetryCoordinator {
                 $0.automaticRetryIdentity == record.identity && $0.retryOf == record.parentJobID && target($0) == record.target
             }
             guard children.count == 1, let child = children.first, child.id != record.parentJobID else { continue }
-            if record.state == .reserved {
+            if let execution = child.execution, execution.prelaunchDiskFailure != nil, record.diskDeferred != true {
+                guard record.state == .reserved ? record.replacementJobID == nil : record.replacementJobID == child.id else { continue }
+                Self.recordDiskDeferredAttempt(for: child, at: execution.finishedAt ?? now(), settings: settings)
+                changed = true
+            } else if record.state == .reserved {
                 guard record.replacementJobID == nil else { continue }
                 settings.assistantAutomaticRetryAttempts[index].state = .started
                 settings.assistantAutomaticRetryAttempts[index].finishedAt = now()

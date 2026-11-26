@@ -56,6 +56,8 @@ extension SettingsManager {
                 && $0.pipelineReservation == nil && $0.followUpPushAllowed != true
                 && $0.verifiedFeedbackNotes?.isEmpty != false && $0.feedbackTodos?.isEmpty != false
                 && $0.feedbackNoteIDs?.isEmpty != false
+                // Keep the owner of a workspace, including any retained legacy proof or local edits.
+                && $0.execution?.workingDirectory == nil
         }
         let retired = Set(displayHistory.dropFirst(Self.retainedRunHistory).map(\.id))
         guard !retired.isEmpty || !transcripts.isEmpty else { return false }

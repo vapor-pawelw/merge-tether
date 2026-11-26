@@ -208,6 +208,8 @@ enum AssistantAutomationRunner {
         var readOnlyReview: Bool? = nil
         var blockerDiagnosis: MergeBlockerDiagnosis? = nil
         var accountUserID: Int? = nil
+        var estimatedRepositoryBytes: Int64? = nil
+        var requiresSoleAssignment: Bool? = nil
 
         var deliveredFeedbackTodos: [Todo.FeedbackIdentity] {
             if let execution { return execution.state == .succeeded ? feedbackTodos ?? [] : [] }
@@ -265,7 +267,9 @@ enum AssistantAutomationRunner {
         }
     }
 
-    private static let coordinator = AssistantJobCoordinator()
+    private static let coordinator = AssistantJobCoordinator(cleanupAfterSuccess: { handoff, _ in
+        await AssistantRunReclamation.reclaimGeneratedFiles(after: handoff)
+    })
     static var onJobFinished: ((Handoff) -> Void)? {
         get { coordinator.onFinished }
         set { coordinator.onFinished = newValue }
@@ -276,6 +280,10 @@ enum AssistantAutomationRunner {
     }
 
     static func resumePendingJobs() { coordinator.resumePendingJobs() }
+
+    static func canRetryAfterDiskFailure(_ execution: AssistantJobExecution?) -> Bool {
+        coordinator.canRetryAfterDiskFailure(execution)
+    }
 
     static func finishQueuedResolvedFeedback(_ id: UUID, settings: SettingsManager) -> Bool {
         coordinator.finishQueuedResolvedFeedback(id, settings: settings)
@@ -438,6 +446,8 @@ enum AssistantAutomationRunner {
         var semanticContextFingerprint: String?
         var reviewer: GitLabAuthenticatedUser?
         var pipelineDiagnosis: ForeignPipelineDiagnosis?
+        var estimatedRepositoryBytes: Int64?
+        var requiresSoleAssignment = false
         if foreignDiagnosis || jobCoordinator == nil || configurationSnapshot != nil || blockerDiagnosis != nil
             || (reviewRetry != nil && glab != nil) {
             let service = glab ?? GlabService()
@@ -471,6 +481,18 @@ enum AssistantAutomationRunner {
             if let pipelineReservation {
                 try validateOwnedPipelineState(snapshot.request, reservation: pipelineReservation)
             }
+            if mrWorkflow == .followUp || allowsPush || pipelineReservation != nil {
+                guard settings.owns(snapshot.request, userID: snapshot.user.id) else {
+                    throw AssistantJobExecutor.ExecutionError.disabledPermission
+                }
+            }
+            requiresSoleAssignment = snapshot.request.author.id != snapshot.user.id
+                && settings.owns(snapshot.request, userID: snapshot.user.id)
+            if let retryOf, settings.assistantHandoffs.first(where: { $0.id == retryOf })?.requiresSoleAssignment == true {
+                guard settings.owns(snapshot.request, userID: snapshot.user.id) else {
+                    throw AssistantJobExecutor.ExecutionError.disabledPermission
+                }
+            }
             headSHA = snapshot.request.sha
             semanticContextFingerprint = snapshot.request.semanticContextFingerprint
             reviewer = snapshot.user
@@ -491,6 +513,11 @@ enum AssistantAutomationRunner {
                 }
                 guard let pipelineDiagnosis else { throw AssistantJobExecutor.ExecutionError.contextUnavailable }
                 try await pipelineDiagnosis.verify(request: snapshot.request, user: snapshot.user, host: work.host, glab: service)
+            }
+            if ApplicationLaunchMode.resolve(environment: ProcessInfo.processInfo.environment) == .application {
+                estimatedRepositoryBytes = await executionCoordinator.repositorySize(
+                    projectID: snapshot.request.sourceProjectID ?? snapshot.request.projectID,
+                    account: .init(host: work.host, username: username), glab: service)
             }
         } else { headSHA = expectedHeadSHA }
         try validateLaunchPolicy()
@@ -625,7 +652,8 @@ enum AssistantAutomationRunner {
             pipelineHandoffConfirmation: pipelineHandoffConfirmation,
             readOnlyReview: usesReadOnlyReview ? true : nil,
             blockerDiagnosis: blockerDiagnosis,
-            accountUserID: reviewer?.id ?? settings.authenticatedAccountID(host: work.host, username: username)
+            accountUserID: reviewer?.id ?? settings.authenticatedAccountID(host: work.host, username: username),
+            estimatedRepositoryBytes: estimatedRepositoryBytes, requiresSoleAssignment: requiresSoleAssignment ? true : nil
         )
         for (noteID, revision) in verifiedFeedbackNotes ?? [:] {
             settings.authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision,
@@ -644,7 +672,7 @@ enum AssistantAutomationRunner {
         try validateLaunchPolicy()
         if mrWorkflow == .followUp { FollowUpVerificationStore.register(handoff, settings: settings) }
         guard executionCoordinator.schedule(handoff, settings: settings) else { throw HandoffError.executionUnavailable }
-        return handoff
+        return settings.assistantHandoffs.first(where: { $0.id == id }) ?? handoff
     }
 
     static func synchronizeInterruptedRuns(settings: SettingsManager) {
@@ -731,6 +759,7 @@ enum AssistantAutomationRunner {
         var retryHead = expectedHeadSHA
         if let prior = handoff.pipelineReservation {
             let glab = glab ?? GlabService()
+        glab.ownershipSettings = settings
             if let executable = settings.glabPath { glab.glabPath = executable }
             else { glab.glabPath = await OnboardingDetector.findGlabExecutable() }
             guard await glab.recheck() == nil, glab.authStatus == .authenticated,
@@ -745,7 +774,7 @@ enum AssistantAutomationRunner {
                   prior.mergeRequestIID == request.iid else {
                 throw AssistantJobExecutor.ExecutionError.contextUnavailable
             }
-            guard request.author.id == user.id else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
+            guard settings.owns(request, userID: user.id) else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
             try AssistantJobExecutor.validateHeadSnapshot(expected: handoff.expectedHeadSHA, actual: request.sha)
             if let expectedHeadSHA {
                 try AssistantJobExecutor.validateHeadSnapshot(expected: expectedHeadSHA, actual: request.sha)
@@ -922,6 +951,7 @@ enum AssistantAutomationRunner {
                                      isReview: Bool, glab: GlabService? = nil) async throws
         -> (request: GitLabMergeRequest, user: GitLabAuthenticatedUser) {
         let glab = glab ?? GlabService()
+        glab.ownershipSettings = settings
         if let executable = settings.glabPath { glab.glabPath = executable }
         else { glab.glabPath = await OnboardingDetector.findGlabExecutable() }
         let probeError = await glab.recheck()
@@ -937,7 +967,7 @@ enum AssistantAutomationRunner {
             throw AssistantJobExecutor.ExecutionError.contextUnavailable
         }
         _ = try AssistantJobExecutor.validateMergeRequestContext(state: request.state, head: request.sha)
-        try AssistantJobExecutor.validateReviewOwnership(isReview: isReview, authorID: request.author.id, userID: user.id)
+        try AssistantJobExecutor.validateReviewOwnership(isReview: isReview, owned: settings.owns(request, userID: user.id))
         return (request, user)
     }
 

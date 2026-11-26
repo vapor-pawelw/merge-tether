@@ -34,7 +34,7 @@ struct BoardCompactJobCard: View {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: request.projectID, iid: request.iid),
             title: request.title, url: request.webURL)
         item.mergeRequest = request
-        item.isAuthored = request.author.username == handoff.key.username
+        item.isAuthored = monitor.settings.owns(request, username: handoff.key.username)
         item.lifecycleCompletionID = monitor.settings.mrLifecycleLedger.completionID(for: scopeTarget)
         return item
     }

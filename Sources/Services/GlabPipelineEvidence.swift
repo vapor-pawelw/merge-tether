@@ -90,7 +90,8 @@ extension GlabService {
         }
 
         let current = try await fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
-        guard current.state == request.state, current.author.id == request.author.id, EvidenceContext.sameHead(source, current.sha),
+        guard current.state == request.state, current.author.id == request.author.id,
+              owns(current, userID: user.id) == owns(request, userID: user.id), EvidenceContext.sameHead(source, current.sha),
               current.sourceProjectID == sourceProject, current.sourceBranch == request.sourceBranch,
               current.targetProjectID == targetProject, current.targetBranch == request.targetBranch,
               current.headPipeline?.id == id, current.headPipeline?.projectID == project,

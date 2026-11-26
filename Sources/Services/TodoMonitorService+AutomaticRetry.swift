@@ -47,7 +47,8 @@ extension TodoMonitorService {
               cliHealth.hold(for: configuration.assistant) == nil,
               let current = settings.assistantHandoffs.first(where: { $0.id == job.id }),
               !settings.mrActionIntents.contains(where: { $0.reviewRecoveryJobID == job.id }),
-              retryableExecution(current), current.draftRepair == nil,
+              retryableExecution(current), AssistantAutomationRunner.canRetryAfterDiskFailure(current.execution),
+              current.draftRepair == nil,
               !(current.workflow == .followUp && !(current.feedbackNoteIDs ?? []).isEmpty),
               !settings.assistantHandoffs.contains(where: { $0.id != current.id && $0.key.work == current.key.work
                   && $0.key.username == current.key.username && $0.execution?.state.isActive == true }),
@@ -109,10 +110,10 @@ extension TodoMonitorService {
         }
         guard configuration.scope.permits(request, host: job.key.work.host, username: job.key.username),
               automaticRetryPermission(job, request: request),
-              !(job.workflow == .review || job.reviewModel != nil) || request.author.id != user.id,
-              job.pipelineReservation == nil || request.author.id == user.id,
-              job.followUpPushAllowed != true || request.author.id == user.id,
-              job.taskIntent != .conflictResolution || request.author.id == user.id else { return .deferred }
+              !(job.workflow == .review || job.reviewModel != nil) || !settings.owns(request, userID: user.id),
+              job.pipelineReservation == nil || settings.owns(request, userID: user.id),
+              job.followUpPushAllowed != true || settings.owns(request, userID: user.id),
+              job.taskIntent != .conflictResolution || settings.owns(request, userID: user.id) else { return .deferred }
         let existingJobIDs = Set(settings.assistantHandoffs.map(\.id))
         let replacement: AssistantAutomationRunner.Handoff
         do {

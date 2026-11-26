@@ -12,6 +12,7 @@ struct NewReviewIntakeTests {
     private var target: MRAutomationScope.Target { .init(host: host, username: "alice", projectID: 1, iid: 42) }
 
     private func fixture(preset: AutomationPreset, addDirectly: Bool = true, state: String = "opened",
+                         reviewers: String? = nil, exactReadFails: Bool = false,
                          body: (TodoMonitorService, SettingsManager) async throws -> Void) async throws {
         let name = "NewReviewIntakeTests-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: name))
@@ -23,7 +24,8 @@ struct NewReviewIntakeTests {
         let gitlab = InMemoryGitLab()
         defer { gitlab.close() }
         gitlab.write("todos", todoJSON)
-        gitlab.write("merge-request", mergeRequestJSON.replacingOccurrences(of: #""state":"opened""#, with: #""state":"\#(state)""#))
+        let live = mergeRequestJSON.replacingOccurrences(of: #""state":"opened""#, with: #""state":"\#(state)""#)
+        gitlab.write("merge-request", reviewers.map { "\(live.dropLast()),\"reviewers\":\($0)}" } ?? live)
         gitlab.handler = { [mergeRequestJSON] request in
             if request.arguments.first == "config" { return InMemoryGitLab.output(host) }
             if request.arguments.first == "auth" { return InMemoryGitLab.output(error: "Logged in to \(host) as alice") }
@@ -32,7 +34,10 @@ struct NewReviewIntakeTests {
                 return InMemoryGitLab.output("[\(mergeRequestJSON)]")
             }
             if request.endpoint == "/user" { return InMemoryGitLab.output(#"{"id":7,"username":"alice"}"#) }
-            if request.endpoint == "/projects/1/merge_requests/42" { return try gitlab.response("merge-request") }
+            if request.endpoint == "/projects/1/merge_requests/42" {
+                if exactReadFails { return InMemoryGitLab.output(error: "Read failed", code: 1) }
+                return try gitlab.response("merge-request")
+            }
             if request.endpoint == "/projects/group%2Frepo" {
                 return InMemoryGitLab.output(#"{"id":1,"path_with_namespace":"group/repo"}"#)
             }
@@ -81,8 +86,8 @@ struct NewReviewIntakeTests {
         }
     }
 
-    @Test(arguments: [false, true])
-    func leavingReviewUpdatesGitLabMembershipOnlyWhenConfirmed(gitLabAccepts: Bool) async throws {
+    @Test(arguments: [false, true], ["opened", "closed", "merged"])
+    func leavingReviewUpdatesGitLabMembershipOnlyWhenConfirmed(gitLabAccepts: Bool, state: String) async throws {
         let name = "LeaveReview-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
@@ -93,8 +98,15 @@ struct NewReviewIntakeTests {
         defer { gitlab.close() }
         let other = #"{"id":11,"username":"charlie","name":"Charlie"}"#
         let me = #"{"id":7,"username":"alice","name":"Alice"}"#
-        let assigned = "\(mergeRequestJSON.dropLast()),\"reviewers\":[\(me),\(other)]}"
-        let unassigned = "\(mergeRequestJSON.dropLast()),\"reviewers\":[\(other)]}"
+        let live = mergeRequestJSON.replacingOccurrences(of: #""state":"opened""#, with: #""state":"\#(state)""#)
+        let assigned = "\(live.dropLast()),\"reviewers\":[\(me),\(other)]}"
+        let unassigned = "\(live.dropLast()),\"reviewers\":[\(other)]}"
+        let assignedRequest = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(assigned.utf8))
+        let hidden = !assignedRequest.isOpen
+        if hidden {
+            try #require(settings.hideReviewedMergeRequest(.init(
+                target: target, title: assignedRequest.title, url: assignedRequest.webURL)))
+        }
         gitlab.write("merge-request", assigned)
         gitlab.handler = { request in
             if request.arguments.first == "config" { return InMemoryGitLab.output(self.host) }
@@ -102,7 +114,7 @@ struct NewReviewIntakeTests {
             if request.endpoint == "/user" { return InMemoryGitLab.output(me) }
             if request.endpoint == "/projects/1/merge_requests/42" { return try gitlab.response("merge-request") }
             if request.endpoint.hasPrefix("/merge_requests?scope=all&state=opened&reviewer_id=7") {
-                return InMemoryGitLab.output(gitlab.text("merge-request") == assigned ? "[\(assigned)]" : "[]")
+                return InMemoryGitLab.output(!hidden && gitlab.text("merge-request") == assigned ? "[\(assigned)]" : "[]")
             }
             if request.endpoint == "graphql" {
                 #expect(request.arguments.contains("username=alice"))
@@ -125,8 +137,7 @@ struct NewReviewIntakeTests {
         settings.onboardingCompleted = true
         await monitor.refreshManually()
         let board = monitor.boardSnapshot
-        let row = try #require(board.reviewed.first)
-        let request = try #require(row.displayRequest)
+        let request = try #require(hidden ? monitor.hiddenReviewAssignments.first?.request : board.reviewed.first?.displayRequest)
         let revision = glab.accountRevision
 
         let otherRemoval = ReviewerChange(.remove, reviewerID: 11, username: "charlie")
@@ -137,17 +148,22 @@ struct NewReviewIntakeTests {
         }
         #expect(gitlab.requests.allSatisfy { $0.endpoint != "graphql" })
 
-        var card = RemoteBoardAdapter.card(row.item, account: "alice@\(host)")
-        let context = try #require(RemoteCardActionContext(card: card, board: board, monitor: monitor))
-        context.project(&card)
-        #expect(card.canRemoveFromBoard == true && card.canLeaveReview == true)
-        let command = try #require(RemoteCardChange(argument: RemoteCardChange.leaveReview.argument))
-        let outcome = await context.execute(command)
+        let outcome: RemoteCommandResult.Status
+        if hidden {
+            outcome = await monitor.leaveReview(request, accountRevision: revision)
+        } else {
+            let row = try #require(board.reviewed.first)
+            var card = RemoteBoardAdapter.card(row.item, account: "alice@\(host)")
+            let context = try #require(RemoteCardActionContext(card: card, board: board, monitor: monitor))
+            context.project(&card)
+            #expect(card.canRemoveFromBoard == true && card.canLeaveReview == true)
+            outcome = await context.execute(.leaveReview)
+        }
         #expect(outcome == (gitLabAccepts ? .completed : .uncertain))
         #expect(gitlab.requests.filter { $0.endpoint == "graphql" }.count == 1)
-        #expect(monitor.boardSnapshot.reviewed.isEmpty == gitLabAccepts)
-        #expect(monitor.hiddenReviewAssignments.isEmpty)
-        #expect(!settings.ignoredMergeRequests.contains(target))
+        #expect(monitor.boardSnapshot.reviewed.isEmpty == (hidden || gitLabAccepts))
+        #expect(monitor.hiddenReviewAssignments.isEmpty == (!hidden || gitLabAccepts))
+        #expect(settings.ignoredMergeRequests.contains(target) == (hidden && !gitLabAccepts))
 
         if gitLabAccepts {
             #expect(monitor.boardSnapshot.otherMergeRequests.isEmpty)
@@ -155,7 +171,8 @@ struct NewReviewIntakeTests {
             #expect(live.reviewers?.map(\.username) == ["charlie"])
             gitlab.write("merge-request", assigned)
             await monitor.refreshManually()
-            #expect(monitor.boardSnapshot.reviewed.first?.id.iid == 42)
+            if !hidden { #expect(monitor.boardSnapshot.reviewed.first?.id.iid == 42) }
+            #expect(!settings.ignoredMergeRequests.contains(target))
         }
     }
 
@@ -253,7 +270,7 @@ struct NewReviewIntakeTests {
         }
     }
 
-    @Test func knownFinishedHiddenReviewsDoNotAppearInTheRestoreList() async throws {
+    @Test func knownFinishedHiddenReviewsStayHiddenWithoutRestore() async throws {
         try await fixture(preset: .manual) { monitor, settings in
             await monitor.refreshNow()
             let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(mergeRequestJSON.utf8))
@@ -264,13 +281,15 @@ struct NewReviewIntakeTests {
             let closedJSON = mergeRequestJSON.replacingOccurrences(of: #""state":"opened""#, with: #""state":"closed""#)
             let closed = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(closedJSON.utf8))
             settings.mrLifecycleLedger.record(closed, for: target)
-            #expect(monitor.hiddenReviewAssignments.isEmpty)
+            #expect(monitor.hiddenReviewAssignments.map(\.target) == [target])
+            let hidden = try #require(monitor.hiddenReviewAssignments.first)
+            #expect(!monitor.restoreReviewedMergeRequests([hidden]))
         }
     }
 
     @Test(arguments: ["merged", "closed"])
-    func refreshingRetiresFinishedHiddenRequestsAndManualAddReportsTheirState(_ state: String) async throws {
-        try await fixture(preset: .manual, state: state) { monitor, settings in
+    func assignedFinishedHiddenReviewsSurviveRefreshAndManualAddReportsTheirState(_ state: String) async throws {
+        try await fixture(preset: .manual, state: state, reviewers: #"[{"id":7,"username":"alice","name":"Alice"}]"#) { monitor, settings in
             let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(mergeRequestJSON.utf8))
             let hidden = HiddenReview(target: target, title: request.title, url: request.webURL)
             try #require(settings.hideFilteredReviews([hidden]))
@@ -280,10 +299,19 @@ struct NewReviewIntakeTests {
 
             monitor.attention.refresh(host: host, username: target.username, todos: [])
             await monitor.refreshManually()
-            #expect(monitor.hiddenReviewAssignments.isEmpty)
+            let current = try #require(monitor.hiddenReviewAssignments.first)
+            #expect(current.target == target)
+            #expect(current.request?.state.rawValue == state)
+            #expect(!monitor.canRestoreHiddenReview(current))
             #expect(monitor.hiddenReviewNotifications.isEmpty)
             #expect(!monitor.restoreReviewedMergeRequests([savedHide]))
             #expect(settings.ignoredMergeRequests.contains(target))
+
+            let phone = RemoteBoardAdapter.board(monitor: monitor, session: UUID(), account: "alice@\(host)",
+                includesReviewBoard: true)
+            let phoneCard = try #require(phone.hiddenReviews?.first)
+            #expect(phoneCard.url == request.webURL)
+            #expect(phoneCard.actions.isEmpty)
 
             for (address, projectID) in [(request.webURL.absoluteString, Int?.none), ("!42", 1)] {
                 do {
@@ -297,18 +325,43 @@ struct NewReviewIntakeTests {
         }
     }
 
-    @Test func manualAddBringsBackAnOpenRequestAfterItsRestoreWindowExpires() async throws {
+    @Test func anOpenHideIsStillExplicitlyRestorableWhenTheAssignmentListOmitsIt() async throws {
         try await fixture(preset: .manual) { monitor, settings in
             let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(mergeRequestJSON.utf8))
             let hidden = HiddenReview(target: target, title: request.title, url: request.webURL)
-            let fourDaysAgo = Date().addingTimeInterval(-4 * 24 * 60 * 60)
-            try #require(settings.hideReviewedMergeRequest(hidden, now: fourDaysAgo))
-            #expect(monitor.hiddenReviewAssignments.isEmpty)
-
-            let added = try await monitor.addManagedMergeRequest(from: request.webURL.absoluteString)
-            #expect(added.iid == request.iid)
+            try #require(settings.hideReviewedMergeRequest(hidden))
+            monitor.attention.refresh(host: host, username: target.username, todos: [])
+            await monitor.refreshManually()
+            let current = try #require(monitor.hiddenReviewAssignments.first)
+            #expect(monitor.restoreReviewedMergeRequests([current]))
             #expect(!settings.ignoredMergeRequests.contains(target))
-            #expect(settings.automation.scope.isManaged(target))
+        }
+    }
+
+    @Test(arguments: ["opened", "closed", "merged"])
+    func anExactReadWithoutTheAssignedReviewerRemovesTheHide(_ state: String) async throws {
+        try await fixture(preset: .manual, state: state, reviewers: "[]") { monitor, settings in
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(mergeRequestJSON.utf8))
+            try #require(settings.hideFilteredReviews([.init(target: target, title: request.title, url: request.webURL)]))
+            monitor.attention.refresh(host: host, username: target.username, todos: [])
+            await monitor.refreshManually()
+
+            #expect(monitor.hiddenReviewAssignments.isEmpty)
+            #expect(monitor.hiddenReviewNotifications.isEmpty)
+            #expect(!settings.ignoredMergeRequests.contains(target))
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func aMissingAssignmentRowWithoutReviewerEvidenceKeepsTheHide(exactReadFails: Bool) async throws {
+        try await fixture(preset: .manual, state: "closed", exactReadFails: exactReadFails) { monitor, settings in
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(mergeRequestJSON.utf8))
+            try #require(settings.hideReviewedMergeRequest(.init(target: target, title: request.title, url: request.webURL)))
+            monitor.attention.refresh(host: host, username: target.username, todos: [])
+            await monitor.refreshManually()
+
+            #expect(monitor.hiddenReviewAssignments.map(\.target) == [target])
+            #expect(settings.ignoredMergeRequests.contains(target))
         }
     }
 

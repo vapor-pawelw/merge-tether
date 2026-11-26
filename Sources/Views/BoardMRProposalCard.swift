@@ -35,7 +35,7 @@ struct BoardMRProposalCard: View {
         var item = proposal.item ?? .init(id: .init(projectID: request.projectID, iid: request.iid),
             title: request.title, url: request.webURL)
         item.mergeRequest = request
-        item.isAuthored = request.author.username == proposal.target.username
+        item.isAuthored = monitor.settings.owns(request, username: proposal.target.username)
         item.lifecycleCompletionID = monitor.settings.mrLifecycleLedger.completionID(for: proposal.target)
         return item
     }

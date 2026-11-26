@@ -213,7 +213,7 @@ extension SettingsManager {
         case .off: .manual
         }
         return .init(mode: effectiveMode, restrictions: automation.publicationRestrictions,
-                     aiCommentCriteriaOverride: automation.aiCommentCriteriaOverride)
+                     aiCommentCriteriaOverride: automation.aiCommentCriteriaOverride, treatSoleAssigneeAsOwn: treatSoleAssigneeAsOwn)
     }
 
     /// A pending audit affects automatic execution for this account and MR until its reads recover.
@@ -240,7 +240,7 @@ extension SettingsManager {
         return switch action {
         case .commentPublication: publicationPolicy(for: target).mode != .manual
         case .merge:
-            request.author.username == target.username && request.draft == false
+            owns(request, username: target.username) && request.draft == false
                 && request.detailedMergeStatus != .draftStatus
                 && automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath,
                     optedIn: autoMergePreference(for: target) == .on)

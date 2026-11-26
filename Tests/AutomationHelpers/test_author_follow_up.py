@@ -54,6 +54,39 @@ class AuthorFollowUpTest(unittest.TestCase):
     def verify(self):
         return self.verifier.verify("gitlab.example.org", "1", "2", self.run["runID"], self.head, self.evidence)
 
+    def test_sole_assignee_can_verify_only_with_run_permission(self):
+        self.mr["author"] = {"id": 7}
+        self.mr["assignees"] = [{"id": 3}]
+        with self.assertRaises(ValueError):
+            self.verify()
+        self.run["soleAssigneeAllowed"] = True
+        self.save_run()
+        proof = self.verify()
+        self.drafts.append({"id": 13, "author_id": 3, "note": "Verified delegated fix"})
+        self.assertTrue(self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[13]")["sealed"])
+
+    def test_changing_the_assignment_or_run_permission_blocks_sealing(self):
+        self.mr["author"] = {"id": 7}
+        self.run["soleAssigneeAllowed"] = True
+        self.save_run()
+        for assignees in ([], [{"id": 7}], [{"id": 3}, {"id": 7}], None, [{"id": "3"}]):
+            with self.subTest(assignees=assignees):
+                self.mr["assignees"] = [{"id": 3}]
+                self.drafts = self.drafts[:1]
+                proof = self.verify()
+                self.drafts.append({"id": 13, "author_id": 3, "note": "Verified delegated fix"})
+                self.mr["assignees"] = assignees
+                with self.assertRaises(ValueError):
+                    self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[13]")
+        self.mr["assignees"] = [{"id": 3}]
+        self.drafts = self.drafts[:1]
+        proof = self.verify()
+        self.drafts.append({"id": 13, "author_id": 3, "note": "Verified delegated fix"})
+        self.run["soleAssigneeAllowed"] = False
+        self.save_run()
+        with self.assertRaises(ValueError):
+            self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[13]")
+
     def test_live_draft_requires_exact_run_opt_in_before_status_and_verification(self):
         self.mr["draft"] = True
         for permission in (None, False, "true", 1):

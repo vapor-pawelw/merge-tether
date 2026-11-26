@@ -146,7 +146,7 @@ import MergeTetherRemote
             switch entry.source {
             case .job(let job, let attempt):
                 return .init(id: entry.id, title: String(localized: .AutomationHistory.automationHistoryRun(attempt)) + " · " + job.title,
-                    status: jobStatus(job.execution?.state),
+                    status: String(localized: job.execution?.statusTitle ?? .AssistantJobs.assistantJobsStatusUnavailable),
                     summary: (job.execution?.attentionExplanation ?? job.execution?.summary ?? job.execution?.errorExplanation).map(GlabService.redactWorkflowEvidence),
                     createdAt: entry.createdAt, head: job.expectedHeadSHA)
             case .workflow(let workflow):
@@ -315,20 +315,6 @@ import MergeTetherRemote
         return String(localized: label)
     }
 
-    private static func jobStatus(_ state: AssistantJobExecution.State?) -> String {
-        let label: LocalizedStringResource = switch state {
-        case .queued: .AssistantJobs.assistantJobsQueued
-        case .running: .AssistantJobs.assistantJobsRunning
-        case .succeeded: .AssistantJobs.assistantJobsSucceeded
-        case .blocked: .AssistantJobs.assistantJobsBlocked
-        case .failed: .AssistantJobs.assistantJobsFailed
-        case .cancelled: .AssistantJobs.assistantJobsCancelled
-        case .interrupted: .AssistantJobs.assistantJobsInterrupted
-        case .feedbackResolved: .AssistantJobs.assistantJobsFeedbackResolved
-        case nil: .AssistantJobs.assistantJobsStatusUnavailable
-        }
-        return String(localized: label)
-    }
     private static func eventStatus(_ state: MRAutomationEvent.State) -> String {
         let label: LocalizedStringResource = switch state {
         case .requested: .AutomationHistory.automationHistoryStateRequested

@@ -176,7 +176,7 @@ final class MergeWorkflowAutomation {
         // Keep that gap neutral even if a to-do route requested the pipeline.
         if settings.pipelineRefreshAttempts.contains(where: {
             $0.createdPipelineID != nil && $0.target.host == host && $0.target.username == username
-                && $0.userID == request.author.id && $0.target.projectID == request.projectID && $0.target.iid == request.iid
+                && settings.owns(request, userID: $0.userID) && $0.target.projectID == request.projectID && $0.target.iid == request.iid
                 && $0.oldPipelineID == request.headPipeline?.id && $0.evidenceContext.binds(to: .init(head: request.sha), policy: .head)
                 && $0.sourceProjectID == request.sourceProjectID && $0.sourceBranch == request.sourceBranch
                 && $0.targetProjectID == request.targetProjectID && $0.targetBranch == request.targetBranch
@@ -372,7 +372,7 @@ final class MergeWorkflowAutomation {
                   (entry.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   let key = pipelineKey(entry), key.projectID > 0, key.mergeRequestIID > 0, key.pipelineID > 0,
                   let current = authored.first(where: { $0.projectID == key.projectID && $0.iid == key.mergeRequestIID }),
-                  current.state == .opened, current.author.id == user.id,
+                  current.state == .opened, settings.owns(current, userID: user.id),
                   settings.effectiveAutomationScope.permits(current, host: entry.host, username: entry.user.username),
                   let source = current.sha, GlabService.isFullGitSHA(source), EvidenceContext.sameHead(entry.event.mergeRequest.sha, source),
                   current.headPipeline?.id == key.pipelineID, current.headPipeline?.status == .failed,
@@ -659,7 +659,7 @@ final class MergeWorkflowAutomation {
         var handoff: ExistingPipelineWorkDetector.Key?
         var failureAfterInfrastructureRetry: ExistingPipelineWorkDetector.FailedJobs?
         if event.kind == .pipelineFailure {
-            guard let key = pipelineKey(entry), latest.author.id == entry.user.id,
+            guard let key = pipelineKey(entry), settings.owns(latest, userID: entry.user.id),
                   !hasActiveWorker(entry),
                   latest.headPipeline?.id == key.pipelineID,
                   latest.headPipeline?.status == .failed
@@ -725,7 +725,7 @@ final class MergeWorkflowAutomation {
                 jobID, pipelineID: handoff.pipelineID, projectID: pipelineProjectID, host: entry.host,
                 beforeRetry: {
                     let current = try await self.glab.fetchMergeRequest(projectID: latest.projectID, iid: latest.iid, host: entry.host)
-                    guard current.state == .opened, current.author.id == entry.user.id,
+                    guard current.state == .opened, settings.owns(current, userID: entry.user.id),
                           current.webURL == latest.webURL, EvidenceContext.sameHead(latest.sha, current.sha),
                           current.sourceProjectID == latest.sourceProjectID, current.sourceBranch == latest.sourceBranch,
                           current.targetProjectID == latest.targetProjectID, current.targetBranch == latest.targetBranch,
@@ -866,7 +866,7 @@ final class MergeWorkflowAutomation {
         // Planning events keep their narrower remote-action policy, but every CLI route can inspect live evidence with tools.
         let mrWorkflow: AssistantAutomationRunner.MRWorkflow? = switch event.kind {
         case .reviewUpdate: .review
-        case .newDiscussion, .pipelineFailure: current.author.username == entry.user.username ? .followUp : nil
+        case .newDiscussion, .pipelineFailure: settings.owns(current, userID: entry.user.id) ? .followUp : nil
         case .reviewWaiting: nil
         case .blockerChange, .stackDependencyMerged: nil
         }
@@ -944,7 +944,7 @@ final class MergeWorkflowAutomation {
               (skipped.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               skipped.event.pipelineID == key.pipelineID, skipped.event.mergeRequest.projectID == current.projectID,
               skipped.event.mergeRequest.iid == current.iid, EvidenceContext.sameHead(skipped.event.mergeRequest.sha, current.sha),
-              current.state == .opened, current.author.id == entry.user.id,
+              current.state == .opened, settings.owns(current, userID: entry.user.id),
               settings.effectiveAutomationScope.permits(current, host: entry.host, username: entry.user.username),
               current.headPipeline?.id == key.pipelineID, current.headPipeline?.status == .failed,
               configuration.preservingScope(from: settings.automation) == settings.automation,

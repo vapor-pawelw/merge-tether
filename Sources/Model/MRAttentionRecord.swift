@@ -64,5 +64,6 @@ struct MRAttentionRecord {
             && left.evidenceContext().binds(to: right.evidenceContext(), policy: .semanticText)
             && left.draft == right.draft && left.author.id == right.author.id
             && left.author.username == right.author.username
+            && left.soleAssignee == right.soleAssignee
     }
 }

@@ -241,48 +241,81 @@ struct IncomingReviewFilterTests {
         #expect(afterAcknowledgement.filteredHiddenReviewDetails[target(2)]?.inboxNotification == nil)
     }
 
-    @Test func restorationExpiresAfterThreeDaysAcrossRestartWithoutLiftingTheHide() throws {
-        let suite = "IncomingReviewFilter.Expiration.\(UUID())"
+    @Test func legacyRestoreDeadlinesKeepExpiredHidesRestorableAcrossRestart() throws {
+        struct LegacyHide: Encodable {
+            let target: MRAutomationScope.Target
+            let title: String
+            let url: URL
+            let restoreUntil: Date
+            var manuallyHidden: Bool? = nil
+        }
+        struct LegacyHides: Encodable {
+            let targets: Set<MRAutomationScope.Target>
+            let details: [MRAutomationScope.Target: LegacyHide]
+            let legacyRestoreUntil: Date
+        }
+        let suite = "IncomingReviewFilter.LegacyDeadlines.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let settings = SettingsManager(defaults: defaults)
-        let manual = try request(2), filtered = try request(3)
-        let now = Date()
-        let expiration = now.addingTimeInterval(3 * 24 * 60 * 60)
-        #expect(settings.hideReviewedMergeRequest(.init(target: target(2), title: manual.title, url: manual.webURL), now: now))
-        #expect(settings.hideFilteredReviews([.init(target: target(3), title: filtered.title, url: filtered.webURL)], now: now))
+        let manual = try request(2), filtered = try request(3), finished = try request(5)
+        let oldDeadline = Date().addingTimeInterval(-90 * 24 * 60 * 60)
+        let legacy = LegacyHides(targets: [target(2), target(3), target(4), target(5)], details: [
+            target(2): .init(target: target(2), title: manual.title, url: manual.webURL,
+                restoreUntil: oldDeadline, manuallyHidden: true),
+            target(3): .init(target: target(3), title: filtered.title, url: filtered.webURL, restoreUntil: oldDeadline),
+            target(5): .init(target: target(5), title: finished.title, url: finished.webURL, restoreUntil: .distantPast)
+        ], legacyRestoreUntil: oldDeadline)
+        defaults.set(try JSONEncoder().encode(legacy), forKey: "ignoredMergeRequests")
+        #expect(SettingsManager(defaults: defaults).save())
 
         let reloaded = SettingsManager(defaults: defaults)
-        #expect(reloaded.canRestoreHiddenReview(target(2), now: expiration.addingTimeInterval(-1)))
-        #expect(reloaded.canRestoreHiddenReview(target(3), now: expiration.addingTimeInterval(-1)))
-        #expect(!reloaded.restoreHiddenReviews([target(2), target(3)], now: expiration))
-        #expect(reloaded.ignoredMergeRequests == [target(2), target(3)])
+        #expect(reloaded.ignoredMergeRequests == legacy.targets)
         #expect(reloaded.intakeFilterHolds(target(3)))
+        #expect(!reloaded.canRestoreHiddenReview(target(5)))
+        #expect(reloaded.restoreHiddenReviews(legacy.targets))
+        #expect(reloaded.ignoredMergeRequests == [target(5)])
+        reloaded.reconcileHiddenReview(target(5), request: finished, reviewerID: 7, hideID: nil)
+        #expect(reloaded.restoreHiddenReviews([target(5)]))
+        #expect(SettingsManager(defaults: defaults).ignoredMergeRequests.isEmpty)
     }
 
-    @Test func oldHidesWithoutTimestampsGetOneRestoreWindowOnUpgrade() throws {
-        let suite = "IncomingReviewFilter.LegacyExpiration.\(UUID())"
+    @Test func legacyHidesWithoutTimestampsKeepTheirUnreadNotice() throws {
+        let suite = "IncomingReviewFilter.LegacyHides.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let now = Date()
-        let later = now.addingTimeInterval(3 * 24 * 60 * 60)
         let manual = try request(2), filtered = try request(3)
         var legacy = HiddenMergeRequests()
         legacy.targets = [target(2), target(3), target(4)]
         legacy.details[target(2)] = .init(target: target(2), title: manual.title, url: manual.webURL, manuallyHidden: true)
-        legacy.details[target(3)] = .init(target: target(3), title: filtered.title, url: filtered.webURL,
-            inboxNotification: .init(id: UUID(), observedAt: now.addingTimeInterval(-4 * 24 * 60 * 60), reason: nil))
+        let notice = HiddenReview.InboxNotification(id: UUID(), observedAt: now.addingTimeInterval(-90 * 24 * 60 * 60), reason: nil)
+        legacy.details[target(3)] = .init(target: target(3), title: filtered.title, url: filtered.webURL, inboxNotification: notice)
         defaults.set(try JSONEncoder().encode(legacy), forKey: "ignoredMergeRequests")
 
-        let upgraded = SettingsManager(defaults: defaults, now: now)
-        #expect(upgraded.canRestoreHiddenReview(target(2), now: now))
-        #expect(!upgraded.canRestoreHiddenReview(target(3), now: now))
-        #expect(upgraded.canRestoreHiddenReview(target(4), now: now))
+        let upgraded = SettingsManager(defaults: defaults)
+        #expect(upgraded.canRestoreHiddenReview(target(3)))
+        #expect(upgraded.filteredHiddenReviewDetails[target(3)]?.inboxNotification == notice)
+    }
 
-        let reopened = SettingsManager(defaults: defaults, now: later)
-        #expect(!reopened.canRestoreHiddenReview(target(2), now: later))
-        #expect(!reopened.canRestoreHiddenReview(target(4), now: later))
-        #expect(reopened.ignoredMergeRequests == legacy.targets)
+    @Test func aReviewerReadForAnEarlierHideCannotRemoveANewerHide() throws {
+        let settings = try filteringSettings()
+        let source = try request(2)
+        let key = target(2)
+        let hidden = HiddenReview(target: key, title: source.title, url: source.webURL)
+        try #require(settings.hideReviewedMergeRequest(hidden))
+        let original = try #require(settings.hiddenReviewDetails[key]?.hideID)
+        try #require(settings.restoreHiddenReviews([key]))
+        try #require(settings.hideReviewedMergeRequest(hidden))
+        let updated = try #require(settings.hiddenReviewDetails[key]?.hideID)
+        try #require(original != updated)
+        var payload = try #require(JSONSerialization.jsonObject(with: Data(requestJSON(2).utf8)) as? [String: Any])
+        payload["reviewers"] = []
+        let unassigned = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: payload))
+
+        settings.reconcileHiddenReview(key, request: unassigned, reviewerID: 7, hideID: original)
+        #expect(settings.hiddenReviewDetails[key]?.hideID == updated)
+        settings.reconcileHiddenReview(key, request: unassigned, reviewerID: 7, hideID: updated)
+        #expect(!settings.ignoredMergeRequests.contains(key))
     }
 
     @Test func optingOutSkipsOnlyFutureInboxNoticesAndRestoringRemovesExistingNotice() throws {

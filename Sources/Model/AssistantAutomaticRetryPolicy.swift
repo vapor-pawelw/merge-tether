@@ -28,6 +28,8 @@ struct AssistantAutomaticRetryAttempt: Codable, Equatable, Identifiable, Sendabl
     var finishedAt: Date? = nil
     var replacementJobID: UUID? = nil
     var failure: String? = nil
+    /// A recorded replacement stopped at the disk gate before launching, so it does not spend an attempt.
+    var diskDeferred: Bool? = nil
     var identity: AssistantAutomaticRetryIdentity { .init(rootID: rootID, reservationID: id, attempt: attempt) }
 }
 
@@ -105,12 +107,14 @@ enum AssistantAutomaticRetryPolicy {
         let adopted = attempts.first { $0.replacementJobID == job.id && $0.state == .started }
         let root = job.automaticRetryIdentity?.rootID ?? adopted?.rootID ?? job.id
         let lineage = attempts.filter { $0.rootID == root }
+        let spent = lineage.filter { $0.diskDeferred != true }
         guard lineage.allSatisfy({ $0.target == job.target && $0.family == job.family
             && (1...maximumRetries).contains($0.attempt) && $0.reservedAt.timeIntervalSinceReferenceDate.isFinite
             && ($0.finishedAt?.timeIntervalSinceReferenceDate.isFinite ?? true)
             && ($0.state == .started ? $0.replacementJobID != nil : $0.replacementJobID == nil)
-        }), Set(lineage.map(\.attempt)).count == lineage.count,
-              Set(lineage.map(\.attempt)) == Set(1...max(1, lineage.count)) || lineage.isEmpty else { return nil }
+            && ($0.diskDeferred != true || $0.state == .started)
+        }), Set(spent.map(\.attempt)).count == spent.count,
+              Set(spent.map(\.attempt)) == Set(1...max(1, spent.count)) || spent.isEmpty else { return nil }
         if let identity = job.automaticRetryIdentity {
             guard lineage.contains(where: { record in
                 guard record.identity == identity else { return false }
@@ -120,7 +124,7 @@ enum AssistantAutomaticRetryPolicy {
         } else if let adopted, adopted.parentJobID != job.retryOf { return nil }
         guard !lineage.contains(where: { $0.state == .obsolete || $0.state == .reserved
             || $0.state == .started && $0.parentJobID == job.id }) else { return nil }
-        let number = (lineage.map(\.attempt).max() ?? 0) + 1
+        let number = spent.count + 1
         guard number <= maximumRetries else { return .exhausted(parentJobID: job.id, rootID: root) }
         let base = lineage.filter { $0.parentJobID == job.id && $0.state == .failed }
             .map { max($0.reservedAt, $0.finishedAt ?? $0.reservedAt) }.reduce(finishedAt, max)

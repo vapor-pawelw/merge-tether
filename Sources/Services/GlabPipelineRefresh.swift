@@ -75,7 +75,7 @@ extension GlabService {
                 && configuration.scope.permits(request, host: host, username: expectedUser.username)
                 && configuration.scope.permits(proof.request, host: host, username: expectedUser.username)
                 && !settings.ignoredMergeRequests.contains(target)
-                && request.author.id == expectedUser.id && request.hasConflicts == false
+                && settings.owns(proof.request, userID: expectedUser.id) && request.hasConflicts == false
                 && self.resolvedHost == host && self.currentUsername == expectedUser.username
                 && EvidenceContext.sameAccountRevision(proof.accountRevision, self.accountRevision) && shouldProceed()
         }
@@ -102,6 +102,7 @@ extension GlabService {
             throw CancellationError()
         } catch GitLabPipelineEvidenceError.staleTarget(let latest) {
             guard EvidenceContext.sameHead(proof.targetHeadSHA, latest.targetHeadSHA), latest.user == proof.user,
+                  settings.owns(latest.request, userID: expectedUser.id),
                   configuration.scope.permits(latest.request, host: host, username: expectedUser.username)
             else { throw CancellationError() }
         }
@@ -136,7 +137,7 @@ extension GlabService {
         let targetHead = try await fetchBranchHeadSHA(projectID: targetProject, branch: request.targetBranch, host: host)
         guard permitted(), user == expectedUser,
               attempt.evidenceContext.binds(to: .init(head: sourceHead, targetHead: targetHead), policy: .sourceAndTargetHeads),
-              current.state == .opened, current.author.id == expectedUser.id, EvidenceContext.sameHead(source, current.sha),
+              current.state == .opened, settings.owns(current, userID: expectedUser.id), EvidenceContext.sameHead(source, current.sha),
               configuration.scope.permits(current, host: host, username: expectedUser.username),
               current.hasConflicts == false,
               current.sourceProjectID == sourceProject, current.sourceBranch == request.sourceBranch,
