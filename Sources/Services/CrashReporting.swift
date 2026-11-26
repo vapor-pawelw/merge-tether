@@ -16,23 +16,29 @@ final class CrashReporting {
     private let destination: CrashReportingDestination?
     private let store: CrashConsentStore
     private let bundle: Bundle
+    private let makeUploader: (CrashReportingDestination) -> any CrashReportUploading
+    private let readMacReports: (@Sendable (Date) -> [CrashReport])?
     private var decision: CrashReportingDecision?
     @ObservationIgnored private var collection: Task<Void, Never>?
     #if os(iOS)
     @ObservationIgnored private var subscriber: CrashMetricSubscriber?
     #endif
-    @ObservationIgnored private var uploader: CrashUpload?
+    @ObservationIgnored private var uploader: (any CrashReportUploading)?
     @ObservationIgnored private var uploads: [String: Task<Void, Never>] = [:]
 
     var isAvailable: Bool { destination != nil }
     var isEnabled: Bool { decision?.authorization != nil }
     var needsConsent: Bool { isAvailable && decision == nil }
 
-    init(destination: CrashReportingDestination?, defaults: UserDefaults, bundle: Bundle) {
+    init(destination: CrashReportingDestination?, defaults: UserDefaults, bundle: Bundle,
+         makeUploader: @escaping (CrashReportingDestination) -> any CrashReportUploading = { CrashUpload(destination: $0) },
+         readMacReports: (@Sendable (Date) -> [CrashReport])? = nil) {
         let store = CrashConsentStore(defaults: defaults)
         self.destination = destination
         self.store = store
         self.bundle = bundle
+        self.makeUploader = makeUploader
+        self.readMacReports = readMacReports
         decision = destination.flatMap { store.decision(for: $0) }
     }
 
@@ -48,18 +54,19 @@ final class CrashReporting {
 
     func startIfAllowed() {
         guard let authorization = decision?.authorization, let destination, uploader == nil else { return }
-        uploader = CrashUpload(destination: destination)
+        uploader = makeUploader(destination)
 
         let executable = bundle.object(forInfoDictionaryKey: "CFBundleExecutable") as? String ?? ""
         #if os(macOS)
         let source = MacCrashReportSource(executable: executable, bundleIdentifier: bundle.bundleIdentifier ?? "")
         let directory = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Logs/DiagnosticReports")
+        let readReports = readMacReports ?? { source.recentReports(in: directory, startingAt: $0) }
         collection = Task.detached(priority: .utility) { [weak self] in
             let start = max(authorization.startsAt, Date.now.addingTimeInterval(-30 * 24 * 60 * 60))
-            await self?.submit(source.recentReports(in: directory, startingAt: start), under: authorization)
+            await self?.submit(readReports(start), under: authorization)
             // ReportCrash can finish writing after the user has already relaunched the app.
             do { try await Task.sleep(for: .seconds(8)) } catch { return }
-            await self?.submit(source.recentReports(in: directory, startingAt: start), under: authorization)
+            await self?.submit(readReports(start), under: authorization)
         }
         #else
         let subscriber = CrashMetricSubscriber(authorization: authorization, executable: executable) { [weak self] reports in

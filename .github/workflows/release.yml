@@ -116,6 +116,8 @@ jobs:
       - name: Upload macOS crash symbols
         if: vars.MERGETETHER_MACOS_CRASH_DSN != ''
         env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_BUILD_NUMBER: ${{ github.run_number }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ vars.MERGETETHER_SENTRY_ORG }}
           SENTRY_PROJECT: ${{ vars.MERGETETHER_SENTRY_MACOS_PROJECT }}
@@ -123,7 +125,8 @@ jobs:
           : "${SENTRY_AUTH_TOKEN:?Configure the Sentry CI token}"
           : "${SENTRY_ORG:?Configure the Sentry organization}"
           : "${SENTRY_PROJECT:?Configure the macOS Sentry project}"
-          sentry-cli debug-files upload --wait "$RUNNER_TEMP/mergetether-crash-symbols/MergeTether.app.dSYM"
+          SYMBOLS_DIR="$RUNNER_TEMP/mergetether-crash-symbols/MergeTether-${RELEASE_VERSION}-${RELEASE_BUILD_NUMBER}-macos"
+          sentry-cli debug-files upload --wait "$SYMBOLS_DIR/MergeTether.app.dSYM"
 
       - name: Verify distribution inventory and retain stable macOS names
         id: inventory

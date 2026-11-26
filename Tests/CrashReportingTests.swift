@@ -5,6 +5,95 @@ import Testing
 @Suite struct CrashReportingTests {
     private let dsn = "https://0123456789abcdef0123456789abcdef@o1.ingest.de.sentry.io/42"
 
+    @MainActor @Test func unavailableReportingDoesNotAskForConsentOrStartAnUpload() throws {
+        let name = "CrashReportingTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let reporting = CrashReporting(destination: nil, defaults: defaults, bundle: .main, makeUploader: { _ in
+            Issue.record("An unconfigured build must never create an uploader")
+            return HeldUpload()
+        })
+
+        reporting.setEnabled(true)
+        reporting.startIfAllowed()
+
+        #expect(!reporting.isAvailable)
+        #expect(!reporting.needsConsent)
+        #expect(!reporting.isEnabled)
+        #expect(defaults.persistentDomain(forName: name)?.isEmpty ?? true)
+    }
+
+    @MainActor @Test func decliningConsentPersistsAcrossLaunchesWithoutStartingUpload() throws {
+        let name = "CrashReportingTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let destination = try #require(CrashReportingDestination(dsn))
+        let makeUploader: (CrashReportingDestination) -> any CrashReportUploading = { _ in
+            Issue.record("An undecided or declined installation must never create an uploader")
+            return HeldUpload()
+        }
+        let reporting = CrashReporting(destination: destination, defaults: defaults, bundle: .main, makeUploader: makeUploader)
+        #expect(reporting.needsConsent)
+        reporting.startIfAllowed()
+
+        reporting.setEnabled(false)
+        let reopened = CrashReporting(destination: destination, defaults: defaults, bundle: .main, makeUploader: makeUploader)
+        reopened.startIfAllowed()
+
+        #expect(reopened.isAvailable)
+        #expect(!reopened.needsConsent)
+        #expect(!reopened.isEnabled)
+        #expect(CrashConsentStore(defaults: defaults).decision(for: destination) == .declined)
+    }
+
+    @MainActor @Test func withdrawalCancelsInFlightUploadAndReenablingUsesANewIdentifier() async throws {
+        let name = "CrashReportingTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let destination = try #require(CrashReportingDestination(dsn))
+        let store = CrashConsentStore(defaults: defaults)
+        let oldUpload = HeldUpload()
+        let newUpload = HeldUpload()
+        let report = try #require(CrashReport(timestamp: .now, applicationVersion: "2.0.0", build: "7",
+            systemVersion: "26.3", signal: "SIGTRAP", executable: "MergeTether", frames: []))
+        let reporting = CrashReporting(destination: destination, defaults: defaults, bundle: .main,
+            makeUploader: { _ in oldUpload.wasCancelled ? newUpload : oldUpload },
+            readMacReports: { _ in [report] })
+        defer {
+            reporting.setEnabled(false)
+            oldUpload.finish()
+            newUpload.finish()
+        }
+
+        reporting.setEnabled(true)
+        try await waitUntil { oldUpload.envelope != nil }
+        let firstAuthorization = try #require(store.decision(for: destination)?.authorization)
+        let firstEnvelope = try #require(oldUpload.envelope)
+
+        reporting.setEnabled(false)
+        #expect(store.decision(for: destination) == .declined)
+        #expect(oldUpload.wasCancelled)
+        reporting.setEnabled(true)
+        try await waitUntil { newUpload.envelope != nil }
+        let newAuthorization = try #require(store.decision(for: destination)?.authorization)
+        let newEnvelope = try #require(newUpload.envelope)
+        #expect(newAuthorization.installationID != firstAuthorization.installationID)
+        #expect(newEnvelope.id != firstEnvelope.id)
+
+        oldUpload.finish()
+        try await waitUntil { oldUpload.sendingTaskWasCancelled != nil }
+        #expect(oldUpload.sendingTaskWasCancelled == true)
+        #expect(!store.wasSent(firstEnvelope.id, under: newAuthorization))
+        newUpload.finish()
+        try await waitUntil { store.wasSent(newEnvelope.id, under: newAuthorization) }
+    }
+
+    @MainActor private func waitUntil(_ predicate: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !predicate(), ContinuousClock.now < deadline { await Task.yield() }
+        try #require(predicate())
+    }
+
     @Test func consentIsPerDestinationAndTheIdentifierIsRemovedOnWithdrawal() throws {
         let name = "CrashReportingTests.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: name))
@@ -123,5 +212,26 @@ import Testing
         #expect(body.contains("0x1004"))
         #expect(!body.contains("0x2004"))
         #expect(!body.contains("/tmp/"))
+    }
+}
+
+@MainActor private final class HeldUpload: CrashReportUploading {
+    private var completion: CheckedContinuation<Bool, Never>?
+    private(set) var envelope: CrashReport.Envelope?
+    private(set) var wasCancelled = false
+    private(set) var sendingTaskWasCancelled: Bool?
+
+    func send(_ envelope: CrashReport.Envelope) async -> Bool {
+        self.envelope = envelope
+        let result = await withCheckedContinuation { completion = $0 }
+        sendingTaskWasCancelled = Task.isCancelled
+        return result
+    }
+
+    func cancel() { wasCancelled = true }
+
+    func finish() {
+        completion?.resume(returning: true)
+        completion = nil
     }
 }

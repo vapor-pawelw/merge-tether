@@ -196,12 +196,32 @@ if os.environ.get('STAPLE_FAIL') and 'stapler' in sys.argv: sys.exit(1)
         self.env["MERGETETHER_CRASH_SYMBOLS_DIR"] = str(symbols)
         result = self.run_script("build-release.sh", "9.8.7", "--platform", "all", "--unsigned")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual({path.name for path in symbols.iterdir()}, {"MergeTether.app.dSYM", "MergeTetheriOS.app.dSYM"})
+        exported = symbols / "MergeTether-9.8.7-1-all"
+        self.assertEqual({path.name for path in exported.iterdir()}, {"MergeTether.app.dSYM", "MergeTetheriOS.app.dSYM"})
         release = self.root / "release/unsigned"
         self.assertFalse(list(release.rglob("*.dSYM")))
         for path in release.glob("*.zip"):
             with zipfile.ZipFile(path) as artifact:
                 self.assertFalse(any(".dSYM" in name for name in artifact.namelist()))
+
+    def test_debug_symbols_preserve_older_builds_and_refuse_to_replace_existing_build(self):
+        symbols = self.root / "private-symbols"
+        self.env["MERGETETHER_CRASH_SYMBOLS_DIR"] = str(symbols)
+        first = self.run_script("build-release.sh", "9.8.7", "--build-number", "1", "--unsigned")
+        self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+        dwarf = Path("MergeTether.app.dSYM/Contents/Resources/DWARF/MergeTether")
+        first_symbols = symbols / "MergeTether-9.8.7-1-macos" / dwarf
+        self.assertTrue(first_symbols.is_file())
+        first_symbols.write_bytes(b"symbols from the first build")
+
+        second = self.run_script("build-release.sh", "9.8.7", "--build-number", "2", "--unsigned")
+        self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+        self.assertTrue((symbols / "MergeTether-9.8.7-2-macos" / dwarf).is_file())
+
+        repeated = self.run_script("build-release.sh", "9.8.7", "--build-number", "1", "--unsigned")
+        self.assertNotEqual(repeated.returncode, 0)
+        self.assertIn("symbol output already exists", repeated.stderr)
+        self.assertEqual(first_symbols.read_bytes(), b"symbols from the first build")
 
     def test_requested_debug_symbols_must_exist_before_packaging(self):
         self.env["MERGETETHER_CRASH_SYMBOLS_DIR"] = str(self.root / "private-symbols")
