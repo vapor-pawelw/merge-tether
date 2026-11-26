@@ -57,6 +57,32 @@ struct AgentQuestionSource: Sendable {
         return .init(installedVersion: build.version, ref: revision.ref, mainFallback: revision.ref == "main", files: files)
     }
 
+    static func installedHelp(for terms: [String], bundle: Bundle = .main) -> [String] {
+        guard let url = bundle.url(forResource: "automation", withExtension: "md"),
+              let documentation = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        return installedHelp(for: terms, documentation: documentation)
+    }
+
+    static func installedHelp(for terms: [String], documentation: String) -> [String] {
+        let queries = terms.map { " " + helpSearchKey($0) + " " }
+        let paragraphs = documentation.components(separatedBy: "\n\n")
+        let matches = paragraphs.enumerated().compactMap { index, paragraph -> (index: Int, score: Int)? in
+            let labels = paragraph.matches(of: /\*\*([^*\n]+)\*\*/).map { helpSearchKey(String($0.1)) }
+            let score = labels.filter { label in
+                label.contains(" ") && queries.contains { $0.contains(" " + label + " ") }
+            }.map(\.count).max()
+            return score.map { (index, $0) }
+        }
+        return matches.sorted { lhs, rhs in
+            lhs.score == rhs.score ? lhs.index < rhs.index : lhs.score > rhs.score
+        }.prefix(3).map { String(paragraphs[$0.index].prefix(1_600)) }
+    }
+
+    private static func helpSearchKey(_ text: String) -> String {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+            .split { !$0.isLetter && !$0.isNumber }.joined(separator: " ")
+    }
+
     private struct GitObject: Decodable {
         let sha: String
         let type: String?

@@ -23,6 +23,8 @@ struct AgentQuestionTests {
             #expect(arguments[option + 1] == schema.path)
         case .claude:
             #expect(arguments.contains("--strict-mcp-config"))
+            let snapshot = try #require(arguments.firstIndex(of: "--system-prompt-snapshot"))
+            #expect(arguments[snapshot + 1] == "off")
             let tools = try #require(arguments.firstIndex(of: "--tools"))
             #expect(arguments[tools + 1].isEmpty)
         }
@@ -239,5 +241,31 @@ extension AgentQuestionTests {
     @Test func exposesTimeoutSeparatelyFromAProtocolFailure() {
         #expect(AgentQuestionConversation.Failure(answerError: ProcessRunner.RunError.timedOut) == .timedOut)
         #expect(AgentQuestionConversation.Failure(answerError: AgentQuestionCLI.Failure.invalidResponse) == .invalidResponse)
+    }
+}
+
+extension AgentQuestionTests {
+    @Test func installedHelpMatchesTheNamedControlInAMixedLanguageQuestion() throws {
+        let claim = "The **Claim merge request** button reads the assignment and saves the claim locally."
+        let docs = """
+            # Automation
+
+            A **Merge request** contains changes in GitLab.
+
+            \(claim)
+
+            **Auto-merge** submits eligible requests automatically.
+            """
+        let help = AgentQuestionSource.installedHelp(for: ["co robi przycisk CLAIM merge request na !676?"], documentation: docs)
+        #expect(help.first == claim)
+        #expect(!help.contains { $0.contains("Auto-merge") })
+        #expect(AgentQuestionSource.installedHelp(for: ["Czy GitLab dzisiaj działa?"], documentation: docs).isEmpty)
+    }
+
+    @Test func appBundleDocumentsThatClaimIsLocal() throws {
+        let help = AgentQuestionSource.installedHelp(for: ["what does Claim merge request do?"])
+        let paragraph = try #require(help.first)
+        #expect(paragraph.contains("MergeTether’s local settings"))
+        #expect(paragraph.contains("current GitLab assignment"))
     }
 }

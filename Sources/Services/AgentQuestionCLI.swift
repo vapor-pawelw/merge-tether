@@ -69,8 +69,11 @@ struct AgentQuestionCLI {
         Use the latest snapshot for facts. Distinguish configured automation, present eligibility and a
         submission already queued by GitLab. Eligibility can change and is never a guarantee of merging.
         State when evidence is stale, missing or partial. Use the supplied MR URLs for Markdown links.
-        For any question about how the app works or implements a rule, request relevant public code before
-        answering. Return {"sourceTerms":["up to five specific English concepts or Swift type names"]}.
+        The installedHelp field contains documentation shipped with the running app. For a question about
+        the effect of a visible control, answer from the installed help and current MR facts when they cover
+        the question. Prefer this help for the installed build if GitHub main differs. Name the system the
+        control reads from, what it saves and where. For implementation details or gaps, request public code
+        with {"sourceTerms":["up to five specific English concepts or Swift type names"]}.
         For "why" questions about a specific MR, a warning, a note or a job, use merge request details,
         especially the visible reason, jobs and Event log. If those details are missing, request
         {"mergeRequestIIDs":[142]}. You may request both kinds of evidence together in one object.
@@ -113,7 +116,8 @@ struct AgentQuestionCLI {
             var arguments = ["--print", "--restricted", "--safe-mode", "--tools", "", "--permission-mode", "dontAsk",
                 "--permission-prompts", "none", "--setting-sources", "", "--settings", #"{"disableAllHooks":true}"#,
                 "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
-                "--system-prompt", instructions, "--output-format", "json", "--json-schema", schema,
+                "--system-prompt", instructions, "--system-prompt-snapshot", "off",
+                "--output-format", "json", "--json-schema", schema,
                 "--model", configuration.model, "--effort", configuration.thinking.rawValue]
             if let session { arguments += ["--resume", session.uuidString.lowercased()] }
             return arguments

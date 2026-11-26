@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Use the installed automation guide to answer questions about MergeTether controls available in the current build.
+
 - Open agent chat in a larger sheet with the active verification model and reasoning level. Show timeouts separately and retry the original question when a reply fails.
 
 - Keep reviewer feedback and discussion blockers visible when a completed assessment cannot be matched to the merge request’s current title and description.

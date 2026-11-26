@@ -163,6 +163,7 @@ let project = Project(
             resources: [
                 "Resources/**",
                 "CHANGELOG.md",
+                "docs/automation.md",
                 "Vendor/Sparkle/Sparkle-LICENSE.txt",
                 .folderReference(path: "Helpers/Automation"),
             ],

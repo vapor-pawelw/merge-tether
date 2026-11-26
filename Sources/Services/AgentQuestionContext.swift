@@ -62,6 +62,7 @@ struct AgentQuestionContext: Encodable, Sendable {
         let gitLabMergeStatus: String?
         let gitLabHasConflicts: Bool?
         let recordedConflictWarning: Bool
+        let assignmentClaimOffered: Bool
         let evidenceMatchesCurrentCatalog: Bool
         let followUpPolicyHold: String?
         let eventLog: [Event]
@@ -133,6 +134,7 @@ struct AgentQuestionContext: Encodable, Sendable {
             targetBranch: request.map { cleanQuestionEvidence($0.targetBranch) },
             gitLabMergeStatus: request?.detailedMergeStatus?.rawValue, gitLabHasConflicts: request?.hasConflicts,
             recordedConflictWarning: row.item.hasConflict || row.attentionIntents.contains { $0.kind == .conflict },
+            assignmentClaimOffered: row.waitsForAssignmentClaim,
             evidenceMatchesCurrentCatalog: row.evidenceMatchesCatalogContext,
             followUpPolicyHold: policyHold.map { String(localized: $0.message) },
             eventLog: history.entries.prefix(12).map { agentQuestionEvent($0, head: request?.sha) })

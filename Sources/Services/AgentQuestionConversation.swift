@@ -28,6 +28,7 @@ final class AgentQuestionConversation {
         let question: String
         let snapshot: AgentQuestionContext?
         let mergeRequestDetails: [AgentQuestionContext.Detail]
+        let installedHelp: [String]
         let source: AgentQuestionSource.Evidence?
         let evidenceResponse: Bool
     }
@@ -124,6 +125,9 @@ final class AgentQuestionConversation {
         let snapshot = monitor.agentQuestionContext()
         let iids = Self.mentionedIIDs(in: question.text)
         let details = monitor.agentQuestionDetails(for: iids)
+        var helpTopics = [question.text]
+        if details.contains(where: \.assignmentClaimOffered) { helpTopics.append("Claim merge request") }
+        let installedHelp = AgentQuestionSource.installedHelp(for: helpTopics)
         let directory = root.appending(path: "Workspace", directoryHint: .isDirectory)
         let id = UUID()
         requestID = id
@@ -137,13 +141,13 @@ final class AgentQuestionConversation {
                 guard current(id, owner: owner, revision: revision, monitor: monitor) else { return }
                 try Self.createPrivateDirectory(directory)
                 let initial = Prompt(question: question.text, snapshot: snapshot, mergeRequestDetails: details,
-                                     source: nil, evidenceResponse: false)
+                                     installedHelp: installedHelp, source: nil, evidenceResponse: false)
                 let first = try await ask(initial, owner: owner, executable: executable, session: session,
                                           configuration: configuration, directory: directory)
                 guard current(id, owner: owner, revision: revision, monitor: monitor) else { return }
                 if first.reply.requestsEvidence { stage = .requestedEvidence }
-                let (turn, notice) = try await complete(first, question: question, owner: owner, executable: executable,
-                    configuration: configuration, directory: directory, monitor: monitor,
+                let (turn, notice) = try await complete(first, question: question, installedHelp: installedHelp,
+                    owner: owner, executable: executable, configuration: configuration, directory: directory, monitor: monitor,
                     isCurrent: { self.current(id, owner: owner, revision: revision, monitor: monitor) })
                 guard current(id, owner: owner, revision: revision, monitor: monitor) else { return }
                 guard let answer = turn.reply.answer?.trimmingCharacters(in: .whitespacesAndNewlines), !answer.isEmpty else {
@@ -161,7 +165,8 @@ final class AgentQuestionConversation {
         }
     }
 
-    private func complete(_ first: AgentQuestionCLI.Turn, question: AgentQuestionInput, owner: Owner, executable: URL,
+    private func complete(_ first: AgentQuestionCLI.Turn, question: AgentQuestionInput, installedHelp: [String],
+                          owner: Owner, executable: URL,
                           configuration: AgentQuestionCLI.Configuration, directory: URL,
                           monitor: TodoMonitorService, isCurrent: () -> Bool)
         async throws -> (AgentQuestionCLI.Turn, AgentQuestionSource.Notice?) {
@@ -173,7 +178,7 @@ final class AgentQuestionConversation {
         } else { evidence = nil }
         guard isCurrent() else { throw CancellationError() }
         let prompt = Prompt(question: question.text, snapshot: nil, mergeRequestDetails: details,
-                            source: evidence, evidenceResponse: true)
+                            installedHelp: installedHelp, source: evidence, evidenceResponse: true)
         let turn = try await ask(prompt, owner: owner, executable: executable, session: first.session,
                                  configuration: configuration, directory: directory)
         return (turn, evidence?.notice)
