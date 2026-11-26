@@ -140,12 +140,12 @@ struct MRProgressPresentationTests {
         #expect(model.confirmedSubmission == state)
     }
 
-    private func mergeRequestWithAutoMerge(sourceBranch: String = "feature") throws -> GitLabMergeRequest {
+    private func mergeRequestWithAutoMerge(sourceBranch: String = "feature", head: String? = nil) throws -> GitLabMergeRequest {
         try JSONDecoder().decode(GitLabMergeRequest.self, from: Data("""
             {"project_id":1,"iid":2,"author":{"id":7,"username":"author","name":"Author"},
             "title":"Example","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2",
             "state":"opened","draft":false,"source_branch":"\(sourceBranch)","target_branch":"main","labels":[],
-            "merge_when_pipeline_succeeds":true}
+            "merge_when_pipeline_succeeds":true,"sha":\(head.map { "\"\($0)\"" } ?? "null")}
             """.utf8))
     }
 
@@ -204,6 +204,30 @@ struct MRProgressPresentationTests {
         let activity = try #require(model.activity)
         #expect(model.working && activity.jobID == job.id)
         #expect(activity.startedAt == (state == .running ? job.execution?.startedAt : job.createdAt))
+    }
+
+    @Test(arguments: [AssistantJobExecution.State.queued, .running, .succeeded])
+    func cardShowsTheReviewReasonForAnActiveRun(_ state: AssistantJobExecution.State) throws {
+        let request = try mergeRequestWithAutoMerge(head: String(repeating: "a", count: 40))
+        let item = MergeRequestAttentionMonitor.Item(id: .init(projectID: request.projectID, iid: request.iid),
+            title: request.title, url: request.webURL, mergeRequest: request)
+        let host = "gitlab.example.test"
+        let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
+            work: .init(host: host, projectID: request.projectID, iid: request.iid), username: "me", workspace: "",
+            access: .gitLabRead), title: "Review", prompt: "", createdAt: .now, allowsPush: false,
+            execution: .init(state: state), mergeRequestURL: request.webURL, workflow: .review,
+            manual: false, expectedHeadSHA: request.sha)
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: job, intents: [])
+        let card = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
+            allowsRemoval: true, assistantReady: true)
+        let update = MergeWorkflowActivityEntry(id: "review-update", event: .init(kind: .reviewUpdate,
+            mergeRequest: request, identity: "review-update", context: "Source changed",
+            reviewUpdateReasons: [.headChanged]), createdAt: job.createdAt, host: host,
+            user: .init(id: 3, username: "me"), state: .running, assistantJobID: job.id)
+
+        #expect(card.reviewLaunchReason(workflows: [update], intents: [])
+            == (state.isActive ? "Source commit (HEAD) changed" : nil))
+        #expect(card.reviewLaunchReason(workflows: [], intents: []) == nil)
     }
 
     private func presentation(_ stage: String, state: AssistantJobExecution.State? = nil,
