@@ -1,8 +1,8 @@
 import Foundation
 
 extension SettingsManager {
-    struct CommentReviewProgress: Codable, Equatable {
-        struct RegeneratedDraft: Codable, Hashable {
+    struct CommentReviewProgress: Codable, Equatable, Sendable {
+        struct RegeneratedDraft: Codable, Hashable, Sendable {
             let id: Int
             let authorID: Int
             let bodyDigest: String
@@ -15,7 +15,7 @@ extension SettingsManager {
             }
         }
 
-        struct AutomaticPublication: Codable, Equatable {
+        struct AutomaticPublication: Codable, Equatable, Sendable {
             let userID: Int
             let requestContext: String
             let snapshot: CommentReviewSnapshot

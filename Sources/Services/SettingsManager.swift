@@ -4,8 +4,12 @@ import Observation
 @MainActor
 @Observable
 final class SettingsManager {
-    var pendingCommentReviews: Set<MRAutomationScope.Target> = []
-    var commentReviewProgress: [MRAutomationScope.Target: CommentReviewProgress] = [:]
+    var pendingCommentReviews: Set<MRAutomationScope.Target> = [] {
+        didSet { changedMRKeys.insert(Key.pendingCommentReviews) }
+    }
+    var commentReviewProgress: [MRAutomationScope.Target: CommentReviewProgress] = [:] {
+        didSet { changedMRKeys.insert(Key.commentReviewProgress) }
+    }
     @ObservationIgnored var commentReviewRevisions: [MRAutomationScope.Target: UInt64] = [:]
     private let defaults: UserDefaults
     let persistenceStore: DurableSettingsStore
@@ -25,7 +29,8 @@ final class SettingsManager {
     func recordPersistenceFailure(_ key: String) { persistenceStore.recordFailure(key) }
     @ObservationIgnored private var lastSavedAutomation: AutomationSettings?
     @ObservationIgnored var onAutomationChanged: ((AutomationSettings) -> Void)?
-    @ObservationIgnored private var changedHistoryKeys: Set<String> = []
+    @ObservationIgnored private var changedMRKeys: Set<String> = []
+    @ObservationIgnored private var mrSettingsArchive = MRSettingsArchive()
 
     var refreshInterval: RefreshInterval
     var unreadReminderInterval: UnreadReminderInterval
@@ -40,14 +45,30 @@ final class SettingsManager {
     var launchAtLoginPreference: Bool
     var lastMenuOpenedAt: Date?
     /// Managed MRs where the user turned off automatic approval.
-    var autoApproveOptOuts: Set<MRAutomationScope.Target>
-    var independentApprovalPreferences: [MRAutomationScope.Target: MRAutomationPreference]
-    var autoPublishOptOuts: Set<MRAutomationScope.Target> = []
-    var autoMergeOptOuts: Set<MRAutomationScope.Target> = []
-    var autoMergeOptIns: Set<MRAutomationScope.Target> = []
-    var automaticActionOptIns: [MRAutomaticAction: Set<MRAutomationScope.Target>] = [:]
-    var mergeSubmissions: [MergeSubmissionReceipt] = []
-    private var hiddenMergeRequests: HiddenMergeRequests
+    var autoApproveOptOuts: Set<MRAutomationScope.Target> = [] {
+        didSet { changedMRKeys.insert(Key.autoApproveOptOuts) }
+    }
+    var independentApprovalPreferences: [MRAutomationScope.Target: MRAutomationPreference] = [:] {
+        didSet { changedMRKeys.insert(Key.independentApprovalPreferences) }
+    }
+    var autoPublishOptOuts: Set<MRAutomationScope.Target> = [] {
+        didSet { changedMRKeys.insert(Key.autoPublishOptOuts) }
+    }
+    var autoMergeOptOuts: Set<MRAutomationScope.Target> = [] {
+        didSet { changedMRKeys.insert(Key.autoMergeOptOuts) }
+    }
+    var autoMergeOptIns: Set<MRAutomationScope.Target> = [] {
+        didSet { changedMRKeys.insert(Key.autoMergeOptIns) }
+    }
+    var automaticActionOptIns: [MRAutomaticAction: Set<MRAutomationScope.Target>] = [:] {
+        didSet { changedMRKeys.insert(Key.automaticActionOptIns) }
+    }
+    var mergeSubmissions: [MergeSubmissionReceipt] = [] {
+        didSet { changedMRKeys.insert(Key.mergeSubmissions) }
+    }
+    private var hiddenMergeRequests: HiddenMergeRequests = .init() {
+        didSet { changedMRKeys.insert(Key.ignoredMergeRequests) }
+    }
     var ignoredMergeRequests: Set<MRAutomationScope.Target> {
         get { hiddenMergeRequests.targets }
         set { hiddenMergeRequests.targets = newValue }
@@ -127,14 +148,9 @@ final class SettingsManager {
     }
 
     private func saveHiddenMergeRequests(_ updated: HiddenMergeRequests) -> Bool {
-        persistenceStore.preserveCorruptValues()
-        guard persistenceStore.save(updated, forKey: Key.ignoredMergeRequests) else { return false }
-        guard persistenceStore.synchronize() else {
-            persistenceStore.save(hiddenMergeRequests, forKey: Key.ignoredMergeRequests)
-            persistenceStore.synchronize()
-            return false
-        }
+        guard saveMRPreference(.hiddenReviews(updated), replacing: .hiddenReviews(hiddenMergeRequests)) else { return false }
         hiddenMergeRequests = updated
+        changedMRKeys.remove(Key.ignoredMergeRequests)
         return true
     }
     var automation: AutomationSettings {
@@ -152,8 +168,9 @@ final class SettingsManager {
     /// New review candidates go straight to Reviewing (marked NEW) instead of waiting in the inbox.
     var addNewReviewsToReviewed: Bool
     /// Reviewing cards that arrived directly and have not been acted on yet.
-    var newReviewTargets: Set<MRAutomationScope.Target> {
+    var newReviewTargets: Set<MRAutomationScope.Target> = [] {
         didSet {
+            changedMRKeys.insert(Key.newReviewTargets)
             for target in newReviewTargets.subtracting(oldValue) { newReviewGenerations[target] = UUID() }
             for target in oldValue.subtracting(newReviewTargets) { newReviewGenerations.removeValue(forKey: target) }
         }
@@ -161,7 +178,9 @@ final class SettingsManager {
     // Invalidate older phone actions when a candidate becomes new again in the same host session.
     private(set) var newReviewGenerations: [MRAutomationScope.Target: UUID] = [:]
     /// New reviews whose automation MergeTether paused until the user starts them.
-    var heldNewReviewTargets: Set<MRAutomationScope.Target>
+    var heldNewReviewTargets: Set<MRAutomationScope.Target> = [] {
+        didSet { changedMRKeys.insert(Key.heldNewReviewTargets) }
+    }
     /// Automation as configured. Presentation reads this so the killswitch only stops execution
     /// and never changes how cards, menus or groupings look.
     var configuredAutomation: AutomationSettings { automation.ignoringGlobalSuspension }
@@ -171,46 +190,65 @@ final class SettingsManager {
             || (configuredAutomation.hasAutomaticPublicActionConsent && hasAutomaticActionOptIn())
     }
     var automationGloballyActive: Bool { automationGloballyEnabled && configuredAutomationAvailable }
-    var automationReceipts: Set<TodoAutomationReceipt>
-    var automationAttemptReceipts: Set<TodoAutomationReceipt>
-    var authorFeedbackAttempts: Set<AuthorFeedbackAttempt>
-    var assistantAutomaticRetryAttempts: [AssistantAutomaticRetryAttempt] = []
+    var automationReceipts: Set<TodoAutomationReceipt> = [] {
+        didSet { changedMRKeys.insert(Key.automationReceipts) }
+    }
+    var automationAttemptReceipts: Set<TodoAutomationReceipt> = [] {
+        didSet { changedMRKeys.insert(Key.automationAttemptReceipts) }
+    }
+    var authorFeedbackAttempts: Set<AuthorFeedbackAttempt> = [] {
+        didSet { changedMRKeys.insert(Key.authorFeedbackAttempts) }
+    }
+    var assistantAutomaticRetryAttempts: [AssistantAutomaticRetryAttempt] = [] {
+        didSet { changedMRKeys.insert(Key.assistantAutomaticRetryAttempts) }
+    }
     var feedbackSuggestionDecisions = FeedbackSuggestionDecisions()
     var reviewParticipationPreferences = ReviewParticipationPreferences()
-    var pipelineRefreshAttempts: Set<PipelineRefreshAttempt>
-    var pipelineClaimAssessmentAttempts: [PipelineClaimAssessmentAttempt]
-    var pendingTodoAcknowledgements: Set<TodoActionAcknowledgement>
-    var conflictReceipts: Set<MergeConflictReceipt>
-    var reReviewReceipts: [ReReviewReceipt.Key: ReReviewReceipt]
-    var reReviewDraftBaselines: [MRAutomationScope.Target: Int]
-    var assistantHandoffs: [AssistantAutomationRunner.Handoff] {
-        didSet { changedHistoryKeys.insert(Key.assistantHandoffs) }
+    var pipelineRefreshAttempts: Set<PipelineRefreshAttempt> = [] {
+        didSet { changedMRKeys.insert(Key.pipelineRefreshAttempts) }
     }
-    var workflowActivity: [MergeWorkflowActivityEntry] {
-        didSet { changedHistoryKeys.insert(Key.workflowActivity) }
+    var pipelineClaimAssessmentAttempts: [PipelineClaimAssessmentAttempt] = [] {
+        didSet { changedMRKeys.insert(Key.pipelineClaimAssessmentAttempts) }
     }
-    var automationEvents: [MRAutomationEvent] {
-        didSet { changedHistoryKeys.insert(Key.automationEvents) }
+    var pendingTodoAcknowledgements: Set<TodoActionAcknowledgement> = [] {
+        didSet { changedMRKeys.insert(Key.pendingTodoAcknowledgements) }
     }
-    var mrActionIntents: [MRTodoIntent] {
-        didSet { changedHistoryKeys.insert(Key.mrActionIntents) }
+    var conflictReceipts: Set<MergeConflictReceipt> = [] {
+        didSet { changedMRKeys.insert(Key.conflictReceipts) }
     }
-    var routedMRTodoReceipts: Set<MRTodoRouteReceipt>
-    var boardPins: Set<BoardCardPin>
+    var reReviewReceipts: [ReReviewReceipt.Key: ReReviewReceipt] = [:] {
+        didSet { changedMRKeys.insert(Key.reReviewReceipts) }
+    }
+    var reReviewDraftBaselines: [MRAutomationScope.Target: Int] = [:] {
+        didSet { changedMRKeys.insert(Key.reReviewDraftBaselines) }
+    }
+    var assistantHandoffs: [AssistantAutomationRunner.Handoff] = [] {
+        didSet { changedMRKeys.insert(Key.assistantHandoffs) }
+    }
+    var workflowActivity: [MergeWorkflowActivityEntry] = [] {
+        didSet { changedMRKeys.insert(Key.workflowActivity) }
+    }
+    var automationEvents: [MRAutomationEvent] = [] {
+        didSet { changedMRKeys.insert(Key.automationEvents) }
+    }
+    var mrActionIntents: [MRTodoIntent] = [] {
+        didSet { changedMRKeys.insert(Key.mrActionIntents) }
+    }
+    var routedMRTodoReceipts: Set<MRTodoRouteReceipt> = [] {
+        didSet { changedMRKeys.insert(Key.routedMRTodoReceipts) }
+    }
+    var boardPins: Set<BoardCardPin> = [] {
+        didSet { changedMRKeys.insert(Key.boardPins) }
+    }
 
     @discardableResult
     func setBoardPin(_ pin: BoardCardPin, pinned: Bool) -> Bool {
         var updated = boardPins
         if pinned { updated.insert(pin) } else { updated.remove(pin) }
         guard updated != boardPins else { return true }
-        persistenceStore.preserveCorruptValues()
-        guard persistenceStore.save(updated, forKey: Key.boardPins) else { return false }
-        guard persistenceStore.synchronize() else {
-            persistenceStore.save(boardPins, forKey: Key.boardPins)
-            persistenceStore.synchronize()
-            return false
-        }
+        guard saveMRPreference(.boardPins(updated), replacing: .boardPins(boardPins)) else { return false }
         boardPins = updated
+        changedMRKeys.remove(Key.boardPins)
         return true
     }
     var ownAutomationOffExpanded: Bool
@@ -285,31 +323,13 @@ final class SettingsManager {
         confirmGlobalAutomationChanges = defaults.bool(forKey: Key.confirmGlobalAutomationChanges)
         keepMacAwakeDuringAgentTasks = defaults.bool(forKey: Key.keepMacAwakeDuringAgentTasks)
         addNewReviewsToReviewed = defaults.bool(forKey: Key.addNewReviewsToReviewed)
-        newReviewTargets = store.load(Key.newReviewTargets, fallback: [])
-        heldNewReviewTargets = store.load(Key.heldNewReviewTargets, fallback: [])
         var runtimeAutomation = loadedAutomation
         runtimeAutomation.isGloballySuspended = !globallyEnabled
         automation = runtimeAutomation
         acceptedAutomation = loadedAutomation
-        mergeSubmissions = store.load(Key.mergeSubmissions, fallback: [])
-        automationReceipts = store.load(Key.automationReceipts, fallback: [])
-        automationAttemptReceipts = store.load(Key.automationAttemptReceipts, fallback: [])
-        authorFeedbackAttempts = store.load(Key.authorFeedbackAttempts, fallback: [])
-        assistantAutomaticRetryAttempts = store.load(Key.assistantAutomaticRetryAttempts, fallback: [])
         feedbackSuggestionDecisions = store.load(Key.feedbackSuggestionDecisions, fallback: FeedbackSuggestionDecisions())
         reviewParticipationPreferences = store.load(Key.reviewParticipationPreferences, fallback: ReviewParticipationPreferences())
-        pipelineRefreshAttempts = store.load(Key.pipelineRefreshAttempts, fallback: [])
-        pipelineClaimAssessmentAttempts = store.load(Key.pipelineClaimAssessmentAttempts, fallback: [])
-        pendingTodoAcknowledgements = store.load(Key.pendingTodoAcknowledgements, fallback: [])
-        assistantHandoffs = store.load(Key.assistantHandoffs, fallback: [AssistantAutomationRunner.Handoff]())
-            .filter { $0.execution != nil }
-        workflowActivity = store.load(Key.workflowActivity, fallback: [MergeWorkflowActivityEntry]())
-            .filter { $0.state != .waitingForAssistant || $0.assistantJobID != nil }
-        automationEvents = store.load(Key.automationEvents, fallback: [])
-        mrActionIntents = store.load(Key.mrActionIntents, fallback: [])
-        routedMRTodoReceipts = store.load(Key.routedMRTodoReceipts, fallback: [])
         boardGrouping = defaults.string(forKey: Key.boardGrouping).flatMap(MRBoardGrouping.init(rawValue:)) ?? .withoutAutomation
-        boardPins = store.load(Key.boardPins, fallback: [])
         ownAutomationOffExpanded = defaults.bool(forKey: Key.ownAutomationOffExpanded)
         reviewingAutomationOffExpanded = defaults.bool(forKey: Key.reviewingAutomationOffExpanded)
         boardOrderingMethod = defaults.string(forKey: Key.boardOrderingMethod).flatMap(MRBoardOrderingMethod.init(rawValue:)) ?? .manual
@@ -319,11 +339,6 @@ final class SettingsManager {
         mrLifecycleLedger = store.load(Key.mrLifecycleLedger, fallback: .init())
         reviewAssignments = store.load(Key.reviewAssignments, fallback: .init())
         incomingReviewFilterSettings = store.load(Key.incomingReviewFilterSettings, fallback: .init())
-        conflictReceipts = store.load(Key.conflictReceipts, fallback: [])
-        reReviewReceipts = store.load(Key.reReviewReceipts, fallback: [:])
-        reReviewDraftBaselines = store.load(Key.reReviewDraftBaselines, fallback: [:])
-        pendingCommentReviews = store.load(Key.pendingCommentReviews, fallback: [])
-        commentReviewProgress = store.load(Key.commentReviewProgress, fallback: [:])
 
         let rawInterval = defaults.integer(forKey: Key.refreshInterval)
         self.refreshInterval = RefreshInterval(rawValue: rawInterval) ?? .fiveMinutes
@@ -341,13 +356,6 @@ final class SettingsManager {
             ? Date(timeIntervalSince1970: storedMenuOpenedAt)
             : nil
 
-        self.hiddenMergeRequests = store.load(Key.ignoredMergeRequests, fallback: .init())
-        self.autoApproveOptOuts = store.load(Key.autoApproveOptOuts, fallback: [])
-        self.independentApprovalPreferences = store.load(Key.independentApprovalPreferences, fallback: [:])
-        self.autoPublishOptOuts = store.load(Key.autoPublishOptOuts, fallback: [])
-        self.autoMergeOptOuts = store.load(Key.autoMergeOptOuts, fallback: [])
-        self.autoMergeOptIns = store.load(Key.autoMergeOptIns, fallback: [])
-        self.automaticActionOptIns = store.load(Key.automaticActionOptIns, fallback: [:])
 
         if let pathString = defaults.string(forKey: Key.glabPath), !pathString.isEmpty {
             self.glabPath = URL(fileURLWithPath: pathString)
@@ -356,6 +364,16 @@ final class SettingsManager {
         }
 
         lastSeenTodoIDs = store.load(Key.lastSeenTodoIDs, fallback: [])
+        mrSettingsArchive = store.load(Key.mergeRequestRecords, fallback: .init())
+        transferMRSettings(.load)
+        changedMRKeys.removeAll()
+        let jobs = assistantHandoffs.filter { $0.execution != nil }
+        if jobs.count != assistantHandoffs.count { assistantHandoffs = jobs }
+        let acceptedActivity = workflowActivity.filter { $0.state != .waitingForAssistant || $0.assistantJobID != nil }
+        if acceptedActivity.count != workflowActivity.count { workflowActivity = acceptedActivity }
+        newReviewGenerations = Dictionary(mrSettingsArchive.values(\.newReviewGenerations).compactMap { entry in
+            newReviewTargets.contains(entry.target) ? (entry.target, entry.value) : nil
+        }, uniquingKeysWith: { first, _ in first })
         for handoff in assistantHandoffs where handoff.execution?.state != .feedbackResolved {
             let target = handoff.key.automationTarget
             for (noteID, revision) in handoff.verifiedFeedbackNotes ?? [:] {
@@ -365,7 +383,13 @@ final class SettingsManager {
         lastSavedAutomation = automation
         mrLifecycleLedger.prepareFinishedRemoval()
         var migratedHides = hiddenMergeRequests
-        if migratedHides.migrateRestorationDeadlines(now: now), !saveHiddenMergeRequests(migratedHides) {
+        if migratedHides.migrateRestorationDeadlines(now: now) {
+            // Preserve the one-time upgrade window even if the app quits before its first settings save.
+            persistenceStore.preserveCorruptValues()
+            if persistenceStore.save(migratedHides, forKey: Key.ignoredMergeRequests), !persistenceStore.synchronize() {
+                persistenceStore.save(hiddenMergeRequests, forKey: Key.ignoredMergeRequests)
+                persistenceStore.synchronize()
+            }
             hiddenMergeRequests = migratedHides
         }
     }
@@ -373,26 +397,11 @@ final class SettingsManager {
     @discardableResult
     func save() -> Bool {
         persistenceStore.preserveCorruptValues()
-        persistenceStore.save(pendingCommentReviews, forKey: Key.pendingCommentReviews)
-        persistenceStore.save(commentReviewProgress, forKey: Key.commentReviewProgress)
         defaults.set(conversationDestination.rawValue, forKey: Key.conversationDestination)
         let previousAutomation = lastSavedAutomation ?? automation
         let automationSaved = persistenceStore.save(automation, forKey: Key.automation)
-        persistenceStore.save(automationReceipts, forKey: Key.automationReceipts)
-        persistenceStore.save(automationAttemptReceipts, forKey: Key.automationAttemptReceipts)
-        persistenceStore.save(authorFeedbackAttempts, forKey: Key.authorFeedbackAttempts)
-        persistenceStore.save(assistantAutomaticRetryAttempts, forKey: Key.assistantAutomaticRetryAttempts)
         persistenceStore.save(feedbackSuggestionDecisions, forKey: Key.feedbackSuggestionDecisions)
         persistenceStore.save(reviewParticipationPreferences, forKey: Key.reviewParticipationPreferences)
-        persistenceStore.save(pipelineRefreshAttempts, forKey: Key.pipelineRefreshAttempts)
-        persistenceStore.save(pipelineClaimAssessmentAttempts, forKey: Key.pipelineClaimAssessmentAttempts)
-        persistenceStore.save(pendingTodoAcknowledgements, forKey: Key.pendingTodoAcknowledgements)
-        saveHistory(assistantHandoffs, forKey: Key.assistantHandoffs)
-        saveHistory(workflowActivity, forKey: Key.workflowActivity)
-        saveHistory(automationEvents, forKey: Key.automationEvents)
-        saveHistory(mrActionIntents, forKey: Key.mrActionIntents)
-        persistenceStore.save(routedMRTodoReceipts, forKey: Key.routedMRTodoReceipts)
-        persistenceStore.save(boardPins, forKey: Key.boardPins)
         persistenceStore.save(boardManualOrder, forKey: Key.boardManualOrder)
         persistenceStore.save(mrLifecycleLedger, forKey: Key.mrLifecycleLedger)
         persistenceStore.save(reviewAssignments, forKey: Key.reviewAssignments)
@@ -405,9 +414,6 @@ final class SettingsManager {
         defaults.set(boardOrderingMethod.rawValue, forKey: Key.boardOrderingMethod)
         defaults.set(promoteBoardAttention, forKey: Key.promoteBoardAttention)
         defaults.set(findMergeRequestIssues, forKey: Key.findMergeRequestIssues)
-        persistenceStore.save(conflictReceipts, forKey: Key.conflictReceipts)
-        persistenceStore.save(reReviewReceipts, forKey: Key.reReviewReceipts)
-        persistenceStore.save(reReviewDraftBaselines, forKey: Key.reReviewDraftBaselines)
         defaults.set(refreshInterval.rawValue, forKey: Key.refreshInterval)
         defaults.set(unreadReminderInterval.rawValue, forKey: Key.unreadReminderInterval)
         defaults.set(unreadReminderSound.rawValue, forKey: Key.unreadReminderSound)
@@ -416,8 +422,6 @@ final class SettingsManager {
         defaults.set(confirmGlobalAutomationChanges, forKey: Key.confirmGlobalAutomationChanges)
         defaults.set(keepMacAwakeDuringAgentTasks, forKey: Key.keepMacAwakeDuringAgentTasks)
         defaults.set(addNewReviewsToReviewed, forKey: Key.addNewReviewsToReviewed)
-        persistenceStore.save(newReviewTargets, forKey: Key.newReviewTargets)
-        persistenceStore.save(heldNewReviewTargets, forKey: Key.heldNewReviewTargets)
         defaults.set(onboardingCompleted, forKey: Key.onboardingCompleted)
         defaults.set(launchAtLoginPreference, forKey: Key.launchAtLoginPreference)
         if let glabPath {
@@ -436,32 +440,19 @@ final class SettingsManager {
         } else {
             defaults.removeObject(forKey: Key.lastMenuOpenedAt)
         }
-        persistenceStore.save(hiddenMergeRequests, forKey: Key.ignoredMergeRequests)
-        persistenceStore.save(autoApproveOptOuts, forKey: Key.autoApproveOptOuts)
-        let approvalPreferencesSaved = persistenceStore.save(independentApprovalPreferences, forKey: Key.independentApprovalPreferences)
-        persistenceStore.save(autoPublishOptOuts, forKey: Key.autoPublishOptOuts)
-        persistenceStore.save(mergeSubmissions, forKey: Key.mergeSubmissions)
-        persistenceStore.save(autoMergeOptOuts, forKey: Key.autoMergeOptOuts)
-        persistenceStore.save(autoMergeOptIns, forKey: Key.autoMergeOptIns)
-        persistenceStore.save(automaticActionOptIns, forKey: Key.automaticActionOptIns)
+        let recordsSaved = transferMRSettings(.save)
         let synchronized = persistenceStore.synchronize()
         if !synchronized {
-            changedHistoryKeys.formUnion([Key.assistantHandoffs, Key.workflowActivity,
+            changedMRKeys.formUnion([Key.assistantHandoffs, Key.workflowActivity,
                 Key.automationEvents, Key.mrActionIntents])
         }
-        let accepted = automationSaved && approvalPreferencesSaved && synchronized
+        let accepted = automationSaved && recordsSaved && synchronized
         if accepted { acceptedAutomation = automation.ignoringGlobalSuspension }
         if automationSaved && synchronized {
             lastSavedAutomation = automation
             if previousAutomation != automation { onAutomationChanged?(previousAutomation) }
         }
         return accepted
-    }
-
-    private func saveHistory<Value: Encodable>(_ value: Value, forKey key: String) {
-        if persistenceStore.save(value, forKey: key, changed: changedHistoryKeys.contains(key)) {
-            changedHistoryKeys.remove(key)
-        }
     }
 
     /// Turns the global automation killswitch on or off and stops or resumes automation accordingly.
@@ -593,6 +584,7 @@ final class SettingsManager {
     }
 
     private enum Key {
+        static let mergeRequestRecords = "mergeRequestRecords"
         static let conversationDestination = "conversationDestination"
         static let automation = "automation"
         static let automationGloballyEnabled = "automationGloballyEnabled"
@@ -654,5 +646,220 @@ final class SettingsManager {
         static let ignoredMergeRequests = "ignoredMergeRequests"
         static let feedbackSuggestionDecisions = "feedbackSuggestionDecisions"
         static let reviewParticipationPreferences = "reviewParticipationPreferences"
+    }
+}
+
+extension SettingsManager {
+    private enum MRSettingsPreference {
+        case hiddenReviews(HiddenMergeRequests)
+        case boardPins(Set<BoardCardPin>)
+
+        var key: String {
+            switch self {
+            case .hiddenReviews: Key.ignoredMergeRequests
+            case .boardPins: Key.boardPins
+            }
+        }
+    }
+
+    private enum MRSettingsTransfer {
+        case load
+        case save
+        case savePreference(MRSettingsPreference)
+    }
+
+    private func saveMRPreference(_ value: MRSettingsPreference, replacing previous: MRSettingsPreference) -> Bool {
+        persistenceStore.preserveCorruptValues()
+        guard transferMRSettings(.savePreference(value)), persistenceStore.synchronize() else {
+            _ = transferMRSettings(.savePreference(previous))
+            _ = persistenceStore.synchronize()
+            return false
+        }
+        return true
+    }
+
+    /// The existing collections are indexes for callers that filter by account, MR or work ID.
+    /// Update their persisted records and the downgrade mirrors together at explicit save points.
+    @discardableResult
+    private func transferMRSettings(_ transfer: MRSettingsTransfer) -> Bool {
+        typealias Record = MRSettingsRecord
+        typealias Target = MRAutomationScope.Target
+        var archive = mrSettingsArchive
+        var updatedKeys = Set<String>()
+        var failedKeys = Set<String>()
+        var candidateHides: HiddenMergeRequests?
+        var candidatePins: Set<BoardCardPin>?
+        if case let .savePreference(preference) = transfer {
+            switch preference {
+            case .hiddenReviews(let value): candidateHides = value
+            case .boardPins(let value): candidatePins = value
+            }
+        }
+
+        func field<Value: Codable, Element>(
+            _ path: ReferenceWritableKeyPath<SettingsManager, Value>,
+            _ field: WritableKeyPath<Record, [Element]?>, _ key: String,
+            candidate: Value? = nil, repartition: Bool = false,
+            split: (Value) -> [Element], combine: ([Element]) -> Value,
+            restorePayload: (Value, Value) -> Value = { value, _ in value },
+            scope: (Element) -> MRSettingsKey?
+        ) {
+            switch transfer {
+            case .load:
+                let legacy = persistenceStore.load(key, fallback: self[keyPath: path])
+                let fingerprint = persistenceStore.savedFingerprint(forKey: key)
+                if let previous = archive.mirrorFingerprints[key], fingerprint == nil || fingerprint == previous {
+                    self[keyPath: path] = restorePayload(combine(archive.values(field)), legacy)
+                } else {
+                    self[keyPath: path] = legacy
+                }
+            case .save, .savePreference:
+                if case .savePreference(let selected) = transfer, key != selected.key { return }
+                let changed = candidate != nil || changedMRKeys.contains(key)
+                let value = candidate ?? self[keyPath: path]
+                guard persistenceStore.save(value, forKey: key, changed: changed),
+                      let fingerprint = persistenceStore.savedFingerprint(forKey: key) else {
+                    failedKeys.insert(key)
+                    return
+                }
+                guard changed || repartition || archive.mirrorFingerprints[key] != fingerprint else { return }
+                archive.replace(field, with: split(value), keyedBy: scope)
+                archive.mirrorFingerprints[key] = fingerprint
+                updatedKeys.insert(key)
+            }
+        }
+
+        func targets(_ path: ReferenceWritableKeyPath<SettingsManager, Set<Target>>,
+                     _ value: WritableKeyPath<Record, [Target]?>, _ key: String) {
+            field(path, value, key, split: Array.init, combine: Set.init, scope: MRSettingsKey.init)
+        }
+
+        func scoped<Value: Codable & Sendable>(_ path: ReferenceWritableKeyPath<SettingsManager, [Target: Value]>,
+                                    _ value: WritableKeyPath<Record, [Record.Scoped<Value>]?>, _ key: String) {
+            field(path, value, key, split: { $0.map { .init(target: $0.key, value: $0.value) } },
+                combine: { Dictionary($0.map { ($0.target, $0.value) }, uniquingKeysWith: { first, _ in first }) },
+                scope: { MRSettingsKey($0.target) })
+        }
+
+        func ordered<Value: Codable>(_ path: ReferenceWritableKeyPath<SettingsManager, [Value]>,
+                                      _ value: WritableKeyPath<Record, [Record.Ordered<Value>]?>, _ key: String,
+                                      scope: (Value) -> MRSettingsKey?) {
+            field(path, value, key, split: { $0.enumerated().map { .init(position: $0.offset, value: $0.element) } },
+                combine: { $0.sorted { $0.position < $1.position }.map(\.value) }, scope: { scope($0.value) })
+        }
+
+        func targetSet<Value: Codable & Hashable>(_ path: ReferenceWritableKeyPath<SettingsManager, Set<Value>>,
+                                                   _ value: WritableKeyPath<Record, [Value]?>, _ key: String,
+                                                   target: KeyPath<Value, Target>) {
+            field(path, value, key, split: Array.init, combine: Set.init, scope: { MRSettingsKey($0[keyPath: target]) })
+        }
+
+        targets(\.autoApproveOptOuts, \.autoApproveOptOuts, Key.autoApproveOptOuts)
+        scoped(\.independentApprovalPreferences, \.independentApprovalPreferences, Key.independentApprovalPreferences)
+        targets(\.autoPublishOptOuts, \.autoPublishOptOuts, Key.autoPublishOptOuts)
+        targets(\.autoMergeOptOuts, \.autoMergeOptOuts, Key.autoMergeOptOuts)
+        targets(\.autoMergeOptIns, \.autoMergeOptIns, Key.autoMergeOptIns)
+        let emptyActionOptIns = archive.emptyActionOptIns ?? []
+        field(\.automaticActionOptIns, \.automaticActionOptIns, Key.automaticActionOptIns,
+            split: { actions in actions.flatMap { action, targets in targets.map { .init(action: action, target: $0) } } },
+            combine: { entries in
+                var result = Dictionary(uniqueKeysWithValues: emptyActionOptIns.map { ($0, Set<Target>()) })
+                for entry in entries { result[entry.action, default: []].insert(entry.target) }
+                return result
+            }, scope: { MRSettingsKey($0.target) })
+        ordered(\.mergeSubmissions, \.mergeSubmissions, Key.mergeSubmissions, scope: { MRSettingsKey($0.target) })
+        let legacyHideDeadline = archive.legacyHideDeadline
+        field(\.hiddenMergeRequests, \.hiddenReviews, Key.ignoredMergeRequests, candidate: candidateHides,
+            split: { hides in hides.targets.map { .init(target: $0, detail: hides.details[$0]) } },
+            combine: { entries in
+                var hides = HiddenMergeRequests()
+                hides.targets = Set(entries.map(\.target))
+                hides.details = Dictionary(entries.compactMap { entry in entry.detail.map { (entry.target, $0) } },
+                    uniquingKeysWith: { first, _ in first })
+                hides.legacyRestoreUntil = legacyHideDeadline
+                return hides
+            }, scope: { MRSettingsKey($0.target) })
+        targets(\.newReviewTargets, \.newReviewTargets, Key.newReviewTargets)
+        targets(\.heldNewReviewTargets, \.heldNewReviewTargets, Key.heldNewReviewTargets)
+        targetSet(\.authorFeedbackAttempts, \.authorFeedbackAttempts, Key.authorFeedbackAttempts, target: \.target)
+        ordered(\.assistantAutomaticRetryAttempts, \.assistantAutomaticRetryAttempts, Key.assistantAutomaticRetryAttempts,
+            scope: { MRSettingsKey(host: $0.target.host, projectID: $0.target.projectID, iid: $0.target.iid) })
+        targetSet(\.pipelineRefreshAttempts, \.pipelineRefreshAttempts, Key.pipelineRefreshAttempts, target: \.target)
+        ordered(\.pipelineClaimAssessmentAttempts, \.pipelineClaimAssessmentAttempts, Key.pipelineClaimAssessmentAttempts,
+            scope: { MRSettingsKey($0.target) })
+        field(\.conflictReceipts, \.conflictReceipts, Key.conflictReceipts, split: Array.init, combine: Set.init,
+            scope: { MRSettingsKey(host: $0.host, projectID: $0.projectID, iid: $0.iid) })
+        field(\.reReviewReceipts, \.reReviewReceipts, Key.reReviewReceipts,
+            split: { $0.map { .init(key: $0.key, value: $0.value) } },
+            combine: { Dictionary($0.map { ($0.key, $0.value) }, uniquingKeysWith: { first, _ in first }) },
+            scope: { MRSettingsKey(host: $0.key.host, projectID: $0.key.projectID, iid: $0.key.iid) })
+        scoped(\.reReviewDraftBaselines, \.reReviewDraftBaselines, Key.reReviewDraftBaselines)
+        field(\.assistantHandoffs, \.assistantHandoffs, Key.assistantHandoffs,
+            split: { jobs in
+                jobs.enumerated().map { index, job in
+                    // The compatibility key already holds successful display transcripts.
+                    var record = job
+                    if record.execution?.state == .succeeded { record.execution?.output = nil }
+                    return .init(position: index, value: record)
+                }
+            },
+            combine: { $0.sorted { $0.position < $1.position }.map(\.value) },
+            restorePayload: { jobs, compatibilityJobs in
+                let byID = Dictionary(compatibilityJobs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                return jobs.map { job in
+                    guard job.execution?.state == .succeeded, let previous = byID[job.id],
+                          previous.key == job.key, previous.execution?.state == .succeeded else { return job }
+                    var restored = job
+                    restored.execution?.output = previous.execution?.output
+                    return restored
+                }
+            }, scope: { MRSettingsKey($0.value.key.automationTarget) })
+        ordered(\.workflowActivity, \.workflowActivity, Key.workflowActivity, scope: {
+            let request = $0.event.mergeRequest
+            return MRSettingsKey(host: $0.host, projectID: request.projectID, iid: request.iid)
+        })
+        ordered(\.automationEvents, \.automationEvents, Key.automationEvents, scope: { MRSettingsKey($0.target) })
+        ordered(\.mrActionIntents, \.mrActionIntents, Key.mrActionIntents, scope: { MRSettingsKey($0.target) })
+        targetSet(\.routedMRTodoReceipts, \.routedMRTodoReceipts, Key.routedMRTodoReceipts, target: \.target)
+        let todoTargets = Dictionary(grouping: routedMRTodoReceipts) {
+            TodoAutomationReceipt(host: $0.target.host, username: $0.target.username, todoID: $0.event.id)
+        }.compactMapValues { routes -> MRSettingsKey? in
+            let targets = Set(routes.map(\.target))
+            guard targets.count == 1, let target = targets.first else { return nil }
+            return MRSettingsKey(target)
+        }
+        let routesChanged = updatedKeys.contains(Key.routedMRTodoReceipts)
+        field(\.automationReceipts, \.automationReceipts, Key.automationReceipts, repartition: routesChanged,
+            split: Array.init, combine: Set.init, scope: { todoTargets[$0] })
+        field(\.automationAttemptReceipts, \.automationAttemptReceipts, Key.automationAttemptReceipts, repartition: routesChanged,
+            split: Array.init, combine: Set.init, scope: { todoTargets[$0] })
+        field(\.pendingTodoAcknowledgements, \.pendingTodoAcknowledgements, Key.pendingTodoAcknowledgements, repartition: routesChanged,
+            split: Array.init, combine: Set.init, scope: {
+                todoTargets[.init(host: $0.host, username: $0.username, todoID: $0.todo.id)]
+            })
+        field(\.boardPins, \.boardPins, Key.boardPins, candidate: candidatePins, split: Array.init, combine: Set.init, scope: { pin in
+            guard case let .mergeRequest(projectID, iid) = pin.item else { return nil }
+            return MRSettingsKey(host: pin.host, projectID: projectID, iid: iid)
+        })
+        targets(\.pendingCommentReviews, \.pendingCommentReviews, Key.pendingCommentReviews)
+        scoped(\.commentReviewProgress, \.commentReviewProgress, Key.commentReviewProgress)
+
+        if case .load = transfer { return true }
+        if updatedKeys.contains(Key.newReviewTargets) {
+            archive.replace(\.newReviewGenerations, with: newReviewGenerations.map { .init(target: $0.key, value: $0.value) },
+                keyedBy: { MRSettingsKey($0.target) })
+        }
+        if updatedKeys.contains(Key.ignoredMergeRequests) {
+            archive.legacyHideDeadline = (candidateHides ?? hiddenMergeRequests).legacyRestoreUntil
+        }
+        if updatedKeys.contains(Key.automaticActionOptIns) {
+            archive.emptyActionOptIns = Set(automaticActionOptIns.compactMap { $0.value.isEmpty ? $0.key : nil })
+        }
+        if !updatedKeys.isEmpty { archive.discardEmptyRecords() }
+        guard persistenceStore.save(archive, forKey: Key.mergeRequestRecords, changed: !updatedKeys.isEmpty) else { return false }
+        mrSettingsArchive = archive
+        changedMRKeys.subtract(updatedKeys)
+        if case .savePreference = transfer { return failedKeys.isEmpty }
+        return !failedKeys.contains(Key.independentApprovalPreferences)
     }
 }

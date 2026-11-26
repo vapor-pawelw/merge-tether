@@ -365,7 +365,7 @@ struct AICommentProvenanceTests: Sendable {
         #expect(!snapshot.contains(threads[0].notes[0], discussionID: threads[0].id))
     }
 
-    @Test func terminalMergeRequestsAndInactiveScopesDropTheirOrigins() throws {
+    @Test func removingOneMergeRequestKeepsOtherOrigins() throws {
         // given
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -378,16 +378,5 @@ struct AICommentProvenanceTests: Sendable {
         // then
         #expect(AICommentProvenanceStore.generation(for: generated, context: context, in: directory) == nil)
         #expect(AICommentProvenanceStore.generation(for: draft(12), context: other, in: directory) != nil)
-
-        // when
-        AICommentProvenanceStore.pruneInactive(before: Date().addingTimeInterval(-60), in: directory)
-        // then
-        #expect(AICommentProvenanceStore.generation(for: draft(12), context: other, in: directory) != nil)
-
-        // when
-        AICommentProvenanceStore.pruneInactive(before: Date().addingTimeInterval(60), in: directory)
-        // then
-        #expect(AICommentProvenanceStore.generation(for: draft(12), context: other, in: directory) == nil)
-        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
     }
 }

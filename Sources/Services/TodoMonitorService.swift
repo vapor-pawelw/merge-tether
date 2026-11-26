@@ -342,6 +342,10 @@ final class TodoMonitorService {
         authoredMergeRequests.onObservedMergeRequests = { [weak self] requests, observedAt in
             self?.recordOwnedLifecycleObservations(requests, observedAt: observedAt)
         }
+        authoredMergeRequests.onExactTerminalObservation = { [weak self] request, user, revision, observedAt in
+            guard let self, let host = glab.resolvedHost else { return }
+            _ = await attention.retireConfirmedLifecycle(request, host: host, user: user, revision: revision, readStartedAt: observedAt)
+        }
         attention.onAutomationEligibilityObserved = { [weak self] in
             self?.cancelIneligibleDraftAutomation()
         }

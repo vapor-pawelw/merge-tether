@@ -286,7 +286,7 @@ final class MergeRequestAttentionMonitor {
     let aiAssessmentDirectory: URL
     private let followUpDirectory: URL
     private let provenanceDirectory: URL
-    private var lastProvenancePrune: Date?
+    private let authorFeedbackAssessmentDirectory: URL?
     private var verifiedRemoteFiles: [String: [FollowUpVerification.FileEvidence]] = [:]
     private var isRefreshingDrafts = false
     @ObservationIgnored private let pendingDraftPolling = PendingDraftPolling()
@@ -351,6 +351,7 @@ final class MergeRequestAttentionMonitor {
         self.aiAssessmentDirectory = aiAssessmentDirectory
         self.followUpDirectory = followUpDirectory
         self.provenanceDirectory = provenanceDirectory
+        self.authorFeedbackAssessmentDirectory = authorFeedbackAssessmentDirectory
         self.canAutomate = canAutomate
         self.approvalReadClock = approvalReadClock
         self.approvalReadWait = approvalReadWait
@@ -753,12 +754,35 @@ final class MergeRequestAttentionMonitor {
         for continuation in waiting { continuation.resume() }
     }
 
-    /// Merged and closed MRs drop their display origins when observed; this sweep covers unobserved ones.
-    private func pruneInactiveProvenance(now: Date) {
-        guard lastProvenancePrune.map({ now.timeIntervalSince($0) >= 86_400 }) ?? true else { return }
-        lastProvenancePrune = now
-        let directory = provenanceDirectory, cutoff = now.addingTimeInterval(-180 * 86_400)
-        Task.detached(priority: .background) { AICommentProvenanceStore.pruneInactive(before: cutoff, in: directory) }
+    /// Called only with the response to a single-MR read. Listing omissions and
+    /// persisted terminal metadata cannot authorize cleanup.
+    @discardableResult
+    func retireConfirmedLifecycle(_ request: GitLabMergeRequest, host: String, user: GitLabAuthenticatedUser,
+                                  revision: UInt64, readStartedAt: Date) async -> Bool {
+        let account = Account(host: host, username: user.username)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: user.username,
+            projectID: request.projectID, iid: request.iid)
+        guard let settings, MergeRequestFinishedState(request) != nil,
+              isCurrent(account, revision: revision), !Task.isCancelled,
+              settings.mrLifecycleLedger.accepts(request, for: target, observedAt: readStartedAt),
+              (try? await glab.fetchAuthenticatedUser(host: host, expectedUsername: user.username)) == user,
+              isCurrent(account, revision: revision), !Task.isCancelled,
+              settings.mrLifecycleLedger.accepts(request, for: target, observedAt: readStartedAt) else { return false }
+
+        let terminalSince = settings.mrLifecycleLedger.terminalObservedAt(for: target, state: request.state) ?? readStartedAt
+        settings.retireMRProgress(for: target, state: request.state, terminalSince: terminalSince, now: readStartedAt)
+        if request.state == .merged && !isConfirming(request.mergeRequestID)
+            && !settings.assistantHandoffs.contains(where: { $0.key.automationTarget == target && $0.execution?.state.isActive == true }) {
+            let origins = AICommentProvenanceStore.Context(host: host, username: user.username, userID: user.id,
+                projectID: request.projectID, iid: request.iid)
+            let provenance = provenanceDirectory
+            let assessments = authorFeedbackAssessmentDirectory
+            await Task.detached(priority: .utility) {
+                AICommentProvenanceStore.removeMergeRequest(origins, in: provenance)
+                if let assessments { AuthorFeedbackAssessmentStore.remove(target, in: assessments) }
+            }.value
+        }
+        return true
     }
 
     private func poll(_ account: Account, todos: [Todo], revision: UInt64,
@@ -866,25 +890,17 @@ final class MergeRequestAttentionMonitor {
                 autoRemoveFinished: true)
             onAutomationEligibilityObserved?()
         }
-        func retireCommentReview(_ request: GitLabMergeRequest) {
-            guard request.state == .merged || request.state == .closed else { return }
-            let reviewTarget = target(for: request)
-            // A newer reopening must win over an older in-flight terminal read.
-            guard settings?.mrLifecycleLedger.request(for: reviewTarget)?.state != .opened else { return }
-            settings?.completeCommentReview(for: reviewTarget)
-            let origins = AICommentProvenanceStore.Context(host: host, username: user.username, userID: user.id,
-                projectID: request.projectID, iid: request.iid)
-            let directory = provenanceDirectory
-            Task.detached(priority: .utility) { AICommentProvenanceStore.removeMergeRequest(origins, in: directory) }
-        }
-        if feedbackDecision == nil { pruneInactiveProvenance(now: observedAt) }
         for pending in settings?.pendingCommentReviews ?? [] where pending.host == host && pending.username == user.username
             && (feedbackDecision == nil || (pending.projectID == feedbackDecision?.projectID && pending.iid == feedbackDecision?.iid)) {
-            if isIgnored(pending) || settings?.mrLifecycleLedger.request(for: pending)?.state == .merged {
+            if isIgnored(pending) {
                 settings?.completeCommentReview(for: pending)
             }
         }
         for request in listed where request.webURL.isGitLabMergeRequest(host: host, iid: request.iid) {
+            if feedbackDecision != nil, settings != nil, MergeRequestFinishedState(request) != nil {
+                guard await retireConfirmedLifecycle(request, host: host, user: user, revision: revision, readStartedAt: observedAt),
+                      isCurrent(account, revision: revision) else { return }
+            }
             remember(request, readStartedAt: observedAt)
             if request.isOpen {
                 terminalCatalogRequests.remove(.init(projectID: request.projectID, iid: request.iid))
@@ -916,11 +932,11 @@ final class MergeRequestAttentionMonitor {
             return item
         }
         for request in listed where request.state == .closed || request.state == .merged {
-            retireCommentReview(request)
             retainedCatalog.removeValue(forKey: .init(projectID: request.projectID, iid: request.iid))
         }
         let pendingReviewTargets = (settings?.pendingCommentReviews ?? []).filter { $0.host == host && $0.username == user.username }
         let scopeTargets = Set(settings?.automation.scope.individualTargets(host: host, username: user.username) ?? []).union(pendingReviewTargets)
+        let transientTargets = (settings?.newReviewTargets ?? []).filter { $0.host == host && $0.username == user.username }
         let recordedTargets = Set(agentWorks.filter { $0.host == host }.map {
             MRAutomationScope.Target.mergeRequest(host: host, username: user.username, projectID: $0.projectID, iid: $0.iid)
         })
@@ -931,8 +947,9 @@ final class MergeRequestAttentionMonitor {
         let hiddenTargets = settings?.ignoredMergeRequests.filter {
             $0.host == host && $0.username == user.username && settings?.canRestoreHiddenReview($0) == true
         } ?? []
+        let historyCleanupTargets = settings?.retainedHistoryCandidates(host: host, username: user.username) ?? []
         let lookupTargets = feedbackDecision == nil
-            ? scopeTargets.union(recordedTargets).union(intentTargets).union(trackedTargets).union(hiddenTargets) : []
+            ? scopeTargets.union(recordedTargets).union(intentTargets).union(trackedTargets).union(hiddenTargets).union(transientTargets) : []
         var explicit: [GitLabMergeRequest] = []
         var recordedReviews: [GitLabMergeRequest] = []
         var explicitFetchFailed = false
@@ -944,8 +961,9 @@ final class MergeRequestAttentionMonitor {
             guard !listedIDs.contains(id) else { continue }
             // Merged MRs cannot reopen. Closed rows, including Seen tombstones,
             // continue exact checks because they may reopen without assignment.
-            if !hidden, settings?.mrLifecycleLedger.request(for: target)?.state == .merged
-                || terminalCatalogRequests.contains(id) { continue }
+            if !hidden, terminalCatalogRequests.contains(id)
+                || (settings?.mrLifecycleLedger.request(for: target)?.state == .merged
+                    && !transientTargets.contains(target) && !historyCleanupTargets.contains(target)) { continue }
             let requestReadStartedAt = Date()
             guard let request = try? await glab.fetchMergeRequest(projectID: target.projectID, iid: iid, host: host) else {
                 if hidden { continue }
@@ -964,15 +982,26 @@ final class MergeRequestAttentionMonitor {
                 continue
             }
             if hidden {
-                settings?.retireFinishedHiddenReview(target, request: request, hideID: hideID)
+                if await retireConfirmedLifecycle(request, host: host, user: user, revision: revision, readStartedAt: requestReadStartedAt) {
+                    settings?.retireFinishedHiddenReview(target, request: request, hideID: hideID)
+                }
+                guard isCurrent(account, revision: revision) else { return }
                 continue
             }
             if request.state == .merged || request.state == .closed {
                 let alreadyTracked = settings?.mrLifecycleLedger.request(for: target) != nil
                     || settings?.automation.scope.isManaged(target) == true || hasManagedIntent(target)
+                if settings != nil {
+                    let confirmed = await retireConfirmedLifecycle(request, host: host, user: user, revision: revision,
+                        readStartedAt: requestReadStartedAt)
+                    guard isCurrent(account, revision: revision) else { return }
+                    guard confirmed else {
+                        explicitFetchFailed = true
+                        continue
+                    }
+                }
                 if alreadyTracked { remember(request, readStartedAt: requestReadStartedAt) }
                 else { onDisplayMetadataObserved?(request, target, revision, requestReadStartedAt) }
-                retireCommentReview(request)
                 if request.state == .merged { terminalCatalogRequests.insert(id) }
                 retainedCatalog.removeValue(forKey: id)
             } else {

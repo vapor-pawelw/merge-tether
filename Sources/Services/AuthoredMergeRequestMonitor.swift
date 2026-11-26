@@ -34,6 +34,7 @@ final class AuthoredMergeRequestMonitor {
     var authorFeedbackStatus: ((GitLabMergeRequest) -> AuthorFeedbackStatus?)?
     /// Fresh authenticated observations, delivered before optional remote actions.
     var onObservedMergeRequests: (([GitLabMergeRequest], Date) -> Void)?
+    var onExactTerminalObservation: ((GitLabMergeRequest, GitLabAuthenticatedUser, UInt64, Date) async -> Void)?
     func isMerging(_ request: GitLabMergeRequest) -> Bool {
         let id = request.mergeRequestID
         guard let progress = mergingRequests[id], isCurrent(progress.account, revision: progress.revision),
@@ -293,7 +294,6 @@ final class AuthoredMergeRequestMonitor {
         }
         guard glab.accountRevision == revision else { return }
         onObservedMergeRequests?(owned, readStartedAt)
-        pruneConflictReceipts(owned, account: account, user: user)
         var results: [AuthoredMergeRequestStatus] = []
         var actionFailed = false
         for summary in owned {
@@ -304,6 +304,10 @@ final class AuthoredMergeRequestMonitor {
             guard isCurrent(account, revision: revision) else { return }
             if request.author.id == user.id {
                 onObservedMergeRequests?([request], detail == nil ? readStartedAt : detailReadStartedAt)
+                if let detail, MergeRequestFinishedState(detail) != nil {
+                    await onExactTerminalObservation?(detail, user, revision, detailReadStartedAt)
+                    guard isCurrent(account, revision: revision) else { return }
+                }
             }
             guard request.isOpen, request.author.id == user.id,
                   request.webURL.isGitLabMergeRequest(host: host, iid: request.iid)
@@ -709,17 +713,6 @@ final class AuthoredMergeRequestMonitor {
         guard observed.origin == .observedQueue, observed.discussionFingerprint == nil else { return false }
         observed.discussionFingerprint = fingerprint.rawValue
         return settings.saveMergeSubmission(observed)
-    }
-
-    private func pruneConflictReceipts(_ requests: [GitLabMergeRequest], account: Account, user: GitLabAuthenticatedUser) {
-        let keys = Set(requests.map(\.mergeRequestID))
-        let remaining = settings.conflictReceipts.filter {
-            $0.host != account.host || $0.userID != user.id || keys.contains(.init(projectID: $0.projectID, iid: $0.iid))
-        }
-        if remaining != settings.conflictReceipts {
-            settings.conflictReceipts = remaining
-            settings.save()
-        }
     }
 
     private func scheduleConflictIfNeeded(_ request: GitLabMergeRequest, account: Account, user: GitLabAuthenticatedUser) async {

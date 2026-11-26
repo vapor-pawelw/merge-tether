@@ -111,14 +111,23 @@ struct MergeRequestLifecycleLedger: Codable, Sendable {
         entries[target]?.acknowledgedTerminalState = nil
     }
 
+    func accepts(_ request: GitLabMergeRequest, for target: MRAutomationScope.Target, observedAt: Date) -> Bool {
+        guard let iid = target.iid, iid > 0, target.projectID > 0, !target.username.isEmpty,
+              request.mergeRequestID == target.mergeRequestID,
+              request.webURL.isGitLabMergeRequest(host: target.host, iid: iid),
+              [.opened, .closed, .merged].contains(request.state) else { return false }
+        return entries[target].map { observedAt >= $0.observedAt } ?? true
+    }
+
+    func terminalObservedAt(for target: MRAutomationScope.Target, state: GitLabMergeRequestState) -> Date? {
+        guard let entry = entries[target], entry.request.state == state, Self.isFinished(entry.request) else { return nil }
+        return entry.terminalObservedAt ?? entry.observedAt
+    }
+
     mutating func record(_ request: GitLabMergeRequest, for target: MRAutomationScope.Target,
                          now: Date = Date(), autoRemoveFinished: Bool = false) {
-        guard let iid = target.iid, iid > 0, target.projectID > 0, !target.username.isEmpty,
-              request.projectID == target.projectID, request.iid == iid,
-              request.webURL.isGitLabMergeRequest(host: target.host, iid: iid),
-              [.opened, .closed, .merged].contains(request.state) else { return }
+        guard accepts(request, for: target, observedAt: now) else { return }
         let previous = entries[target]
-        guard previous.map({ now >= $0.observedAt }) ?? true else { return }
         var kind: Transition.Kind?
         if let old = previous?.request {
             if old.state != request.state, Self.isFinished(request) {

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Observation
 
@@ -12,6 +13,8 @@ final class DurableSettingsStore {
     @ObservationIgnored private var corrupt: [String: NSObject] = [:]
     @ObservationIgnored private var backups: [String: String] = [:]
     @ObservationIgnored private var savedValues: [String: Data] = [:]
+
+    @ObservationIgnored private var savedFingerprints: [String: Data] = [:]
 
     init(defaults: UserDefaults) {
         self.defaults = defaults
@@ -37,6 +40,14 @@ final class DurableSettingsStore {
             recordFailure(key, .decode)
             return fallback()
         }
+    }
+
+    func savedFingerprint(forKey key: String) -> Data? {
+        if let fingerprint = savedFingerprints[key] { return fingerprint }
+        guard let data = savedValues[key] else { return nil }
+        let fingerprint = Data(SHA256.hash(data: data))
+        savedFingerprints[key] = fingerprint
+        return fingerprint
     }
 
     /// Called by explicit save, never by view evaluation or initialization.
@@ -70,6 +81,7 @@ final class DurableSettingsStore {
         defaults.set(data, forKey: key)
         guard defaults.data(forKey: key) == data else { recordFailure(key, .write); return false }
         savedValues[key] = data
+        savedFingerprints[key] = nil
         return true
     }
 

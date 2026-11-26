@@ -338,26 +338,12 @@ enum AICommentProvenanceStore {
         return .init(context: context, notes: notes)
     }
 
-    /// Display evidence is only useful while the MR is open; terminal MRs drop their whole scope.
+    /// Remove one confirmed merged MR’s display provenance for the authenticated account.
     nonisolated static func removeMergeRequest(_ context: Context, in directory: URL = directory) {
         guard context.isValid else { return }
         let scope = file(kind: "notes", id: 0, context: context, in: directory)
             .deletingLastPathComponent().deletingLastPathComponent()
         try? FileManager.default.removeItem(at: scope)
-    }
-
-    /// Removes scopes with no write since `cutoff`, covering MRs whose closure the app never observed.
-    nonisolated static func pruneInactive(before cutoff: Date, in directory: URL = directory) {
-        let keys: [URLResourceKey] = [.contentModificationDateKey, .isDirectoryKey]
-        let manager = FileManager.default
-        guard let scopes = try? manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: keys) else { return }
-        for scope in scopes where (try? scope.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-            && scope.lastPathComponent.utf8.count == 64 {
-            let files = manager.enumerator(at: scope, includingPropertiesForKeys: keys)?
-                .compactMap { $0 as? URL }.filter { $0.pathExtension == "json" } ?? []
-            let newest = files.compactMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }.max()
-            if newest.map({ $0 < cutoff }) ?? true { try? manager.removeItem(at: scope) }
-        }
     }
 
     private nonisolated static func displayDirectories(_ directory: URL, legacyDirectory: URL?) -> [URL] {

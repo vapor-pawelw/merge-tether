@@ -160,6 +160,20 @@ Before retrying a pipeline task, the app reads its current MR and pipeline. A pa
 
 MR menus and Details offer **Refresh from GitLab**. This refreshes tracked data through the normal monitoring path without clearing verification results or retry fences. Details share the card's MR actions and pin control. Automatic monitoring follows the selected refresh interval, with an hourly option available; forced refresh does not add a second periodic timer.
 
+### Local retention after an MR finishes
+
+MergeTether groups MR settings and journals by GitLab host, project ID and MR number. Each entry keeps its original account binding. Explicit settings saves also write the older keys so older installations still have the preferences and safety receipts they use. On upgrade, the app reconciles changes made by an older installation and preserves unreadable journals for diagnosis. Successful transcripts are stored once in the compatible run history payload, which is rewritten when the run history changes.
+
+Retirement requires a successful single-MR read that confirms the terminal state and a matching authenticated account. An omitted row, partial response, failed read or older observation cannot trigger retirement.
+
+| Data | Retention |
+| --- | --- |
+| Automation choices, ignored reviews and write safety records | Kept across close, reopen and merge. A closed MR can reopen on the same commit at any time, so age alone never expires a safety record or automation opt-out. |
+| Board pin | Kept while open and for at least 30 days after close. A fresh terminal read can remove a pin once that interval elapses or when the MR is merged. |
+| New-review marker | Removed on confirmed close or merge. The separate hold that pauses automation stays in place. |
+| Worker history | On merge, or on a fresh read after 30 days closed, keep the newest 12 ordinary successful transcripts and the newest 12 eligible read-only reviews per MR and account. Active or queued runs, runs linked to receipts or other records, and runs with pending audits or recorded effects are exempt. Operational run metadata, failed and interrupted diagnostics, worker checkpoints and working files remain available. |
+| File evidence | A confirmed merge can retire display provenance and the cached author-feedback assessment. A close keeps them for reopening. Sealed verdicts, publication and draft proof, follow-up receipts and pipeline reservations keep their existing storage rules. |
+
 The app bundles `evidence.py` and `author_follow_up.py` under `Contents/Resources/Automation`. Workers use these helpers to read GitLab state and store local evidence.
 
 ## Optional manual agent actions

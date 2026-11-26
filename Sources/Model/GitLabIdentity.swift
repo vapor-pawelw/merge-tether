@@ -20,7 +20,7 @@ struct GitLabAccountSession: Hashable, Sendable {
 }
 
 /// A merge request within an already established GitLab host and account.
-struct GitLabMergeRequestID: Hashable, Sendable {
+struct GitLabMergeRequestID: Codable, Hashable, Sendable {
     let projectID: Int
     let iid: Int
 }
