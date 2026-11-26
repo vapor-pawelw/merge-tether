@@ -22,9 +22,15 @@ struct MRAutomationEventLogRow: View {
         DisclosureGroup(isExpanded: $detailsExpanded) {
             if detailsExpanded { details.padding(.vertical, 5) }
         } label: {
-            MREventLogRowHeader(title: Text(title),
-                context: Text(stateLabel).foregroundColor(needsAttention ? .orange : .secondary), createdAt: entry.createdAt,
-                source: .mergeTether, isAutomatic: entry.isAutomatic)
+            VStack(alignment: .leading, spacing: 3) {
+                MREventLogRowHeader(title: Text(title),
+                    context: Text(stateLabel).foregroundColor(needsAttention ? .orange : .secondary), createdAt: entry.createdAt,
+                    source: .mergeTether, isAutomatic: entry.isAutomatic)
+                if case .workflow(let workflow) = entry.source,
+                   let reason = ReviewLaunchReason.message(for: workflow.event.reviewUpdateReasons ?? []) {
+                    Text(verbatim: reason).foregroundStyle(.secondary)
+                }
+            }
         }
         .font(.caption)
         .padding(.vertical, 3)

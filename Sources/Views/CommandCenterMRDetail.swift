@@ -498,9 +498,16 @@ private struct CommandCenterMRDetailContent: View {
                         }
                         if progress.working, mergeActivity == nil, let status = progress.status,
                            !(isRecheckingFeedback && progress.activityEffect == .aiCheck) {
+                            let activity = progress.activity
                             MRActivityStatus(status: status,
-                                startedAt: monitor.activityStartedAt(for: item, activity: progress.activity), effect: progress.activityEffect)
+                                startedAt: monitor.activityStartedAt(for: item, activity: activity), effect: progress.activityEffect)
                             .font(.callout).foregroundStyle(.secondary)
+                            if let job = progress.row.latestJob, activity?.jobID == job.id,
+                               let reason = reviewLaunchReason(for: job) {
+                                Text(verbatim: reason)
+                                    .font(.callout).foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         } else if progress.refreshFailed {
                             Label { Text(verbatim: progress.refreshFailureLabel ?? String(localized: .AutomationProgress.progressRefreshFailed)) }
                                 icon: { Image(systemName: "arrow.clockwise") }
@@ -529,6 +536,11 @@ private struct CommandCenterMRDetailContent: View {
                 }
             }
         }
+    }
+
+    private func reviewLaunchReason(for job: AssistantAutomationRunner.Handoff) -> String? {
+        ReviewLaunchReason.message(for: MRAutomationHistory.reviewLaunchReasons(for: job,
+            workflows: monitor.settings.workflowActivity, intents: monitor.settings.mrActionIntents))
     }
 
     private func feedbackRecheckButton(_ feedback: AuthorFeedbackStatus, retryIntentID: UUID? = nil) -> some View {

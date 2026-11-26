@@ -89,13 +89,15 @@ final class MergeWorkflowMonitor {
         func event(
             _ kind: MergeWorkflowTrigger, token: String, context: String,
             pipelineProjectID: Int? = nil, pipelineID: Int? = nil, jobID: Int? = nil,
-            isInfrastructureFailure: Bool = false, noteIDs: [Int] = [], failedPipelineJobIDs: [Int]? = nil
+            isInfrastructureFailure: Bool = false, noteIDs: [Int] = [], failedPipelineJobIDs: [Int]? = nil,
+            reviewUpdateReasons: [ReviewLaunchReason]? = nil
         ) -> MergeWorkflowEvent {
             MergeWorkflowEvent(
                 kind: kind, mergeRequest: request,
                 identity: "\(account.host)|\(account.userID)|\(kind.rawValue)|\(request.projectID)!\(request.iid)|\(token)",
                 context: context, pipelineProjectID: pipelineProjectID, pipelineID: pipelineID, jobID: jobID,
-                isInfrastructureFailure: isInfrastructureFailure, noteIDs: noteIDs, failedPipelineJobIDs: failedPipelineJobIDs
+                isInfrastructureFailure: isInfrastructureFailure, noteIDs: noteIDs, failedPipelineJobIDs: failedPipelineJobIDs,
+                reviewUpdateReasons: reviewUpdateReasons
             )
         }
     }
@@ -541,6 +543,15 @@ final class MergeWorkflowMonitor {
             let targetReviewInstructions = "The MR target or diff base changed. Review the entire current diff and discussions, including files previously reviewed, and record a fresh verdict."
             let metadataNeedsReview = staleContext != nil
                 && verdict?.requiresFreshReview(forSemanticContext: request.semanticContextFingerprint) == true
+            let staleReason: ReviewLaunchReason = if changedTarget != nil {
+                .targetChanged
+            } else if externallySuperseded {
+                .pushedDuringReview
+            } else if metadataNeedsReview {
+                verdict?.semanticContextFingerprint == nil ? .metadataCoverageMissing : .metadataChanged
+            } else {
+                verdict?.discussionFingerprint == nil ? .discussionCoverageMissing : .discussionsChanged
+            }
             let hasReviewed = previous.hasReviewed || hasReviewEvidence || previous.reviewedHead != nil || staleContext != nil
             if firstObservation && !recoveredReview {
                 previous.hasReviewed = hasReviewed
@@ -552,7 +563,8 @@ final class MergeWorkflowMonitor {
                         context: changedTarget != nil ? targetReviewInstructions
                             : externallySuperseded ? supersededInstructions
                             : metadataNeedsReview ? IncrementalReviewScope.metadataReviewInstructions
-                            : "Your recorded review does not cover the current discussion content at this head. Recheck current discussions and record a fresh review verdict."))
+                            : "Your recorded review does not cover the current discussion content at this head. Recheck current discussions and record a fresh review verdict.",
+                        reviewUpdateReasons: [staleReason]))
                 }
                 continue
             }
@@ -598,12 +610,15 @@ final class MergeWorkflowMonitor {
                 }
                 scope.changedNoteIDs = changedActiveNotes
                 var parts: [String] = []
+                var reasons: [ReviewLaunchReason] = []
                 if changedHead {
+                    reasons.append(externallySuperseded ? .pushedDuringReview : .headChanged)
                     parts.append(scope.reviewedHead == nil
                         ? "The MR head changed. Review the current diff and discussions at this head."
                         : "The MR head changed after your recorded review.")
                 }
                 if !ids.isEmpty {
+                    reasons.append(.authorReplied)
                     parts.append("The author replied after your review comments. Recheck reply note IDs: "
                         + ids.map(String.init).joined(separator: ", ") + ".")
                 }
@@ -623,8 +638,14 @@ final class MergeWorkflowMonitor {
                 if onlyOwnOrRemoved {
                     parts.append("No other participant's note was added or edited since your review. Do not review again; confirm your verdict for the current discussions.")
                 }
+                let discussionChangeIsAuthorReply = staleReason == .discussionsChanged && !newReplies.isEmpty
+                    && changedActiveNotes.allSatisfy { newReplies.contains($0) }
+                if staleUnreported, !discussionChangeIsAuthorReply, !reasons.contains(staleReason) {
+                    reasons.append(staleReason)
+                }
                 let context = parts.joined(separator: " ")
-                events.append(observation.event(.reviewUpdate, token: token, context: context, noteIDs: ids))
+                events.append(observation.event(.reviewUpdate, token: token, context: context, noteIDs: ids,
+                    reviewUpdateReasons: reasons))
                 if let staleContext {
                     previous.reportedEvidenceContexts = (previous.reportedEvidenceContexts ?? []).union([staleContext])
                 }

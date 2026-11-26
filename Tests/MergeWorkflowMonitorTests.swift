@@ -204,6 +204,7 @@ struct MergeWorkflowMonitorTests {
         #expect(events.count == 1)
         #expect(events.first?.kind == .reviewUpdate)
         #expect(events.first?.context.contains("discussion") == true)
+        #expect(events.first?.reviewUpdateReasons == [.discussionsChanged])
         await fixture.poll(monitor) { events.append($0) }
         let restarted = MergeWorkflowMonitor(defaults: fixture.defaults, verdictDirectory: fixture.verdictDirectory)
         await fixture.poll(restarted) { events.append($0) }
@@ -240,6 +241,7 @@ struct MergeWorkflowMonitorTests {
         await fixture.poll(monitor) { events.append($0) }
         #expect(events.count == 1)
         let rebaseContext = try #require(events.last?.context)
+        #expect(events.last?.reviewUpdateReasons == [.headChanged])
         #expect(rebaseContext.contains(reviewed) && rebaseContext.contains("identical"))
         #expect(rebaseContext.contains("raise no new code findings"))
 
@@ -251,6 +253,31 @@ struct MergeWorkflowMonitorTests {
         #expect(events.count == 2)
         let incremental = try #require(events.last?.context)
         #expect(incremental.contains("Incremental re-review") && incremental.contains(reviewed) && !incremental.contains("identical"))
+    }
+
+    @Test(arguments: [false, true])
+    func reviewUpdateRecordsAnAuthorReplyAlongsideAnyHeadChange(_ push: Bool) async throws {
+        let head = String(repeating: "a", count: 40)
+        let fixture = try FreshnessFixture(request: mergeRequest(13, sha: head, author: 2))
+        defer { fixture.cleanUp() }
+        let original = fixture.reviewedThreads.replacingOccurrences(of: #""resolved":true"#, with: #""resolved":false"#)
+        try fixture.write("threads", original)
+        try fixture.recordVerdict(threads: original)
+        let monitor = MergeWorkflowMonitor(defaults: fixture.defaults, verdictDirectory: fixture.verdictDirectory)
+        var events: [MergeWorkflowEvent] = []
+        await fixture.poll(monitor) { events.append($0) }
+        #expect(events.isEmpty)
+
+        let changed = String(original.dropLast(3)) + #",{"id":102,"author":{"id":2},"system":false,"body":"I added a test"}]}]"#
+        try fixture.write("threads", changed)
+        if push {
+            try fixture.write("request", mergeRequest(13, sha: String(repeating: "b", count: 40), author: 2))
+        }
+        await fixture.poll(monitor) { events.append($0) }
+        let event = try #require(events.first)
+        #expect(events.count == 1)
+        #expect(event.noteIDs == [102])
+        #expect(event.reviewUpdateReasons == (push ? [.headChanged, .authorReplied] : [.authorReplied]))
     }
 
     @Test(arguments: [false, true])
@@ -413,6 +440,7 @@ struct MergeWorkflowMonitorTests {
             let event = try #require(events.first)
             #expect(event.kind == .reviewUpdate)
             #expect(event.mergeRequest.sha == pushed)
+            #expect(event.reviewUpdateReasons == (externalPush ? [.pushedDuringReview] : [.headChanged]))
             #expect(event.context.contains(externalPush
                 ? "Another GitLab account pushed during the previous review"
                 : "earlier review covered head \(reviewed)"))

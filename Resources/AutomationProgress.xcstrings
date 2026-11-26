@@ -49,6 +49,76 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Trwa przegląd"}}
       }
     },
+    "reviewReasonHeadChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Source commit (HEAD) changed"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Zmienił się commit źródłowy (HEAD)"}}
+      }
+    },
+    "reviewReasonAuthorReplied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "The author replied to review comments"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Autor odpowiedział na uwagi z przeglądu"}}
+      }
+    },
+    "reviewReasonDiscussionsChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Discussion content changed"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Zmieniła się treść dyskusji"}}
+      }
+    },
+    "reviewReasonDiscussionCoverageMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "The previous review did not cover the current discussion"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Poprzedni przegląd nie obejmował bieżącej dyskusji"}}
+      }
+    },
+    "reviewReasonMetadataChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "MR title or description changed"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Zmienił się tytuł lub opis MR"}}
+      }
+    },
+    "reviewReasonMetadataCoverageMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "The previous review did not verify the current title or description"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak potwierdzenia przeglądu bieżącego tytułu lub opisu MR"}}
+      }
+    },
+    "reviewReasonTargetChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "MR target or diff base changed"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Zmienił się cel MR lub baza porównania"}}
+      }
+    },
+    "reviewReasonPushedDuringReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Another user pushed during the previous review"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Inny użytkownik wypchnął zmiany podczas poprzedniego przeglądu"}}
+      }
+    },
+    "reviewReasonAutomaticRetry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Automatically retrying the previous review"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyczne ponowienie przeglądu"}}
+      }
+    },
+    "reviewReasonUnverifiedReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "The previous review result could not be verified"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się zweryfikować wyniku poprzedniego przeglądu"}}
+      }
+    },
     "progressFeedback": {
       "extractionState": "manual",
       "localizations": {
