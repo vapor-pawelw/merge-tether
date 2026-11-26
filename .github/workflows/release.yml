@@ -62,8 +62,10 @@ jobs:
           IOS_RELEASE_IDENTITY: ${{ vars.IOS_RELEASE_IDENTITY }}
           IOS_EXPORT_METHOD: ${{ vars.IOS_EXPORT_METHOD }}
           MERGETETHER_RELAY_CONFIG_JSON: ${{ secrets.MERGETETHER_RELAY_CONFIG_JSON }}
+          MERGETETHER_SPARKLE_PUBLIC_KEY: ${{ vars.MERGETETHER_SPARKLE_PUBLIC_KEY }}
+          MERGETETHER_SPARKLE_PRIVATE_KEY: ${{ secrets.MERGETETHER_SPARKLE_PRIVATE_KEY }}
         run: |
-          for name in APPLE_CERTIFICATES_P12_BASE64 APPLE_CERTIFICATES_PASSWORD IOS_PROFILE_BASE64 NOTARY_API_PRIVATE_KEY NOTARY_KEY_ID NOTARY_ISSUER_ID APPLE_TEAM_ID MACOS_RELEASE_IDENTITY IOS_RELEASE_IDENTITY IOS_EXPORT_METHOD MERGETETHER_RELAY_CONFIG_JSON; do
+          for name in MERGETETHER_SPARKLE_PUBLIC_KEY MERGETETHER_SPARKLE_PRIVATE_KEY APPLE_CERTIFICATES_P12_BASE64 APPLE_CERTIFICATES_PASSWORD IOS_PROFILE_BASE64 NOTARY_API_PRIVATE_KEY NOTARY_KEY_ID NOTARY_ISSUER_ID APPLE_TEAM_ID MACOS_RELEASE_IDENTITY IOS_RELEASE_IDENTITY IOS_EXPORT_METHOD MERGETETHER_RELAY_CONFIG_JSON; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::Missing distribution configuration: ${name}. Configure existing distribution credentials before publishing; Apple Development is insufficient."
               exit 1
@@ -128,6 +130,8 @@ jobs:
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
           MACOS_RELEASE_IDENTITY: ${{ vars.MACOS_RELEASE_IDENTITY }}
           IOS_RELEASE_IDENTITY: ${{ vars.IOS_RELEASE_IDENTITY }}
+          TUIST_MERGETETHER_UPDATE_FEED: https://github.com/${{ github.repository }}/releases/latest/download/appcast.xml
+          TUIST_MERGETETHER_UPDATE_PUBLIC_KEY: ${{ vars.MERGETETHER_SPARKLE_PUBLIC_KEY }}
         run: |
           mise exec -- bash scripts/build-release.sh "$RELEASE_VERSION" --build-number "$RELEASE_BUILD_NUMBER" --platform all \
             --signing-identity "$MACOS_RELEASE_IDENTITY" --ios-signing-identity "$IOS_RELEASE_IDENTITY" \
@@ -167,12 +171,22 @@ jobs:
           [[ "$DMG_SHA256" =~ ^[a-f0-9]{64}$ ]]
           echo "dmg_sha256=${DMG_SHA256}" >> "${GITHUB_OUTPUT:-/dev/null}"
 
+      - name: Sign and verify the macOS update feed
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_BUILD_NUMBER: ${{ github.run_number }}
+          MERGETETHER_SPARKLE_PRIVATE_KEY: ${{ secrets.MERGETETHER_SPARKLE_PRIVATE_KEY }}
+        run: bash scripts/generate-update-feed.sh "${APP_NAME}.zip" release "$RELEASE_REPO" "$TAG" "$RELEASE_BUILD_NUMBER"
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          VERSION="${{ steps.version.outputs.version }}"
+          IPA="release/MergeTetheriOS-${VERSION}.ipa"
+          ASSETS=("${APP_NAME}.dmg" "${APP_NAME}.zip" "$IPA" release/release-manifest.json release/appcast.xml
+            release/MergeTether.dmg.sha256 release/MergeTether.zip.sha256 "$IPA.sha256")
           NOTES_FILE=$(mktemp)
           trap 'rm -f "$NOTES_FILE"' EXIT
           HAS_NOTES=false
@@ -220,24 +234,31 @@ jobs:
             fi
           fi
 
-          if gh release view "$TAG" --repo "$RELEASE_REPO" > /dev/null 2>&1; then
+          if DRAFT=$(gh release view "$TAG" --repo "$RELEASE_REPO" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$DRAFT" != "true" ]; then
+              echo '::error::Release is already published. The update archive and its signed feed must stay paired.'
+              exit 1
+            fi
             if [ "$HAS_NOTES" = "true" ]; then
               gh release edit "$TAG" --repo "$RELEASE_REPO" --notes-file "$NOTES_FILE"
             fi
-            gh release upload "$TAG" --repo "$RELEASE_REPO" --clobber "${APP_NAME}.dmg" "${APP_NAME}.zip" "release/MergeTetheriOS-${VERSION}.ipa" release/release-manifest.json release/MergeTether.dmg.sha256 release/MergeTether.zip.sha256 "release/MergeTetheriOS-${VERSION}.ipa.sha256"
+            gh release upload "$TAG" --repo "$RELEASE_REPO" --clobber "${ASSETS[@]}"
           elif [ "$HAS_NOTES" = "true" ]; then
             gh release create "$TAG" \
               --repo "$RELEASE_REPO" \
               --title "$TAG" \
+              --draft \
               --notes-file "$NOTES_FILE" \
-              "${APP_NAME}.dmg" "${APP_NAME}.zip" "release/MergeTetheriOS-${VERSION}.ipa" release/release-manifest.json release/MergeTether.dmg.sha256 release/MergeTether.zip.sha256 "release/MergeTetheriOS-${VERSION}.ipa.sha256"
+              "${ASSETS[@]}"
           else
             gh release create "$TAG" \
               --repo "$RELEASE_REPO" \
               --title "$TAG" \
+              --draft \
               --generate-notes \
-              "${APP_NAME}.dmg" "${APP_NAME}.zip" "release/MergeTetheriOS-${VERSION}.ipa" release/release-manifest.json release/MergeTether.dmg.sha256 release/MergeTether.zip.sha256 "release/MergeTetheriOS-${VERSION}.ipa.sha256"
+              "${ASSETS[@]}"
           fi
+          gh release edit "$TAG" --repo "$RELEASE_REPO" --draft=false --latest
 
       - name: Remove temporary distribution credentials
         if: always()

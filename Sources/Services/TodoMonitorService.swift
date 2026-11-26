@@ -1539,6 +1539,11 @@ final class TodoMonitorService {
         }
     }
 
+    var hasActiveWorkForUpdate: Bool {
+        AssistantAutomationRunner.hasActiveJobs || automation.hasActiveActions || draftRegeneration.hasActiveWork
+            || authoredMergeRequests.workflow.hasActiveWork || attention.confirmationStates.values.contains(where: \.isBusy)
+    }
+
     func prepareForTermination() {
         incomingReviewFilter.stop()
         stopTimer()

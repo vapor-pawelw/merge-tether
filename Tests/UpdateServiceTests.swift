@@ -5,6 +5,42 @@ import Testing
 
 @Suite("UpdateService")
 struct UpdateServiceTests {
+    @MainActor @Test func showsReleaseNotesOnFirstLaunchOfAnUpdatedVersion() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let suite = "UpdateServiceTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            defaults.removePersistentDomain(forName: suite)
+        }
+
+        func bundle(version: String) throws -> Bundle {
+            let app = root.appendingPathComponent("\(version).app")
+            let resources = app.appendingPathComponent("Contents/Resources")
+            try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+            let info = ["CFBundleShortVersionString": version, "CFBundlePackageType": "APPL"]
+            let data = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+            try data.write(to: app.appendingPathComponent("Contents/Info.plist"))
+            try "## \(version)\n\n- Release notes.".write(to: resources.appendingPathComponent("CHANGELOG.md"),
+                                                          atomically: true, encoding: .utf8)
+            return try #require(Bundle(url: app))
+        }
+
+        let oldBundle = try bundle(version: "2.0.0")
+        let firstLaunch = UpdateService(defaults: defaults, bundle: oldBundle)
+        #expect(!firstLaunch.shouldShowWhatsNew)
+        firstLaunch.seedIfNeeded()
+
+        let updatedBundle = try bundle(version: "2.0.1")
+        let afterRestart = UpdateService(defaults: defaults, bundle: updatedBundle)
+        #expect(afterRestart.shouldShowWhatsNew)
+        afterRestart.loadWhatsNew()
+        #expect(afterRestart.whatsNewEntry?.body == "- Release notes.")
+        afterRestart.acknowledgeCurrentVersion()
+
+        #expect(!UpdateService(defaults: defaults, bundle: updatedBundle).shouldShowWhatsNew)
+    }
+
     @Test("parses the matching version section and stops at the next heading")
     func parseMatchingSection() {
         let changelog = """

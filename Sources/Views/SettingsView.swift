@@ -66,11 +66,15 @@ final class SettingsNavigation {
 
 struct SettingsView: View {
     @Bindable var monitor: TodoMonitorService
+    let updates: UpdateService
+    let updater: AppUpdater
     @State private var editor: SettingsPolicyEditor
     @Bindable private var navigation = SettingsNavigation.shared
 
-    init(monitor: TodoMonitorService) {
+    init(monitor: TodoMonitorService, updates: UpdateService, updater: AppUpdater) {
         self.monitor = monitor
+        self.updates = updates
+        self.updater = updater
         _editor = State(initialValue: SettingsPolicyEditor(settings: monitor.settings))
     }
 
@@ -104,7 +108,7 @@ struct SettingsView: View {
     @ViewBuilder
     private func page(_ tab: SettingsNavigation.Tab) -> some View {
         switch tab {
-        case .general: GeneralSettingsTab(monitor: monitor)
+        case .general: GeneralSettingsTab(monitor: monitor, updates: updates, updater: updater)
         case .integration: IntegrationSettingsTab(monitor: monitor)
         case .mergeRequests: MergeRequestSettingsTab(monitor: monitor)
         case .notifications: NotificationsSettingsTab(monitor: monitor)

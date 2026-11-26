@@ -115,6 +115,7 @@ final class MergeWorkflowAutomation {
     private let retryWait: ReadOnlyAssessmentRetry.Wait
     private let now: ReadOnlyAssessmentRetry.Clock
     private var work: Task<Void, Never>?
+    var hasActiveWork: Bool { work != nil }
     private var polling = false
     private var confirmedPipelineHandoffs: Set<String> = []
     @ObservationIgnored var onRemoteChange: (() -> Void)?

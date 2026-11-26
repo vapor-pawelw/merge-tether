@@ -52,6 +52,7 @@ struct MenuBarStatusLabel: View {
 
 struct MenuBarStatusMenu: View {
     let monitor: TodoMonitorService
+    let updater: AppUpdater
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
 
@@ -86,6 +87,7 @@ struct MenuBarStatusMenu: View {
             .disabled(monitor.showsGlobalRefreshProgress)
         }
         SettingsLink { Text(.CommandCenter.commandCenterSettings) }
+        if updater.isEnabled { CheckForAppUpdatesButton(updater: updater) }
         Divider()
         Button { NSApplication.shared.terminate(nil) } label: { Text(.MenuBar.menuBarQuit) }
     }

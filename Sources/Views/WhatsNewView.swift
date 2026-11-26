@@ -14,10 +14,7 @@ struct WhatsNewView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if let entry = updates.whatsNewEntry {
-                        Text(entry.body)
-                            .font(.body)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        ExtraContextMarkdown(source: entry.body)
                     } else {
                         Text(.Menu.whatsNewEmpty)
                             .foregroundStyle(.secondary)
@@ -31,6 +28,9 @@ struct WhatsNewView: View {
             footer
         }
         .frame(minWidth: 520, minHeight: 420)
+        .onDisappear {
+            if updates.whatsNewEntry != nil { updates.acknowledgeCurrentVersion() }
+        }
     }
 
     private var header: some View {
@@ -49,7 +49,6 @@ struct WhatsNewView: View {
         HStack {
             Spacer()
             Button {
-                updates.acknowledgeCurrentVersion()
                 dismissWindow(id: "whats-new")
             } label: {
                 Text(.Menu.whatsNewDismiss)

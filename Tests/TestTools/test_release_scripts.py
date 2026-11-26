@@ -435,7 +435,8 @@ elif a[:2] == ['release', 'view']:
                       'url': os.environ.get('RELEASE_URL', 'https://github.com/fixture/release/releases/tag/v9.8.7'),
                       'assets': [{'name': name, 'size': 0 if os.environ.get('EMPTY_ASSET') else 123,
                                   'url': 'https://github.com/fixture/release/releases/download/v9.8.7/' + name}
-                                 for name in (assets.split(',') + ([] if os.environ.get('NO_MANIFEST') else ['release-manifest.json']))]}))
+                                 for name in (assets.split(',') + ([] if os.environ.get('NO_MANIFEST') else ['release-manifest.json'])
+                                              + ([] if os.environ.get('NO_APPCAST') else ['appcast.xml']))]}))
 elif a[:2] == ['release', 'download']:
     if os.environ.get('NO_MANIFEST'): sys.exit(1)
     target = pathlib.Path(a[a.index('--dir') + 1]) / 'release-manifest.json'
@@ -504,6 +505,12 @@ else: sys.exit('unexpected gh fixture call: ' + repr(a))
         result = self.publish()
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn("Release complete.", result.stdout)
+
+    def test_missing_update_feed_is_not_a_successful_release(self):
+        self.env["NO_APPCAST"] = "1"
+        result = self.publish()
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("appcast.xml", result.stderr)
 
     def test_missing_dmg_is_not_a_successful_release(self):
         self.env["ASSETS"] = "MergeTether.zip"
@@ -699,7 +706,8 @@ class ReleaseWorkflowTests(ReleaseScriptFixture):
     def test_missing_ci_distribution_configuration_fails_without_exposing_values(self):
         names = ["APPLE_CERTIFICATES_P12_BASE64", "APPLE_CERTIFICATES_PASSWORD", "IOS_PROFILE_BASE64",
                  "NOTARY_API_PRIVATE_KEY", "NOTARY_KEY_ID", "NOTARY_ISSUER_ID", "APPLE_TEAM_ID",
-                 "MACOS_RELEASE_IDENTITY", "IOS_RELEASE_IDENTITY", "IOS_EXPORT_METHOD", "MERGETETHER_RELAY_CONFIG_JSON"]
+                 "MACOS_RELEASE_IDENTITY", "IOS_RELEASE_IDENTITY", "IOS_EXPORT_METHOD", "MERGETETHER_RELAY_CONFIG_JSON",
+                 "MERGETETHER_SPARKLE_PUBLIC_KEY", "MERGETETHER_SPARKLE_PRIVATE_KEY"]
         private_value = "fixture-private-value-never-log"
         for missing_name in names:
             for missing_value in [None, ""]:
@@ -772,6 +780,44 @@ pathlib.Path('mise-arguments.json').write_text(json.dumps(sys.argv[1:]))
         result = self.run_step("Verify distribution inventory and retain stable macOS names")
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.root / "MergeTether.dmg").exists())
+
+    def test_ci_publishes_only_after_attaching_the_update_feed_and_platform_archives(self):
+        self.env.update(APP_NAME="MergeTether", RELEASE_REPO="fixture/release", TAG="v9.8.7", VERSION="9.8.7")
+        (self.root / "CHANGELOG.md").write_text("## 9.8.7 - 2026-01-01\n\n- Fixture release.\n")
+        self.executable("gh", """
+import json, os, pathlib, sys
+args = sys.argv[1:]
+with pathlib.Path('release-arguments.jsonl').open('a') as calls: calls.write(json.dumps(args) + '\\n')
+if args[:2] == ['release', 'view']:
+    status = os.environ.get('RELEASE_STATUS')
+    if status is None: sys.exit(1)
+    print(status)
+""")
+        calls_path = self.root / "release-arguments.jsonl"
+        for command in ["create", "upload"]:
+            with self.subTest(command=command):
+                calls_path.write_text("")
+                if command == "upload":
+                    self.env["RELEASE_STATUS"] = "true"
+                result = self.run_step("Create GitHub Release")
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
+                args = calls[-2]
+                self.assertEqual(args[:3], ["release", command, "v9.8.7"])
+                if command == "create":
+                    self.assertIn("--draft", args)
+                self.assertEqual(args[-8:], ["MergeTether.dmg", "MergeTether.zip",
+                                            "release/MergeTetheriOS-9.8.7.ipa", "release/release-manifest.json", "release/appcast.xml",
+                                            "release/MergeTether.dmg.sha256", "release/MergeTether.zip.sha256",
+                                            "release/MergeTetheriOS-9.8.7.ipa.sha256"])
+                self.assertEqual(calls[-1], ["release", "edit", "v9.8.7", "--repo", "fixture/release", "--draft=false", "--latest"])
+
+        calls_path.write_text("")
+        self.env["RELEASE_STATUS"] = "false"
+        result = self.run_step("Create GitHub Release")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Release is already published", result.stdout)
+        self.assertEqual(len(calls_path.read_text().splitlines()), 1)
 
     def test_release_build_needs_full_verification_before_secrets(self):
         release = (REPO / ".github/workflows/release.yml").read_text()

@@ -653,6 +653,7 @@ enum AssistantAutomationRunner {
     }
 
     static func waitForTermination() async { await coordinator.waitForTermination() }
+    static var hasActiveJobs: Bool { coordinator.hasActiveJobs }
 
     static func cancel(_ id: UUID, settings: SettingsManager,
                        origin: AssistantJobExecution.CancellationOrigin = .user) {

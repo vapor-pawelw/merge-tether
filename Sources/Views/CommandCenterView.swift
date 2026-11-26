@@ -5,6 +5,7 @@ import SwiftUI
 struct CommandCenterView: View {
     let monitor: TodoMonitorService
     let updates: UpdateService
+    let updater: AppUpdater
     @State private var showingAdd = false
     @State private var showingInbox = false
     @State private var regenerationPresentation: DraftRegenerationPresentation?
@@ -107,6 +108,11 @@ struct CommandCenterView: View {
                 }
                 Button { openSettings() } label: {
                     Label { Text(.CommandCenter.commandCenterSettings) } icon: { Image(systemName: "gearshape") }
+                }
+            }
+            if AppUpdateControls.showsInToolbar(updater.presentation.phase) {
+                ToolbarItem(placement: .primaryAction) {
+                    AppUpdateControls(updater: updater, inToolbar: true)
                 }
             }
         }
@@ -315,10 +321,10 @@ struct CommandCenterView: View {
         if !monitor.settings.onboardingCompleted {
             NSApplication.shared.activate(ignoringOtherApps: true)
             openWindow(id: "onboarding")
-            updates.seedIfNeeded()
-        } else if updates.shouldShowWhatsNew {
+        }
+        if updates.shouldShowWhatsNew {
             updates.loadWhatsNew()
-            openWindow(id: "whats-new")
+            if updates.whatsNewEntry != nil { openWindow(id: "whats-new") }
         } else {
             updates.seedIfNeeded()
         }

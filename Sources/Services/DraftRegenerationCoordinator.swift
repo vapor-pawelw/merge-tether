@@ -77,6 +77,7 @@ final class DraftRegenerationCoordinator {
 
     var isAvailable: Bool { !terminating && account != nil && settings != nil }
     var batch: DraftRegenerationBatch? { batchAccount == account ? currentBatch : nil }
+    var hasActiveWork: Bool { generation != nil || application != nil }
 
     var mergeRequestCount: Int { selection(for: .all).count }
 

@@ -61,17 +61,32 @@ final class MergeTetherAppDelegate: NSObject, NSApplicationDelegate {
     let monitor = TodoMonitorService()
     let avatarCache = AvatarCache()
     let updates = UpdateService()
+    let updater = AppUpdater()
     lazy var remote = RemoteHostController(monitor: monitor)
     private var terminating = false
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = remote
         NSApplication.shared.setActivationPolicy(.regular)
         monitor.notifications.onOpenMainWindow = { MainWindowPresentation.show() }
+        updater.start { [weak self] in self?.monitor.hasActiveWorkForUpdate ?? false }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !terminating else { return .terminateLater }
         terminating = true
+        if updater.presentation.phase == .restarting, monitor.hasActiveWorkForUpdate {
+            Task { @MainActor in
+                // Sparkle requests termination asynchronously. Let work admitted in the meantime finish as well.
+                while monitor.hasActiveWorkForUpdate { try? await Task.sleep(for: .seconds(1)) }
+                finishTermination(sender)
+            }
+        } else {
+            finishTermination(sender)
+        }
+        return .terminateLater
+    }
+
+    private func finishTermination(_ sender: NSApplication) {
         let draftRegeneration = monitor.draftRegeneration.prepareForTermination()
         monitor.prepareForTermination()
         Task { @MainActor in
@@ -79,7 +94,6 @@ final class MergeTetherAppDelegate: NSObject, NSApplicationDelegate {
             await draftRegeneration?.value
             sender.reply(toApplicationShouldTerminate: true)
         }
-        return .terminateLater
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -97,7 +111,7 @@ struct MergeTetherApp: App {
 
     var body: some Scene {
         Window(String(localized: .CommandCenter.commandCenterTitle), id: "main") {
-            CommandCenterView(monitor: appDelegate.monitor, updates: appDelegate.updates)
+            CommandCenterView(monitor: appDelegate.monitor, updates: appDelegate.updates, updater: appDelegate.updater)
                 .environment(\.avatarCache, appDelegate.avatarCache)
                 .environment(\.codingProviderGlyph, appDelegate.monitor.settings.automation.selectedAssistant?.glyph)
                 .background(MainWindowFrameReader())
@@ -105,13 +119,19 @@ struct MergeTetherApp: App {
         .defaultSize(width: 1280, height: 820)
         .windowResizability(.contentMinSize)
         .commands {
+            CommandGroup(after: .appInfo) {
+                if appDelegate.updater.isEnabled {
+                    CheckForAppUpdatesButton(updater: appDelegate.updater)
+                }
+                WhatsNewButton(updates: appDelegate.updates)
+            }
             CommandGroup(replacing: .newItem) {
                 OpenMainWindowButton()
             }
         }
 
         MenuBarExtra {
-            MenuBarStatusMenu(monitor: appDelegate.monitor)
+            MenuBarStatusMenu(monitor: appDelegate.monitor, updater: appDelegate.updater)
                 .environment(\.codingProviderGlyph, appDelegate.monitor.settings.automation.selectedAssistant?.glyph)
         } label: {
             MenuBarStatusLabel(monitor: appDelegate.monitor)
@@ -140,7 +160,7 @@ struct MergeTetherApp: App {
         .windowResizability(.contentMinSize)
 
         Settings {
-            SettingsView(monitor: appDelegate.monitor)
+            SettingsView(monitor: appDelegate.monitor, updates: appDelegate.updates, updater: appDelegate.updater)
                 .environment(\.codingProviderGlyph, appDelegate.monitor.settings.automation.selectedAssistant?.glyph)
         }
         .windowResizability(.contentMinSize)
@@ -154,6 +174,18 @@ struct MergeTetherApp: App {
             WhatsNewView(updates: appDelegate.updates)
         }
         .windowResizability(.contentSize)
+    }
+}
+
+private struct WhatsNewButton: View {
+    let updates: UpdateService
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button {
+            updates.loadWhatsNew()
+            openWindow(id: "whats-new")
+        } label: { Text(.Menu.whatsNewTitle) }
     }
 }
 

@@ -33,6 +33,15 @@ let relayOrigin: String = {
     return normalized.absoluteString
 }()
 
+let updateFeed: String = ProcessInfo.processInfo.environment["TUIST_MERGETETHER_UPDATE_FEED"] ?? ""
+let updatePublicKey: String = ProcessInfo.processInfo.environment["TUIST_MERGETETHER_UPDATE_PUBLIC_KEY"] ?? ""
+if !updateFeed.isEmpty || !updatePublicKey.isEmpty {
+    guard let url = URLComponents(string: updateFeed), url.scheme == "https", url.host?.isEmpty == false,
+          url.user == nil, url.password == nil, url.fragment == nil, url.query == nil,
+          Data(base64Encoded: updatePublicKey)?.count == 32 else {
+        fatalError("Configure an HTTPS Sparkle update feed and its base64-encoded public EdDSA key together.")
+    }
+}
 
 let project = Project(
     name: "MergeTether",
@@ -43,7 +52,7 @@ let project = Project(
     settings: .settings(
         base: [
             "SWIFT_VERSION": "6.0",
-            "MARKETING_VERSION": "1.2.0",
+            "MARKETING_VERSION": "2.0.0",
             "CURRENT_PROJECT_VERSION": "1",
             "LOCALIZATION_PREFERS_STRING_CATALOGS": "YES",
             "STRING_CATALOG_GENERATE_SYMBOLS": "YES",
@@ -120,6 +129,13 @@ let project = Project(
                 "CFBundleName": .string("MergeTether"),
                 "CFBundleShortVersionString": .string("$(MARKETING_VERSION)"),
                 "CFBundleVersion": .string("$(CURRENT_PROJECT_VERSION)"),
+                "SUFeedURL": .string(updateFeed),
+                "SUPublicEDKey": .string(updatePublicKey),
+                "SUEnableAutomaticChecks": .boolean(true),
+                "SUAllowsAutomaticUpdates": .boolean(false),
+                "SUShowReleaseNotes": .boolean(false),
+                "SURequireSignedFeed": .boolean(true),
+                "SUVerifyUpdateBeforeExtraction": .boolean(true),
                 "NSHumanReadableCopyright": .string("Copyright © 2026 vaporpw. MIT License."),
                 "UTExportedTypeDeclarations": .array([.dictionary([
                     "UTTypeIdentifier": .string("com.vaporpw.mergetether.board-card"),
@@ -131,9 +147,11 @@ let project = Project(
             resources: [
                 "Resources/**",
                 "CHANGELOG.md",
+                "Vendor/Sparkle/Sparkle-LICENSE.txt",
                 .folderReference(path: "Helpers/Automation"),
             ],
-            dependencies: [.target(name: "MergeTetherRemote")]
+            scripts: [.post(path: "scripts/sign-sparkle.sh", name: "Sign Sparkle helpers", basedOnDependencyAnalysis: false)],
+            dependencies: [.target(name: "MergeTetherRemote"), .xcframework(path: "Vendor/Sparkle/Sparkle.xcframework")]
         ),
         .target(
             name: "MergeTetherTests",

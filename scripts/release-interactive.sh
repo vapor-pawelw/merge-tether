@@ -337,6 +337,9 @@ if release.get('tagName') != tag or release.get('isDraft') is not False or relea
 if manifest.get('version') != version or manifest.get('distributable') is not True or manifest.get('build') != expected_build:
     sys.exit('Release manifest does not describe a distributable artifact set for the requested version/build.')
 assets = release.get('assets', [])
+appcast = [asset for asset in assets if asset.get('name') == 'appcast.xml']
+if len(appcast) != 1 or not isinstance(appcast[0].get('size'), int) or appcast[0]['size'] <= 0:
+    sys.exit('Expected exactly one nonempty release asset: appcast.xml')
 required = [(['MergeTether-' + version + '.dmg', 'MergeTether.dmg']),
             (['MergeTether-' + version + '.zip', 'MergeTether.zip'])]
 if platform == 'all':
@@ -612,7 +615,7 @@ main() {
   echo "- Current source commit: $commit (must match origin/${branch})"
   echo "- Require a passing full verification for this commit (runs scripts/run-tests.py --full if missing)"
   echo "- Watch workflow in ${source_repo}: $RELEASE_WORKFLOW_NAME"
-  echo "- Verify published release in ${release_repo} contains macOS .dmg/.zip (platform: ${platform})"
+  echo "- Verify published release in ${release_repo} contains macOS .dmg/.zip and appcast.xml (platform: ${platform})"
   [[ "$platform" != all ]] || echo "- Verify separate MergeTetheriOS-${version}.ipa distribution artifact"
   if [[ -n "$tap_repo" ]]; then
     echo "- Verify Homebrew tap ${tap_repo} points to version ${version}"

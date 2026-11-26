@@ -2,6 +2,8 @@ import SwiftUI
 
 struct GeneralSettingsTab: View {
     let monitor: TodoMonitorService
+    let updates: UpdateService
+    let updater: AppUpdater
     @Environment(\.openWindow) private var openWindow
     @State private var launchAtLogin: Bool = LaunchAtLoginService.isEnabled
 
@@ -31,6 +33,23 @@ struct GeneralSettingsTab: View {
                 }
             }
 
+            Section {
+                LabeledContent {
+                    Text(verbatim: updates.currentVersion)
+                } label: { Text(.AppUpdates.appUpdateCurrentVersion) }
+
+                if updater.isEnabled {
+                    Toggle(isOn: Binding(get: { updater.automaticallyChecks }, set: { updater.setAutomaticallyChecks($0) })) {
+                        Text(.AppUpdates.appUpdateAutomaticallyCheck)
+                    }
+                    AppUpdateControls(updater: updater)
+                } else {
+                    Text(updater.isConfigured ? .AppUpdates.appUpdateFailed : .AppUpdates.appUpdateDevelopmentBuild)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text(.AppUpdates.appUpdateSectionTitle)
+            }
         }
         .formStyle(.grouped)
         .task {

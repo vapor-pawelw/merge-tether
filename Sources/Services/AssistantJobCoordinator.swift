@@ -44,6 +44,7 @@ final class AssistantJobCoordinator {
     }
 
     func isRunning(_ id: UUID) -> Bool { work[id] != nil }
+    var hasActiveJobs: Bool { !tasks.isEmpty }
 
     func resumePendingJobs() { startPendingJobs() }
 

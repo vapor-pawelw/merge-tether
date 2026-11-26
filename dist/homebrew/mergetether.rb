@@ -7,6 +7,7 @@ cask "mergetether" do
   desc "Menu-bar app that surfaces your GitLab to-do inbox via the glab CLI"
   homepage "https://github.com/vapor-pawelw/merge-tether"
 
+  auto_updates true
   depends_on formula: "glab"
   depends_on macos: ">= :sonoma"
 

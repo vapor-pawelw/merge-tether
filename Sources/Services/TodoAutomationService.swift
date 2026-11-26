@@ -25,6 +25,8 @@ final class TodoAutomationService {
     }
     private var scriptTasks: [UUID: RunningScript] = [:]
 
+    var hasActiveActions: Bool { !running.isEmpty || !scriptTasks.isEmpty }
+
     func cancelRunningScripts(outsideScope scope: MRAutomationScope? = nil) {
         for script in scriptTasks.values {
             if let scope {
