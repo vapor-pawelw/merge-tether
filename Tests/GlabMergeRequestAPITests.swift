@@ -268,10 +268,11 @@ struct GlabMergeRequestAPITests {
         let delegated = assignmentRequest(iid: 13)
         let shared = assignmentRequest(iid: 14, assignment: .shared)
         let assignedToSomeoneElse = assignmentRequest(iid: 15, assignment: .someoneElse)
+        let handedOff = assignmentRequest(iid: 16, authored: true, assignment: .someoneElse)
         gitlab.handler = { call in
             switch call.endpoint {
             case "/merge_requests?scope=created_by_me&state=opened&with_merge_status_recheck=true&per_page=100":
-                return InMemoryGitLab.output("[\(mine)]")
+                return InMemoryGitLab.output("[\(mine),\(handedOff)]")
             case "/merge_requests?scope=all&state=opened&assignee_id=8&with_merge_status_recheck=true&per_page=100":
                 #expect(call.arguments.contains("--paginate"))
                 return InMemoryGitLab.output("[\(mine),\(delegated),\(shared),\(assignedToSomeoneElse)]")
@@ -285,21 +286,22 @@ struct GlabMergeRequestAPITests {
         #expect(owned.last?.author.username == "author")
         settings.treatAssignedMergeRequestsAsOwn = false
         gitlab.requests.removeAll()
-        #expect(try await glab.fetchOwnedMergeRequests(userID: 8, host: host).map(\.iid) == [12])
+        #expect(try await glab.fetchOwnedMergeRequests(userID: 8, host: host).map(\.iid) == [12, 16])
         #expect(gitlab.requests.count == 1)
     }
 
-    @Test(arguments: ["valid", "shared", "removed", "disabled"])
+    @Test(arguments: ["valid", "shared", "removed", "disabled", "handed-off", "shared-auto-merge-disabled"])
     func mergeRechecksAssignmentAndPreferenceAtTheWrite(_ scenario: String) async throws {
         let gitlab = InMemoryGitLab()
         defer { gitlab.close() }
         let settings = try assignmentSettings()
         let glab = gitlab.service(host: host, username: "alice")
         glab.ownershipSettings = settings
-        let assigned = assignmentRequest(iid: 12)
+        let assigned = assignmentRequest(iid: 12, authored: scenario == "handed-off")
         let final = switch scenario {
-        case "shared": assignmentRequest(iid: 12, assignment: .shared)
+        case "shared", "shared-auto-merge-disabled": assignmentRequest(iid: 12, assignment: .shared)
         case "removed": assignmentRequest(iid: 12, assignment: .someoneElse)
+        case "handed-off": assignmentRequest(iid: 12, authored: true, assignment: .someoneElse)
         default: assigned
         }
         var detailReads = 0
@@ -321,7 +323,9 @@ struct GlabMergeRequestAPITests {
         }
         let merge = {
             try await glab.mergeMergeRequest(projectID: 34, iid: 12, headSHA: sha, host: host,
-                expectedUser: .init(id: 8, username: "alice"), beforeWrite: { _ in
+                expectedUser: .init(id: 8, username: "alice"), permitsRequest: { request in
+                    scenario != "shared-auto-merge-disabled" || !request.hasOtherAssignees(than: "alice")
+                }, beforeWrite: { _ in
                     if scenario == "disabled" { settings.treatAssignedMergeRequestsAsOwn = false }
                 }, shouldProceed: { true })
         }

@@ -949,7 +949,7 @@ final class TodoMonitorService {
                               account: original, currentAccount: current) else { return }
         boardDisplayMetadata = metadata
         if request.assignees != nil, !settings.owns(request, username: target.username) {
-            cancelAssignmentDependentJobs(for: target)
+            cancelAuthorJobsAfterAssignmentChange(for: target)
         }
         mergeRequestIssues?.observe(request, target: target, revision: accountRevision, at: readStartedAt)
     }
@@ -1654,14 +1654,16 @@ final class TodoMonitorService {
         guard settings.treatAssignedMergeRequestsAsOwn != enabled else { return }
         settings.treatAssignedMergeRequestsAsOwn = enabled
         settings.save()
-        if !enabled { cancelAssignmentDependentJobs() }
+        if !enabled { cancelAuthorJobsAfterAssignmentChange() }
+        FollowUpVerificationStore.synchronizeRuns(settings: settings)
         Task { await forceRefreshFromGitLab() }
     }
 
-    private func cancelAssignmentDependentJobs(for target: MRAutomationScope.Target? = nil) {
-        let active = settings.assistantHandoffs.filter {
-            $0.dependsOnAssignment && $0.execution?.state.isActive == true
-                && $0.execution?.cancellationOrigin == nil && (target == nil || $0.key.automationTarget == target)
+    private func cancelAuthorJobsAfterAssignmentChange(for target: MRAutomationScope.Target? = nil) {
+        let active = settings.assistantHandoffs.filter { job in
+            job.execution?.state.isActive == true && job.execution?.cancellationOrigin == nil
+                && (target == nil ? job.dependsOnAssignment : job.requiresAuthorOwnership)
+                && (target == nil || job.key.automationTarget == target)
         }
         guard !active.isEmpty else { return }
         for job in active { cancelPolicyJob(job.id, settings) }

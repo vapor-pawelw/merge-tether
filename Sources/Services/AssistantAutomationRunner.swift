@@ -17,7 +17,7 @@ enum AssistantAutomationRunner {
     }
 
     nonisolated static let authorRepairReportingInstructions = """
-        On a merge request authored by the authenticated user, keep repair reports in the run result.
+        On a merge request you are responsible for, keep repair reports in the run result.
         Do not create standalone draft notes or self-review findings on my own MR. Report pipeline repairs and status summaries in the run result only. Save warranted replies in the existing incoming reviewer discussion using its verified discussion_id. An explicit user request for a standalone comment is a separate manual publication decision, never permission to publish it automatically.
         """
 
@@ -33,7 +33,7 @@ enum AssistantAutomationRunner {
                 let scope = """
                     Stay within the assigned task: the indicated incoming reviewer feedback or the separately assigned failed-pipeline diagnosis and fix. Verify only the related corrections and replies in active discussions. Skip resolved threads and never reopen, reply to, or re-verify them. Do not perform a fresh general code review of my own MR or create unrelated findings. Do not create merge requests. Purely informational notes and feedback already answered in this same thread require no new change or reply. Check existing published replies and private drafts for duplicates before drafting. Preserve unrelated and user-created drafts; an uncertain draft must not stop independent incoming feedback.
                     \(AssistantAutomationRunner.authorRepairReportingInstructions)
-                    Each actionable feedback thread needs its own private reply draft after its correction or explanation is verified, including general comments. A fix or reply in another thread does not replace this response. Do not repeat a delivered code change: verify the current remote correction, then briefly explain it here and link to the original feedback or published explanation. Avoid duplicates within this same thread; preserve existing manual replies and user-created drafts. For a simple verified fix, prefer a brief reply such as "Poprawione, dzięki" in the source comment's language; explain more only when needed to understand the result. Follow applicable user skills and workflow instructions for reply wording. Purely informational summaries without a distinct request need no courtesy reply. Existing push, remote-content proof, draft ownership and publication permissions still apply.
+                    Reply privately in each actionable feedback thread whose correction or explanation still needs a response, including general comments. Immediately before drafting, check live replies from any participant and the current code. Skip a duplicate reply or a resolved request, including a complete answer from another assignee. If an answer needs a specific addition, explain just that addition and give credit for the earlier fix. A fix or reply in another thread may be linked from an unanswered actionable thread. Preserve existing manual replies and user-created drafts. Follow applicable user skills and workflow instructions for reply wording. Purely informational summaries without a distinct request need no courtesy reply. Existing push, remote-content proof, draft ownership and publication permissions still apply.
                     Separate the observed defect from the reviewer's proposed remedy and its rationale. Research accessible authoritative contracts, relevant callers and tests before asking for an external decision. Rejecting an unsupported remedy does not address an independently supported defect. Verify whether the MR introduces the defect or newly exposes inherited behavior through a changed caller or route. For each observed defect, either implement and verify a warranted correction that preserves the established contract, disprove it with evidence, or explain with evidence why it is outside this MR's scope. Do not invent an undocumented business meaning or status mapping. An unknown meaning need not prevent a safe correction using the established failure behavior. If an external decision genuinely prevents the remaining work, identify the exact missing external fact, the evidence checked and why it prevents the remaining work; return blocked with that concrete question. Do not hand research or code work to the user while accessible evidence or an in-scope correction can settle it.
                     Distinguish the assigned MR correction or explanation from approval for a later lifecycle step. Do not return blocked solely because approval for a later deployment or organizational step is absent. Return succeeded when the assigned correction or explanation is complete and any required reply is already published. Mention a documented future prerequisite without inventing its acceptance or creating a duplicate reply. An explicit reviewer/user condition before merge, an independently unresolved defect, or a decision actually needed to perform the current assigned work remains blocking; preserve it and explain the exact stopped step.
                     """
@@ -42,7 +42,7 @@ enum AssistantAutomationRunner {
                 }
                 return scope + "\n" + drafts + """
 
-                    Automatic author-follow-up push is ON. You are explicitly authorized to commit and push tested, in-scope fixes to this MR's verified remote source branch from an isolated detached worktree, without altering any other local checkout or local branch ref. A remote push is part of this task, without a separate push prompt; isolation is not a ban on pushing. Do not save completion drafts before the push and remote content verification succeed. Re-fetch the MR with glab and confirm it is open and authored by the authenticated user. Work in an isolated worktree, run proportionate checks, and use an explicit refspec to the verified source repository and branch. Follow the installed MR skill for stacked fixes, remote head verification and refreshing affected drafts after the push. Honor any explicit review-only or local-only instruction. Report any failure to safely push as a blocker.
+                    Automatic author-follow-up push is ON. You are explicitly authorized to commit and push tested, in-scope fixes to this MR's verified remote source branch from an isolated detached worktree, without altering any other local checkout or local branch ref. A remote push is part of this task, without a separate push prompt; isolation is not a ban on pushing. Save completion drafts only after verifying the remote fix, including a fix already delivered by another assignee. Re-fetch the MR with glab and confirm it remains open and you are still responsible for it. Follow the supplied pre-write checks, use the verified source repository and branch, and honor any explicit review-only or local-only instruction. Report any failure to safely push an outstanding correction as a blocker.
                     """
             }
             if self == .review && diagnosesPipeline {
@@ -212,6 +212,10 @@ enum AssistantAutomationRunner {
         // Keep the stored field for handoffs created by earlier versions.
         var requiresSoleAssignment: Bool? = nil
         var dependsOnAssignment: Bool { requiresSoleAssignment == true }
+        var requiresAuthorOwnership: Bool {
+            dependsOnAssignment || workflow == .followUp || followUpPushAllowed == true
+                || pipelineReservation != nil || allowsPush || taskIntent == .conflictResolution
+        }
 
         var deliveredFeedbackTodos: [Todo.FeedbackIdentity] {
             if let execution { return execution.state == .succeeded ? feedbackTodos ?? [] : [] }
@@ -969,7 +973,8 @@ enum AssistantAutomationRunner {
             throw AssistantJobExecutor.ExecutionError.contextUnavailable
         }
         _ = try AssistantJobExecutor.validateMergeRequestContext(state: request.state, head: request.sha)
-        try AssistantJobExecutor.validateReviewOwnership(isReview: isReview, owned: settings.owns(request, userID: user.id))
+        try AssistantJobExecutor.validateReviewOwnership(isReview: isReview,
+            owned: request.author.id == user.id || settings.owns(request, userID: user.id))
         return (request, user)
     }
 

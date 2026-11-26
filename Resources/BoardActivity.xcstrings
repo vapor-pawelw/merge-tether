@@ -1,40 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "inactiveSection": {
+    "inactiveSection.%lld": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Automation off"
+            "value": "Automation off (%lld)"
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja wyłączona"}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja wyłączona (%lld)"}}
       }
     },
-    "mergeRequestCount.%lld": {
+    "hiddenSection.%lld": {
       "extractionState": "manual",
       "localizations": {
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld MR"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld MRs"
-                }
-              }
-            }
-          }
-        },
-        "pl": {"variations": {"plural": {"one": {"stringUnit": {"state": "translated", "value": "%lld MR"}}, "few": {"stringUnit": {"state": "translated", "value": "%lld MR"}}, "many": {"stringUnit": {"state": "translated", "value": "%lld MR"}}, "other": {"stringUnit": {"state": "translated", "value": "%lld MR"}}}}}
+        "en": {"stringUnit": {"state": "translated", "value": "Hidden (%lld)"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Ukryte (%lld)"}}
       }
     },
     "attentionCount.%lld": {

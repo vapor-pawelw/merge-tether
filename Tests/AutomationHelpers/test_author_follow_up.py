@@ -54,6 +54,37 @@ class AuthorFollowUpTest(unittest.TestCase):
     def verify(self):
         return self.verifier.verify("gitlab.example.org", "1", "2", self.run["runID"], self.head, self.evidence)
 
+    def test_reassigning_an_authored_merge_request_revokes_the_run(self):
+        self.run["assignmentTakesPrecedence"] = True
+        self.save_run()
+        proof = self.verify()
+        self.mr["assignees"] = [{"id": 7}]
+        self.drafts.append({"id": 13, "author_id": 3, "note": "Verified fix"})
+        with self.assertRaisesRegex(ValueError, "must belong"):
+            self.verifier.status("gitlab.example.org", "1", "2", self.run["runID"])
+        with self.assertRaisesRegex(ValueError, "must belong"):
+            self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[13]")
+
+    def test_pre_write_requires_the_same_branch_head_and_discussions(self):
+        initial = self.verifier.status("gitlab.example.org", "1", "2", self.run["runID"])
+        def check():
+            return self.verifier.status("gitlab.example.org", "1", "2", self.run["runID"],
+                                        self.head, initial["discussionFingerprint"])
+
+        self.assertTrue(check()["pushAllowed"])
+        self.discussions = [{"notes": [{"id": 1, "author": {"id": 7}, "body": "I already applied this fix"}]}]
+        with self.assertRaisesRegex(ValueError, "Discussion content changed"):
+            check()
+        self.discussions = []
+        original = self.verifier.read
+        def advanced_branch(host, endpoint):
+            if endpoint == "/projects/4/repository/branches/fix%2Ftest":
+                return {"commit": {"id": "b" * 40}}
+            return original(host, endpoint)
+        self.verifier.read = advanced_branch
+        with self.assertRaisesRegex(ValueError, "Source branch HEAD changed"):
+            check()
+
     def test_legacy_run_permission_only_covers_a_sole_assignee(self):
         self.mr["author"] = {"id": 7}
         self.mr["assignees"] = [{"id": 3}]

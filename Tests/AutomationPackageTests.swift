@@ -3,6 +3,36 @@ import Testing
 @testable import MergeTether
 
 struct AutomationPackageTests {
+    @Test func autoMergeWithOtherAssigneesFollowsMaxAndPreservesCustomChoices() throws {
+        var settings = AutomationSettings()
+        #expect(!settings.autoMergeWithOtherAssignees)
+        settings.applyPreset(.trusted, for: .codex)
+        #expect(!settings.autoMergeWithOtherAssignees)
+        settings.applyPreset(.full, for: .codex)
+        #expect(settings.permitsAutoMerge(project: "g/p"))
+        #expect(settings.permitsAutoMerge(project: "g/p", hasOtherAssignees: true))
+        #expect(settings.matchingPreset == .full)
+        let saved = try JSONEncoder().encode(settings)
+        var legacy = try #require(JSONSerialization.jsonObject(with: saved) as? [String: Any])
+        legacy.removeValue(forKey: "autoMergeWithOtherAssignees")
+        let upgraded = try JSONDecoder().decode(AutomationSettings.self, from: JSONSerialization.data(withJSONObject: legacy))
+        #expect(upgraded.autoMergeWithOtherAssignees && upgraded.matchingPreset == .full)
+        legacy["selectedPreset"] = NSNull()
+        let custom = try JSONDecoder().decode(AutomationSettings.self, from: JSONSerialization.data(withJSONObject: legacy))
+        #expect(!custom.autoMergeWithOtherAssignees)
+
+        settings.autoMergeWithOtherAssignees = false
+        #expect(settings.matchingPreset == nil)
+        #expect(!settings.permitsAutoMerge(project: "g/p", optedIn: true, hasOtherAssignees: true))
+        let restored = try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(settings))
+        #expect(!restored.autoMergeWithOtherAssignees && restored.matchingPreset == nil)
+        settings.autoMergeWithOtherAssignees = true
+        settings.autoMergeEnabled = false
+        #expect(!settings.permitsAutoMerge(project: "g/p", optedIn: true, hasOtherAssignees: true))
+        settings.applyPreset(.trusted, for: .codex)
+        #expect(!settings.autoMergeWithOtherAssignees)
+    }
+
     @Test(arguments: [AutomationPreset.trusted, .full])
     func reducingPermissionsDoesNotRequireAssistantSetup(_ preset: AutomationPreset) {
         var current = AutomationSettings()
@@ -718,6 +748,9 @@ struct AutomationPackageTests {
         let proof = FollowUpVerificationStore.recordingInstructions(
             work: .init(host: "gitlab.example.test", projectID: 1, iid: 2), runID: UUID())
         #expect(proof.contains("If no incoming reviewer reply is owed, do not create drafts or run seal"))
+        #expect(proof.contains("--head-sha <assessed-source-sha> --discussion-fingerprint <assessed-fingerprint>"))
+        #expect(proof.contains("git merge-base --is-ancestor <assessed-source-sha> HEAD"))
+        #expect(proof.contains("--force-with-lease=refs/heads/<source-branch>:<assessed-source-sha>"))
     }
 
     @Test @MainActor func conflictAndLegacyHandoffsCannotAuthorizeAuthorFollowUpPublication() throws {
@@ -763,7 +796,7 @@ struct AutomationPackageTests {
         #expect(handoff.prompt.contains("authenticated local `glab`"))
         #expect(handoff.prompt.contains("private `draft_notes` endpoint"))
         #expect(handoff.prompt.contains("MergeTether may publish eligible replies to feedback assessed as AI-assisted"))
-        #expect(handoff.prompt.contains("On a merge request authored by the authenticated user, keep repair reports in the run result"))
+        #expect(handoff.prompt.contains("On a merge request you are responsible for, keep repair reports in the run result"))
         #expect(handoff.prompt.contains("load and follow the applicable installed MR skills"))
         #expect(handoff.prompt.contains("Do not publish directly yourself"))
         #expect(!handoff.allowsPush && handoff.followUpPushAllowed == nil)

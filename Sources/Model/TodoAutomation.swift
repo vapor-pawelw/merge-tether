@@ -215,6 +215,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var workerExecutionTimeout = WorkerExecutionTimeout()
     var assistantWorkspace = ""
     var autoMergeEnabled = false
+    var autoMergeWithOtherAssignees = false
     var autoReReviewEnabled = false
     /// Stored publication flags stay compatible; the selected profile determines new defaults.
     var publishDraftsWithoutConfirmation = false {
@@ -380,6 +381,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         workerExecutionTimeout = (try? values.decode(WorkerExecutionTimeout.self, forKey: .workerExecutionTimeout)) ?? .init()
         assistantWorkspace = try values.decodeIfPresent(String.self, forKey: .assistantWorkspace) ?? assistantWorkspace
         autoMergeEnabled = try values.decodeIfPresent(Bool.self, forKey: .autoMergeEnabled) ?? false
+        let storedSharedAutoMerge = try values.decodeIfPresent(Bool.self, forKey: .autoMergeWithOtherAssignees)
         autoReReviewEnabled = try values.decodeIfPresent(Bool.self, forKey: .autoReReviewEnabled) ?? false
         publishDraftsWithoutConfirmation = try values.decodeIfPresent(Bool.self, forKey: .publishDraftsWithoutConfirmation) ?? false
         autoResolveOwnReviewThreads = try values.decodeIfPresent(Bool.self, forKey: .autoResolveOwnReviewThreads) ?? true
@@ -465,6 +467,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
             selectedPreset = AutomationPreset.allCases.first { preset in
                 var candidate = self
                 candidate.publicationMode = loadedPublicationMode
+                candidate.autoMergeWithOtherAssignees = storedSharedAutoMerge ?? (preset == .full)
                 candidate.publicationRestrictions.allowBotReplies = AutomaticPublicationRestrictions.defaults(for: preset).allowBotReplies
                 return candidate.matchingPreset == preset
             }
@@ -475,6 +478,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
             if botReplies != publicationRestrictions.allowBotReplies { publicationMode = loadedPublicationMode }
             publicationRestrictions.allowBotReplies = botReplies
         }
+        autoMergeWithOtherAssignees = storedSharedAutoMerge ?? (packageDecision == .enabled && selectedPreset == .full)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -483,6 +487,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         if assistantSelectionCleared { try values.encode(true, forKey: .assistantSelectionCleared) }
         try values.encodeIfPresent(assistantWorkspace, forKey: .assistantWorkspace)
         try values.encodeIfPresent(autoMergeEnabled, forKey: .autoMergeEnabled)
+        try values.encodeIfPresent(autoMergeWithOtherAssignees, forKey: .autoMergeWithOtherAssignees)
         try values.encodeIfPresent(conflictTasksEnabled, forKey: .conflictTasksEnabled)
         try values.encodeIfPresent(reviewRequested, forKey: .reviewRequested)
         try values.encodeIfPresent(authorFeedback, forKey: .authorFeedback)
@@ -526,6 +531,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case assistant, assistantSelectionCleared, assistantWorkspace, autoMergeEnabled, conflictTasksEnabled, reviewRequested, authorFeedback
+        case autoMergeWithOtherAssignees
         case requireReviewStartConfirmation
         case allowAssistantTools, assistantToolProjects, packageDecision, workflowRules, allowAutomaticPublicActions
         case autoApprovalThreshold
@@ -542,6 +548,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
 
     mutating func applyPreset(_ preset: AutomationPreset, for assistant: AutomationAssistant?) {
         selectedAssistant = assistant
+        autoMergeWithOtherAssignees = preset == .full
         if preset == .manual {
             let firstChoice = packageDecision == .undecided
             disableAssistantPackage()
@@ -608,6 +615,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     private mutating func removePublicPermissions() {
         publicationMode = .manual
         autoMergeEnabled = false
+        autoMergeWithOtherAssignees = false
         autoApproveEnabled = false
         autoReReviewEnabled = false
         allowFollowUpPush = false
@@ -722,8 +730,9 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         return updated
     }
 
-    func permitsAutoMerge(project: String, optedIn: Bool = false) -> Bool {
+    func permitsAutoMerge(project: String, optedIn: Bool = false, hasOtherAssignees: Bool = false) -> Bool {
         hasAutomaticPublicActionConsent
+            && (!hasOtherAssignees || (autoMergeEnabled && autoMergeWithOtherAssignees))
             && (optedIn || (autoMergeEnabled && matchesOptionalProjectRestriction(project, paths: autoMergeProjects)))
     }
 

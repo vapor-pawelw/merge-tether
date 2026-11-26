@@ -77,8 +77,10 @@ struct GlabConnectionTests {
         let strings: [(LocalizedStringResource, String)] = [
             (.Onboarding.onboardingWindowTitle, "Konfiguracja"),
             (.Board.boardTitle, "Merge requesty"),
-            (.Board.boardLaneOwn, "Moje merge requesty"),
-            (.Board.boardLaneReviewing, "Do przeglądu"),
+            (.Board.boardLaneOwn(2), "Moje merge requesty (2)"),
+            (.Board.boardLaneReviewing(3), "Do przeglądu (3)"),
+            (.BoardActivity.inactiveSection(4), "Automatyzacja wyłączona (4)"),
+            (.BoardActivity.hiddenSection(10), "Ukryte (10)"),
             (.Board.boardApprovalRatio(2, 5), "2/5"),
             (.Board.boardEmptyReviewingTitle, "Brak merge requestów do przeglądu"),
             (.Settings.settingsMergeRequestsTab, "Merge requesty"),

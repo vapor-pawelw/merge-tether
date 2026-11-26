@@ -144,6 +144,46 @@ struct MRBoardGroupingTests {
         #expect(visible(.init()) == [1, 2, 3, 4, 5])
     }
 
+    @Test func hiddenReviewsFollowAutomationOffAndExpandIndependently() throws {
+        let request = try request(2, draft: false)
+        let row = MergeRequestBoardSnapshot.Row(item: .init(id: request.mergeRequestID, title: request.title,
+            url: request.webURL, mergeRequest: request), latestJob: nil, intents: [])
+        let hiddenTarget = MRAutomationScope.Target.mergeRequest(host: host, username: "me", projectID: 1, iid: 3)
+        let hidden = HiddenReview(target: hiddenTarget, title: "Hidden review",
+            url: try #require(URL(string: "https://\(host)/g/p/-/merge_requests/3")))
+
+        let collapsed = CommandCenterBoardView.laneEntries([row], automationOffExpanded: true,
+            hiddenReviews: [hidden], activity: { _ in .inactive }, hasHumanAction: { _ in false })
+        #expect(collapsed.map(\.id) == [.automationOff, .card(row.id), .hidden])
+        guard case let .hidden(count)? = collapsed.last else {
+            Issue.record("Missing Hidden header")
+            return
+        }
+        #expect(count == 1)
+
+        let expanded = CommandCenterBoardView.laneEntries([row], automationOffExpanded: false,
+            hiddenReviews: [hidden], hiddenExpanded: true, activity: { _ in .inactive }, hasHumanAction: { _ in false })
+        #expect(expanded.map(\.id) == [.automationOff, .hidden, .hiddenCard(hiddenTarget, hideID: nil)])
+
+        let hiddenOnly = CommandCenterBoardView.laneEntries([], automationOffExpanded: true,
+            hiddenReviews: [hidden], activity: { _ in .regular }, hasHumanAction: { _ in false })
+        #expect(hiddenOnly.map(\.id) == [.hidden])
+    }
+
+    @Test func hiddenCardIdentityDistinguishesLegacyReviewsAndNewHides() throws {
+        let legacyReviews = try [2, 3].map { iid in
+            let request = try request(iid, draft: false)
+            return HiddenReview(target: .mergeRequest(host: host, username: "me", projectID: 1, iid: iid),
+                title: request.title, url: request.webURL)
+        }
+        let legacyIDs = legacyReviews.map { CommandCenterBoardView.LaneEntry.hiddenCard($0).id }
+        #expect(Set(legacyIDs).count == legacyReviews.count)
+
+        var hiddenAgain = legacyReviews[0]
+        hiddenAgain.hideID = UUID()
+        #expect(CommandCenterBoardView.LaneEntry.hiddenCard(hiddenAgain).id != legacyIDs[0])
+    }
+
     @Test func changingTheSecondarySectionKeepsFinishedFirstAndPreservedRanksWithinTheirCurrentGroup() throws {
         let requests = try [request(1, draft: true), request(2, draft: false), request(3, draft: false), request(4, draft: true, state: "merged")]
         let items = requests.map { MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: $0.iid),

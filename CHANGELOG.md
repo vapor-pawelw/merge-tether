@@ -23,9 +23,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Queue agent work based on free disk space on the Mac and show disk waits and failures on paired iPhones and iPads.
 - Stop agent runs when required workspace directories disappear, record possible GitLab effects before retrying, and cap persistent worker output.
 
-- Treat MRs assigned to you as yours, including shared assignments and automation under your active profile. The setting is on by default and can be changed in **Settings → Merge requests**.
+- Use assignees to determine which MRs are yours, falling back to the author when nobody is assigned. Author follow-ups check the remote branch and discussions immediately before pushing or drafting to avoid duplicating another assignee's work.
+- Allow automatic merging of MRs with other assignees by default in Max. Other profiles leave this choice off. Change it separately under **Merge when ready**.
 
 - Show **Review needed** again when new commits or a different target diff make your GitLab approval stale, including after restarting MergeTether.
+
+- Restore hidden merge requests from a collapsed **Hidden** section under **Reviewing** on Mac. Hidden cards use the same dimming as drafts and offer GitLab, conversation, and review actions from their **Actions** and right-click menus. The board shows counts beside lane and **Automation off** titles, with lane filters on the right.
 
 - Limit older successful transcripts and read-only review history after an MR merges or stays closed for 30 days. Active runs and records used for automation remain available.
 

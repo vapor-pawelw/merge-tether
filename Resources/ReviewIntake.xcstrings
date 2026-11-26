@@ -120,13 +120,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The filter uses the lightweight verifier configured in Agent settings to assess new requests for Inbox and Reviewing. The verifier needs a working, signed-in CLI. Requests follow the usual workflow if the verifier is unavailable or unsure. Filtered requests can be restored under Hidden merge requests."
+            "value": "The filter uses the lightweight verifier configured in Agent settings to assess new requests for Inbox and Reviewing. The verifier needs a working, signed-in CLI. Requests follow the usual workflow if the verifier is unavailable or unsure. Filtered requests can be restored under Reviewing → Hidden."
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Filtr używa lekkiego weryfikatora wybranego w ustawieniach agenta do oceny nowych MR-ów trafiających do Inboxa lub Reviewing. Weryfikator wymaga działającego, zalogowanego CLI. Gdy jest niedostępny lub niepewny, MR trafia na zwykłą ścieżkę. Odfiltrowane MR-y możesz przywrócić na liście ukrytych MR-ów."
+            "value": "Filtr używa lekkiego weryfikatora wybranego w ustawieniach agenta do oceny nowych MR-ów trafiających do Inboxa lub Reviewing. Weryfikator wymaga działającego, zalogowanego CLI. Gdy jest niedostępny lub niepewny, MR trafia na zwykłą ścieżkę. Odfiltrowane MR-y możesz przywrócić w sekcji Do przeglądu → Ukryte."
           }
         }
       }
