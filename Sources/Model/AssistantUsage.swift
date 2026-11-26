@@ -174,17 +174,18 @@ extension AssistantTokenUsage {
 }
 
 /// A comparison baseline, never a subscription charge or a billing receipt.
-/// Source: https://developers.openai.com/api/docs/pricing (verified 2026-11-08).
+/// Source: https://developers.openai.com/api/docs/pricing (verified 2026-11-26).
 /// Aggregated CLI usage cannot reveal each request's context length, cache writes or tier.
 enum CodexUsagePricing {
-    static let version = "openai-standard-short-2026-11-08"
+    static let version = "openai-standard-short-2026-11-26"
     static let source = URL(string: "https://developers.openai.com/api/docs/pricing")!
 
     static func estimate(_ tokens: AssistantTokenUsage, model: String?) -> Double? {
         let rates: (input: Double, cached: Double, output: Double)
         switch model {
+        case "gpt-6.2-astra": rates = (8, 0.4, 40)
         case "gpt-6-astra": rates = (10, 1, 50)
-        case "gpt-6.1-sol": rates = (2, 0.1, 10)
+        case "gpt-6.2-sol", "gpt-6.1-sol": rates = (2, 0.1, 10)
         case "gpt-6.1-terra": rates = (1, 0.05, 5)
         case "gpt-6-luna": rates = (0.1, 0.01, 0.5)
         default: return nil

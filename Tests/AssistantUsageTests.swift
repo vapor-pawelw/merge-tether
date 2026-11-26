@@ -100,17 +100,19 @@ struct AssistantUsageTests {
         #expect(result.terminalComplete == false)
     }
 
-    @Test("Codex completed turns count cached input once and use the published baseline")
-    func codexUsage() throws {
+    @Test("Codex completed turns count cached input once and use the published baseline", arguments: [
+        ("gpt-6.1-sol", 1.89), ("gpt-6.2-sol", 1.89), ("gpt-6.2-astra", 7.56),
+    ])
+    func codexUsage(model: String, expectedUSD: Double) throws {
         let data = Data("""
             {"type":"item.completed","item":{"text":"private prompt, not usage"}}
             {"type":"turn.completed","usage":{"input_tokens":1000000,"cached_input_tokens":800000,"output_tokens":100000,"reasoning_output_tokens":30000}}
             {"type":"turn.completed","usage":{"input_tokens":200000,"cached_input_tokens":100000,"output_tokens":20000}}
             """.utf8)
-        let result = AssistantUsageParser.parse(data, assistant: .codex, model: "gpt-6.1-sol")
+        let result = AssistantUsageParser.parse(data, assistant: .codex, model: model)
         #expect(result.tokens == .init(input: 1_200_000, cachedInput: 900_000, output: 120_000))
-        #expect(abs(try #require(result.estimatedUSD) - 1.89) < 0.000001)
-        #expect(result.pricingVersion == "openai-standard-short-2026-11-08")
+        #expect(abs(try #require(result.estimatedUSD) - expectedUSD) < 0.000001)
+        #expect(result.pricingVersion == "openai-standard-short-2026-11-26")
     }
 
     @Test("Claude uses the envelope total rather than adding per-model costs twice")

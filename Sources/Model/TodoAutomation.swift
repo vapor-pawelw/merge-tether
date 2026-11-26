@@ -19,6 +19,8 @@ enum AutomationRunner: String, Codable, Sendable {
 }
 
 enum CodexReviewModel: String, CaseIterable, Codable, Sendable {
+    case sol62 = "gpt-6.2-sol"
+    case astra62 = "gpt-6.2-astra"
     case sol = "gpt-6.1-sol"
     case astra = "gpt-6-astra"
     case terra = "gpt-6.1-terra"
@@ -27,6 +29,8 @@ enum CodexReviewModel: String, CaseIterable, Codable, Sendable {
 
     var name: String {
         switch self {
+        case .sol62: "GPT-6.2 Sol"
+        case .astra62: "GPT-6.2 Astra"
         case .sol: "GPT-6.1 Sol"
         case .astra: "GPT-6 Astra"
         case .terra: "GPT-6.1 Terra"
@@ -192,7 +196,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
             else { assistantSelectionCleared = true }
         }
     }
-    var codexReviewModel: CodexReviewModel = .sol
+    var codexReviewModel: CodexReviewModel = .sol62
     var codexReviewThinking: CodexReviewThinking = .high
     var claudeCodingModel: ClaudeCodingModel = .opus
     var claudeCodingThinking: CodexReviewThinking = .high
