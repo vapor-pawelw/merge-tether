@@ -101,12 +101,11 @@ struct MRSettingsArchive: Codable {
     private(set) var records: [MRSettingsKey: MRSettingsRecord] = [:]
     /// Unmatched legacy to-dos, repository preferences and pins for other card kinds.
     private var unscoped = MRSettingsRecord()
-    var legacyHideDeadline: Date?
     var emptyActionOptIns: Set<MRAutomaticAction>?
     var mirrorFingerprints: [String: Data] = [:]
 
     private enum CodingKeys: String, CodingKey {
-        case version, records, unscoped, legacyHideDeadline, emptyActionOptIns, mirrorFingerprints
+        case version, records, unscoped, emptyActionOptIns, mirrorFingerprints
     }
 
     init() { version = 1 }
@@ -119,7 +118,6 @@ struct MRSettingsArchive: Codable {
         }
         records = try values.decode([MRSettingsKey: MRSettingsRecord].self, forKey: .records)
         unscoped = try values.decode(MRSettingsRecord.self, forKey: .unscoped)
-        legacyHideDeadline = try values.decodeIfPresent(Date.self, forKey: .legacyHideDeadline)
         emptyActionOptIns = try values.decodeIfPresent(Set<MRAutomaticAction>.self, forKey: .emptyActionOptIns)
         mirrorFingerprints = try values.decode([String: Data].self, forKey: .mirrorFingerprints)
     }

@@ -45,8 +45,8 @@
     "settings.hiddenReviews.help": {
       "extractionState": "manual",
       "localizations": {
-        "en": {"stringUnit": {"state": "translated", "value": "Restore open merge requests within 3 days of hiding them. After that, use + on the board to add them again."}},
-        "pl": {"stringUnit": {"state": "translated", "value": "Otwarte MR-y możesz przywrócić w ciągu 3 dni od ukrycia. Później możesz je dodać ponownie przyciskiem + na tablicy."}}
+        "en": {"stringUnit": {"state": "translated", "value": "Hidden merge requests stay here while you’re a reviewer. You can restore an open merge request at any time."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Ukryte MR-y pozostają na tej liście, dopóki jesteś ich recenzentem. Otwarty MR możesz przywrócić w każdej chwili."}}
       }
     },
     "settings.hiddenReviews.empty": {
@@ -55,13 +55,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No merge requests to restore."
+            "value": "No hidden merge requests."
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Brak MR-ów do przywrócenia."
+            "value": "Brak ukrytych MR-ów."
           }
         }
       }

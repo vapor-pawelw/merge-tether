@@ -998,8 +998,12 @@ final class MergeRequestAttentionMonitor {
         }.map(\.target))
         let trackedTargets = settings?.mrLifecycleLedger.targets(host: host, username: user.username) ?? []
         let hiddenTargets = settings?.ignoredMergeRequests.filter {
-            $0.host == host && $0.username == user.username && settings?.canRestoreHiddenReview($0) == true
+            $0.host == host && $0.username == user.username
         } ?? []
+        let listedAssignments = Set((assigned ?? []).filter { request in
+            request.isOpen && request.reviewers?.contains(where: { $0.id == user.id }) == true
+                && request.webURL.isGitLabMergeRequest(host: host, iid: request.iid)
+        }.map(\.mergeRequestID))
         let historyCleanupTargets = settings?.retainedHistoryCandidates(host: host, username: user.username) ?? []
         let trackedLookupTargets = feedbackDecision == nil
             ? scopeTargets.union(recordedTargets).union(intentTargets).union(trackedTargets).union(hiddenTargets).union(transientTargets) : []
@@ -1014,16 +1018,23 @@ final class MergeRequestAttentionMonitor {
             ? trackedLookupTargets.union(approvalTargets).union(workspaceCleanupTargets) : []
         var explicit: [GitLabMergeRequest] = []
         var recordedReviews: [GitLabMergeRequest] = []
+        var removedHiddenAssignments: Set<MRAutomationScope.Target> = []
         var explicitFetchFailed = false
         for target in lookupTargets.sorted(by: { ($0.projectID, $0.iid ?? 0) < ($1.projectID, $1.iid ?? 0) }) {
             let hidden = isIgnored(target)
             let cleanupOnly = !trackedLookupTargets.contains(target)
             let needsWorkspaceRead = workspaceCleanupTargets.contains(target)
-            let canRestoreHidden = hidden && settings?.canRestoreHiddenReview(target) == true
-            guard let iid = target.iid, !hidden || needsWorkspaceRead || canRestoreHidden else { continue }
-            let hideID = settings?.hiddenReviewDetails[target]?.hideID
+            guard let iid = target.iid else { continue }
+            let hide = settings?.hiddenReviewDetails[target]
             let id = Item.ID(projectID: target.projectID, iid: iid)
-            guard !listedIDs.contains(id) || needsWorkspaceRead && !listed.contains(where: { $0.mergeRequestID == id && $0.isOpen }) else { continue }
+            if hidden {
+                // The assignment listing only contains open MRs. An omitted row
+                // cannot distinguish closure, unassignment and a partial listing.
+                if listedAssignments.contains(id), hide?.request?.isOpen == true,
+                   hide?.request?.reviewers?.contains(where: { $0.id == user.id }) == true { continue }
+            } else if listedIDs.contains(id), !needsWorkspaceRead || listed.contains(where: { $0.mergeRequestID == id && $0.isOpen }) {
+                continue
+            }
             // Merged MRs cannot reopen. Closed rows, including Seen tombstones,
             // continue exact checks because they may reopen without assignment.
             if !hidden, !needsWorkspaceRead, terminalCatalogRequests.contains(id)
@@ -1048,10 +1059,15 @@ final class MergeRequestAttentionMonitor {
                 continue
             }
             if hidden {
+                guard !Task.isCancelled else { return }
                 if request.isOpen { recordOpenRunCleanupObservation(target, at: requestReadStartedAt) }
-                if await retireConfirmedLifecycle(request, host: host, user: user, revision: revision, readStartedAt: requestReadStartedAt),
-                   canRestoreHidden {
-                    settings?.retireFinishedHiddenReview(target, request: request, hideID: hideID)
+                if settings?.reconcileHiddenReview(target, request: request, reviewerID: user.id, hideID: hide?.hideID) == true {
+                    removedHiddenAssignments.insert(target)
+                }
+                if needsWorkspaceRead || request.state != .merged || !terminalCatalogRequests.contains(id),
+                   await retireConfirmedLifecycle(request, host: host, user: user, revision: revision, readStartedAt: requestReadStartedAt),
+                   request.state == .merged {
+                    terminalCatalogRequests.insert(id)
                 }
                 guard isCurrent(account, revision: revision) else { return }
                 continue
@@ -1143,7 +1159,7 @@ final class MergeRequestAttentionMonitor {
 
         for id in Array(candidates.keys) {
             let target = MRAutomationScope.Target.mergeRequest(host: host, username: user.username, projectID: id.projectID, iid: id.iid)
-            if isFiltered(target) {
+            if isFiltered(target) || removedHiddenAssignments.contains(target) {
                 candidates.removeValue(forKey: id)
                 continue
             }
