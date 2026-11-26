@@ -28,19 +28,25 @@ struct ReviewParticipationPreferences: Codable, Equatable, Sendable {
     private(set) var localAutomationAuthors: [Entry] = []
     private(set) var aiReplyTrustRecords: [AIReplyTrust] = []
 
+    /// One per-account settings record element. It carries either a participation entry or an
+    /// AI reply trust record, so both survive the record archive's split and combine round trip.
     struct StoredEntry: Codable {
-        let automationAuthor: Bool
-        let entry: Entry
+        var automationAuthor = false
+        var entry: Entry?
+        var aiReplyTrust: AIReplyTrust?
     }
 
     var storedEntries: [StoredEntry] {
         entries.map { .init(automationAuthor: false, entry: $0) }
             + localAutomationAuthors.map { .init(automationAuthor: true, entry: $0) }
+            + aiReplyTrustRecords.map { .init(aiReplyTrust: $0) }
     }
 
     init(storedEntries: [StoredEntry]) {
-        entries = storedEntries.filter { !$0.automationAuthor }.map(\.entry)
-        localAutomationAuthors = storedEntries.filter(\.automationAuthor).map(\.entry)
+        entries = storedEntries.filter { !$0.automationAuthor }.compactMap(\.entry)
+        localAutomationAuthors = storedEntries.filter(\.automationAuthor).compactMap(\.entry)
+        var trustIDs: Set<AIReplyTrust.ID> = []
+        aiReplyTrustRecords = storedEntries.compactMap(\.aiReplyTrust).filter { trustIDs.insert($0.id).inserted }
     }
 
     private enum CodingKeys: String, CodingKey { case entries, localAutomationAuthors, aiReplyTrustRecords }

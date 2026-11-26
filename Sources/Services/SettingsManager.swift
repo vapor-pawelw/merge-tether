@@ -1156,7 +1156,9 @@ extension SettingsManager {
         field(\.reviewParticipationPreferences, \.reviewParticipationPreferences, Key.reviewParticipationPreferences,
             candidate: candidateParticipation, split: \.storedEntries, combine: ReviewParticipationPreferences.init(storedEntries:),
             mapTarget: { stored, transform in
-                accountEntry(stored.entry, host: \.host, username: \.username, owner: \.accountUserID, using: transform)
+                // AI reply trust records are already keyed by host and user IDs, so renames never remap them.
+                guard let entry = stored.entry else { return stored }
+                return accountEntry(entry, host: \.host, username: \.username, owner: \.accountUserID, using: transform)
                     .map { .init(automationAuthor: stored.automationAuthor, entry: $0) }
             }, scope: { _ in nil })
         field(\.feedbackSuggestionDecisions, \.feedbackSuggestionDecisions, Key.feedbackSuggestionDecisions,

@@ -38,6 +38,35 @@ struct ReviewParticipationPreferencesTests {
         #expect(SettingsManager(defaults: defaults).reviewParticipationPreferences.aiReplyTrustRecords.isEmpty)
     }
 
+    @Test func AIReplyTrustSurvivesAccountBoundRestartAndRename() throws {
+        let suite = "AIReplyTrustAccountRecords.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let host = "gitlab.example.org"
+        let account = GitLabAuthenticatedUser(id: 3, username: "me")
+        let date = Date(timeIntervalSince1970: 10)
+        let notes = [40, 41].map {
+            GitLabMergeRequestDiscussion.Note(id: $0, author: .init(id: 8, username: "alice", name: nil), system: false,
+                resolvable: true, resolved: false, resolvedBy: nil, body: "Review")
+        }
+        let settings = SettingsManager(defaults: defaults)
+        #expect(settings.bindAuthenticatedAccount(.init(host: host, username: account.username, userID: account.id)))
+        #expect(defaults.data(forKey: "mergeRequestAccountRecords") != nil)
+        #expect(settings.recordAIReplyTrust(.ai, notes: notes, host: host, user: account, at: date))
+
+        let restarted = SettingsManager(defaults: defaults)
+        #expect(restarted.bindAuthenticatedAccount(.init(host: host, username: account.username, userID: account.id)))
+        #expect(restarted.reviewParticipationPreferences.aiReplyTrust(host: host, accountID: 3, authorID: 8)?
+            .trustsStyleAssessment == true)
+        #expect(restarted.bindAuthenticatedAccount(.init(host: host, username: "renamed", userID: account.id)))
+        #expect(restarted.save())
+
+        let renamed = SettingsManager(defaults: defaults)
+        #expect(renamed.bindAuthenticatedAccount(.init(host: host, username: "renamed", userID: account.id)))
+        let record = try #require(renamed.reviewParticipationPreferences.aiReplyTrust(host: host, accountID: 3, authorID: 8))
+        #expect(record.confirmedAINotes == [40: date, 41: date])
+    }
+
     @Test(arguments: ["invalidID", "emptyHost", "emptyAccount", "duplicateIdentity", "duplicateEntryID"])
     func malformedStoredAutomationAuthorsKeepAutomaticActionsOnHold(_ scenario: String) throws {
         let suite = "LocalAutomationAuthorsCorrupt.\(UUID())"
