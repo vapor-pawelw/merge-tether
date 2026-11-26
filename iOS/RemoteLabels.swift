@@ -2,12 +2,28 @@ import SwiftUI
 import MergeTetherRemote
 
 extension RemoteCard {
+    var gitLabActionURL: URL? {
+        guard id.hasPrefix("mr:") || mergeRequestIID != nil,
+              let url, let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = parts.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              parts.host != nil, parts.user == nil, parts.password == nil else { return nil }
+        return url
+    }
+
     var repositoryName: String {
         project.split(separator: "/").last?.trimmingCharacters(in: .whitespaces) ?? project
     }
 }
 
 extension RemoteLaneID {
+    func countedTitle(_ count: Int) -> Text {
+        switch self {
+        case .own: Text(.Board.boardLaneOwn(count))
+        case .reviewed: Text(.Board.boardLaneReviewing(count))
+        default: Text(verbatim: "\(String(localized: title)) (\(count.formatted()))")
+        }
+    }
+
     var title: LocalizedStringResource {
         switch self {
         case .ready: .Remote.remoteReady

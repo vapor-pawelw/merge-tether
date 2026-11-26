@@ -6,11 +6,42 @@ struct CommandCenterView: View {
     let monitor: TodoMonitorService
     let updates: UpdateService
     let updater: AppUpdater
+    let agentQuestion: AgentQuestionConversation
     @State private var showingAdd = false
     @State private var showingInbox = false
+    @State private var showingAgentQuestion = false
+    @State private var questionMergeRequest: URL?
     @State private var regenerationPresentation: DraftRegenerationPresentation?
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
+
+    @ViewBuilder private var agentQuestionButton: some View {
+        if let owner = monitor.agentQuestionOwner, monitor.selectedAssistantReady,
+           case .ready(let executable) = monitor.assistantDependencies.statuses[owner.assistant] {
+            Button { showingAgentQuestion.toggle() } label: {
+                Image(systemName: "questionmark.bubble.fill")
+            }
+            .help(Text(.AgentQuestion.agentQuestionTitle))
+            .accessibilityLabel(Text(.AgentQuestion.agentQuestionTitle))
+            .popover(isPresented: $showingAgentQuestion, arrowEdge: .top) {
+                AgentQuestionPopover(conversation: agentQuestion, submit: { text in
+                    agentQuestion.submit(text, owner: owner, executable: executable,
+                                         model: monitor.agentQuestionModel, monitor: monitor)
+                }, openLink: openQuestionLink)
+            }
+        }
+    }
+
+    private func openQuestionLink(_ url: URL) -> OpenURLAction.Result {
+        let board = monitor.boardSnapshot
+        if (board.own + board.reviewed + board.otherMergeRequests).contains(where: { $0.displayURL == url }) {
+            showingAgentQuestion = false
+            questionMergeRequest = url
+            return .handled
+        }
+        if AgentQuestionSource.isEvidenceLink(url) { return .systemAction }
+        return .discarded
+    }
 
     var body: some View {
         let initialRefresh = monitor.boardRefreshState
@@ -29,7 +60,8 @@ struct CommandCenterView: View {
             NotificationPermissionView(notifications: monitor.notifications,
                                        enabled: monitor.settings.notificationsEnabled)
                 .padding(.horizontal, 18)
-            CommandCenterBoardView(monitor: monitor, board: display.board, refreshState: initialRefresh)
+            CommandCenterBoardView(monitor: monitor, board: display.board, refreshState: initialRefresh,
+                                       questionMergeRequest: $questionMergeRequest)
                 .id("\(monitor.glab.resolvedHost ?? "")|\(monitor.glab.currentUsername ?? "")")
             ForEach(monitor.undoableReviewRemovals, id: \.automatic) { removal in
                 ReviewRemovalBanner(removal: removal, monitor: monitor)
@@ -55,6 +87,7 @@ struct CommandCenterView: View {
                 Button { openWindow(id: "remote-access") } label: {
                     Label { Text(.Remote.remoteMacPairPhone) } icon: { Image(systemName: "iphone") }
                 }
+                agentQuestionButton
             }
             if #available(macOS 26.0, *) {
                 ToolbarSpacer(.fixed, placement: .primaryAction)
@@ -115,6 +148,14 @@ struct CommandCenterView: View {
                     AppUpdateControls(updater: updater, inToolbar: true)
                 }
             }
+        }
+        .onChange(of: monitor.agentQuestionOwner, initial: true) { _, owner in
+            showingAgentQuestion = false
+            agentQuestion.activate(owner)
+        }
+        .onChange(of: monitor.glab.accountRevision) { _, _ in
+            showingAgentQuestion = false
+            questionMergeRequest = nil
         }
         .sheet(isPresented: $showingAdd) { CommandCenterAddMergeRequestView(monitor: monitor) }
         .sheet(item: $regenerationPresentation) { monitor.draftRegenerationSheet($0) }

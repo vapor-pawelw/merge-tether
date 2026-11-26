@@ -1060,11 +1060,37 @@ final class TodoMonitorService {
         return assignmentSeen || candidateSeen
     }
 
-    func canRestoreHiddenReview(_ review: HiddenReview) -> Bool {
+    func isCurrentHiddenReview(_ review: HiddenReview) -> Bool {
         guard let iid = review.target.iid,
               scopeTarget(projectID: review.target.projectID, iid: iid, url: review.url) == review.target else { return false }
-        return settings.canRestoreHiddenReview(review.target)
+        return settings.ignoredMergeRequests.contains(review.target)
             && settings.hiddenReviewDetails[review.target]?.hideID == review.hideID
+    }
+
+    func canRestoreHiddenReview(_ review: HiddenReview) -> Bool {
+        isCurrentHiddenReview(review) && settings.canRestoreHiddenReview(review.target)
+    }
+
+    func hiddenReviewDisplay(_ review: HiddenReview) -> (request: GitLabMergeRequest?, approvals: MergeRequestApprovalProgress?) {
+        guard let account = boardDisplayAccount, review.target.host == account.host,
+              review.target.username == account.username else { return (nil, nil) }
+        let saved = review.request
+        let cached = boardDisplayMetadata.request(for: review.target, url: review.url, account: account)
+        let request = if let saved, let cached, saved.state != cached.state || saved.reviewers != cached.reviewers {
+            saved
+        } else {
+            cached ?? saved ?? boardDisplayRequest(for: review.target, url: review.url)
+        }
+        return (request, request.flatMap { boardDisplayMetadata.approvalProgress(for: review.target, request: $0, account: account) })
+    }
+
+    func recordHiddenReviewDisplay(_ review: HiddenReview, request: GitLabMergeRequest, approvals: MergeRequestApprovalProgress?,
+                                   accountRevision: UInt64, readStartedAt: Date) {
+        guard let account = boardDisplayAccount, account.revision == accountRevision, isCurrentHiddenReview(review) else { return }
+        var metadata = boardDisplayMetadata
+        guard metadata.record(request, for: review.target, url: review.url, readStartedAt: readStartedAt,
+                              account: account, currentAccount: account, approvalProgress: approvals) else { return }
+        boardDisplayMetadata = metadata
     }
 
     var hiddenReviewNotifications: [HiddenReview] {
@@ -1126,6 +1152,10 @@ final class TodoMonitorService {
         guard !settings.ignoredMergeRequests.contains(target) else { return true }
         let review = HiddenReview(target: target, title: request.title, url: request.webURL, request: request)
         guard settings.hideReviewedMergeRequest(review) else { return false }
+        if let saved = settings.hiddenReviewDetails[target], let approvals = item.approvalProgress {
+            recordHiddenReviewDisplay(saved, request: request, approvals: approvals,
+                accountRevision: glab.accountRevision, readStartedAt: .now)
+        }
         if clearNewReviewAssignment(target) { settings.save() }
         announceHiddenReviews([review], automatic: false)
         return true

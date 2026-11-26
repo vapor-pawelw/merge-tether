@@ -115,6 +115,7 @@ let project = Project(
                       "Sources/Services/CrashUpload.swift",
                       "Sources/Views/Settings/CrashReportingSettingsSection.swift"],
             resources: ["Resources/MergeActions.xcstrings", "Resources/Remote.xcstrings", "Resources/Board.xcstrings",
+                        "Resources/BoardActivity.xcstrings",
                         "Resources/MRHumanAction.xcstrings", "Resources/AuthorFeedback.xcstrings", "Resources/MRDependencies.xcstrings",
                         "Resources/CommentReview.xcstrings", "Resources/FeedbackSuggestions.xcstrings", "Resources/DraftRegeneration.xcstrings",
                         "Resources/ActionEffects.xcstrings", "Resources/CommandCenter.xcstrings",

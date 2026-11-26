@@ -6,6 +6,7 @@ struct CommandCenterBoardView: View {
     let monitor: TodoMonitorService
     let board: MergeRequestBoardSnapshot
     var refreshState: BoardRefreshState = .current
+    @Binding var questionMergeRequest: URL?
     private var dimUnverifiedContent: Bool { refreshState != .current }
     private var usesManualOrder: Bool { monitor.settings.boardOrderingMethod == .manual }
     private enum Lane: Hashable {
@@ -85,6 +86,13 @@ struct CommandCenterBoardView: View {
             }
         }
         .background(Color(white: colorScheme == .dark ? 0.095 : 0.99))
+        .onChange(of: questionMergeRequest) { _, url in
+            guard let url else { return }
+            questionMergeRequest = nil
+            if let row = (board.own + board.reviewed + board.otherMergeRequests).first(where: { $0.displayURL == url }) {
+                selected = Selection(item: row.item, section: .overview, account: account)
+            }
+        }
         .onChange(of: account) { _, _ in
             selected = nil
             laneFilters.removeAll()

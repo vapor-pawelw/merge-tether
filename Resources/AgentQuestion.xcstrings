@@ -1,0 +1,193 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "agentQuestionClear": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear conversation"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wyczyść rozmowę"
+          }
+        }
+      }
+    },
+    "agentQuestionFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The agent couldn't answer. Try asking again or clear the conversation to start over."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent nie odpowiedział. Spróbuj zadać pytanie ponownie lub wyczyść rozmowę, aby zacząć od nowa."
+          }
+        }
+      }
+    },
+    "agentQuestionPlaceholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask a question…"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wpisz pytanie…"
+          }
+        }
+      }
+    },
+    "agentQuestionReadOnly": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I can answer questions about MergeTether and your MRs."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mogę odpowiadać na pytania o MergeTether i Twoje MR-y."
+          }
+        }
+      }
+    },
+    "agentQuestionSend": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Send question"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wyślij pytanie"
+          }
+        }
+      }
+    },
+    "agentQuestionSourceMain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The installed build couldn't be matched to a GitHub release. Source evidence is from main."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się dopasować zainstalowanej wersji do wydania na GitHubie. Użyto kodu z gałęzi main."
+          }
+        }
+      }
+    },
+    "agentQuestionSourceUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Source evidence was unavailable on GitHub."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się pobrać kodu źródłowego z GitHuba."
+          }
+        }
+      }
+    },
+    "agentQuestionStorageFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MergeTether couldn't update the saved conversation."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MergeTether nie mógł zaktualizować zapisanej rozmowy."
+          }
+        }
+      }
+    },
+    "agentQuestionThinking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for an answer"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oczekiwanie na odpowiedź"
+          }
+        }
+      }
+    },
+    "agentQuestionTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask Agent"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zapytaj agenta"
+          }
+        }
+      }
+    },
+    "agentQuestionWelcome": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hi! Ask a question about your MRs or automation in MergeTether."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cześć! Wpisz pytanie o swoje MR-y lub automatyzację w MergeTether."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

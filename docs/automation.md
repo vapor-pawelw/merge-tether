@@ -201,6 +201,14 @@ Retirement requires a successful single-MR read that confirms the terminal state
 
 The app bundles `evidence.py` and `author_follow_up.py` under `Contents/Resources/Automation`. Workers use these helpers to read GitLab state and store local evidence.
 
+## Ask the agent
+
+Click the question mark in the Mac toolbar when your selected CLI is ready. Questions and answers stay in one conversation in this installation. Clear it from the popover or start a fresh conversation by switching the GitLab account or agent provider. The CLI may retain its own session history.
+
+The app sends a bounded board snapshot with each question. For a specific MR it can include recent activity, job summaries and saved reasons from the Event log. It retrieves public MergeTether source on GitHub for questions about app behavior using the installed release version when available. Development and unmatched builds use `main`, with a notice in the answer. Source and MR context go to the selected CLI provider.
+
+The Q&A CLI uses its own restricted launch configuration. The app passes fresh evidence as text, keeps credentials and raw worker transcripts out of the snapshot, and disables the shell, MCP, and tool approvals for questions.
+
 ## Optional manual agent actions
 
 An MR’s right-click menu and bottom-right **Actions** button offer the same actions. **Start conversation in…** opens the default app configured under **Settings → Agent → Agent settings → Open conversations in**, independently of the automation provider. Hold **Option** to show **Start conversation with…** and choose an installed desktop app or CLI for one conversation; this does not change the default. The chooser also offers **Copy MR link**. If the default is unavailable, the chooser opens instead.
@@ -224,7 +232,7 @@ The first successful assignment list establishes a baseline without badges when 
 
 Choose **Hide** from the card menu or directly on a new card awaiting a manual start. On Mac, select **Don’t ask again** in the menu action’s confirmation to skip future prompts for Hide. Restore an open MR at any time from the banner or **Reviewing → Hidden**. Hidden reviews persist across restarts, closure and merge while you remain assigned as a reviewer. A failed refresh preserves the hide. A refresh that confirms you are no longer assigned clears it.
 
-On Mac, use **…** or right-click a hidden card to open it in GitLab, copy its link, refresh it, start an agent conversation, or restore it. **Leave review** is available when you are assigned as a reviewer.
+Use **…**, right-click on Mac, or touch and hold on iPhone or iPad to open a hidden MR in GitLab, copy its link, refresh it, start an agent conversation, or restore it. **Leave review** is available when you are assigned as a reviewer. The paired Mac runs GitLab updates and starts agent conversations.
 
 **Settings → Merge requests → Incoming review filter** optionally evaluates new review requests for Inbox and Reviewing against your written criteria. It uses the configured lightweight verifier model and requires a working, signed-in agent CLI. A batch shares one verifier run. Accepted requests follow the ordinary routing and review permissions. Rejected requests use the same persistent hidden state as **Hide**. A banner identifies the MR or lists the batch and offers **Restore**. By default, every new autohide leaves an Inbox update with the verifier's reason. **Mark as seen** dismisses the update while keeping the MR hidden. **Restore** brings the MR back and dismisses the update. Bulk **Mark all as read** also dismisses these notices. The checkbox controls future Inbox updates, and banners remain available independently. A failed, unavailable, uncertain or interrupted assessment lets the request through with a note, including after restarting the app. The Reviewing note clears with **New**. The global automation switch pauses new filtering.
 

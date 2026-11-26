@@ -172,7 +172,9 @@ struct IncomingReviewFilterTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsManager(defaults: defaults)
-        let manual = try request(2)
+        let manualData = requestJSON(2).dropLast()
+            + #","reviewers":[{"id":9,"username":"me","name":"Reviewer"}]}"#
+        let manual = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(manualData.utf8))
         let filtered = try request(3)
         let gitlab = InMemoryGitLab()
         defer { gitlab.close() }
@@ -180,6 +182,15 @@ struct IncomingReviewFilterTests {
             if request.arguments.first == "config" { return InMemoryGitLab.output(self.host) }
             if request.arguments.first == "auth" {
                 return InMemoryGitLab.output(error: "Logged in to \(self.host) as \(self.username)")
+            }
+            if request.arguments.first == "api" {
+                switch request.endpoint {
+                case "/user": return InMemoryGitLab.output(#"{"id":9,"username":"me"}"#)
+                case "/projects/1/merge_requests/2": return InMemoryGitLab.output(String(manualData))
+                case "/projects/1/merge_requests/2/approvals":
+                    return InMemoryGitLab.output(#"{"project_id":1,"iid":2,"approvals_required":2,"approvals_left":1}"#)
+                default: break
+                }
             }
             return InMemoryGitLab.output("[]")
         }
@@ -197,7 +208,7 @@ struct IncomingReviewFilterTests {
             board: snapshot, monitor: original))
         #expect(await context.execute(.remove) == .completed)
         #expect(!settings.intakeFilterHolds(target(2)))
-        #expect(settings.hideFilteredReviews([.init(target: target(3), title: filtered.title, url: filtered.webURL)]))
+        #expect(settings.hideFilteredReviews([.init(target: target(3), title: filtered.title, url: filtered.webURL, request: filtered)]))
         let notice = try #require(settings.filteredHiddenReviewDetails[target(3)]?.inboxNotification)
         #expect(original.acknowledgeHiddenReviewNotifications([notice.id]))
 
@@ -207,19 +218,37 @@ struct IncomingReviewFilterTests {
         await monitor.bootstrap()
         let account = "\(username)@\(host)"
         func board() -> RemoteBoard {
-            RemoteBoardAdapter.board(monitor: monitor, session: UUID(), account: account, includesReviewBoard: true)
+            RemoteBoardAdapter.board(monitor: monitor, session: UUID(), account: account, includesCardActions: true, includesReviewBoard: true)
         }
         let hidden = try #require(board().hiddenReviews)
         #expect(Set(hidden.map(\.mergeRequestIID)) == [2, 3])
         #expect(board().cards.allSatisfy { !$0.id.hasPrefix("completion:") })
         let card = try #require(hidden.first { $0.mergeRequestIID == 2 })
-        let restore = try #require(card.actions.first)
+        #expect(card.presentation?.author == "Alice")
+        #expect(card.presentation?.assignedReviewerCount == 1)
+        #expect(card.canLeaveReview == true)
+        #expect(card.detail.isEmpty && card.primaryCTA == nil)
+        #expect(card.pinned == nil && card.automation == nil && card.canRemoveFromBoard == nil)
+        #expect(Set(card.actions.map(\.kind)) == [.markDone, .editCard])
+        let edit = try #require(card.actions.first { $0.kind == .editCard })
+        let hiddenContext = try #require(RemoteCardActionContext(card: card, board: monitor.boardSnapshot, monitor: monitor))
+        #expect(await hiddenContext.execute(.pin(true)) == .changed)
+        #expect(await hiddenContext.execute(.remove) == .changed)
+        #expect(await hiddenContext.execute(.refresh) == .completed)
+        let refreshed = try #require(board().hiddenReviews?.first { $0.id == card.id })
+        #expect(refreshed.approvals?.received == 1)
+        #expect(refreshed.approvals?.required == 2)
+        let restore = try #require(card.actions.first { $0.id == RemoteAction.restoreHiddenReviewID })
         #expect(RemoteBoardAdapter.restoreHiddenReview(card, action: restore, monitor: monitor, account: "another@\(host)") == .changed)
         #expect(RemoteBoardAdapter.restoreHiddenReview(card, action: restore, monitor: monitor, account: account) == .completed)
         #expect(monitor.removeReviewedMergeRequest(item))
         #expect(RemoteBoardAdapter.restoreHiddenReview(card, action: restore, monitor: monitor, account: account) == .changed)
         let filteredCard = try #require(board().hiddenReviews?.first { $0.mergeRequestIID == 3 })
-        let filteredRestore = try #require(filteredCard.actions.first)
+        #expect(filteredCard.canLeaveReview == nil)
+        let hiddenAgain = try #require(board().hiddenReviews?.first { $0.mergeRequestIID == 2 })
+        #expect(!hiddenAgain.actions.contains(edit))
+        #expect(await hiddenContext.execute(.refresh) == .changed)
+        let filteredRestore = try #require(filteredCard.actions.first { $0.id == RemoteAction.restoreHiddenReviewID })
         #expect(RemoteBoardAdapter.restoreHiddenReview(filteredCard, action: filteredRestore, monitor: monitor, account: account) == .completed)
         #expect(SettingsManager(defaults: defaults).ignoredMergeRequests == [target(2)])
     }
