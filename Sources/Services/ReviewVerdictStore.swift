@@ -64,10 +64,18 @@ struct ReviewVerdict: Codable, Equatable, Sendable {
     var semanticContextFingerprint: String? = nil
     var draftBodyDigests: [String: String]? = nil
 
+    var evidenceContext: EvidenceContext {
+        .init(account: username.map { .init(host: host, username: $0) },
+              mergeRequestID: .init(projectID: projectID, iid: iid), head: headSHA,
+              discussionContent: discussionFingerprint.map(DiscussionContentDigest.init),
+              semanticContext: semanticContextFingerprint.map(SemanticContextDigest.init))
+    }
+
     func requiresFreshReview(forSemanticContext current: String) -> Bool {
         switch verdict {
         case .objections: false
-        case .noObjections, .classifiedFindings: semanticContextFingerprint != current
+        case .noObjections, .classifiedFindings:
+            !evidenceContext.binds(to: .init(semanticContext: .init(current)), policy: .semanticText)
         }
     }
 
@@ -98,10 +106,11 @@ struct ReviewVerdict: Codable, Equatable, Sendable {
     /// The verdict covers the checked head and the discussion evidence, regardless of findings.
     func covers(head: String, discussions: [GitLabMergeRequestDiscussion],
                 reviewerID: Int? = nil, publishedDrafts: Set<String> = []) -> Bool {
-        guard version == 1 && headSHA == head,
-              Self.fingerprint(discussions) != nil else { return false }
+        let recorded = evidenceContext
+        guard version == 1, recorded.binds(to: .init(head: head), policy: .head),
+              let content = Self.discussionContentDigest(discussions) else { return false }
         // Older receipts remain valid only when there is no discussion content to miss.
-        guard let recorded = discussionFingerprint else {
+        guard recorded.discussionContent != nil else {
             return discussions.flatMap(\.notes).allSatisfy { $0.system == true }
         }
         // Notes created after the verdict have the highest IDs, so try excluding the newest
@@ -116,15 +125,21 @@ struct ReviewVerdict: Codable, Equatable, Sendable {
         }
         ownPublished.sort(by: >)
         var excluded: Set<Int> = []
-        if Self.fingerprint(discussions) == recorded { return true }
+        if recorded.binds(to: .init(head: head, discussionContent: content), policy: .reviewContent) { return true }
         for noteID in ownPublished {
             excluded.insert(noteID)
-            if Self.fingerprint(discussions, excluding: excluded) == recorded { return true }
+            let content = Self.discussionContentDigest(discussions, excluding: excluded)
+            if recorded.binds(to: .init(head: head, discussionContent: content), policy: .reviewContent) { return true }
         }
         return false
     }
 
     static func fingerprint(_ discussions: [GitLabMergeRequestDiscussion], excluding excluded: Set<Int> = []) -> String? {
+        discussionContentDigest(discussions, excluding: excluded)?.rawValue
+    }
+
+    static func discussionContentDigest(_ discussions: [GitLabMergeRequestDiscussion],
+                                        excluding excluded: Set<Int> = []) -> DiscussionContentDigest? {
         var rows: [(Int, Int, String)] = []
         for note in discussions.flatMap(\.notes) where note.system != true {
             guard let id = note.id, id > 0, let authorID = note.author?.id, authorID > 0, let body = note.body else { return nil }
@@ -132,7 +147,7 @@ struct ReviewVerdict: Codable, Equatable, Sendable {
             rows.append((id, authorID, AICommentAssessmentStore.digest(body)))
         }
         let content = rows.sorted { $0 < $1 }.map { "\($0.0):\($0.1):\($0.2)\n" }.joined()
-        return AICommentAssessmentStore.digest(content)
+        return .init(AICommentAssessmentStore.digest(content))
     }
 }
 
@@ -148,7 +163,7 @@ enum ReviewVerdictStore {
         let verdict: ReviewVerdict
         fileprivate let drafts: [GitLabDraftNote]
         fileprivate let beforeIDs: Set<Int>
-        fileprivate let beforeFingerprint: String
+        fileprivate let beforeFingerprint: DiscussionContentDigest
         fileprivate let publishedDraftRoots: [String: Int]
     }
     private struct NormalizedPublication: Codable {
@@ -265,7 +280,9 @@ enum ReviewVerdictStore {
     private static func publishedDraftRoots(_ verdict: ReviewVerdict, matching discussions: [GitLabMergeRequestDiscussion],
                                             in directory: URL) -> [String: Int] {
         let publication = normalizedPublication(verdict, in: directory)
-        return publication?.fingerprint == ReviewVerdict.fingerprint(discussions) ? publication?.publishedDraftRoots ?? [:] : [:]
+        let recorded = EvidenceContext(discussionContent: publication.map { .init($0.fingerprint) })
+        let current = EvidenceContext(discussionContent: ReviewVerdict.discussionContentDigest(discussions))
+        return recorded.binds(to: current, policy: .discussionContent) ? publication?.publishedDraftRoots ?? [:] : [:]
     }
 
     private static func findingLevels(_ findings: ReviewVerdict.Findings, noteID: Int,
@@ -277,10 +294,15 @@ enum ReviewVerdictStore {
     @MainActor
     static func contentMatches(_ verdict: ReviewVerdict, head: String,
         discussions: [GitLabMergeRequestDiscussion], user: GitLabAuthenticatedUser, in directory: URL = directory) -> Bool {
-        guard verdict.version == 1, verdict.headSHA == head,
+        let recorded = verdict.evidenceContext
+        guard verdict.version == 1, recorded.binds(to: .init(head: head), policy: .head),
               verdict.username == user.username, verdict.userID == user.id, verdict.runID != nil,
-              let fingerprint = ReviewVerdict.fingerprint(discussions) else { return false }
-        return fingerprint == verdict.discussionFingerprint || normalizedPublication(verdict, in: directory)?.fingerprint == fingerprint
+              let fingerprint = ReviewVerdict.discussionContentDigest(discussions) else { return false }
+        let current = EvidenceContext(head: head, discussionContent: fingerprint)
+        if recorded.binds(to: current, policy: .reviewContent) { return true }
+        guard let normalized = normalizedPublication(verdict, in: directory) else { return false }
+        return EvidenceContext(head: recorded.head, discussionContent: .init(normalized.fingerprint))
+            .binds(to: current, policy: .reviewContent)
     }
 
     @MainActor
@@ -304,10 +326,11 @@ enum ReviewVerdictStore {
               drafts.allSatisfy({ reviewedDrafts.contains($0) }),
               drafts.allSatisfy({ ($0.id ?? 0) > 0 && $0.authorID == user.id && $0.note?.isEmpty == false }),
               ids.count == notes.count, ids.allSatisfy({ $0 > 0 }), Set(ids).count == ids.count,
-              let fingerprint = ReviewVerdict.fingerprint(before) else { return nil }
+              let fingerprint = ReviewVerdict.discussionContentDigest(before) else { return nil }
         let publication = normalizedPublication(verdict, in: directory)
         return .init(verdict: verdict, drafts: drafts, beforeIDs: Set(ids), beforeFingerprint: fingerprint,
-            publishedDraftRoots: publication?.fingerprint == fingerprint ? publication?.publishedDraftRoots ?? [:] : [:])
+            publishedDraftRoots: publication.map { DiscussionContentDigest($0.fingerprint) } == fingerprint
+                ? publication?.publishedDraftRoots ?? [:] : [:])
     }
 
     @MainActor
@@ -335,7 +358,7 @@ enum ReviewVerdictStore {
                 publishedDraftRoots[String(draftID)] = root
             }
         }
-        guard ReviewVerdict.fingerprint(after, excluding: matched) == publication.beforeFingerprint,
+        guard ReviewVerdict.discussionContentDigest(after, excluding: matched) == publication.beforeFingerprint,
               let fingerprint = ReviewVerdict.fingerprint(after) else { return }
         let record = NormalizedPublication(verdict: publication.verdict, fingerprint: fingerprint,
             publishedDraftRoots: publishedDraftRoots.isEmpty ? nil : publishedDraftRoots)

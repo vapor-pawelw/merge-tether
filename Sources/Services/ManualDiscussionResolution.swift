@@ -22,12 +22,14 @@ enum ManualDiscussionResolution {
             return details.joined(separator: "\n\n")
         }
         func matches(_ discussions: [GitLabMergeRequestDiscussion]) -> Bool {
-            fingerprint != nil && fingerprint == ManualDiscussionResolution.fingerprint(discussions)
+            EvidenceContext(discussionState: ManualDiscussionResolution.discussionStateDigest(self.discussions))
+                .binds(to: .init(discussionState: ManualDiscussionResolution.discussionStateDigest(discussions)),
+                       policy: .discussionState)
         }
         func acceptingResolution(_ resolved: GitLabMergeRequestDiscussion) -> Self? {
             guard let index = discussions.firstIndex(where: { $0.id == resolved.id }), resolved.notes.first?.resolved == true,
-                  ManualDiscussionResolution.fingerprint([discussions[index]], includeRevisions: false)
-                    == ManualDiscussionResolution.fingerprint([resolved], includeRevisions: false) else { return nil }
+                  ManualDiscussionResolution.discussionStateDigest([discussions[index]], includeRevisions: false)
+                    == ManualDiscussionResolution.discussionStateDigest([resolved], includeRevisions: false) else { return nil }
             var next = discussions
             next[index] = resolved
             return .init(eligibleIDs: eligibleIDs, heldIDs: heldIDs, discussions: next)
@@ -76,9 +78,14 @@ enum ManualDiscussionResolution {
         return .init(eligibleIDs: eligible.sorted(), heldIDs: held.sorted(), discussions: discussions)
     }
 
+    static func fingerprint(_ discussions: [GitLabMergeRequestDiscussion], includeRevisions: Bool = true) -> String? {
+        discussionStateDigest(discussions, includeRevisions: includeRevisions)?.rawValue
+    }
+
     /// Bind IDs, topology and edit revisions as well as text. Resolution flags
     /// are intentionally excluded so completing one selected ID preserves the rest.
-    static func fingerprint(_ discussions: [GitLabMergeRequestDiscussion], includeRevisions: Bool = true) -> String? {
+    static func discussionStateDigest(_ discussions: [GitLabMergeRequestDiscussion],
+                                      includeRevisions: Bool = true) -> DiscussionStateDigest? {
         struct Row: Encodable {
             let discussion: String
             let note: Int
@@ -106,7 +113,7 @@ enum ManualDiscussionResolution {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         guard let data = try? encoder.encode(rows.sorted { ($0.discussion, $0.note) < ($1.discussion, $1.note) }) else { return nil }
-        return UserAttentionSnapshot.digest(String(decoding: data, as: UTF8.self))
+        return .init(UserAttentionSnapshot.digest(String(decoding: data, as: UTF8.self)))
     }
 
     @MainActor static func prepare(_ expected: GitLabMergeRequest, monitor: TodoMonitorService,

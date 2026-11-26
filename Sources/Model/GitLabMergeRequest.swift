@@ -194,9 +194,23 @@ struct GitLabMergeRequest: Codable, Sendable {
     var canMerge: Bool? { user?.canMerge }
 
     /// Semantic feedback checks depend on MR text as well as code and discussions.
-    var semanticContextFingerprint: String {
+    var semanticContextDigest: SemanticContextDigest {
         let body = description ?? ""
-        return UserAttentionSnapshot.digest("\(title.utf8.count):\(title)\(body.utf8.count):\(body)")
+        return .init(UserAttentionSnapshot.digest("\(title.utf8.count):\(title)\(body.utf8.count):\(body)"))
+    }
+
+    var semanticContextFingerprint: String { semanticContextDigest.rawValue }
+
+    /// A target is usable when GitLab supplied diff refs for this exact source head.
+    var evidenceTarget: EvidenceContext.Target? {
+        guard let sha, !sha.isEmpty, let targetProjectID, targetProjectID > 0, !targetBranch.isEmpty,
+              let diffRefs, diffRefs.headSHA == sha, let base = diffRefs.baseSHA, !base.isEmpty else { return nil }
+        return .init(projectID: targetProjectID, branch: targetBranch, base: base)
+    }
+
+    func evidenceContext(discussionContent: DiscussionContentDigest? = nil) -> EvidenceContext {
+        .init(mergeRequestID: mergeRequestID, head: sha, target: evidenceTarget, discussionContent: discussionContent,
+              semanticContext: semanticContextDigest)
     }
 
     struct DiffRefs: Codable, Equatable, Sendable {

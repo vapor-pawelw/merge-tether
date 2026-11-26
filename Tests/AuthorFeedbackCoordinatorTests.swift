@@ -1809,7 +1809,7 @@ struct AuthorFeedbackCoordinatorTests {
             #expect(fixture.inputs.first?.target?.expectedUsername == "me")
             let snapshot = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(request.utf8))
             #expect(fixture.inputs.first?.target?.url == snapshot.webURL)
-            #expect(fixture.inputs.first?.semanticContextFingerprint == snapshot.semanticContextFingerprint)
+            #expect(fixture.inputs.first?.semanticContextFingerprint == snapshot.semanticContextDigest)
         }
     }
 

@@ -47,7 +47,7 @@ struct AuthoredMergeRequestStatus: Identifiable {
 
     func matchesCurrentRequest(_ current: GitLabMergeRequest) -> Bool {
         MergeRequestDependencySummary.Context(request) == .init(current)
-            && request.semanticContextFingerprint == current.semanticContextFingerprint
+            && request.evidenceContext().binds(to: current.evidenceContext(), policy: .semanticText)
             && request.draft == current.draft && request.author.id == current.author.id
             && request.author.username == current.author.username
     }

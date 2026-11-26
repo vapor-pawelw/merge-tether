@@ -28,6 +28,11 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
     var reviewParticipationRevision = ""
     var accountKinds: [Int: AuthorFeedbackPolicy.AccountKind] = [:]
 
+    var evidenceContext: EvidenceContext {
+        .init(head: head, discussionContent: .init(fingerprint),
+              semanticContext: semanticContextFingerprint.map(SemanticContextDigest.init))
+    }
+
     static func canReconcile(_ job: AssistantAutomationRunner.Handoff, request: GitLabMergeRequest) -> Bool {
         guard job.workflow == .followUp, job.pipelineReservation == nil, !job.allowsPush,
               let state = job.operationalExecution?.state, [.failed, .interrupted, .cancelled, .blocked].contains(state),
@@ -52,8 +57,9 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
                     discussionFingerprint: String?) -> Bool {
         guard Self.canReconcile(job, request: request), reconciledFollowUpJobIDs.contains(job.id),
               phase == .complete || phase == .waitingPublication,
-              head == request.sha, !head.isEmpty, fingerprint == discussionFingerprint,
-              semanticContextFingerprint == request.semanticContextFingerprint else { return false }
+              !head.isEmpty, evidenceContext.binds(
+                to: request.evidenceContext(discussionContent: discussionFingerprint.map(DiscussionContentDigest.init)),
+                policy: .verifiedFeedback) else { return false }
         if job.execution?.state == .blocked {
             guard let context = Self.blockedContext(for: job), reconciledBlockedContexts[job.id] == context else { return false }
         }
@@ -193,6 +199,17 @@ final class AuthorFeedbackCoordinator {
         let writesAllowed: Bool
         let scopedRefresh: Bool
         var readOnly: Bool { drafts > 0 }
+        var accountContext: EvidenceContext {
+            .init(account: .init(host: target.host, username: user.username), accountRevision: accountRevision)
+        }
+        var feedbackContext: EvidenceContext {
+            request.evidenceContext(discussionContent: .init(fingerprint))
+        }
+
+        func matchesFeedback(in request: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion]) -> Bool {
+            feedbackContext.binds(to: request.evidenceContext(discussionContent: ReviewVerdict.discussionContentDigest(discussions)),
+                                  policy: .verifiedFeedback)
+        }
     }
 
     private struct Preparation {
@@ -229,8 +246,8 @@ final class AuthorFeedbackCoordinator {
         guard let host = glab.resolvedHost, let username = glab.currentUsername,
               let state = status(projectID: request.projectID, iid: request.iid),
               state.phase == .complete || state.phase == .waitingPublication,
-              state.head == request.sha, state.fingerprint == fingerprint,
-              state.semanticContextFingerprint == request.semanticContextFingerprint else { return nil }
+              state.evidenceContext.binds(to: request.evidenceContext(discussionContent: .init(fingerprint)),
+                                         policy: .verifiedFeedback) else { return nil }
         let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
         guard state.feedbackDecisionRevision == settings.feedbackSuggestionDecisions.revision(for: target),
               state.reviewParticipationRevision == settings.reviewParticipationPreferences.revision(host: host, username: username) else { return nil }
@@ -240,15 +257,15 @@ final class AuthorFeedbackCoordinator {
 
     func isChecking(for request: GitLabMergeRequest, fingerprint: String) -> Bool {
         guard let status = status(projectID: request.projectID, iid: request.iid) else { return false }
-        return status.phase == .checking && status.head == request.sha && status.fingerprint == fingerprint
-            && status.semanticContextFingerprint == request.semanticContextFingerprint
+        return status.phase == .checking && status.evidenceContext.binds(
+            to: request.evidenceContext(discussionContent: .init(fingerprint)), policy: .verifiedFeedback)
     }
 
     func assessmentInFlight(for request: GitLabMergeRequest, fingerprint: String, activeFingerprint: String) -> Bool {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return false }
         let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
         guard let input = statusOwners[target], statuses[target]?.phase == .checking,
-              input.request.sha == request.sha, input.request.draftProofRecoveryContextFingerprint == request.draftProofRecoveryContextFingerprint,
+              input.request.draftRecoveryEvidence.binds(to: request.draftRecoveryEvidence, policy: .draftRecovery),
               input.fingerprint == fingerprint, input.activeFingerprint == activeFingerprint,
               liveContextMatches(input) else { return false }
         return pending[target]?.id == input.id || (activeInputs[target]?.id == input.id && tasks[target]?.isCancelled == false)
@@ -262,8 +279,7 @@ final class AuthorFeedbackCoordinator {
         let target = MRAutomationScope.Target.mergeRequest(host: host, username: user.username, projectID: request.projectID, iid: request.iid)
         guard let discussionID = draft.discussionID, let body = draft.note,
               let prior = cache[target], prior.verifiedInProcess, prior.input.user == user, liveContextMatches(prior.input),
-              prior.input.request.sha == request.sha,
-              prior.input.request.draftProofRecoveryContextFingerprint == request.draftProofRecoveryContextFingerprint,
+              prior.input.request.draftRecoveryEvidence.binds(to: request.draftRecoveryEvidence, policy: .draftRecovery),
               Self.samePublicationDiscussions(prior.input.discussions, before),
               before.contains(where: { $0.id == discussionID && $0.notes.contains { $0.id == sourceNoteID } }),
               prior.assessment.notes.contains(where: {
@@ -287,8 +303,9 @@ final class AuthorFeedbackCoordinator {
 
     private static func samePublicationDiscussions(_ first: [GitLabMergeRequestDiscussion],
                                                    _ second: [GitLabMergeRequestDiscussion]) -> Bool {
-        guard let fingerprint = ManualDiscussionResolution.fingerprint(first),
-              fingerprint == ManualDiscussionResolution.fingerprint(second),
+        guard EvidenceContext(discussionState: ManualDiscussionResolution.discussionStateDigest(first))
+                .binds(to: .init(discussionState: ManualDiscussionResolution.discussionStateDigest(second)),
+                       policy: .discussionState),
               sameDiscussionResolution(first, second) else { return false }
         return first.flatMap(\.notes).elementsEqual(second.flatMap(\.notes)) {
             $0.body == $1.body && $0.author?.id == $1.author?.id && $0.system == $1.system
@@ -315,7 +332,7 @@ final class AuthorFeedbackCoordinator {
         guard request.author.id == user.id, request.isOpen, request.draft != nil,
               Self.permitsBackgroundCheck(for: request, configuration: configuration, host: host, username: user.username,
                   mergeOptedIn: settings.autoMergePreference(for: target) == .on),
-              let fingerprint = ReviewVerdict.fingerprint(discussions), let head = request.sha else { return }
+              let fingerprint = ReviewVerdict.fingerprint(discussions), request.sha != nil else { return }
         let activeDiscussions = GitLabMergeRequestDiscussion.activeForReview(discussions)
         guard let activeFingerprint = ReviewVerdict.fingerprint(activeDiscussions) else { return }
         let hasFeedback = activeDiscussions.contains { $0.notes.contains { $0.system == false && $0.author?.id != user.id } }
@@ -328,8 +345,8 @@ final class AuthorFeedbackCoordinator {
         let completedJobID = completedFollowUpJob(for: request, target: target)?.id
         let decisionRevision = settings.feedbackSuggestionDecisions.revision(for: target)
         let participationRevision = settings.reviewParticipationPreferences.revision(host: host, username: user.username)
-        if let status = statuses[target], status.head == head, status.fingerprint == fingerprint,
-           status.semanticContextFingerprint == request.semanticContextFingerprint,
+        if let status = statuses[target],
+           status.evidenceContext.binds(to: request.evidenceContext(discussionContent: .init(fingerprint)), policy: .verifiedFeedback),
            status.feedbackDecisionRevision == decisionRevision,
            status.reviewParticipationRevision == participationRevision,
            status.phase == .failed, status.completedFollowUpJobID == completedJobID {
@@ -482,17 +499,14 @@ final class AuthorFeedbackCoordinator {
 
     private func isCurrent(_ input: Input) -> Bool {
         !Task.isCancelled && statusOwners[input.target]?.id == input.id && liveContextMatches(input)
-            && statuses[input.target]?.head == input.request.sha
-            && statuses[input.target]?.fingerprint == input.fingerprint
-            && statuses[input.target]?.semanticContextFingerprint == input.request.semanticContextFingerprint
+            && statuses[input.target]?.evidenceContext.binds(to: input.feedbackContext, policy: .verifiedFeedback) == true
             && statuses[input.target]?.completedFollowUpJobID == input.completedFollowUpJobID
             && statuses[input.target]?.feedbackDecisionRevision == input.decisionRevision
             && statuses[input.target]?.reviewParticipationRevision == input.reviewParticipationRevision
     }
 
     private func liveContextMatches(_ input: Input) -> Bool {
-        glab.resolvedHost == input.target.host && glab.currentUsername == input.user.username
-            && glab.accountRevision == input.accountRevision
+        input.accountContext.binds(to: glab.evidenceAccountContext, policy: .accountSession)
             && settings.feedbackSuggestionDecisions.revision(for: input.target) == input.decisionRevision
             && settings.reviewParticipationPreferences.revision(host: input.target.host, username: input.user.username) == input.reviewParticipationRevision
             && settings.automation == input.configuration
@@ -505,9 +519,9 @@ final class AuthorFeedbackCoordinator {
     private func sameSnapshot(_ previous: Input?, _ input: Input) -> Bool {
         guard let previous else { return false }
         return previous.target == input.target && previous.user == input.user
-            && previous.accountRevision == input.accountRevision && previous.configuration == input.configuration
-            && previous.request.sha == input.request.sha
-            && previous.request.draftProofRecoveryContextFingerprint == input.request.draftProofRecoveryContextFingerprint
+            && previous.accountContext.binds(to: input.accountContext, policy: .accountSession)
+            && previous.configuration == input.configuration
+            && previous.request.draftRecoveryEvidence.binds(to: input.request.draftRecoveryEvidence, policy: .draftRecovery)
             && previous.fingerprint == input.fingerprint && previous.activeFingerprint == input.activeFingerprint
             && previous.drafts == input.drafts
             && previous.completedFollowUpJobID == input.completedFollowUpJobID
@@ -523,7 +537,7 @@ final class AuthorFeedbackCoordinator {
               let phase = statuses[input.target]?.phase, phase == .complete || phase == .waitingPublication,
               input.approvalRevision != nil, stable.input.approvalRevision == input.approvalRevision,
               stable.input.handoffRevision == input.handoffRevision, stable.input.writesAllowed == input.writesAllowed,
-              stable.input.request.semanticContextFingerprint == input.request.semanticContextFingerprint,
+              stable.input.request.evidenceContext().binds(to: input.request.evidenceContext(), policy: .semanticText),
               stable.input.request.draft == input.request.draft,
               sameSnapshot(stable.input, input),
               Self.sameDiscussionResolution(stable.input.discussions, input.discussions) else { return false }
@@ -676,7 +690,7 @@ final class AuthorFeedbackCoordinator {
             description: request.description, diff: diffText, discussions: input.discussions,
             target: .init(host: host, projectID: request.projectID, iid: request.iid,
                 url: request.webURL, expectedUsername: input.user.username),
-            semanticContextFingerprint: request.semanticContextFingerprint,
+            semanticContextFingerprint: request.semanticContextDigest,
             thinking: input.configuration.verificationThinking, blockedFollowUps: stoppedContexts,
             ignoredSuggestions: input.ignoredSuggestions, completedFollowUp: completedFollowUp,
             excludedReplyAuthorIDs: excludedReplyAuthors(input).sorted(), usagePurpose: .authorFeedback,
@@ -702,8 +716,8 @@ final class AuthorFeedbackCoordinator {
         let bypass = bypassStoredAssessment.contains(input.target) || fullReassessment.contains(input.target)
         if !bypass, let stored = cache[input.target], stored.key == key {
             assessment = stored.assessment
-            verifiedInProcess = stored.verifiedInProcess && stored.input.request.sha == request.sha
-                && stored.input.request.draftProofRecoveryContextFingerprint == request.draftProofRecoveryContextFingerprint
+            verifiedInProcess = stored.verifiedInProcess
+                && stored.input.request.draftRecoveryEvidence.binds(to: request.draftRecoveryEvidence, policy: .draftRecovery)
                 && Self.samePublicationDiscussions(stored.input.discussions, input.discussions)
         }
         else if !bypass, let assessmentDirectory,
@@ -746,8 +760,7 @@ final class AuthorFeedbackCoordinator {
         }
         guard isCurrent(input) else { throw CancellationError() }
         let current = try await glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
-        guard isCurrent(input), current.sha == request.sha,
-              current.semanticContextFingerprint == request.semanticContextFingerprint,
+        guard isCurrent(input), request.evidenceContext().binds(to: current.evidenceContext(), policy: .requestText),
               current.state == .opened, current.draft == request.draft, current.author.id == input.user.id,
               current.webURL == request.webURL else { throw CancellationError() }
         if input.readOnly || !stoppedFollowUps.isEmpty || !input.ignoredSuggestions.isEmpty {
@@ -779,8 +792,7 @@ final class AuthorFeedbackCoordinator {
     private func assessmentAfterPublication(_ input: Input, evidenceKey: String) -> ReReviewAssessment? {
         guard let reply = publishedReplies[input.target], let stored = cache[input.target], stored.verifiedInProcess,
               stored.evidenceKey == evidenceKey, stored.input.accountRevision == input.accountRevision,
-              stored.input.request.sha == input.request.sha,
-              stored.input.request.draftProofRecoveryContextFingerprint == input.request.draftProofRecoveryContextFingerprint,
+              stored.input.request.draftRecoveryEvidence.binds(to: input.request.draftRecoveryEvidence, policy: .draftRecovery),
               Self.samePublicationDiscussions(stored.input.discussions, reply.before),
               Self.samePublicationDiscussions(input.discussions, reply.after) else { return nil }
         let assessment = ReReviewAssessment(notes: stored.assessment.notes.map { note in
@@ -920,11 +932,10 @@ final class AuthorFeedbackCoordinator {
             let (live, discussions, user, count, liveApproved) = try await (currentMR, currentThreads, currentUser, drafts, approvals)
             approved = liveApproved
             guard settings.automaticPublicWritesAllowed else { break }
-            guard isCurrent(input), live.sha == request.sha, live.isOpen,
-                  live.semanticContextFingerprint == request.semanticContextFingerprint,
+            guard isCurrent(input), live.isOpen, input.matchesFeedback(in: live, discussions: discussions),
                   live.author.id == input.user.id, user == input.user, count == 0,
                   settings.automation.scope.permits(live, host: host, username: user.username),
-                  live.webURL == request.webURL, ReviewVerdict.fingerprint(discussions) == input.fingerprint else { throw CancellationError() }
+                  live.webURL == request.webURL else { throw CancellationError() }
             threads = discussions
             let involved = discussions.filter { $0.id == discussionID }
             let freshKinds = try await participantAccountKinds(in: involved, input: input)
@@ -943,10 +954,8 @@ final class AuthorFeedbackCoordinator {
             if accountKinds[finding.reviewerID] != .automation { accepted.insert(finding.reviewerID) }
             threads = try await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
             let confirmed = try await glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
-            guard isCurrent(input), confirmed.sha == request.sha,
-                  confirmed.semanticContextFingerprint == request.semanticContextFingerprint,
-                  settings.automation.scope.permits(confirmed, host: host, username: input.user.username),
-                  ReviewVerdict.fingerprint(threads) == input.fingerprint else { throw CancellationError() }
+            guard isCurrent(input), input.matchesFeedback(in: confirmed, discussions: threads),
+                  settings.automation.scope.permits(confirmed, host: host, username: input.user.username) else { throw CancellationError() }
         }
         guard isCurrent(input) else { throw CancellationError() }
         var findings = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment, authorID: input.user.id,
@@ -1066,11 +1075,10 @@ final class AuthorFeedbackCoordinator {
         async let currentUser = glab.fetchAuthenticatedUser(host: host, expectedUsername: input.user.username)
         async let currentDrafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: input.user.id)
         let (live, discussions, user, count) = try await (currentMR, currentThreads, currentUser, currentDrafts)
-        guard settings.automaticPublicWritesAllowed, isCurrent(input), live.sha == request.sha, live.isOpen,
-              live.semanticContextFingerprint == request.semanticContextFingerprint,
+        guard settings.automaticPublicWritesAllowed, isCurrent(input), live.isOpen,
               live.author.id == input.user.id, user == input.user, count == 0, live.webURL == request.webURL,
               settings.automation.scope.permits(live, host: host, username: user.username),
-              ReviewVerdict.fingerprint(discussions) == input.fingerprint else { throw CancellationError() }
+              input.matchesFeedback(in: live, discussions: discussions) else { throw CancellationError() }
         return discussions
     }
 

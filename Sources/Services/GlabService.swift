@@ -13,6 +13,13 @@ struct FeedbackAccountKindUpdate: Sendable {
 @MainActor
 @Observable
 final class GlabService {
+    var evidenceAccountContext: EvidenceContext {
+        let account = resolvedHost.flatMap { host in
+            currentUsername.map { GitLabAccountIdentity(host: host, username: $0) }
+        }
+        return .init(account: account, accountRevision: accountRevision)
+    }
+
     typealias CommandRunner = @MainActor (URL, [String], [String: String], TimeInterval, (@MainActor @Sendable () -> Bool)?) async throws -> ProcessRunner.Output
     @ObservationIgnored private let commandRunner: CommandRunner
     @ObservationIgnored private var feedbackAccountObservers: [UUID: @MainActor (FeedbackAccountKindUpdate) -> Void] = [:]

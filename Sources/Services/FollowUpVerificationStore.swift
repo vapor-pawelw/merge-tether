@@ -24,10 +24,19 @@ struct FollowUpVerification: Codable, Equatable, Sendable {
     var recoveryContextFingerprint: String? = nil
     var repairIntent: RepairIntent? = nil
 
+    var evidenceContext: EvidenceContext {
+        .init(account: .init(host: host, username: username), mergeRequestID: .init(projectID: projectID, iid: iid),
+              head: headSHA, discussionContent: discussionFingerprint.map(DiscussionContentDigest.init),
+              semanticContext: semanticContextFingerprint.map(SemanticContextDigest.init),
+              recoveryContext: recoveryContextFingerprint.map(DraftRecoveryDigest.init))
+    }
+
     /// Historical identity establishes ownership only; fresh verification must establish current truth.
     func owns(_ draft: GitLabDraftNote, request: GitLabMergeRequest, host: String, user: GitLabAuthenticatedUser) -> Bool {
-        version == 1 && sealed && self.host == host && projectID == request.projectID && iid == request.iid
-            && username == user.username && userID == user.id && request.author.id == user.id && request.isOpen
+        version == 1 && sealed && evidenceContext.binds(
+            to: .init(account: .init(host: host, username: user.username), mergeRequestID: request.mergeRequestID),
+            policy: .accountAndRequest)
+            && userID == user.id && request.author.id == user.id && request.isOpen
             && sourceProjectID == request.sourceProjectID && sourceBranch == request.sourceBranch
             && draft.authorID == user.id && !files.isEmpty && files.count <= 20
             && drafts.contains { $0.id == draft.id && $0.bodySHA256 == AICommentAssessmentStore.digest(draft.note ?? "") }
@@ -35,9 +44,7 @@ struct FollowUpVerification: Codable, Equatable, Sendable {
 
     func covers(_ draft: GitLabDraftNote, request: GitLabMergeRequest, host: String, user: GitLabAuthenticatedUser, runID: UUID) -> Bool {
         owns(draft, request: request, host: host, user: user) && self.runID == runID
-            && headSHA == request.sha
-            && (semanticContextFingerprint == nil || semanticContextFingerprint == request.semanticContextFingerprint)
-            && (recoveryContextFingerprint == nil || recoveryContextFingerprint == request.draftProofRecoveryContextFingerprint)
+            && evidenceContext.binds(to: request.draftRecoveryEvidence, policy: .legacyFollowUpProof)
             && draft.authorID == user.id && !files.isEmpty && files.count <= 20
             && drafts.contains { $0.id == draft.id && $0.bodySHA256 == AICommentAssessmentStore.digest(draft.note ?? "") }
     }
@@ -563,10 +570,22 @@ extension FollowUpVerificationStore {
 
 extension GitLabMergeRequest {
     /// Retargeting changes the meaning of current feedback even at the same source commit.
-    var draftProofRecoveryContextFingerprint: String {
-        UserAttentionSnapshot.digest(semanticContextFingerprint + "|\(projectID)|\(iid)|\(author.id)"
+    var draftProofRecoveryDigest: DraftRecoveryDigest {
+        draftProofRecoveryDigest(semanticContext: semanticContextDigest)
+    }
+
+    private func draftProofRecoveryDigest(semanticContext: SemanticContextDigest) -> DraftRecoveryDigest {
+        .init(UserAttentionSnapshot.digest(semanticContext.rawValue + "|\(projectID)|\(iid)|\(author.id)"
             + "|\(sourceProjectID ?? 0)|\(sourceBranch.utf8.count):\(sourceBranch)"
             + "|\(targetProjectID ?? 0)|\(targetBranch.utf8.count):\(targetBranch)"
-            + "|\(webURL.absoluteString)|\(state)|\(draft.map(String.init) ?? "unknown")")
+            + "|\(webURL.absoluteString)|\(state)|\(draft.map(String.init) ?? "unknown")"))
+    }
+
+    var draftProofRecoveryContextFingerprint: String { draftProofRecoveryDigest.rawValue }
+
+    var draftRecoveryEvidence: EvidenceContext {
+        let semanticContext = semanticContextDigest
+        return .init(mergeRequestID: mergeRequestID, head: sha, semanticContext: semanticContext,
+                     recoveryContext: draftProofRecoveryDigest(semanticContext: semanticContext))
     }
 }

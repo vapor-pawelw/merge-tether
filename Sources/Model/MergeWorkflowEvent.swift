@@ -321,7 +321,8 @@ struct ReReviewReceipt: Codable {
 
     func covers(noteID: Int, headSHA: String) -> Bool {
         // Older uncertain writes have no recorded head; keep their existing replay fence.
-        (self.headSHA == headSHA || (self.headSHA == nil && unconfirmed)) && self.noteID >= noteID
+        EvidenceContext(head: self.headSHA).binds(to: .init(head: headSHA),
+            policy: unconfirmed ? .uncertainReReviewReceipt : .head) && self.noteID >= noteID
     }
 }
 

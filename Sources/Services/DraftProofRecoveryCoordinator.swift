@@ -25,6 +25,11 @@ final class DraftProofRecoveryCoordinator {
         var work: AssistantAutomationRunner.MergeRequestWork {
             .init(host: host, projectID: request.projectID, iid: request.iid)
         }
+        var evidenceContext: EvidenceContext {
+            var context = request.draftRecoveryEvidence
+            context.account = .init(host: host, username: user.username)
+            return context
+        }
     }
     typealias Fetch = @MainActor (Snapshot) async throws -> Snapshot
     typealias HashFile = @MainActor (Snapshot, FollowUpVerification.FileEvidence) async throws -> String
@@ -238,7 +243,7 @@ final class DraftProofRecoveryCoordinator {
                 } == true
             return !(attempt.assessment == nil && attempt.retryAfter.map { $0 <= now() } == true)
                 && (attempt.context?.key == key || legacyNegative) && attempt.context.map {
-                discussionMatches($0.discussionFingerprint, snapshot: snapshot)
+                discussionMatches(.init($0.discussionFingerprint), snapshot: snapshot)
                     // A failure without a semantic verdict is scoped to its evidence origin.
                     // Preserve in-flight checks across normalized publication of our own replies.
                     && (attempt.phase == .checking || attempt.assessment != nil
@@ -634,14 +639,15 @@ final class DraftProofRecoveryCoordinator {
     }
 
     private func sameContext(_ original: Snapshot, _ live: Snapshot) -> Bool {
-        live.host == original.host && live.user == original.user && live.request.projectID == original.request.projectID
-            && live.request.iid == original.request.iid && live.request.webURL == original.request.webURL
-            && live.request.sha == original.request.sha && live.branchHead == original.branchHead
-            && live.request.isOpen && live.request.author.id == original.user.id
+        let recorded = original.evidenceContext
+        let current = live.evidenceContext
+        return recorded.binds(to: current, policy: .accountAndRequest)
+            && recorded.binds(to: current, policy: .draftRecovery)
+            && live.user.id == original.user.id && live.request.webURL == original.request.webURL
+            && live.branchHead == original.branchHead && live.request.isOpen && live.request.author.id == original.user.id
             && live.request.sourceProjectID == original.request.sourceProjectID
             && live.request.sourceBranch == original.request.sourceBranch
-            && live.request.draftProofRecoveryContextFingerprint == original.request.draftProofRecoveryContextFingerprint
-            && ReviewVerdict.fingerprint(original.discussions).map { discussionMatches($0, snapshot: live) } == true
+            && ReviewVerdict.discussionContentDigest(original.discussions).map { discussionMatches($0, snapshot: live) } == true
     }
 
     private func attemptFolder(work: AssistantAutomationRunner.MergeRequestWork, username: String) -> URL {
@@ -679,9 +685,9 @@ final class DraftProofRecoveryCoordinator {
             + (stoppedRepairRevision.isEmpty ? "" : "|stopped-repairs:" + AICommentAssessmentStore.digest(stoppedRepairRevision)))
     }
 
-    private func discussionMatches(_ fingerprint: String, snapshot: Snapshot) -> Bool {
+    private func discussionMatches(_ fingerprint: DiscussionContentDigest, snapshot: Snapshot) -> Bool {
         ReviewVerdict(version: 1, host: snapshot.host, projectID: snapshot.request.projectID, iid: snapshot.request.iid,
-            headSHA: snapshot.request.sha ?? "", verdict: .noObjections, discussionFingerprint: fingerprint)
+            headSHA: snapshot.request.sha ?? "", verdict: .noObjections, discussionFingerprint: fingerprint.rawValue)
             .covers(head: snapshot.request.sha ?? "", discussions: snapshot.discussions, reviewerID: snapshot.user.id,
                 publishedDrafts: ReviewVerdictStore.seenDrafts(host: snapshot.host, projectID: snapshot.request.projectID,
                     iid: snapshot.request.iid, in: verdictDirectory))
@@ -757,12 +763,13 @@ final class DraftProofRecoveryCoordinator {
             settings: settings, in: directory) {
             guard attempts.first(where: { $0.id == record.attemptID })?.context == nil,
                   record.assistant == configuration.assistant, record.model == model,
-                  record.proof.userID == snapshot.user.id, record.proof.headSHA == snapshot.request.sha,
-                  record.proof.recoveryContextFingerprint == snapshot.request.draftProofRecoveryContextFingerprint,
-                  let fingerprint = record.proof.discussionFingerprint, discussionMatches(fingerprint, snapshot: snapshot) else { continue }
+                  record.proof.userID == snapshot.user.id,
+                  record.proof.evidenceContext.binds(to: snapshot.evidenceContext, policy: .draftRecovery),
+                  let fingerprint = record.proof.evidenceContext.discussionContent,
+                  discussionMatches(fingerprint, snapshot: snapshot) else { continue }
             let scope = record.requestedDraftIDs ?? record.origin.drafts.map(\.id)
             let rejected = record.assessment.drafts.first { $0.state != .valid }
-            let context = AttemptContext(key: key, discussionFingerprint: fingerprint,
+            let context = AttemptContext(key: key, discussionFingerprint: fingerprint.rawValue,
                 drafts: record.origin.drafts.filter { scope.contains($0.id) })
             let imported = Attempt(id: record.attemptID, phase: rejected == nil ? .verified : .blocked,
                 reason: rejected?.reason, assessment: record.assessment, context: context)

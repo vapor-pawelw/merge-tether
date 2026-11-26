@@ -103,7 +103,7 @@ enum ReReviewVerifier {
         let diff: String
         var discussions: [GitLabMergeRequestDiscussion]
         var target: Target? = nil
-        var semanticContextFingerprint: String? = nil
+        var semanticContextFingerprint: SemanticContextDigest? = nil
         var thinking: VerificationThinking = .high
         var blockedFollowUps: [BlockedFollowUp] = []
         var ignoredSuggestions: [IgnoredFeedbackSuggestion] = []

@@ -8,16 +8,16 @@ struct ReviewTargetBinding: Codable, Equatable, Sendable {
     let baseSHA: String
     let headSHA: String
 
+    var evidenceContext: EvidenceContext {
+        .init(head: headSHA, target: .init(projectID: targetProjectID, branch: targetBranch, base: baseSHA))
+    }
+
     /// Requires a single-MR read whose diff refs describe the current head.
     init?(_ request: GitLabMergeRequest) {
-        guard let head = request.sha, !head.isEmpty,
-              let targetProjectID = request.targetProjectID, targetProjectID > 0,
-              !request.targetBranch.isEmpty,
-              let refs = request.diffRefs, refs.headSHA == head,
-              let base = refs.baseSHA, !base.isEmpty else { return nil }
-        self.targetProjectID = targetProjectID
-        self.targetBranch = request.targetBranch
-        self.baseSHA = base
+        guard let head = request.sha, let target = request.evidenceTarget else { return nil }
+        self.targetProjectID = target.projectID
+        self.targetBranch = target.branch
+        self.baseSHA = target.base
         self.headSHA = head
     }
 }
@@ -33,7 +33,8 @@ enum AutomaticApprovalGate {
     static func refusal(for request: GitLabMergeRequest, head: String,
                         reviewed: ReviewTargetBinding?) -> Refusal? {
         guard let reviewed else { return .reviewTargetUnbound }
-        guard reviewed.headSHA == head, ReviewTargetBinding(request) == reviewed else { return .targetChanged }
+        guard let current = ReviewTargetBinding(request), current.headSHA == head,
+              reviewed.evidenceContext.binds(to: current.evidenceContext, policy: .approvalTarget) else { return .targetChanged }
         return nil
     }
 
