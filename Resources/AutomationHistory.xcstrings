@@ -154,6 +154,13 @@
         }
       }
     },
+    "automationHistory.promptReadinessOnly": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Readiness only. %@"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Ocena gotowości. %@"}}
+      }
+    },
     "automationHistory.promptChanged": {
       "extractionState": "manual",
       "localizations": {

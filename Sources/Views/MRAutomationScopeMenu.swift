@@ -65,18 +65,11 @@ struct MRAutomationScopeEditor {
         case .off: return .off
         case .default:
             if action == .approval, let preference = settings.independentApprovalPreferences[target] { return preference }
+            guard action == .commentPublication else { return .default }
             let automation = settings.configuredAutomation
             guard summary.active, automation.hasAutomaticPublicActionConsent else { return .off }
-            let enabled = switch action {
-            case .commentPublication:
-                automation.publicationMode != .manual
-                    && (automation.publicationMode != .filtered || automation.publicationRestrictions.hasConditions)
-            case .merge:
-                !isDraft && automation.permitsAutoMerge(project: projectPath ?? request?.webURL.gitLabProjectPath ?? "",
-                    hasOtherAssignees: request?.hasOtherAssignees(than: target.username) == true,
-                    isAuthor: request.map { $0.author.username == target.username } ?? true)
-            case .approval: automation.autoApproveEnabled
-            }
+            let enabled = automation.publicationMode != .manual
+                && (automation.publicationMode != .filtered || automation.publicationRestrictions.hasConditions)
             return enabled ? .on : .off
         }
     }

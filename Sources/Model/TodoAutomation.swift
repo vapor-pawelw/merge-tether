@@ -771,10 +771,12 @@ struct AutomationSettings: Codable, Equatable, Sendable {
 
     func permitsAutoMerge(project: String, optedIn: Bool = false, hasOtherAssignees: Bool = false,
                           isAuthor: Bool = true) -> Bool {
-        hasAutomaticPublicActionConsent
+        guard hasAutomaticPublicActionConsent else { return false }
+        if optedIn { return true }
+        return autoMergeEnabled
             && (!autoMergeAuthorOnly || isAuthor)
-            && (!hasOtherAssignees || (autoMergeEnabled && autoMergeWithOtherAssignees))
-            && (optedIn || (autoMergeEnabled && matchesOptionalProjectRestriction(project, paths: autoMergeProjects)))
+            && (!hasOtherAssignees || autoMergeWithOtherAssignees)
+            && matchesOptionalProjectRestriction(project, paths: autoMergeProjects)
     }
 
     func permitsAssistantTools(project: String) -> Bool {

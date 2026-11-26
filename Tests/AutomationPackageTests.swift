@@ -77,12 +77,12 @@ struct AutomationPackageTests {
 
         settings.autoMergeWithOtherAssignees = false
         #expect(settings.matchingPreset == nil)
-        #expect(!settings.permitsAutoMerge(project: "g/p", optedIn: true, hasOtherAssignees: true))
+        #expect(settings.permitsAutoMerge(project: "g/p", optedIn: true, hasOtherAssignees: true))
         let restored = try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(settings))
         #expect(!restored.autoMergeWithOtherAssignees && restored.matchingPreset == nil)
         settings.autoMergeWithOtherAssignees = true
         settings.autoMergeEnabled = false
-        #expect(!settings.permitsAutoMerge(project: "g/p", optedIn: true, hasOtherAssignees: true))
+        #expect(settings.permitsAutoMerge(project: "g/p", optedIn: true, hasOtherAssignees: true))
         settings.applyPreset(.trusted, for: .codex)
         #expect(!settings.autoMergeWithOtherAssignees)
     }

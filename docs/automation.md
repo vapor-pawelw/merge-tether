@@ -9,6 +9,7 @@ Worker output is written to private files throughout execution. Validated comple
 | Situation | Expected behavior |
 | --- | --- |
 | Trusted or Max reviews an MR within its configured scope. | The preset enables automatic approval. The selected findings threshold and a review of the current diff decide eligibility. CI and diff size belong to separate checks. See [Automatic approval](#automatic-approval). |
+| An MR has an explicit auto-approval or auto-merge choice. | The choice controls which MRs qualify. Readiness is still mandatory, including the configured approval threshold and readiness requirements from an active prompt. See [Qualification and readiness](#qualification-and-readiness). |
 | GitLab fails to respond while checking a completed worker run. | Only that MR waits for the audit. The app retries the read, and other MRs can continue. Confirmed unexpected changes require resuming the affected MR. See [CLI setup and execution](#cli-setup-and-execution). |
 | AI-reply publication checks a source comment. | A definite signal qualifies directly. A style-only AI verdict qualifies when you have confirmed two distinct comments from that author and marked none human. Other replies stay private and need your attention. See [AI reply trust](#ai-reply-trust). |
 | A reply needs a source comment’s AI assessment. | Reuse its current sealed action assessment for the same account, content and criteria. A reply worker can supply the first assessment. See [Message authorship in Details](#message-authorship-in-details). |
@@ -53,7 +54,7 @@ The feedback verifier first identifies whether each comment asks for a change, a
 2. Before saving completion replies, the worker re-fetches the MR HEAD and verifies the remote source/test content. With push off, pending or failed, the proposal stays in the task result and no completion drafts are created.
 3. Verified replies wait on the relevant MR card or qualify for the selected publication rule. MergeTether requests another review only when feedback is ready and unpublished replies no longer block it.
 4. Failed pipelines and conflicts can become separate tasks. Trusted and Max check existing reservations and atomically claim unowned pipeline failures. Safe keeps external CI actions manual; pipeline ownership remains independently adjustable.
-5. Automatic merge is enabled by Max and disabled by the other profiles. It checks ownership, scope, approvals, discussions, pipeline, the source commit, dependencies and the stack target. **Automatically merge only requests I authored** also applies to per-MR merge opt-ins. Safe, Trusted and Manual enable this restriction by default. Max leaves it off. When another assignee is present, automatic merge requires **Allow auto-merge for own merge requests with other assignees** as well. Max enables this option by default. Other profiles leave it off. It only appears with automatic merge enabled. Manual merging follows the usual checks.
+5. Automatic merge is enabled by Max and disabled by the other profiles. It checks ownership, scope, approvals, discussions, pipeline, the source commit, dependencies and the stack target. **Automatically merge only requests I authored** applies when the per-MR choice is **Default**. Safe, Trusted and Manual enable this restriction by default. Max leaves it off. Under **Default**, when another assignee is present, automatic merge requires **Allow auto-merge for own merge requests with other assignees** as well. Max enables this option by default. Other profiles leave it off. It only appears with automatic merge enabled. Manual merging follows the usual checks.
 
 **Retry follow-up** starts a fresh worker with access to the stopped run's files. The worker checks live GitLab state, inspects the prior worktree for commits and uncommitted changes, and carries forward applicable changes in a fresh worktree. The original worktree stays available on the Mac through **View run result → Files**.
 
@@ -283,7 +284,7 @@ Scope is always required. Empty additional project lists mean all repositories p
 
 Manage global scope and repository/MR overrides in **Settings → Automation → Scope**. Scope changes save immediately and can be configured before enabling a profile. **Agent** and the other **Automation** pages share a draft saved by **Apply Changes**, which preserves the latest scope. Immediate-save controls in **Advanced** are labeled separately. Paused and closed MR overrides remain editable.
 
-With **Automation → On**, choose **Default**, **On**, or **Off** for comment publication and for auto-merge on your own MRs or auto-approval on reviewed MRs. **Default** for an action follows Settings. **On** enables the action for this MR under the usual public action permissions and checks. Auto-approval uses the configured threshold. Comment publication keeps the configured filters and uses eligible replies to AI feedback when automatic publication is off in Settings. The app checks and publishes eligible draft IDs individually. **Off** pauses the automatic action. Existing action overrides stay active until you choose a new Automation mode.
+With **Automation → On**, choose **Default**, **On**, or **Off** for comment publication and for auto-merge on your own MRs or auto-approval on reviewed MRs. **Default** for an action follows Settings. **On** enables the action for this MR under the usual public action permissions and checks. Automatic approval uses the configured threshold. Comment publication keeps the configured filters and uses eligible replies to AI feedback when automatic publication is off in Settings. The app checks and publishes eligible draft IDs individually. **Off** pauses the automatic action. Existing action overrides stay active until you choose a new Automation mode.
 
 ## Board grouping
 
@@ -535,9 +536,21 @@ Workers can set `proposedSolution` when the draft recommends a concrete solution
 
 Choose **Off**, **On** or **By prompt** for automatic approval in **Settings → Automation → Review & feedback** and for automatic merge in **Publish & merge**. You can describe cases to allow or cases to exclude. The configured verifier evaluates the criteria once the MR passes the ordinary readiness checks. An action requires a clear allow decision and fresh matching evidence. A denial, uncertain decision, blank prompt or unavailable verifier leaves the action to you.
 
-Per-MR **Default** follows the global mode. Per-MR **On** skips the prompt and still requires the ordinary permission and readiness checks, including the author-only option for automatic merge. Per-MR **Off** disables that automatic action. Manual approval and merge skip the prompt.
+### Qualification and readiness
 
-The MR Event log records the verifier outcome and reason. A decision may be reused for 15 minutes while the observed MR, discussions, account and prompt configuration match. A later check can reassess updated evidence. The verifier can read evidence for the exact MR. MergeTether alone submits a permitted action after rechecking GitLab.
+Qualification selects which MRs may enter automatic approval or merge. Readiness determines when a qualified MR may receive the action. The choices are independent for approval and merge.
+
+| Per-MR choice | Qualification | Readiness |
+| --- | --- | --- |
+| **Default** | Follows the global mode, automatic merge filters and qualification criteria in an active prompt. | Applies all readiness checks and any readiness criteria in the prompt. |
+| **On** | Explicitly qualifies the MR, including when the action is globally off or the MR falls outside the auto-merge author, co-assignee or repository filters. | Applies the configured approval threshold, merge readiness checks and any readiness criteria in an active prompt. |
+| **Off** | Excludes the MR from that automatic action. | The app skips prompt assessment for the action. |
+
+For example, with “Only merge Alice’s MRs after QA signs off,” **On** allows an MR from another author to enter the auto-merge flow. The verifier still checks for QA sign-off. Where the prompt clearly limits a readiness condition to certain changes, such as requiring QA for security changes, that applicability still holds. Ambiguous criteria or missing evidence leave the action for you. The Event log identifies a readiness-only assessment.
+
+The account, public-action permission, MR scope, assignment confirmation and readiness checks still apply. Manual approval and merge skip the prompt.
+
+The MR Event log records the verifier outcome and reason. A decision may be reused for 15 minutes while the observed MR, discussions, account prompt configuration and assessment mode match. A later check can reassess updated evidence. The verifier can read evidence for the exact MR. MergeTether alone submits a permitted action after rechecking GitLab.
 
 ## Automatic approval
 

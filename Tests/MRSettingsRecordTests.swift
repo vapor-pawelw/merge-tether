@@ -133,6 +133,40 @@ struct MRSettingsRecordTests {
         }
     }
 
+    @Test func archivedScopeInheritsTheConfiguredAssignmentConfirmation() throws {
+        try withDefaults { defaults in
+            let settings = SettingsManager(defaults: defaults)
+            settings.automation.applyPreset(.full, for: .codex)
+            #expect(settings.bindAuthenticatedAccount(.init(host: target.host, username: target.username, userID: 21)))
+            let data = try #require(defaults.data(forKey: "mergeRequestAccountRecords"))
+            var archive = try JSONDecoder().decode(MRSettingsArchive.self, from: data)
+            #expect(archive.accountAutomationScope?.assignedOwnershipConfirmation == false)
+            archive.accountAutomationScope?.assignedOwnershipConfirmation = nil
+            defaults.set(try JSONEncoder().encode(archive), forKey: "mergeRequestAccountRecords")
+
+            let restarted = SettingsManager(defaults: defaults)
+            #expect(!restarted.automation.requiresAssignmentClaim)
+        }
+    }
+
+    @Test func assignmentClaimFollowsTheGitLabAccountAcrossRenameAndRestart() throws {
+        try withDefaults { defaults in
+            let settings = SettingsManager(defaults: defaults)
+            let account = GitLabAccountIdentity(host: target.host, username: target.username, userID: 21)
+            #expect(settings.bindAuthenticatedAccount(account))
+            settings.automation.scope.claimAssignment(for: target)
+            #expect(settings.save())
+
+            let restarted = SettingsManager(defaults: defaults)
+            #expect(restarted.bindAuthenticatedAccount(.init(host: target.host, username: target.username, userID: 22)))
+            #expect(restarted.automation.scope.assignmentClaimRequired(for: target))
+            let renamed = GitLabAccountIdentity(host: target.host, username: "renamed", userID: 21)
+            #expect(restarted.bindAuthenticatedAccount(renamed))
+            #expect(!restarted.automation.scope.assignmentClaimRequired(for: target.forAccount(
+                .init(host: renamed.host, username: renamed.username))))
+        }
+    }
+
     @Test func legacyClientCanEditDowngradeMirrorsAndKeepAnAuthenticatedFence() throws {
         try withDefaults { defaults in
             let owner = GitLabAccountIdentity(host: target.host, username: target.username, userID: 21)
