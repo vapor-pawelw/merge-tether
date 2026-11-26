@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Apply coding agent changes from **Settings → Agent** with **Apply Changes**. A note under the picker explains when automation starts using the selected agent. Choose Codex or Claude, with recommended models for each role and an option to show all supported models.
+
 - Add GPT-6.2 Sol and GPT-6.2 Astra in **Settings → Agent**. GPT-6.2 Sol is the default ChatGPT coding model when no choice has been saved.
 
 - Restore hidden reviews for three days while they are open. Add an expired open review again with **+**, which now explains when an MR is already merged or closed.

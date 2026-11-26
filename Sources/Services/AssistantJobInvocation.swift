@@ -42,7 +42,7 @@ struct AssistantJobInvocation {
     }
 
     /// Legacy handoffs without a recorded model keep the model configured in Claude CLI.
-    func claudeArguments(model: ClaudeCodingModel?, thinking: CodexReviewThinking?) -> [String] {
+    func claudeArguments(model: ClaudeModel?, thinking: CodexReviewThinking?) -> [String] {
         var arguments = ["-p", "--dangerously-skip-permissions", "--permission-prompts", "none",
                          "--tools", claudeTools, "--settings", claudeSettings,
                          "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,

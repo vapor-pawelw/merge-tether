@@ -161,6 +161,8 @@ struct AutomationAssistantPicker: View {
     let available: Set<AutomationAssistant>
     let onRefresh: () -> Void
     var statuses: [AutomationAssistant: AssistantDependencyStatus] = [:]
+    var verifySelectionImmediately = true
+    var onSetupReady: ((AutomationAssistant) -> Void)?
     @State private var lastCheck: Date?
     @State private var setupCandidate: AutomationAssistant?
 
@@ -186,8 +188,8 @@ struct AutomationAssistantPicker: View {
             }
 
             Picker(selection: Binding(get: { assistant }, set: { candidate in
-                if let candidate { setupCandidate = candidate }
-                else { assistant = nil }
+                if verifySelectionImmediately, let candidate { setupCandidate = candidate }
+                else { assistant = candidate }
             })) {
                 Text(.Settings.settingsAssistantNone).tag(nil as AutomationAssistant?)
                 ForEach(AutomationAssistant.allCases, id: \.self) { candidate in
@@ -215,7 +217,8 @@ struct AutomationAssistantPicker: View {
         .onAppear(perform: check)
         .sheet(item: $setupCandidate) { candidate in
             AssistantSetupView(assistant: candidate) {
-                assistant = candidate
+                if verifySelectionImmediately { assistant = candidate }
+                onSetupReady?(candidate)
                 check()
             }
         }

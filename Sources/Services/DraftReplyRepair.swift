@@ -15,7 +15,7 @@ enum DraftReplyRepair {
         let codingModel: CodexReviewModel
         let codingThinking: CodexReviewThinking
         /// Absent for Codex and for repairs recorded before Claude models were selectable.
-        var claudeCodingModel: ClaudeCodingModel?
+        var claudeCodingModel: ClaudeModel?
         var automaticRecoveryOf: UUID? = nil
         var workRevision: String? = nil
 

@@ -12,6 +12,16 @@ final class SettingsPolicyEditor {
     var sessionCustom: AutomationProfileSnapshot?
     private(set) var saveState: AutomationSettingsSaveState
 
+    var selectedAssistant: AutomationAssistant? {
+        get { draft.selectedAssistant }
+        set {
+            var updated = draft
+            if newValue == nil { updated.assistant = saveState.accepted.assistant }
+            updated.selectedAssistant = newValue
+            draft = updated
+        }
+    }
+
     init(settings: SettingsManager) {
         let accepted = settings.acceptedAutomation
         draft = accepted
@@ -29,8 +39,10 @@ final class SettingsPolicyEditor {
     }
 
     func updateAssistant(from settings: SettingsManager) {
-        draft.selectedAssistant = settings.automation.selectedAssistant
-        saveState.updateSavedAssistant(settings.acceptedAutomation.selectedAssistant)
+        let assistant = settings.acceptedAutomation.selectedAssistant
+        guard assistant != saveState.accepted.selectedAssistant else { return }
+        if draft.selectedAssistant == saveState.accepted.selectedAssistant { draft.selectedAssistant = assistant }
+        saveState.updateSavedAssistant(assistant)
     }
 
     func revert(settings: SettingsManager) {
@@ -38,9 +50,15 @@ final class SettingsPolicyEditor {
         sessionCustom = settings.automationProfileHistory.available(for: draft)
     }
 
-    func apply(monitor: TodoMonitorService) {
+    func assistantRequiringSetup(comparedTo current: AutomationSettings) -> AutomationAssistant? {
+        guard let assistant = draft.selectedAssistant else { return nil }
+        if assistant != current.selectedAssistant || draft.requiresAssistantSetup(comparedTo: current) { return assistant }
+        return nil
+    }
+
+    func apply(monitor: TodoMonitorService, navigation: SettingsNavigation = .shared) {
         let settings = monitor.settings
-        draft.selectedAssistant = settings.automation.selectedAssistant
+        let previousAssistant = settings.acceptedAutomation.selectedAssistant
         if draft.aiCommentCriteriaOverride == nil { draft.aiCommentCriteria = AICommentOriginAssessor.criteriaInstructions }
         let custom = AutomationProfileSnapshot.custom(from: draft) ?? sessionCustom
         saveState.begin()
@@ -53,13 +71,25 @@ final class SettingsPolicyEditor {
             saveState.historySaved(succeeded: historySaved)
             if historySaved { sessionCustom = custom }
         } else { saveState.historySaved(succeeded: true) }
+        if let assistant = settings.acceptedAutomation.selectedAssistant, assistant != previousAssistant {
+            finishAssistantSetup(assistant, monitor: monitor, navigation: navigation)
+        }
+    }
+
+    func finishAssistantSetup(_ assistant: AutomationAssistant, monitor: TodoMonitorService, navigation: SettingsNavigation = .shared) {
+        guard monitor.settings.acceptedAutomation.selectedAssistant == assistant,
+              monitor.settings.automation.selectedAssistant == assistant else { return }
+        if let hold = monitor.cliHealth.hold(for: assistant), hold.issue.kind == .loginRequired {
+            _ = monitor.cliHealth.clear(assistant, expectedID: hold.id)
+        }
+        navigation.codingAgentConfigured()
     }
 }
 
 struct SettingsPolicyFooter: View {
     let monitor: TodoMonitorService
     let editor: SettingsPolicyEditor
-    @State private var needsSetup = false
+    @State private var assistantToVerify: AutomationAssistant?
 
     var body: some View {
         Divider()
@@ -82,9 +112,9 @@ struct SettingsPolicyFooter: View {
                 && !editor.saveState.failed)
 
             Button {
-                if editor.draft.selectedAssistant != nil,
-                   editor.draft.requiresAssistantSetup(comparedTo: monitor.settings.acceptedAutomation) { needsSetup = true }
-                else { editor.apply(monitor: monitor) }
+                if let assistant = editor.assistantRequiringSetup(comparedTo: monitor.settings.acceptedAutomation) {
+                    assistantToVerify = assistant
+                } else { editor.apply(monitor: monitor) }
             } label: { Text(.Settings.settingsAutomationApply) }
             .disabled(!editor.saveState.canApply(draft: editor.draft, custom: editor.sessionCustom,
                 savedCustom: monitor.settings.automationProfileHistory.lastGood) || editor.hasIncompleteRule
@@ -93,10 +123,9 @@ struct SettingsPolicyFooter: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
         .background(.bar)
-        .sheet(isPresented: $needsSetup) {
-            let assistant = editor.draft.assistant
+        .sheet(item: $assistantToVerify) { assistant in
             AssistantSetupView(assistant: assistant) {
-                guard monitor.settings.automation.selectedAssistant == assistant else { return }
+                guard editor.draft.selectedAssistant == assistant else { return }
                 editor.apply(monitor: monitor)
             }
         }
@@ -141,7 +170,7 @@ struct AutomationSettingsTab: View {
         .sheet(isPresented: $needsVerificationSetup) {
             let assistant = editor.draft.assistant
             AssistantSetupView(assistant: assistant) {
-                guard settings.automation.selectedAssistant == assistant else { return }
+                guard editor.draft.selectedAssistant == assistant else { return }
                 editor.draft.autoVerifyReReview = true
             }
         }
@@ -210,7 +239,8 @@ struct AutomationSettingsTab: View {
                          effect: editor.draft.authorFeedback.runner == .assistant ? .agent : nil)
                 .disabled(editor.draft.authorFeedback.runner == .shell)
             effectToggle(Binding(get: { editor.draft.autoVerifyReReview }, set: { enabled in
-                if enabled && editor.draft.selectedAssistant != nil { needsVerificationSetup = true }
+                if enabled, let assistant = editor.draft.selectedAssistant,
+                   assistant == settings.acceptedAutomation.selectedAssistant { needsVerificationSetup = true }
                 else { editor.draft.autoVerifyReReview = enabled }
             }), .Settings.settingsVerificationEnabled, effect: .aiCheck)
             Text(.Settings.settingsVerificationHelp).font(.caption).foregroundStyle(.secondary)

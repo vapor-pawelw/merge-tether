@@ -90,8 +90,22 @@
     "settings.assistant.useHelp": {
       "extractionState": "manual",
       "localizations": {
-        "en": {"stringUnit": {"state": "translated", "value": "Codex CLI or Claude CLI runs agent actions on merge requests and agent automation."}},
-        "pl": {"stringUnit": {"state": "translated", "value": "Codex CLI lub Claude CLI obsługuje działania asystenta wywoływane na merge requestach i w automatyzacji."}}
+        "en": {"stringUnit": {"state": "translated", "value": "MergeTether runs agent tasks through Codex CLI or Claude CLI."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "MergeTether uruchamia zadania asystenta przez Codex CLI lub Claude CLI."}}
+      }
+    },
+    "settings.assistant.applyNotice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Click Apply Changes to save your selection. MergeTether will run the selected agent when an automation needs it."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Kliknij „Zastosuj zmiany”, aby zapisać wybór. MergeTether uruchomi wybranego agenta w automatyzacjach, które go potrzebują."}}
+      }
+    },
+    "settings.codingAgent.showNonRecommendedModels": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Show non-recommended models"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Pokaż też modele spoza zaleceń"}}
       }
     },
     "settings.assistant.none": {
@@ -539,10 +553,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Claude CLI"
+            "value": "Claude"
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Claude CLI"}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Claude"}}
       }
     },
     "settings.automation.assistant.codex": {
@@ -551,10 +565,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "ChatGPT (Codex CLI)"
+            "value": "Codex"
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "ChatGPT (Codex CLI)"}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Codex"}}
       }
     },
     "settings.automation.assistant.picker": {
@@ -2054,6 +2068,13 @@
           }
         },
         "pl": {"stringUnit": {"state": "translated", "value": "Model weryfikacji"}}
+      }
+    },
+    "settings.verification.model.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "The verifier checks reviewer feedback, assesses comments, and performs other read-only checks."}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Weryfikator sprawdza uwagi recenzentów, ocenia komentarze i wykonuje inne kontrole w trybie odczytu."}}
       }
     },
     "settings.automation.runner.legacyHelp": {

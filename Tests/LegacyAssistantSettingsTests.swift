@@ -41,4 +41,32 @@ struct LegacyAssistantSettingsTests {
         #expect(settings.codingPolicy == "claude|claude-sonnet-5-5|low")
         #expect(settings.codingThinking(for: .claude) == .low && settings.codingThinking(for: .codex) == .high)
     }
+
+    @Test func everySupportedClaudeModelCanBeStoredForEitherRole() throws {
+        for modelID in ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"] {
+            let data = Data("""
+                {"claudeCodingModel":"\(modelID)","claudeVerificationModel":"\(modelID)"}
+                """.utf8)
+            let settings = try JSONDecoder().decode(AutomationSettings.self, from: data)
+            #expect(settings.claudeCodingModel.rawValue == modelID)
+            #expect(settings.claudeVerificationModel.rawValue == modelID)
+            #expect(try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(settings)) == settings)
+        }
+    }
+
+    @Test func modelRecommendationsMatchTheRoleAndProvider() {
+        #expect(CodexReviewModel.recommendedForCoding == [.sol62, .astra62])
+        #expect(CodexReviewModel.recommendedForVerification == [.luna, .terra, .sol62])
+        #expect(ClaudeModel.recommendedForCoding == [.opus, .fable])
+        #expect(ClaudeModel.recommendedForVerification == [.haiku, .sonnet, .opus])
+    }
+
+    @Test func filteringThePickerKeepsAnExistingSelectionAndShowingAllOffersTheFullCatalog() {
+        let recommended = ClaudeModel.recommendedForVerification
+        #expect(ClaudeModel.haiku.pickerOptions(recommended: recommended, showAll: false) == recommended)
+        #expect(ClaudeModel.fable.pickerOptions(recommended: recommended, showAll: false) == recommended + [.fable])
+        #expect(ClaudeModel.fable.pickerOptions(recommended: recommended, showAll: true) == ClaudeModel.allCases)
+        #expect(CodexReviewModel.sol62.pickerOptions(recommended: CodexReviewModel.recommendedForCoding, showAll: true)
+            == CodexReviewModel.allCases)
+    }
 }

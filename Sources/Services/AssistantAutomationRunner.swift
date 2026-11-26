@@ -171,7 +171,7 @@ enum AssistantAutomationRunner {
         var reviewThinking: CodexReviewThinking?
         var codingModel: CodexReviewModel?
         var codingThinking: CodexReviewThinking?
-        var claudeCodingModel: ClaudeCodingModel?
+        var claudeCodingModel: ClaudeModel?
         var draftRepair: DraftReplyRepair.Context?
         var repository: String?
         var followUpPushAllowed: Bool?

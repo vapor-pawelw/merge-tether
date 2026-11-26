@@ -6,6 +6,7 @@ struct CodingAgentSettingsTab: View {
     let monitor: TodoMonitorService
     @Bindable var editor: SettingsPolicyEditor
     @Binding var page: Page
+    @State private var showAllModels = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,6 +26,10 @@ struct CodingAgentSettingsTab: View {
                     powerSettings
                     if let assistant = editor.draft.selectedAssistant {
                         assistantModelFields(assistant)
+                        Section {
+                            Toggle(isOn: $showAllModels) { Text(.Settings.settingsCodingAgentShowNonRecommendedModels) }
+                                .toggleStyle(.checkbox)
+                        }
                     }
                     WorkerExecutionTimeoutSettingsView(policy: $editor.draft.workerExecutionTimeout, repositories: timeoutRepositories)
                 }
@@ -42,22 +47,26 @@ struct CodingAgentSettingsTab: View {
     private var provider: some View {
         Section {
             AutomationAssistantPicker(
-                assistant: Binding(
-                    get: { monitor.settings.automation.selectedAssistant },
-                    set: { assistant in
-                        monitor.settings.automation.selectedAssistant = assistant
-                        let saved = monitor.applySettings()
-                        if saved, let assistant {
-                            if let hold = monitor.cliHealth.hold(for: assistant), hold.issue.kind == .loginRequired {
-                                _ = monitor.cliHealth.clear(assistant, expectedID: hold.id)
-                            }
-                            SettingsNavigation.shared.codingAgentConfigured()
-                        }
-                    }),
+                assistant: $editor.selectedAssistant,
                 available: monitor.availableAssistants,
                 onRefresh: monitor.refreshAvailableAssistants,
-                statuses: monitor.assistantDependencies.statuses
+                statuses: monitor.assistantDependencies.statuses,
+                verifySelectionImmediately: false,
+                onSetupReady: { editor.finishAssistantSetup($0, monitor: monitor) }
             )
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "info.circle.fill")
+                    .foregroundStyle(Color.accentColor)
+                    .accessibilityHidden(true)
+                Text(.Settings.settingsAssistantApplyNotice)
+                    .fontWeight(.medium)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.callout)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+
             PersistenceDegradedBanner(settings: monitor.settings)
         } footer: {
             Text(.Settings.settingsAssistantUseHelp)
@@ -98,13 +107,8 @@ struct CodingAgentSettingsTab: View {
     private func assistantModelFields(_ assistant: AutomationAssistant) -> some View {
         Section {
             if assistant == .codex {
-                Picker(selection: $editor.draft.codexReviewModel) {
-                    ForEach(CodexReviewModel.allCases, id: \.self) { model in
-                        Text(verbatim: model.name).tag(model)
-                    }
-                } label: {
-                    Text(.Settings.settingsAutomationReviewModel)
-                }
+                modelPicker(.Settings.settingsAutomationReviewModel, selection: $editor.draft.codexReviewModel,
+                            recommended: CodexReviewModel.recommendedForCoding)
                 Picker(selection: $editor.draft.codexReviewThinking) {
                     ForEach(CodexReviewThinking.allCases, id: \.self) { effort in
                         Text(effort.name).tag(effort)
@@ -113,13 +117,8 @@ struct CodingAgentSettingsTab: View {
                     Text(.Settings.settingsAutomationReviewThinking)
                 }
             } else {
-                Picker(selection: $editor.draft.claudeCodingModel) {
-                    ForEach(ClaudeCodingModel.allCases, id: \.self) { model in
-                        Text(verbatim: model.name).tag(model)
-                    }
-                } label: {
-                    Text(.Settings.settingsAutomationReviewModel)
-                }
+                modelPicker(.Settings.settingsAutomationReviewModel, selection: $editor.draft.claudeCodingModel,
+                            recommended: ClaudeModel.recommendedForCoding)
                 Picker(selection: $editor.draft.claudeCodingThinking) {
                     ForEach(CodexReviewThinking.allCases, id: \.self) { effort in
                         Text(effort.name).tag(effort)
@@ -136,17 +135,13 @@ struct CodingAgentSettingsTab: View {
         }
 
         Section {
-            Text(.Settings.settingsVerificationHelp).font(.caption).foregroundStyle(.secondary)
+            Text(.Settings.settingsVerificationModelHelp).font(.caption).foregroundStyle(.secondary)
             if assistant == .codex {
-                Picker(selection: $editor.draft.codexVerificationModel) {
-                    ForEach(CodexReviewModel.allCases, id: \.self) { Text(verbatim: $0.name).tag($0) }
-                } label: { Text(.Settings.settingsVerificationModel) }
-                .disabled(!editor.draft.autoVerifyReReview)
+                modelPicker(.Settings.settingsVerificationModel, selection: $editor.draft.codexVerificationModel,
+                            recommended: CodexReviewModel.recommendedForVerification)
             } else {
-                Picker(selection: $editor.draft.claudeVerificationModel) {
-                    ForEach(ClaudeVerificationModel.allCases, id: \.self) { Text(verbatim: $0.name).tag($0) }
-                } label: { Text(.Settings.settingsVerificationModel) }
-                .disabled(!editor.draft.autoVerifyReReview)
+                modelPicker(.Settings.settingsVerificationModel, selection: $editor.draft.claudeVerificationModel,
+                            recommended: ClaudeModel.recommendedForVerification)
             }
             Picker(selection: $editor.draft.verificationThinking) {
                 ForEach(VerificationThinking.allCases, id: \.self) { thinking in
@@ -154,6 +149,15 @@ struct CodingAgentSettingsTab: View {
                 }
             } label: { Text(.Settings.settingsVerificationThinking) }
         } header: { Text(.Settings.settingsVerificationTitle) }
+    }
+
+    private func modelPicker<Model: AgentModel>(_ title: LocalizedStringResource, selection: Binding<Model>,
+                                                recommended: [Model]) -> some View {
+        Picker(selection: selection) {
+            ForEach(selection.wrappedValue.pickerOptions(recommended: recommended, showAll: showAllModels), id: \.self) { model in
+                Text(verbatim: model.name).tag(model)
+            }
+        } label: { Text(title) }
     }
 
     private var timeoutRepositories: [PublicationIdentity] {

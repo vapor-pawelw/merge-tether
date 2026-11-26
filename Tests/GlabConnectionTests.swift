@@ -84,8 +84,8 @@ struct GlabConnectionTests {
             (.Settings.settingsMergeRequestsTab, "Merge requesty"),
             (.Settings.settingsNotificationsTab, "Powiadomienia"),
             (.Settings.settingsCodingAgentTab, "Agent"),
-            (AutomationAssistant.codex.displayName, "ChatGPT (Codex CLI)"),
-            (AutomationAssistant.claude.displayName, "Claude CLI"),
+            (AutomationAssistant.codex.displayName, "Codex"),
+            (AutomationAssistant.claude.displayName, "Claude"),
         ]
         for (var resource, expected) in strings {
             resource.locale = Locale(identifier: "pl")

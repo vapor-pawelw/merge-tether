@@ -71,7 +71,7 @@ struct ConfirmedAttentionSnapshotTests {
             allowsRemoval: false, assistantReady: true, preservedHumanAction: cache.humanActions[id], isRefreshingAttention: true)
         #expect(model.working && model.humanAction != nil)
         #expect(model.message == action.explanation)
-        #expect(model.status == "Checking whether reviewer comments are addressed · ChatGPT (Codex CLI)")
+        #expect(model.status == "Checking whether reviewer comments are addressed · Codex")
         let phone = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "me"), model: model)
         #expect(phone.needsAttention == true)
         #expect(phone.detail == action.explanation)
@@ -92,7 +92,7 @@ struct ConfirmedAttentionSnapshotTests {
             allowsRemoval: false, assistantReady: true, preservedHumanAction: action, isRefreshingAttention: true,
             showsReadProgress: visible)
         #expect(model.working)
-        #expect(model.status == "Checking whether reviewer comments are addressed · ChatGPT (Codex CLI)")
+        #expect(model.status == "Checking whether reviewer comments are addressed · Codex")
         #expect(model.busy && model.actionsBlocked)
         #expect(model.message == action.explanation && model.humanAction != nil)
         var original = RemoteBoardAdapter.card(item, account: "me")

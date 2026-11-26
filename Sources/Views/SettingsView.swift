@@ -84,7 +84,7 @@ struct SettingsView: View {
         }
         .frame(minWidth: 680, idealWidth: 760, minHeight: 560, idealHeight: 680)
         .onChange(of: monitor.settings.automation.scope) { editor.updateScope(from: monitor.settings) }
-        .onChange(of: monitor.settings.automation.selectedAssistant, initial: true) { editor.updateAssistant(from: monitor.settings) }
+        .onChange(of: monitor.settings.acceptedAutomation.selectedAssistant, initial: true) { editor.updateAssistant(from: monitor.settings) }
     }
 
     private func tabIcon(_ tab: SettingsNavigation.Tab) -> Image {

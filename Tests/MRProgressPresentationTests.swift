@@ -82,7 +82,7 @@ struct MRProgressPresentationTests {
             assistantReady: true, showsReadProgress: false)
         #expect(model.busy == aiChecking)
         #expect(model.working)
-        #expect(model.status == (aiChecking ? "Assessing AI assistance · ChatGPT (Codex CLI)" : "Checking replies · ChatGPT (Codex CLI)"))
+        #expect(model.status == (aiChecking ? "Assessing AI assistance · Codex" : "Checking replies · Codex"))
         if !aiChecking { #expect(model.humanAction?.kind == .blockedRun) }
     }
 
@@ -266,7 +266,7 @@ struct MRProgressPresentationTests {
         let original = presentation("review", state: .running)
         let model = MRCardPresentation(row: original.row, reviewingContext: original.reviewingContext,
             allowsRemoval: false, assistantReady: true, assistant: .claude)
-        #expect(model.status == "Running review · ChatGPT (Codex CLI)")
+        #expect(model.status == "Running review · Codex")
         #expect(model.activityEffect == MRActionCTA.runReview.effect)
     }
 
@@ -299,7 +299,7 @@ struct MRProgressPresentationTests {
         let model = presentation(stage)
         #expect(model.working)
         let usesAgent = !["publishing", "approving", "pipeline"].contains(stage)
-        #expect(model.status == expected + (usesAgent ? " · ChatGPT (Codex CLI)" : ""))
+        #expect(model.status == expected + (usesAgent ? " · Codex" : ""))
         #expect(model.humanAction == nil && model.actionLabel == nil)
     }
 
@@ -309,14 +309,14 @@ struct MRProgressPresentationTests {
     ])
     func runningJobsIdentifyTheirTaskWithoutParsingAgentText(stage: String, expected: String) {
         let model = presentation(stage, state: .running)
-        #expect(model.status == expected + " · ChatGPT (Codex CLI)")
+        #expect(model.status == expected + " · Codex")
         #expect(model.activityEffect == .agent)
     }
 
     @Test(arguments: ["review", "followUp", "pipeline", "conflict", "unknown"])
     func queuedJobsDoNotClaimThatTheAgentHasStarted(stage: String) {
         let model = presentation(stage, state: .queued)
-        #expect(model.status == "Queued for agent · ChatGPT (Codex CLI)")
+        #expect(model.status == "Queued for agent · Codex")
         #expect(model.activityEffect == .agent)
     }
 }

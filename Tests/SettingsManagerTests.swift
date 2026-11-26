@@ -22,6 +22,63 @@ struct SettingsManagerTests {
         #expect(restored.reviewRequested.isEnabled)
     }
 
+    @Test(arguments: [AutomationAssistant.claude, nil])
+    func codingAgentChangesAreAppliedWithTheSettingsDraft(_ assistant: AutomationAssistant?) throws {
+        let suite = "CodingAgentDraft.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.selectedAssistant = .codex
+        try #require(settings.save())
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let monitor = TodoMonitorService(settings: settings, glab: gitlab.service(host: "example.test", username: "alice"),
+            assistantDependencies: AssistantDependencyMonitor(probe: { _ in .missingCLI }))
+        let editor = SettingsPolicyEditor(settings: settings)
+        let navigation = SettingsNavigation()
+        var resumes = 0
+        navigation.showCodingAgent(onConfigured: {
+            #expect(SettingsManager(defaults: defaults).automation.selectedAssistant == assistant)
+            resumes += 1
+        })
+
+        editor.selectedAssistant = assistant
+        settings.automation.scope.mode = .selected
+        try #require(settings.save())
+        editor.updateScope(from: settings)
+        editor.updateAssistant(from: settings)
+        #expect(editor.draft.selectedAssistant == assistant)
+        #expect(settings.automation.selectedAssistant == .codex)
+        #expect(SettingsManager(defaults: defaults).automation.selectedAssistant == .codex)
+        #expect(editor.saveState.canApply(draft: editor.draft, custom: nil, savedCustom: nil))
+        #expect(editor.assistantRequiringSetup(comparedTo: settings.acceptedAutomation) == assistant)
+        #expect(resumes == 0)
+
+        editor.revert(settings: settings)
+        #expect(editor.draft.selectedAssistant == .codex)
+
+        editor.selectedAssistant = assistant
+        editor.draft.claudeCodingThinking = .low
+        editor.apply(monitor: monitor, navigation: navigation)
+
+        #expect(settings.automation.selectedAssistant == assistant)
+        #expect(editor.saveState.accepted.selectedAssistant == assistant)
+        #expect(resumes == (assistant == nil ? 0 : 1))
+        let restarted = SettingsManager(defaults: defaults).automation
+        #expect(restarted.selectedAssistant == assistant)
+        #expect(restarted.claudeCodingThinking == .low)
+        #expect(restarted.scope.mode == .selected)
+    }
+
+    @Test func returningToNoCodingAgentClearsThePendingProviderChange() {
+        let settings = SettingsManager(defaults: makeDefaults())
+        let editor = SettingsPolicyEditor(settings: settings)
+        editor.selectedAssistant = .claude
+        editor.selectedAssistant = nil
+
+        #expect(!editor.saveState.canApply(draft: editor.draft, custom: nil, savedCustom: nil))
+    }
+
     @Test func decodingLegacyAutomationKeepsItsConfiguredProvider() throws {
         let legacy = Data(#"{"assistant":"claude","packageDecision":"enabled"}"#.utf8)
         let restored = try JSONDecoder().decode(AutomationSettings.self, from: legacy)

@@ -18,7 +18,18 @@ enum AutomationRunner: String, Codable, Sendable {
     case shell
 }
 
-enum CodexReviewModel: String, CaseIterable, Codable, Sendable {
+protocol AgentModel: CaseIterable, Hashable {
+    var name: String { get }
+}
+
+extension AgentModel {
+    func pickerOptions(recommended: [Self], showAll: Bool) -> [Self] {
+        if showAll { return Array(Self.allCases) }
+        return recommended.contains(self) ? recommended : recommended + [self]
+    }
+}
+
+enum CodexReviewModel: String, AgentModel, Codable, Sendable {
     case sol62 = "gpt-6.2-sol"
     case astra62 = "gpt-6.2-astra"
     case sol = "gpt-6.1-sol"
@@ -26,6 +37,9 @@ enum CodexReviewModel: String, CaseIterable, Codable, Sendable {
     case terra = "gpt-6.1-terra"
     case luna = "gpt-6-luna"
     case luna56 = "gpt-5.6-luna"
+
+    static let recommendedForCoding: [Self] = [.sol62, .astra62]
+    static let recommendedForVerification: [Self] = [.luna, .terra, .sol62]
 
     var name: String {
         switch self {
@@ -40,23 +54,21 @@ enum CodexReviewModel: String, CaseIterable, Codable, Sendable {
     }
 }
 
-enum ClaudeVerificationModel: String, CaseIterable, Codable, Sendable {
-    case haiku = "claude-haiku-5-5"
-    case sonnet = "claude-sonnet-5-5"
-    var name: String { self == .haiku ? "Claude Haiku 5.5" : "Claude Sonnet 5.5" }
-}
-
-/// Coding-agent models passed to Claude CLI with `--model`; Claude CLI accepts the same effort levels as Codex.
-enum ClaudeCodingModel: String, CaseIterable, Codable, Sendable {
+enum ClaudeModel: String, AgentModel, Codable, Sendable {
     case fable = "claude-fable-5-2"
     case opus = "claude-opus-5-5"
     case sonnet = "claude-sonnet-5-5"
+    case haiku = "claude-haiku-5-5"
+
+    static let recommendedForCoding: [Self] = [.opus, .fable]
+    static let recommendedForVerification: [Self] = [.haiku, .sonnet, .opus]
 
     var name: String {
         switch self {
         case .fable: "Claude Fable 5.2"
         case .opus: "Claude Opus 5.5"
         case .sonnet: "Claude Sonnet 5.5"
+        case .haiku: "Claude Haiku 5.5"
         }
     }
 }
@@ -171,7 +183,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var baselinePreset: AutomationPreset?
     var autoVerifyReReview = true
     var codexVerificationModel: CodexReviewModel = .luna
-    var claudeVerificationModel: ClaudeVerificationModel = .haiku
+    var claudeVerificationModel: ClaudeModel = .haiku
     var verificationThinking: VerificationThinking = .high
     private var customAICommentCriteria: String?
 
@@ -198,7 +210,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     }
     var codexReviewModel: CodexReviewModel = .sol62
     var codexReviewThinking: CodexReviewThinking = .high
-    var claudeCodingModel: ClaudeCodingModel = .opus
+    var claudeCodingModel: ClaudeModel = .opus
     var claudeCodingThinking: CodexReviewThinking = .high
     var workerExecutionTimeout = WorkerExecutionTimeout()
     var assistantWorkspace = ""
@@ -355,7 +367,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         projectPermissionsVersion = try values.decodeIfPresent(Int.self, forKey: .projectPermissionsVersion) ?? 0
         autoVerifyReReview = try values.decodeIfPresent(Bool.self, forKey: .autoVerifyReReview) ?? true
         codexVerificationModel = (try? values.decode(CodexReviewModel.self, forKey: .codexVerificationModel)) ?? .luna
-        claudeVerificationModel = (try? values.decode(ClaudeVerificationModel.self, forKey: .claudeVerificationModel)) ?? .haiku
+        claudeVerificationModel = (try? values.decode(ClaudeModel.self, forKey: .claudeVerificationModel)) ?? .haiku
         verificationThinking = (try? values.decode(VerificationThinking.self, forKey: .verificationThinking)) ?? .high
         customAICommentCriteria = try? values.decode(String.self, forKey: .aiCommentCriteria)
         customAICommentCriteria = aiCommentCriteriaOverride
@@ -363,7 +375,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         assistantSelectionCleared = try values.decodeIfPresent(Bool.self, forKey: .assistantSelectionCleared) ?? false
         codexReviewModel = (try? values.decode(CodexReviewModel.self, forKey: .codexReviewModel)) ?? codexReviewModel
         codexReviewThinking = (try? values.decode(CodexReviewThinking.self, forKey: .codexReviewThinking)) ?? codexReviewThinking
-        claudeCodingModel = (try? values.decode(ClaudeCodingModel.self, forKey: .claudeCodingModel)) ?? claudeCodingModel
+        claudeCodingModel = (try? values.decode(ClaudeModel.self, forKey: .claudeCodingModel)) ?? claudeCodingModel
         claudeCodingThinking = (try? values.decode(CodexReviewThinking.self, forKey: .claudeCodingThinking)) ?? claudeCodingThinking
         workerExecutionTimeout = (try? values.decode(WorkerExecutionTimeout.self, forKey: .workerExecutionTimeout)) ?? .init()
         assistantWorkspace = try values.decodeIfPresent(String.self, forKey: .assistantWorkspace) ?? assistantWorkspace

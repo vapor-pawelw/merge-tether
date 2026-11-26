@@ -72,7 +72,9 @@ When all feedback is verified, required replies are published and the existing a
 
 ## CLI setup and execution
 
-Choose **No coding agent**, **Codex CLI**, or **Claude CLI** in **Settings → Agent**. A verified provider change saves immediately and applies to manual agent actions and automation. Setup verifies the executable, supported headless options and sign-in before accepting a selection. For a missing or incompatible CLI, setup opens the provider’s installation guide. Follow the guide and choose **Check again** when the CLI is available. Sign-in opens Terminal. Cancelling or failing setup keeps the previous selection.
+Choose **No coding agent**, **Codex**, or **Claude** in **Settings → Agent**. **Apply Changes** saves the choice for manual agent actions and automation. When switching to an agent, setup verifies the executable, supported headless options and sign-in before saving. For a missing or incompatible CLI, setup opens the provider’s installation guide. Follow the guide and choose **Check again** when the CLI is available. Sign-in opens Terminal. **Revert Changes** restores the saved choice in the form.
+
+The coding and verification pickers show recommendations for their respective roles. Select **Show non-recommended models** to see all models supported by MergeTether for that agent in both pickers. A selected model stays visible in its picker until you choose another one.
 
 The CLI requirement applies even when automatic re-review verification is off. Desktop installation does not establish CLI readiness. Dependency checks run independently of GitLab polling. An action that needs an agent offers to open the agent settings when the CLI is unavailable. Affected merge requests show a hold with a setup and resume action. Manual publication and other GitLab actions that do not require an agent remain available.
 
@@ -226,7 +228,7 @@ Merge-blocker changes remain visible in the event log. Known statuses such as pe
 
 Scope is always required. Empty additional project lists mean all repositories permitted by the active scope. Nonempty lists restrict the corresponding tool tasks, conflict pushes or default automatic merges to exact repository paths.
 
-Manage global scope and repository/MR overrides in **Settings → Automation → Scope**. Scope changes save immediately. Other automation pages use **Apply Changes**, preserving scope and coding-agent selections made in the meantime. Paused and closed MR overrides remain editable.
+Manage global scope and repository/MR overrides in **Settings → Automation → Scope**. Scope changes save immediately. **Agent** and the other **Automation** pages share a draft saved by **Apply Changes**, which preserves the latest scope. Paused and closed MR overrides remain editable.
 
 With **Automation → On**, choose **Default**, **On**, or **Off** for comment publication and for auto-merge on your own MRs or auto-approval on reviewed MRs. **Default** for an action follows Settings. **On** enables the action for this MR under the usual public action permissions and checks. Auto-approval uses the configured threshold. Comment publication keeps the configured filters and uses eligible replies to AI feedback when automatic publication is off in Settings. The app checks and publishes eligible draft IDs individually. **Off** pauses the automatic action. Existing action overrides stay active until you choose a new Automation mode.
 

@@ -145,7 +145,7 @@ struct AssistantJobInvocationTests {
         } else {
             #expect(arguments.contains("--dangerously-skip-permissions"))
             #expect(value(after: "--tools", in: arguments) == "default")
-            #expect(value(after: "--model", in: arguments) == ClaudeCodingModel.sonnet.rawValue)
+            #expect(value(after: "--model", in: arguments) == ClaudeModel.sonnet.rawValue)
             #expect(value(after: "--effort", in: arguments) == "xhigh")
         }
     }
@@ -333,7 +333,7 @@ struct AssistantJobInvocationTests {
 
     @Test func claudeWorkerUsesSelectedModelAndEffort() {
         let arguments = policy.claudeArguments(model: .fable, thinking: .max)
-        #expect(value(after: "--model", in: arguments) == ClaudeCodingModel.fable.rawValue)
+        #expect(value(after: "--model", in: arguments) == ClaudeModel.fable.rawValue)
         #expect(value(after: "--effort", in: arguments) == "max")
     }
 
