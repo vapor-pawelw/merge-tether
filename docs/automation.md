@@ -207,7 +207,7 @@ The app bundles `evidence.py` and `author_follow_up.py` under `Contents/Resource
 
 ## Ask the agent
 
-Click the question mark in the Mac toolbar when your selected CLI is ready. Questions and answers stay in one conversation in this installation. Clear it from the popover or start a fresh conversation by switching the GitLab account or agent provider. The CLI may retain its own session history.
+Click the question mark in the Mac toolbar when your selected CLI is ready. Questions and answers stay in one conversation in this installation. The sheet shows the configured verification model and reasoning level. Each CLI call has two minutes to respond. If a question fails, retry it from the sheet. Clear the conversation from the sheet or start a fresh conversation by switching the GitLab account or agent provider. The CLI may retain its own session history.
 
 The app sends a bounded board snapshot with each question. For a specific MR it can include recent activity, job summaries and saved reasons from the Event log. It retrieves public MergeTether source on GitHub for questions about app behavior using the installed release version when available. Development and unmatched builds use `main`, with a notice in the answer. Source and MR context go to the selected CLI provider.
 

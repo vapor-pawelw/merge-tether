@@ -1,9 +1,11 @@
 import SwiftUI
 
-struct AgentQuestionPopover: View {
+struct AgentQuestionSheet: View {
     let conversation: AgentQuestionConversation
+    let configuration: AgentQuestionCLI.Configuration
     let submit: (String) -> Void
     let openLink: (URL) -> OpenURLAction.Result
+    @Environment(\.dismiss) private var dismiss
     @State private var question = ""
     @FocusState private var inputFocused: Bool
 
@@ -14,7 +16,12 @@ struct AgentQuestionPopover: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(.AgentQuestion.agentQuestionTitle).font(.headline)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(.AgentQuestion.agentQuestionTitle).font(.headline)
+                    Text(.AgentQuestion.agentQuestionModelAndEffort(configuration.modelName, String(localized: configuration.thinking.name)))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button { conversation.clear(); inputFocused = true } label: {
                     Image(systemName: "trash")
@@ -23,18 +30,31 @@ struct AgentQuestionPopover: View {
                 .help(Text(.AgentQuestion.agentQuestionClear))
                 .accessibilityLabel(Text(.AgentQuestion.agentQuestionClear))
                 .disabled(conversation.messages.isEmpty && !conversation.isRunning)
+                Button { dismiss() } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless)
+                    .keyboardShortcut(.cancelAction)
+                    .help(Text(.CommandCenter.commandCenterClose))
+                    .accessibilityLabel(Text(.CommandCenter.commandCenterClose))
             }
             .padding(12)
             Divider()
             transcript
             Divider()
-            if let failure = conversation.failure {
-                Text(failure == .answer ? .AgentQuestion.agentQuestionFailed : .AgentQuestion.agentQuestionStorageFailed)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            if conversation.failure != nil || conversation.unansweredQuestion != nil {
+                HStack {
+                    if let failure = conversation.failure {
+                        Text(failure.message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if let text = conversation.unansweredQuestion {
+                        Button { submit(text); inputFocused = true } label: { Text(.AgentQuestion.agentQuestionRetry) }
+                            .controlSize(.small)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
             }
             HStack(alignment: .bottom, spacing: 8) {
                 TextField(text: $question, prompt: Text(.AgentQuestion.agentQuestionPlaceholder)) {
@@ -58,7 +78,7 @@ struct AgentQuestionPopover: View {
             }
             .padding(12)
         }
-        .frame(width: 430, height: 450)
+        .frame(minWidth: 540, idealWidth: 690, minHeight: 460, idealHeight: 600)
         .onAppear { inputFocused = true }
     }
 
@@ -104,7 +124,7 @@ struct AgentQuestionPopover: View {
             .font(.callout)
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .frame(maxWidth: 350, alignment: .leading)
+            .frame(maxWidth: 525, alignment: .leading)
             .background(user ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.1),
                         in: RoundedRectangle(cornerRadius: 12))
             .frame(maxWidth: .infinity, alignment: user ? .trailing : .leading)

@@ -35,6 +35,40 @@
         }
       }
     },
+    "agentQuestionInvalidResponse": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The agent returned an unreadable response."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent zwrócił odpowiedź, której nie udało się odczytać."
+          }
+        }
+      }
+    },
+    "agentQuestionModelAndEffort.%@.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · Reasoning %2$@"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · Rozumowanie %2$@"
+          }
+        }
+      }
+    },
     "agentQuestionPlaceholder": {
       "extractionState": "manual",
       "localizations": {
@@ -65,6 +99,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Mogę odpowiadać na pytania o MergeTether i Twoje MR-y."
+          }
+        }
+      }
+    },
+    "agentQuestionRetry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry question"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ponów pytanie"
           }
         }
       }
@@ -150,6 +201,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Oczekiwanie na odpowiedź"
+          }
+        }
+      }
+    },
+    "agentQuestionTimedOut.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The agent did not answer within %lld seconds."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent nie odpowiedział w ciągu %lld sekund."
           }
         }
       }

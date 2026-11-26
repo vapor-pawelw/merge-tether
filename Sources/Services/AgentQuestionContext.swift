@@ -36,6 +36,8 @@ struct AgentQuestionContext: Encodable, Sendable {
         let eligibleForAutoMerge: Bool?
         let mergeBlockers: [String]?
         let mergeSubmission: String?
+        let gitLabMergeStatus: String?
+        let gitLabHasConflicts: Bool?
         let evidenceCurrent: Bool
     }
 
@@ -55,6 +57,11 @@ struct AgentQuestionContext: Encodable, Sendable {
         let currentUserIsAuthor: Bool?
         let currentUserIsAssignee: Bool?
         let visibleReason: String?
+        let sourceBranch: String?
+        let targetBranch: String?
+        let gitLabMergeStatus: String?
+        let gitLabHasConflicts: Bool?
+        let recordedConflictWarning: Bool
         let evidenceMatchesCurrentCatalog: Bool
         let followUpPolicyHold: String?
         let eventLog: [Event]
@@ -122,6 +129,10 @@ struct AgentQuestionContext: Encodable, Sendable {
             currentUserIsAuthor: request.map { $0.author.username == target.username },
             currentUserIsAssignee: request?.assignees.map { $0.contains { $0.username == target.username } },
             visibleReason: explanation.map(cleanQuestionEvidence),
+            sourceBranch: request.map { cleanQuestionEvidence($0.sourceBranch) },
+            targetBranch: request.map { cleanQuestionEvidence($0.targetBranch) },
+            gitLabMergeStatus: request?.detailedMergeStatus?.rawValue, gitLabHasConflicts: request?.hasConflicts,
+            recordedConflictWarning: row.item.hasConflict || row.attentionIntents.contains { $0.kind == .conflict },
             evidenceMatchesCurrentCatalog: row.evidenceMatchesCatalogContext,
             followUpPolicyHold: policyHold.map { String(localized: $0.message) },
             eventLog: history.entries.prefix(12).map { agentQuestionEvent($0, head: request?.sha) })
@@ -188,6 +199,7 @@ struct AgentQuestionContext: Encodable, Sendable {
             autoMergeConfigured: input.mergeAllowed,
             eligibleForAutoMerge: status == nil ? nil : row.isEligibleForAutomaticMerge,
             mergeBlockers: blockers, mergeSubmission: input.submission == .none ? nil : input.submission.rawValue,
+            gitLabMergeStatus: request?.detailedMergeStatus?.rawValue, gitLabHasConflicts: request?.hasConflicts,
             evidenceCurrent: current)
     }
 }

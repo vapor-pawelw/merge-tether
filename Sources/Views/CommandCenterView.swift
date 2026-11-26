@@ -10,33 +10,38 @@ struct CommandCenterView: View {
     @State private var showingAdd = false
     @State private var showingInbox = false
     @State private var showingAgentQuestion = false
+    @State private var pendingQuestionLink: URL?
     @State private var questionMergeRequest: URL?
     @State private var regenerationPresentation: DraftRegenerationPresentation?
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
 
     @ViewBuilder private var agentQuestionButton: some View {
-        if let owner = monitor.agentQuestionOwner, monitor.selectedAssistantReady,
-           case .ready(let executable) = monitor.assistantDependencies.statuses[owner.assistant] {
-            Button { showingAgentQuestion.toggle() } label: {
+        if monitor.agentQuestionOwner != nil, monitor.selectedAssistantReady {
+            Button { showingAgentQuestion = true } label: {
                 Image(systemName: "questionmark.bubble.fill")
             }
             .help(Text(.AgentQuestion.agentQuestionTitle))
             .accessibilityLabel(Text(.AgentQuestion.agentQuestionTitle))
-            .popover(isPresented: $showingAgentQuestion, arrowEdge: .top) {
-                AgentQuestionPopover(conversation: agentQuestion, submit: { text in
-                    agentQuestion.submit(text, owner: owner, executable: executable,
-                                         model: monitor.agentQuestionModel, monitor: monitor)
-                }, openLink: openQuestionLink)
-            }
+        }
+    }
+
+    @ViewBuilder private var agentQuestionSheet: some View {
+        if let owner = monitor.agentQuestionOwner,
+           case .ready(let executable) = monitor.assistantDependencies.statuses[owner.assistant] {
+            let configuration = monitor.agentQuestionConfiguration
+            AgentQuestionSheet(conversation: agentQuestion, configuration: configuration, submit: { text in
+                agentQuestion.submit(text, owner: owner, executable: executable,
+                                     configuration: configuration, monitor: monitor)
+            }, openLink: openQuestionLink)
         }
     }
 
     private func openQuestionLink(_ url: URL) -> OpenURLAction.Result {
         let board = monitor.boardSnapshot
         if (board.own + board.reviewed + board.otherMergeRequests).contains(where: { $0.displayURL == url }) {
+            pendingQuestionLink = url
             showingAgentQuestion = false
-            questionMergeRequest = url
             return .handled
         }
         if AgentQuestionSource.isEvidenceLink(url) { return .systemAction }
@@ -155,8 +160,13 @@ struct CommandCenterView: View {
         }
         .onChange(of: monitor.glab.accountRevision) { _, _ in
             showingAgentQuestion = false
+            pendingQuestionLink = nil
             questionMergeRequest = nil
         }
+        .sheet(isPresented: $showingAgentQuestion, onDismiss: {
+            questionMergeRequest = pendingQuestionLink
+            pendingQuestionLink = nil
+        }) { agentQuestionSheet }
         .sheet(isPresented: $showingAdd) { CommandCenterAddMergeRequestView(monitor: monitor) }
         .sheet(item: $regenerationPresentation) { monitor.draftRegenerationSheet($0) }
         .onChange(of: monitor.glab.accountRevision) { _, _ in regenerationPresentation = nil }

@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OSLog
 
 @MainActor @Observable
 final class AgentQuestionConversation {
@@ -24,14 +25,39 @@ final class AgentQuestionConversation {
     }
 
     private struct Prompt: Encodable {
-        let question: String?
+        let question: String
         let snapshot: AgentQuestionContext?
         let mergeRequestDetails: [AgentQuestionContext.Detail]
         let source: AgentQuestionSource.Evidence?
         let evidenceResponse: Bool
     }
 
-    enum Failure { case answer, storage }
+    enum Failure: String, Equatable {
+        case answer, invalidResponse, timedOut, storage
+
+        init(answerError: Error) {
+            if let processError = answerError as? ProcessRunner.RunError, case .timedOut = processError {
+                self = .timedOut
+            } else if (answerError as? AgentQuestionCLI.Failure) == .invalidResponse || answerError is DecodingError {
+                self = .invalidResponse
+            } else {
+                self = .answer
+            }
+        }
+
+        var message: LocalizedStringResource {
+            switch self {
+            case .answer: .AgentQuestion.agentQuestionFailed
+            case .invalidResponse: .AgentQuestion.agentQuestionInvalidResponse
+            case .timedOut: .AgentQuestion.agentQuestionTimedOut(AgentQuestionCLI.timeoutSeconds)
+            case .storage: .AgentQuestion.agentQuestionStorageFailed
+            }
+        }
+    }
+
+    private static let log = Logger(subsystem: "com.vaporpw.MergeTether", category: "agent-question")
+    private enum AnswerStage: String { case question, requestedEvidence }
+
 
     @ObservationIgnored private let root: URL
     @ObservationIgnored private let source: AgentQuestionSource
@@ -42,6 +68,12 @@ final class AgentQuestionConversation {
     private(set) var messages: [Message] = []
     private(set) var isRunning = false
     private(set) var failure: Failure?
+
+    var unansweredQuestion: String? {
+        guard !isRunning, let last = messages.last, last.role == .user,
+              last.text != "?" else { return nil }
+        return last.text
+    }
 
     init(root: URL = InstallationStorage.current.root.appending(path: "Agent Questions"),
          source: AgentQuestionSource = .init()) {
@@ -75,13 +107,16 @@ final class AgentQuestionConversation {
         discardSavedTranscript()
     }
 
-    func submit(_ text: String, owner: Owner, executable: URL, model: String, monitor: TodoMonitorService) {
+    func submit(_ text: String, owner: Owner, executable: URL,
+                configuration: AgentQuestionCLI.Configuration, monitor: TodoMonitorService) {
         guard self.owner == owner, monitor.agentQuestionOwner == owner, !isRunning else { return }
         let cleaned = GlabService.redactWorkflowEvidence(text.trimmingCharacters(in: .whitespacesAndNewlines))
         guard !cleaned.isEmpty else { return }
+        let original = unansweredQuestion
+        let retry = (cleaned == "?" || cleaned == original) ? original : nil
         failure = nil
-        append(.init(role: .user, text: String(cleaned.prefix(AgentQuestionInput.maximumLength))))
-        guard let question = AgentQuestionInput(cleaned) else {
+        if retry == nil { append(.init(role: .user, text: String(cleaned.prefix(AgentQuestionInput.maximumLength)))) }
+        guard let question = AgentQuestionInput(retry ?? cleaned) else {
             append(.init(role: .refusal, text: ""))
             return
         }
@@ -96,16 +131,20 @@ final class AgentQuestionConversation {
         let session = transcript?.session
         pending = Task {
             defer { if requestID == id { cancel() } }
+            let started = ContinuousClock.now
+            var stage = AnswerStage.question
             do {
                 guard current(id, owner: owner, revision: revision, monitor: monitor) else { return }
                 try Self.createPrivateDirectory(directory)
                 let initial = Prompt(question: question.text, snapshot: snapshot, mergeRequestDetails: details,
                                      source: nil, evidenceResponse: false)
                 let first = try await ask(initial, owner: owner, executable: executable, session: session,
-                                          model: model, directory: directory)
+                                          configuration: configuration, directory: directory)
                 guard current(id, owner: owner, revision: revision, monitor: monitor) else { return }
-                let (turn, notice) = try await complete(first, owner: owner, executable: executable, model: model,
-                    directory: directory, monitor: monitor, isCurrent: { self.current(id, owner: owner, revision: revision, monitor: monitor) })
+                if first.reply.requestsEvidence { stage = .requestedEvidence }
+                let (turn, notice) = try await complete(first, question: question, owner: owner, executable: executable,
+                    configuration: configuration, directory: directory, monitor: monitor,
+                    isCurrent: { self.current(id, owner: owner, revision: revision, monitor: monitor) })
                 guard current(id, owner: owner, revision: revision, monitor: monitor) else { return }
                 guard let answer = turn.reply.answer?.trimmingCharacters(in: .whitespacesAndNewlines), !answer.isEmpty else {
                     throw AgentQuestionCLI.Failure.invalidResponse
@@ -113,33 +152,39 @@ final class AgentQuestionConversation {
                 transcript?.session = turn.session
                 append(.init(role: .agent, text: String(GlabService.redactWorkflowEvidence(answer).prefix(16_000)), sourceNotice: notice))
             } catch {
-                if current(id, owner: owner, revision: revision, monitor: monitor) { failure = .answer }
+                guard current(id, owner: owner, revision: revision, monitor: monitor) else { return }
+                let cause = Failure(answerError: error)
+                let seconds = started.duration(to: .now).components.seconds
+                Self.log.warning("Agent question failed provider=\(owner.assistant.rawValue, privacy: .public) model=\(configuration.model, privacy: .public) effort=\(configuration.thinking.rawValue, privacy: .public) stage=\(stage.rawValue, privacy: .public) elapsedSeconds=\(seconds, privacy: .public) reason=\(cause.rawValue, privacy: .public)")
+                failure = cause
             }
         }
     }
 
-    private func complete(_ first: AgentQuestionCLI.Turn, owner: Owner, executable: URL, model: String,
-                          directory: URL, monitor: TodoMonitorService, isCurrent: () -> Bool)
+    private func complete(_ first: AgentQuestionCLI.Turn, question: AgentQuestionInput, owner: Owner, executable: URL,
+                          configuration: AgentQuestionCLI.Configuration, directory: URL,
+                          monitor: TodoMonitorService, isCurrent: () -> Bool)
         async throws -> (AgentQuestionCLI.Turn, AgentQuestionSource.Notice?) {
-        if first.reply.answer != nil { return (first, nil) }
+        guard first.reply.requestsEvidence else { return (first, nil) }
         let details = monitor.agentQuestionDetails(for: first.reply.mergeRequestIIDs ?? [])
         let evidence: AgentQuestionSource.Evidence?
         if let terms = first.reply.sourceTerms, !terms.isEmpty {
             evidence = try await source.evidence(for: terms, build: .installed)
         } else { evidence = nil }
         guard isCurrent() else { throw CancellationError() }
-        let prompt = Prompt(question: nil, snapshot: nil, mergeRequestDetails: details, source: evidence, evidenceResponse: true)
+        let prompt = Prompt(question: question.text, snapshot: nil, mergeRequestDetails: details,
+                            source: evidence, evidenceResponse: true)
         let turn = try await ask(prompt, owner: owner, executable: executable, session: first.session,
-                                 model: model, directory: directory)
+                                 configuration: configuration, directory: directory)
         return (turn, evidence?.notice)
     }
 
-    private func ask(_ prompt: Prompt, owner: Owner, executable: URL, session: UUID?, model: String, directory: URL)
-        async throws -> AgentQuestionCLI.Turn {
+    private func ask(_ prompt: Prompt, owner: Owner, executable: URL, session: UUID?,
+                     configuration: AgentQuestionCLI.Configuration, directory: URL) async throws -> AgentQuestionCLI.Turn {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         return try await AgentQuestionCLI.run(owner.assistant, executable: executable, session: session,
-                                              model: model, directory: directory, input: encoder.encode(prompt))
+                                             configuration: configuration, directory: directory, input: encoder.encode(prompt))
     }
 
     private func current(_ id: UUID, owner: Owner, revision: UInt64, monitor: TodoMonitorService) -> Bool {
@@ -199,8 +244,7 @@ final class AgentQuestionConversation {
         return .init(assistant: assistant, host: glab.resolvedHost, username: glab.currentUsername)
     }
 
-    var agentQuestionModel: String {
-        let automation = settings.automation
-        return automation.assistant == .codex ? automation.codexVerificationModel.rawValue : automation.claudeVerificationModel.rawValue
+    var agentQuestionConfiguration: AgentQuestionCLI.Configuration {
+        .init(assistant: settings.automation.assistant, settings: settings.automation)
     }
 }
