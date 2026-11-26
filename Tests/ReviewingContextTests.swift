@@ -93,17 +93,21 @@ struct ReviewingContextTests {
         await fixture.refresh(monitor)
         #expect(monitor.currentOpenItems.first?.reviewingProgress == .current)
 
+        // A rename keeps the same GitLab user, so the approval still counts.
         fixture.diffReadFails = true
-        fixture.glab.currentUsername = "other"
+        fixture.glab.currentUsername = "renamed"
         await fixture.refresh(monitor)
-        #expect(monitor.currentOpenItems.first?.reviewingProgress == .needsReview)
+        #expect(monitor.currentOpenItems.first?.reviewingProgress == .current)
 
+        // The inbox pass notices a different GitLab user behind the original username.
         fixture.glab.currentUsername = fixture.target.username
         fixture.userID = 6
+        _ = try await fixture.glab.refreshAuthenticatedAccount()
         await fixture.refresh(monitor)
         #expect(monitor.currentOpenItems.first?.reviewingProgress == .needsReview)
 
         fixture.userID = 5
+        _ = try await fixture.glab.refreshAuthenticatedAccount()
         await fixture.refresh(monitor)
         #expect(monitor.currentOpenItems.first?.reviewingProgress == .current)
     }

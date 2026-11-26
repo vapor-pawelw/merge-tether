@@ -20,6 +20,7 @@ struct MacWakeAutomationTests {
         gitlab.handler = { request in
             if request.arguments == ["config", "get", "host"] { return InMemoryGitLab.output(host) }
             if request.arguments == ["auth", "status"] { return InMemoryGitLab.output(error: "Logged in to \(host) as operator") }
+            if request.endpoint == "/user" { return InMemoryGitLab.output(#"{"id":4,"username":"operator"}"#) }
             if request.arguments.contains("/todos?per_page=100&state=pending") {
                 reads += 1
                 if reads == 1 {

@@ -83,7 +83,9 @@ import MergeTetherRemote
         #expect(f.transport.messages.last?.result?.status == .completed)
         #expect(f.monitor.lifecycleCompletions.isEmpty)
         #expect(f.monitor.hiddenReviewNotifications.isEmpty)
+        // Saved targets stay bound to the GitLab user ID until a restart reads /user again.
         let persisted = SettingsManager(defaults: f.defaults)
+        #expect(persisted.bindAuthenticatedAccount(.init(host: "gitlab.example.test", username: "me", userID: 3)))
         #expect(persisted.ignoredMergeRequests.contains(hidden))
         #expect(persisted.filteredHiddenReviewDetails[hidden]?.inboxNotification == nil)
         #expect(persisted.mrLifecycleLedger.isSuppressed(finishedTarget))
@@ -161,7 +163,9 @@ import MergeTetherRemote
             actionID: current.id, token: current.token, argument: #"{"pin":{"_0":true}}"#)
         await f.transport.onMessage?(.init(type: .command, command: repin))
         #expect(f.transport.messages.last?.result?.status == .completed)
-        #expect(SettingsManager(defaults: f.defaults).boardPins.contains(pin))
+        let restarted = SettingsManager(defaults: f.defaults)
+        #expect(restarted.bindAuthenticatedAccount(.init(host: "gitlab.example.test", username: "me", userID: 3)))
+        #expect(restarted.boardPins.contains(pin))
     }
 
     @Test func phoneEditsTheDisplayedDraftPolicyAndKeepsRepositoryScopeSeparate() async throws {
