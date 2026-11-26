@@ -335,7 +335,7 @@ struct AssistantWorkerAdmissionTests {
             let pipeline = ["owned-pipeline", "stale-token", "owned-plus-legacy", "confirmed-pipeline", "unconfirmed-pipeline", "wrong-confirmation"].contains(scenario) || scenario.hasPrefix("late-pipeline-")
             let allowedPush = scenario == "audit-allowed-push"
             let feedbackFollowUp = scenario.hasPrefix("follow-up-")
-            let authored = pipeline || allowedPush || feedbackFollowUp
+            let authored = pipeline || allowedPush || feedbackFollowUp || scenario.hasPrefix("new-discussion")
             let key = ExistingPipelineWorkDetector.Key(host: host, projectID: 7, mergeRequestIID: 11, pipelineID: 10)
             var reservation: ExistingPipelineWorkDetector.Key?
             if pipeline {
