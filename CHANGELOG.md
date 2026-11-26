@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Open agent chat in a larger sheet with the active verification model and reasoning level. Show timeouts separately and retry the original question when a reply fails.
 
-- Let an explicit per-MR auto-merge or auto-approval choice override its global rules. Keep Default for inherited choices.
+- Let per-MR On qualify an MR for auto-approval or auto-merge while keeping readiness requirements, including the configured approval threshold and readiness criteria from the active prompt.
 - Remove obsolete handler completion controls from Automation settings.
 
 - Keep reviewer feedback and discussion blockers visible when a completed assessment cannot be matched to the merge request’s current title and description.

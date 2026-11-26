@@ -2925,54 +2925,72 @@ import MergeTetherRemote
         #expect(harness.monitor.currentItems.first?.canApprove != true)
     }
 
-    @Test(arguments: ["allow", "deny", "uncertain", "blank", "off", "on", "unready", "changed", "editedPrompt"])
-    func approvalPromptIsAnAdditionalGateForEligibleDefaults(_ scenario: String) async throws {
-        var verifications = 0
+    @Test(arguments: ["allow", "deny", "uncertain", "blank", "off", "on", "onDenied", "onUncertain",
+                      "onUnready", "unready", "switchOn", "changed", "editedPrompt"])
+    func approvalPromptChecksReadinessEvenWhenTheUserQualifiesTheMR(_ scenario: String) async throws {
+        let optedIn = ["on", "onDenied", "onUncertain", "onUnready"].contains(scenario)
+        var scopes: [AutomaticActionPromptVerifier.EvaluationScope] = []
         var gitlab: InMemoryGitLab?
         var settings: SettingsManager?
         let harness = try makeHarness(assistantWorked: true, verifyActionPrompt: { input, _ in
-            verifications += 1
+            scopes.append(input.evaluationScope)
             #expect(input.action == .approval && input.target.iid == 2)
-            #expect(input.criteria == "Approve Alice's MRs.")
+            #expect(input.criteria == "Approve Alice's MRs after QA signs off.")
             if scenario == "changed" { gitlab?.write("discussions.json", self.othersThread) }
             if scenario == "editedPrompt" { settings?.automation.autoApprovePrompt.criteria = "Deny all." }
-            return .init(decision: scenario == "deny" ? .deny : scenario == "uncertain" ? .uncertain : .allow,
-                         reason: "Matched the fixture criteria.")
+            let decision: AutomaticActionPromptVerifier.Result.Decision = switch scenario {
+            case "deny", "onDenied": .deny
+            case "uncertain", "onUncertain": .uncertain
+            case "switchOn" where input.evaluationScope == .qualificationAndReadiness: .deny
+            default: .allow
+            }
+            return .init(decision: decision, reason: "Checked the author and QA status.")
         })
         defer { harness.cleanUp() }
         gitlab = harness.gitlab
         settings = harness.settings
         let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
         harness.settings.automation.autoApproveMode = .prompt
-        harness.settings.automation.autoApprovePrompt.criteria = scenario == "blank" ? " " : "Approve Alice's MRs."
-        if scenario == "off" || scenario == "on" {
-            harness.settings.setActionPreference(scenario == "on" ? .on : .off, for: .approval, target: target)
+        harness.settings.automation.autoApprovePrompt.criteria = scenario == "blank" ? " " : "Approve Alice's MRs after QA signs off."
+        if scenario == "off" || optedIn {
+            harness.settings.setActionPreference(optedIn ? .on : .off, for: .approval, target: target)
         }
-        if scenario != "unready" { try harness.recordVerdict("no_objections", head: head) }
+        if !["unready", "onUnready"].contains(scenario) { try harness.recordVerdict("no_objections", head: head) }
 
         try await harness.poll()
-        if scenario == "deny" || scenario == "uncertain" { try await harness.poll() }
+        if ["deny", "uncertain", "onDenied", "onUncertain"].contains(scenario) { try await harness.poll() }
+        if scenario == "switchOn" {
+            #expect(harness.log("approve.log").isEmpty)
+            harness.settings.setActionPreference(.on, for: .approval, target: target)
+            harness.settings.save()
+            await harness.monitor.resumeAutomaticAction(.approval, for: target)
+        }
 
-        let invoked = ["allow", "deny", "uncertain", "changed", "editedPrompt"].contains(scenario)
-        #expect(verifications == (invoked ? 1 : 0))
-        #expect(harness.log("approve.log").contains("sha=\(head)") == (scenario == "allow" || scenario == "on"))
+        let expectedScopes: [AutomaticActionPromptVerifier.EvaluationScope] = switch scenario {
+        case "blank", "off", "unready", "onUnready": []
+        case "on", "onDenied", "onUncertain": [.readinessOnly]
+        case "switchOn": [.qualificationAndReadiness, .readinessOnly]
+        default: [.qualificationAndReadiness]
+        }
+        #expect(scopes == expectedScopes)
+        #expect(harness.log("approve.log").contains("sha=\(head)") == ["allow", "on", "switchOn"].contains(scenario))
         let events = harness.settings.automationEvents.filter { $0.action == .approvalPrompt }
-        #expect(events.count == (invoked || scenario == "blank" ? 1 : 0))
+        #expect(events.count == (scenario == "blank" ? 1 : expectedScopes.count))
         #expect(events.allSatisfy { $0.origin == .automatic && $0.message?.isEmpty == false })
         if scenario == "deny" {
             await harness.monitor.approve(.init(projectID: 1, iid: 2))
             #expect(harness.log("approve.log").contains("sha=\(head)"))
-            #expect(verifications == 1)
+            #expect(scopes == [.qualificationAndReadiness])
         }
     }
 
     @Test(arguments: [
         (MRAutomationPreference.default, "minor_code", false),
-        (MRAutomationPreference.on, "minor_code", true),
+        (MRAutomationPreference.on, "minor_code", false),
         (MRAutomationPreference.on, "major", false),
         (MRAutomationPreference.off, "none", false)
     ])
-    func explicitApprovalChoiceOverridesTheGlobalThreshold(_ scenario: (MRAutomationPreference, String, Bool)) async throws {
+    func explicitApprovalChoiceKeepsTheGlobalReadinessThreshold(_ scenario: (MRAutomationPreference, String, Bool)) async throws {
         let (preference, finding, approves) = scenario
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }

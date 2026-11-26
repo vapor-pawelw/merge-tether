@@ -1214,8 +1214,8 @@ import Testing
         }
     }
 
-    @Test(arguments: ["allow", "train", "deny", "unavailable", "off", "on", "ci", "changed"])
-    func mergePromptIsAnAdditionalGateForEligibleDefaults(_ scenario: String) async throws {
+    @Test(arguments: ["allow", "train", "deny", "unavailable", "off", "on", "onDenied", "onUncertain", "onCI", "ci", "changed"])
+    func mergePromptChecksReadinessEvenWhenTheUserQualifiesTheMR(_ scenario: String) async throws {
         try await fixture { glab, gitlab, _ in
             let suite = "MergePrompt.\(UUID())"
             let defaults = try #require(UserDefaults(suiteName: suite))
@@ -1224,13 +1224,14 @@ import Testing
             settings.onboardingCompleted = true
             settings.automation.applyPreset(.full, for: .codex)
             settings.automation.autoMergeMode = .prompt
-            settings.automation.autoMergePrompt.criteria = "Do not merge changes to protected branches."
+            settings.automation.autoMergePrompt.criteria = "Only merge dependencies after QA signs off."
             let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
-            if scenario == "off" || scenario == "on" {
-                settings.setAutoMergePreference(scenario == "on" ? .on : .off, for: target)
+            let optedIn = ["on", "onDenied", "onUncertain", "onCI"].contains(scenario)
+            if scenario == "off" || optedIn {
+                settings.setAutoMergePreference(optedIn ? .on : .off, for: target)
             }
             if scenario != "train" { gitlab.write("ordinary-project") }
-            if scenario == "ci" { gitlab.write("pipeline-running") }
+            if scenario == "ci" || scenario == "onCI" { gitlab.write("pipeline-running") }
             gitlab.write("outcome", scenario == "train" ? "train-only" : "merged")
 
             var verifications = 0
@@ -1238,21 +1239,27 @@ import Testing
                 verifyActionPrompt: { input, _ in
                     verifications += 1
                     #expect(input.action == .merge && input.target == target)
+                    #expect(input.evaluationScope == (optedIn ? .readinessOnly : .qualificationAndReadiness))
                     #expect(input.criteria == settings.automation.autoMergePrompt.criteria)
                     #expect(settings.mergeSubmissions.isEmpty)
                     if scenario == "changed" { gitlab.write("drift", "target") }
                     if scenario == "unavailable" { throw AutomaticActionPromptVerifier.Failure.unavailable }
-                    return .init(decision: scenario == "deny" ? .deny : .allow, reason: "Checked the target branch.")
+                    let decision: AutomaticActionPromptVerifier.Result.Decision = switch scenario {
+                    case "deny", "onDenied": .deny
+                    case "onUncertain": .uncertain
+                    default: .allow
+                    }
+                    return .init(decision: decision, reason: "Checked the QA status.")
                 })
 
             monitor.refreshIfNeeded()
             while monitor.isLoading { await Task.yield() }
-            if scenario == "deny" || scenario == "unavailable" {
+            if ["deny", "unavailable", "onDenied", "onUncertain"].contains(scenario) {
                 monitor.refreshIfNeeded()
                 while monitor.isLoading { await Task.yield() }
             }
 
-            let invoked = !["off", "on", "ci"].contains(scenario)
+            let invoked = !["off", "ci", "onCI"].contains(scenario)
             let writes = gitlab.requests.filter { $0.method != "GET" }
             #expect(verifications == (invoked ? 1 : 0))
             #expect(writes.count == (["allow", "train", "on"].contains(scenario) ? 1 : 0))

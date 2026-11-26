@@ -28,8 +28,8 @@
     },
     "automaticActions.mergeHelp": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Default follows Settings. On skips the prompt and the author, assignee and project filters. Merge readiness and permissions still apply. Off disables auto-merge for this MR." } },
-        "pl": {"stringUnit": {"state": "translated", "value": "Domyślne stosuje ustawienia globalne. Włączone pomija prompt oraz filtry autora, przypisania i projektu. Nadal obowiązują warunki gotowości i uprawnienia. Wyłączone blokuje auto merge dla tego MR-a."}} }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Default follows Settings. On qualifies this MR for auto-merge. Merge checks and any readiness requirements in the active prompt still apply. Off disables auto-merge for this MR." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Domyślne stosuje ustawienia globalne. Włączone kwalifikuje ten MR do auto merge’a. Nadal obowiązują warunki scalania i wymagania gotowości z aktywnego promptu. Wyłączone blokuje auto merge dla tego MR-a."}} }
     },
     "automaticActions.approval": {
       "extractionState": "manual",
@@ -43,8 +43,8 @@
     },
     "automaticActions.approvalHelp": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Default follows Settings. On uses the No major issues threshold and skips the prompt. Off disables auto-approval for this MR." } },
-        "pl": {"stringUnit": {"state": "translated", "value": "Domyślne stosuje ustawienia globalne. Włączone stosuje próg Brak poważnych problemów i pomija prompt. Wyłączone blokuje auto approve dla tego MR-a."}} }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Default follows Settings. On qualifies this MR for auto-approval. The configured findings threshold and any readiness requirements in the active prompt still apply. Off disables auto-approval for this MR." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Domyślne stosuje ustawienia globalne. Włączone kwalifikuje ten MR do auto approve. Nadal obowiązują ustawiony próg uwag i wymagania gotowości z aktywnego promptu. Wyłączone blokuje auto approve dla tego MR-a."}} }
     },
     "automaticActions.exceptionsHelp": {
       "extractionState": "manual",

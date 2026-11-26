@@ -7,10 +7,12 @@ final class AutomaticActionPromptGate {
 
     struct Policy: Equatable, Sendable {
         let criteria: String
+        let evaluationScope: Verifier.EvaluationScope
         let configuration: Verifier.Configuration
 
         @MainActor init?(_ action: MRAutomaticAction, target: MRAutomationScope.Target, settings: SettingsManager) {
-            guard settings.actionPreference(action, for: target) == .default else { return nil }
+            let preference = settings.actionPreference(action, for: target)
+            guard preference != .off else { return nil }
             let automation = settings.automation
             let prompt: AutomaticActionPrompt
             switch action {
@@ -23,6 +25,7 @@ final class AutomaticActionPromptGate {
             case .commentPublication: return nil
             }
             criteria = prompt.criteria.trimmingCharacters(in: .whitespacesAndNewlines)
+            evaluationScope = preference == .on ? .readinessOnly : .qualificationAndReadiness
             configuration = .init(automation)
         }
     }
@@ -84,7 +87,8 @@ final class AutomaticActionPromptGate {
             message = .AutomationHistory.automationHistoryPromptEmpty
         } else {
             let input = Verifier.Input(action: candidate.action, mergeAction: candidate.mergeAction,
-                criteria: candidate.policy.criteria, target: candidate.target, userID: candidate.userID,
+                criteria: candidate.policy.criteria, evaluationScope: candidate.policy.evaluationScope,
+                target: candidate.target, userID: candidate.userID,
                 request: request, discussions: discussions)
             do {
                 let result = try await verify(input, candidate.policy.configuration)
@@ -107,10 +111,12 @@ final class AutomaticActionPromptGate {
         }
         guard accountIsCurrent() else { return false }
         let current = !Task.isCancelled && isEligible()
+        let outcome = String(localized: current ? message : .AutomationHistory.automationHistoryPromptChanged(String(localized: message)))
+        let summary = candidate.policy.evaluationScope == .readinessOnly
+            ? String(localized: .AutomationHistory.automationHistoryPromptReadinessOnly(outcome)) : outcome
         settings.recordAutomationEvent(target: candidate.target,
             action: candidate.action == .approval ? .approvalPrompt : .mergePrompt,
-            origin: .automatic, state: current ? state : .blocked,
-            message: String(localized: current ? message : .AutomationHistory.automationHistoryPromptChanged(String(localized: message))))
+            origin: .automatic, state: current ? state : .blocked, message: summary)
         guard current, settings.automaticActionsAllowed else { return false }
         let finished = Date()
         recent = recent.filter { $0.value.retryAfter > finished }

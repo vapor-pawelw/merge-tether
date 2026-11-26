@@ -1238,7 +1238,7 @@ final class MergeRequestAttentionMonitor {
                         autoApproveApplies(to: $0, host: host, username: account.username)
                     } ?? false
                     let target = commentReviewTarget(item.id, account: account)
-                    let approvalThreshold = settings?.autoApprovalThreshold(for: target) ?? .noMajorIssues
+                    let approvalThreshold = settings?.automation.autoApprovalThreshold ?? .noMajorIssues
                     let approvalBaseline = settings?.approvalBaseline(for: target, user: user)
                     let approvalOptedOut = settings.map {
                         $0.automation.scope[target] != .paused && $0.actionPreference(.approval, for: target) == .off
@@ -3347,7 +3347,7 @@ final class MergeRequestAttentionMonitor {
             if requiresAuthenticatedVerdict, let verdict {
                 covered = ReviewVerdictStore.automaticallyApproves(verdict, head: head,
                     discussions: evidence.discussions, user: user,
-                    threshold: self.settings?.autoApprovalThreshold(for: target) ?? .noMajorIssues,
+                    threshold: self.settings?.automation.autoApprovalThreshold ?? .noMajorIssues,
                     semanticContextFingerprint: current.semanticContextFingerprint,
                     legacyDuoThreadsVerified: evidence.discussionsReady, in: self.verdictDirectory)
             } else {
@@ -3587,7 +3587,7 @@ final class MergeRequestAttentionMonitor {
                     if let verdict = ReviewVerdictStore.authenticatedVerdict(host: account.host, projectID: item.id.projectID,
                         iid: item.id.iid, user: user, settings: settings, in: verdictDirectory), verdict.verdict == .classifiedFindings {
                         return request.isOpen && ReviewVerdictStore.automaticallyApproves(verdict, head: request.sha ?? "",
-                            discussions: discussions, user: user, threshold: settings?.autoApprovalThreshold(for: target) ?? .noMajorIssues,
+                            discussions: discussions, user: user, threshold: settings?.automation.autoApprovalThreshold ?? .noMajorIssues,
                             semanticContextFingerprint: request.semanticContextFingerprint, in: verdictDirectory)
                     }
                     return ReviewVerdictStore.verdict(host: account.host, projectID: item.id.projectID, iid: item.id.iid, user: user, in: verdictDirectory)?

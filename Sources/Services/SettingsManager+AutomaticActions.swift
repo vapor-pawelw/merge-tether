@@ -142,10 +142,6 @@ extension SettingsManager {
         return storedActionPreference(action, for: target)
     }
 
-    func autoApprovalThreshold(for target: MRAutomationScope.Target) -> AutoApprovalThreshold {
-        actionPreference(.approval, for: target) == .on ? .noMajorIssues : automation.autoApprovalThreshold
-    }
-
     func autoMergePreference(for target: MRAutomationScope.Target) -> MRAutomationPreference {
         actionPreference(.merge, for: target)
     }

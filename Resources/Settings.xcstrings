@@ -126,13 +126,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Describe which merge requests to allow or exclude. The verifier checks only eligible requests that use Default. Missing or uncertain decisions leave the action for you."
+            "value": "Describe which MRs qualify and what must be true before acting. Per-MR Default applies both. Per-MR On applies the readiness requirements. Uncertain decisions leave the action for you."
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Opisz, które MR-y dopuścić lub wykluczyć. Weryfikator sprawdza tylko gotowe MR-y z ustawieniem Domyślne. Przy braku pewnej decyzji akcja pozostaje do wykonania ręcznie."
+            "value": "Opisz, które MR-y zakwalifikować i co musi być spełnione przed akcją. Domyślne stosuje oba rodzaje reguł, a Włączone stosuje warunki gotowości. Przy niepewności akcja pozostaje do wykonania ręcznie."
           }
         }
       }
