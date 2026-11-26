@@ -1,6 +1,11 @@
 import Foundation
 
-final class CrashUpload: Sendable {
+protocol CrashReportUploading: Sendable {
+    func send(_ envelope: CrashReport.Envelope) async -> Bool
+    @MainActor func cancel()
+}
+
+final class CrashUpload: CrashReportUploading {
     private let destination: CrashReportingDestination
     private let session: URLSession
 

@@ -3,9 +3,9 @@ import SwiftUI
 struct OnboardingView: View {
     let monitor: TodoMonitorService
     let crashReporting: CrashReporting
-    private let steps: [Step]
 
     @Environment(\.dismissWindow) private var dismissWindow
+    @State private var steps: [Step]
     @State private var step: Step = .glabInstall
     @State private var automationChoice: AutomationPackageChoice?
     @State private var assistant: AutomationAssistant?
@@ -14,7 +14,7 @@ struct OnboardingView: View {
     init(monitor: TodoMonitorService, crashReporting: CrashReporting) {
         self.monitor = monitor
         self.crashReporting = crashReporting
-        steps = Step.allCases.filter { $0 != .crashReporting || crashReporting.needsConsent }
+        _steps = State(initialValue: Step.allCases.filter { $0 != .crashReporting || crashReporting.needsConsent })
         let automation = monitor.settings.automation
         _assistant = State(initialValue: automation.selectedAssistant)
         _automationChoice = State(initialValue: AutomationPreset.onboardingDefault(for: automation.packageDecision))

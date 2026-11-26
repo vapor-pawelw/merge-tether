@@ -191,9 +191,11 @@ trap 'rm -rf "$SCRATCH"' EXIT
 mkdir -p "$SCRATCH/artifacts"
 ARTIFACTS=()
 COMMON_SETTINGS=("MARKETING_VERSION=${VERSION}" "CURRENT_PROJECT_VERSION=${BUILD_NUMBER}")
-SYMBOLS_DIR="${MERGETETHER_CRASH_SYMBOLS_DIR:-}"
-if [[ -n "$SYMBOLS_DIR" ]]; then
-    [[ "$SYMBOLS_DIR" == /* ]] || fail "MERGETETHER_CRASH_SYMBOLS_DIR must be an absolute private directory"
+SYMBOLS_ROOT="${MERGETETHER_CRASH_SYMBOLS_DIR:-}"
+if [[ -n "$SYMBOLS_ROOT" ]]; then
+    [[ "$SYMBOLS_ROOT" == /* ]] || fail "MERGETETHER_CRASH_SYMBOLS_DIR must be an absolute private directory"
+    SYMBOLS_DIR="${SYMBOLS_ROOT%/}/MergeTether-${VERSION}-${BUILD_NUMBER}-${PLATFORM}"
+    [[ ! -e "$SYMBOLS_DIR" && ! -L "$SYMBOLS_DIR" ]] || fail "symbol output already exists: $SYMBOLS_DIR"
     mkdir "$SCRATCH/symbols"
     COMMON_SETTINGS+=(DEBUG_INFORMATION_FORMAT=dwarf-with-dsym)
 fi
@@ -228,7 +230,7 @@ verify_signature() {
     fi
 }
 collect_debug_symbols() {
-    [[ -n "$SYMBOLS_DIR" ]] || return 0
+    [[ -n "$SYMBOLS_ROOT" ]] || return 0
     [[ -d "$1" ]] || fail "missing dSYM for crash symbolication"
     ditto "$1" "$SCRATCH/symbols/${1##*/}"
 }
@@ -342,9 +344,13 @@ for name in names:
     'artifacts': artifacts,
 }, indent=2) + '\n')
 PY
-if [[ -n "$SYMBOLS_DIR" ]]; then
-    mkdir -p "$SYMBOLS_DIR"
-    ditto "$SCRATCH/symbols" "$SYMBOLS_DIR"
+if [[ -n "$SYMBOLS_ROOT" ]]; then
+    mkdir -p "$SYMBOLS_ROOT"
+    (umask 077; mkdir "$SYMBOLS_DIR") || fail "could not create symbol output: $SYMBOLS_DIR"
+    if ! ditto "$SCRATCH/symbols" "$SYMBOLS_DIR"; then
+        rm -rf "$SYMBOLS_DIR"
+        fail "could not export debug symbols"
+    fi
 fi
 for name in "${ARTIFACTS[@]}"; do
     cp "$SCRATCH/artifacts/$name" "$SCRATCH/artifacts/$name.sha256" "$RELEASE_DIR/"
