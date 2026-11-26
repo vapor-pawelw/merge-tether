@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Auto-reply to comments based on style only after you confirm two AI comments from the same author and have marked none human. See author-trust publications in the MR Event log and manage trust in publication settings.
+- Use **Reply (AI)** or **It's human** on unconfirmed reply drafts in Mac, iPhone and iPad Details.
+
 - Show **Review needed** again when new commits or a different target diff make your GitLab approval stale, including after restarting MergeTether.
 
 - Limit older successful transcripts and read-only review history after an MR merges or stays closed for 30 days. Active runs and records used for automation remain available.

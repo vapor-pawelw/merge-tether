@@ -3,6 +3,27 @@ import Testing
 @testable import MergeTether
 
 struct AICommentPublicationTests {
+    @Test func styleCriteriaRevisionIsNewerThanThePreviousHeuristic() {
+        #expect(AICommentOriginAssessor.criteriaVersion > 5)
+    }
+
+    @Test(arguments: [0, 1, 2], [false, true])
+    func styleEvidenceRequiresTwoDistinctConfirmationsAndNoHumanMark(_ confirmations: Int, _ human: Bool) {
+        let expected: AIReplyTrustLane = confirmations >= 2 && !human ? .trustedAuthor : .unconfirmed
+        #expect(AIReplyTrustLane(override: nil, definite: false, styleSaysAI: true,
+            trustsAuthor: confirmations >= 2 && !human) == expected)
+        #expect(AIReplyTrustLane(override: nil, definite: false, styleSaysAI: false,
+            trustsAuthor: true) == .humanOrUncertain)
+        #expect(AIReplyTrustLane(override: .human, definite: false, styleSaysAI: true,
+            trustsAuthor: true) == .humanOrUncertain)
+        #expect(AIReplyTrustLane(override: .uncertain, definite: false, styleSaysAI: true,
+            trustsAuthor: true) == .humanOrUncertain)
+        #expect(AIReplyTrustLane(override: .ai, definite: false, styleSaysAI: false,
+            trustsAuthor: false) == .definite)
+        #expect(AIReplyTrustLane(override: nil, definite: true, styleSaysAI: false,
+            trustsAuthor: false) == .definite)
+    }
+
     @Test func newOptionMigratesOnAndPreservesExplicitChoices() throws {
         let decoder = JSONDecoder()
         #expect(AutomationSettings().publishAIRepliesWithoutConfirmation)

@@ -20,6 +20,7 @@ struct MRAutomationEvent: Codable, Identifiable, Equatable, Sendable {
     var relatedJobID: UUID? = nil
     var approvedHeadSHA: String? = nil
     var publishedNoteID: Int? = nil
+    var publicationBasedOnAuthorTrust: Bool? = nil
 
     var title: LocalizedStringResource {
         switch action {
@@ -35,7 +36,8 @@ struct MRAutomationEvent: Codable, Identifiable, Equatable, Sendable {
         case .approval: .AutomationHistory.automationHistoryActionApproval
         case .approve: .AutomationHistory.automationHistoryActionApproved
         case .removeApproval: .Board.boardApprovalsRemoved
-        case .publication: .AutomationHistory.automationHistoryActionPublication
+        case .publication: publicationBasedOnAuthorTrust == true
+            ? .AutomationHistory.automationHistoryPublicationAuthorTrust : .AutomationHistory.automationHistoryActionPublication
         case .merge: .AutomationHistory.automationHistoryMerged
         case .enqueueMerge: .AutomationHistory.automationHistoryActionEnqueueMerge
         }
@@ -165,12 +167,12 @@ extension SettingsManager {
                                origin: MRAutomationEvent.Origin, state: MRAutomationEvent.State,
                                message: String? = nil, intentID: UUID? = nil, jobID: UUID? = nil,
                                relatedJobID: UUID? = nil, approvedHeadSHA: String? = nil,
-                               publishedNoteID: Int? = nil, now: Date = Date()) {
+                               publishedNoteID: Int? = nil, publicationBasedOnAuthorTrust: Bool? = nil, now: Date = Date()) {
         guard target.iid != nil else { return }
         let event = MRAutomationEvent(id: UUID(), target: target, createdAt: now, action: action,
             origin: origin, state: state, message: message.map(GlabService.redactWorkflowEvidence),
             intentID: intentID, jobID: jobID, relatedJobID: relatedJobID, approvedHeadSHA: approvedHeadSHA,
-            publishedNoteID: publishedNoteID)
+            publishedNoteID: publishedNoteID, publicationBasedOnAuthorTrust: publicationBasedOnAuthorTrust)
         var counts: [MRAutomationScope.Target: Int] = [:]
         automationEvents = ([event] + automationEvents).sorted {
             $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt > $1.createdAt

@@ -4,6 +4,40 @@ import Testing
 
 @MainActor
 struct ReviewParticipationPreferencesTests {
+    @Test func AIReplyTrustSurvivesRestartAndUsesTheGitLabAccountAndAuthorIDs() throws {
+        let suite = "AIReplyTrust.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        let host = "gitlab.example.org"
+        let account = GitLabAuthenticatedUser(id: 3, username: "me")
+        let date = Date(timeIntervalSince1970: 10)
+        func note(_ id: Int, username: String = "alice") -> GitLabMergeRequestDiscussion.Note {
+            .init(id: id, author: .init(id: 8, username: username, name: nil), system: false,
+                resolvable: true, resolved: false, resolvedBy: nil, body: "Review")
+        }
+        #expect(settings.recordAIReplyTrust(.ai, notes: [note(40), note(40), note(41, username: "renamed")],
+            host: host, user: account, at: date))
+
+        let reopened = SettingsManager(defaults: defaults)
+        let records = reopened.reviewParticipationPreferences
+        let record = try #require(records.aiReplyTrust(host: host, accountID: 3, authorID: 8))
+        #expect(record.confirmedAINotes == [40: date, 41: date])
+        #expect(record.trustsStyleAssessment)
+        #expect(records.aiReplyTrust(host: host, accountID: 9, authorID: 8) == nil)
+        #expect(records.aiReplyTrust(host: "another.example.org", accountID: 3, authorID: 8) == nil)
+        #expect(records.aiReplyTrust(host: host, accountID: 3, authorID: 9) == nil)
+
+        #expect(reopened.recordAIReplyTrust(.human, notes: [note(42)], host: host, user: account, at: date))
+        #expect(reopened.recordAIReplyTrust(.ai, notes: [note(42)], host: host, user: account, at: date))
+        let blocked = try #require(SettingsManager(defaults: defaults).reviewParticipationPreferences
+            .aiReplyTrust(host: host, accountID: 3, authorID: 8))
+        #expect(blocked.humanNotes == [42: date])
+        #expect(!blocked.trustsStyleAssessment)
+        #expect(reopened.resetAIReplyTrust(blocked.id))
+        #expect(SettingsManager(defaults: defaults).reviewParticipationPreferences.aiReplyTrustRecords.isEmpty)
+    }
+
     @Test(arguments: ["invalidID", "emptyHost", "emptyAccount", "duplicateIdentity", "duplicateEntryID"])
     func malformedStoredAutomationAuthorsKeepAutomaticActionsOnHold(_ scenario: String) throws {
         let suite = "LocalAutomationAuthorsCorrupt.\(UUID())"

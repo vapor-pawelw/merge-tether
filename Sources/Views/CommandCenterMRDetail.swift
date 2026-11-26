@@ -76,6 +76,8 @@ private struct CommandCenterMRDetailContent: View {
     @State private var feedbackDecisionError: String?
     @State private var feedbackRecheck: MRFeedbackRecheckProgress?
     @State private var originChangeFailed = false
+    @State private var isDecidingAIReply = false
+    @State private var aiReplyResult: LocalizedStringResource?
     @State private var regenerationPresentation: DraftRegenerationPresentation?
     @State private var discussionNavigation: MRDiscussionNavigation?
 
@@ -346,7 +348,16 @@ private struct CommandCenterMRDetailContent: View {
                 discussionStore.cancel()
                 publicationSession.close()
             }
-            withObservers.alert(Text(feedbackDecisionConfirmation?.isReset == true
+            decisionAlerts(withObservers)
+            .sheet(item: $regenerationPresentation) { monitor.draftRegenerationSheet($0) }
+            .environment(\.gitLabPersonSourceURL, item.url)
+            .environment(\.gitLabViewerUsername, monitor.glab.currentUsername)
+        }
+    }
+
+    private func decisionAlerts<Content: View>(_ content: Content) -> some View {
+        let originAlertTitle = aiReplyResult ?? .MRDiscussions.mrDiscussionsOriginChangeFailed
+        return content.alert(Text(feedbackDecisionConfirmation?.isReset == true
                 ? .FeedbackSuggestions.feedbackSuggestionsResetTitle : .FeedbackSuggestions.feedbackSuggestionsIgnoreTitle),
                 isPresented: Binding(get: { feedbackDecisionConfirmation != nil },
                     set: { if !$0 { feedbackDecisionConfirmation = nil } }), presenting: feedbackDecisionConfirmation) { choice in
@@ -359,13 +370,11 @@ private struct CommandCenterMRDetailContent: View {
                          : .FeedbackSuggestions.feedbackSuggestionsIgnoreConfirm)
                 }
             } message: { choice in Text(verbatim: choice.message) }
-            .alert(Text(.MRDiscussions.mrDiscussionsOriginChangeFailed), isPresented: $originChangeFailed) {
-                Button(role: .cancel) {} label: { Text(.MRDiscussions.mrDiscussionsOriginCancel) }
-            } message: { Text(.MRDiscussions.mrDiscussionsOriginChangeFailedMessage) }
-            .sheet(item: $regenerationPresentation) { monitor.draftRegenerationSheet($0) }
-            .environment(\.gitLabPersonSourceURL, item.url)
-            .environment(\.gitLabViewerUsername, monitor.glab.currentUsername)
-        }
+            .alert(Text(originAlertTitle), isPresented: $originChangeFailed) {
+                Button(role: .cancel) { aiReplyResult = nil } label: { Text(.MRDiscussions.mrDiscussionsOriginCancel) }
+            } message: {
+                if aiReplyResult == nil { Text(.MRDiscussions.mrDiscussionsOriginChangeFailedMessage) }
+            }
     }
 
     private func scroll(to anchor: Anchor, proxy: ScrollViewProxy) async {
@@ -1193,14 +1202,37 @@ private struct CommandCenterMRDetailContent: View {
             currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,
             hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
             expandPendingDrafts: true, selection: $publicationSession.selection,
-            selectionDisabled: discussionTarget == nil || monitor.attention.confirmationStates[item.id]?.isBusy == true,
+            selectionDisabled: discussionTarget == nil || isDecidingAIReply
+                || monitor.attention.confirmationStates[item.id]?.isBusy == true,
             onDelete: { draft in Task { await monitor.attention.deleteDraft(draft, from: item.id) } },
-            onRegenerate: regenerateDraft,
+            onRegenerate: regenerateDraft, aiReplyControls: aiReplyControls,
             title: .DraftPublication.draftPublicationThreads, codeContext: discussionCodeContext, onSetOrigin: originAction,
             extraContexts: current ? discussionStore.extraContexts : .empty,
             currentUserIdentity: current ? discussionStore.currentUser : nil, replyRecipients: item.replyRecipients,
             navigation: discussionNavigation,
             onRefresh: { refreshDiscussions(visible: true) })
+    }
+
+    private var aiReplyControls: AIReplyControls {
+        let displayed = item
+        return .init(decisions: displayed.aiReplyDecisions) { choice, source, draft in
+            guard !isDecidingAIReply else { return }
+            isDecidingAIReply = true
+            aiReplyResult = nil
+            Task {
+                defer { isDecidingAIReply = false }
+                switch await monitor.attention.decideAIReply(choice, source: source, draft: draft,
+                    displayed: displayed, originCenter: monitor.commentOrigins) {
+                case .completed: break
+                case .draftStillPrivate: aiReplyResult = .CommentReview.commentReviewAiDraftStillPrivate
+                case .changed: aiReplyResult = .CommentReview.commentReviewAiReplyChanged
+                case .failed: originChangeFailed = true
+                case .uncertain: aiReplyResult = .CommentReview.commentReviewAiReplyUncertain
+                }
+                if aiReplyResult != nil { originChangeFailed = true }
+                refreshDiscussions()
+            }
+        }
     }
 
     private var eventDiscussions: MREventLogView.Discussions {

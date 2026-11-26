@@ -2,6 +2,125 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "publication.aiReplyTrustHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verified or declared automation, generation footers, and comments you mark as AI qualify directly. Style assessments qualify after two confirmed AI comments from the same author and zero marked human."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zweryfikowana lub zadeklarowana automatyzacja, stopka o wygenerowaniu oraz komentarze oznaczone przez Ciebie jako AI kwalifikują się bezpośrednio. Ocena stylu wystarcza po dwóch potwierdzeniach AI u tego autora, jeśli nie oznaczono żadnego jego komentarza jako napisanego przez człowieka."
+          }
+        }
+      }
+    },
+    "publication.aiReplyTrustAuthors": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Author trust for AI replies"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zaufanie do autorów odpowiedzi AI"
+          }
+        }
+      }
+    },
+    "publication.aiReplyTrustEmpty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No author decisions for this account."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Brak decyzji dotyczących autorów na tym koncie."
+          }
+        }
+      }
+    },
+    "publication.aiReplyTrustHuman": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Human comment marked"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oznaczono komentarz człowieka"
+          }
+        }
+      }
+    },
+    "publication.aiReplyTrustEligible": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trusted for AI replies"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zaufany dla odpowiedzi AI"
+          }
+        }
+      }
+    },
+    "publication.aiReplyTrustWaiting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "More confirmations needed"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Potrzeba więcej potwierdzeń"
+          }
+        }
+      }
+    },
+    "publication.aiReplyTrustResetFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not reset author trust."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się zresetować zaufania do autora."
+          }
+        }
+      }
+    },
     "publication.filtersManual": {
       "extractionState": "manual",
       "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Automatic publication is off. Saved filters are inactive and will be available when you choose a filtered mode." } },
@@ -29,8 +148,8 @@
     },
     "publication.aiRequiredByMode": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Replies to AI or bot feedback requires an AI assessment, or a verified bot account when bot replies are allowed. Choose Matching filters to configure the AI condition independently." } },
-        "pl": {"stringUnit": {"state": "translated", "value": "Tryb odpowiedzi na uwagi AI lub botów wymaga oceny AI albo potwierdzonego konta bota przy włączonych odpowiedziach na jego uwagi. Wybierz „Pasujące do filtrów”, aby ustawić warunek AI niezależnie."}} }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "This mode uses AI reply trust. Choose Matching filters to configure the AI condition independently." } },
+        "pl": {"stringUnit": {"state": "translated", "value": "Ten tryb uwzględnia zaufanie do autorów odpowiedzi AI. Wybierz „Pasujące do filtrów”, aby ustawić warunek AI niezależnie."}} }
     },
     "publication.noConditions": {
       "extractionState": "manual",
@@ -300,10 +419,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "For non-bot accounts, assessment concerns how the comment was written, including AI assistance used by a person. Known bot accounts have a fixed Bot badge. The separate bot-reply permission lets them qualify without an AI assessment; existing AI-evidence conditions remain independent. Other likely manual or uncertain sources stay private."
+            "value": "A reply to an unconfirmed AI assessment stays private and needs your attention. Use Reply (AI) to confirm and publish after checks, or It's human to keep the draft private."
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "W przypadku kont osób ocena dotyczy sposobu napisania komentarza, w tym możliwego wsparcia AI. Znane konta botów mają stałą etykietę „Bot”. Osobne uprawnienie do odpowiedzi na uwagi botów pozwala im się kwalifikować bez oceny AI. Warunki dowodów udziału AI pozostają niezależne. Komentarze prawdopodobnie ręczne lub o niepewnym pochodzeniu pozostają prywatne."}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Odpowiedź na komentarz z niepotwierdzoną oceną AI pozostaje prywatna i wymaga Twojej uwagi. Wybierz „Odpowiedz (AI)”, aby potwierdzić i opublikować po sprawdzeniu, albo „To człowiek”, aby zachować prywatny szkic."}}
       }
     },
     "publication.automaticAll": {

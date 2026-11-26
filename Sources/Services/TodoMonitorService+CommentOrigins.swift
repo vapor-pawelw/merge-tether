@@ -9,7 +9,7 @@ extension TodoMonitorService {
         }, resume: { [weak self] target in
             guard let self, let iid = target.iid, self.isCurrentAccount(target) else { return }
             await self.refreshFromGitLab(for: .init(projectID: target.projectID, iid: iid))
-        }, criteriaOverride: { [weak self] in self?.settings.automation.aiCommentCriteriaOverride })
+        }, onRevision: { [weak self] in self?.attention.invalidateCommentOriginPublication() })
     }
 
     /// Records the user's verdict on comments of one MR. `nil` returns them to automatic assessment.
@@ -34,7 +34,16 @@ extension TodoMonitorService {
                 throw CommentOriginOverrideCenter.ChangeError.automatedAuthor
             }
         }
-        return try await commentOrigins.apply(classification, to: notes, in: discussions, target: target)
+        let account = try await glab.fetchAuthenticatedUser(host: target.host, expectedUsername: target.username)
+        guard isCurrentAccount(target), glab.accountRevision == revision else {
+            throw CommentOriginOverrideCenter.ChangeError.invalidTarget
+        }
+        return try await commentOrigins.apply(classification, to: notes, in: discussions, target: target) { [weak self] selected in
+            guard let self, self.isCurrentAccount(target), self.glab.accountRevision == revision else { return false }
+            guard classification.map({ self.settings.recordAIReplyTrust($0, notes: selected, host: target.host, user: account) }) ?? true
+            else { return false }
+            return true
+        }
     }
 
     private func isCurrentAccount(_ target: MRAutomationScope.Target) -> Bool {

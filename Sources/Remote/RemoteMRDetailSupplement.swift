@@ -159,6 +159,7 @@ import MergeTetherRemote
                 let source: LocalizedStringResource = appEvent == nil
                     ? .AutomationHistory.automationHistorySourceGitLab : .AutomationHistory.automationHistorySourceMergeTether
                 let headline = event.systemHeadline
+                let title = appEvent?.publicationBasedOnAuthorTrust == true ? appEvent?.title ?? event.title : event.title
                 let status = [
                     String(localized: source),
                     entry.isAutomatic ? String(localized: .AutomationHistory.automationHistoryAutomated) : nil,
@@ -167,7 +168,7 @@ import MergeTetherRemote
                 let note = event.noteID.map {
                     RemoteDetailActivity.Note(id: $0, threadID: event.discussionID.flatMap { $0.isEmpty ? nil : "discussion/\($0)" })
                 }
-                return .init(id: entry.id, title: GlabService.redactWorkflowEvidence(headline ?? String(localized: event.title)),
+                return .init(id: entry.id, title: GlabService.redactWorkflowEvidence(headline ?? String(localized: title)),
                     status: GlabService.redactWorkflowEvidence(status), summary: event.body.map(GlabService.redactWorkflowEvidence),
                     createdAt: entry.createdAt, note: note)
             }

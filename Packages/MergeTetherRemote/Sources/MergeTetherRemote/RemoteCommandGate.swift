@@ -32,7 +32,7 @@ import Foundation
         guard admission.receipts.count < RemoteCommandReceiptStore.maximumReceipts else { return .init(id: command.id, status: .limit) }
         guard !board.partial,
               let card = board.commandCards.first(where: { $0.id == command.cardID }),
-              let action = card.actions.first(where: { $0.id == command.actionID && $0.token == command.token })
+              let action = card.commandActions.first(where: { $0.id == command.actionID && $0.token == command.token })
         else { return .init(id: command.id, status: .changed) }
         admission.receipts.append(.init(command: identity, result: .init(id: command.id, status: .running)))
         do { try store?.save(admission) }

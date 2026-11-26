@@ -308,7 +308,9 @@ enum AICommentAssessmentStore {
             guard let note = notes.first(where: { $0.id == result.noteID }), let body = note.body else { throw AICommentOriginAssessor.AssessmentError.invalidEvidence }
             // A worker can save a current positive while the lightweight pass is still running.
             if (result.classification != .aiAssisted || result.confidence == .uncertain),
-               self.assessment(for: note, host: target.host, projectID: target.projectID, iid: iid, in: directory) != nil { continue }
+               let existing = self.assessment(for: note, host: target.host, projectID: target.projectID, iid: iid, in: directory),
+               existing.criteriaVersion == AICommentOriginAssessor.criteriaVersion,
+               existing.username == target.username, existing.authorID == note.author?.id { continue }
             let record = AICommentAssessment(version: 2, host: target.host, projectID: target.projectID, iid: iid,
                 noteID: result.noteID, bodySHA256: digest(body), confidence: result.confidence.rawValue,
                 evidence: GlabService.redactWorkflowEvidence(result.evidence), classification: result.classification.rawValue,

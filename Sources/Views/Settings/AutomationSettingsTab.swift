@@ -275,7 +275,7 @@ struct AutomationSettingsTab: View {
                 }
             } header: { Text(.Settings.settingsAutomationPublicationTitle) }
             PublicationRestrictionsSettingsView(restrictions: $editor.draft.publicationRestrictions,
-                mode: editor.draft.publicationMode, glab: monitor.glab, preset: editor.draft.baselinePreset)
+                mode: editor.draft.publicationMode, glab: monitor.glab, settings: monitor.settings, preset: editor.draft.baselinePreset)
         }
     }
 

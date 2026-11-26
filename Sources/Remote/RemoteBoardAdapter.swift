@@ -110,6 +110,23 @@ import MergeTetherRemote
         return monitor.markReviewAssignmentSeen(row.displayItem) ? .completed : .failed
     }
 
+    private static func aiReplyDecisions(for draft: GitLabDraftNote, item: MergeRequestAttentionMonitor.Item,
+                                         account: String) -> [RemoteAIReplyDecision]? {
+        guard let draftID = draft.id, let offered = item.aiReplyDecisions[draftID], !offered.isEmpty,
+              let request = item.mergeRequest, let fingerprint = item.observedDiscussionFingerprint,
+              let draftToken = try? RemoteDigest.token(draft), let requestToken = try? RemoteDigest.token(request) else { return nil }
+        let decisions: [RemoteAIReplyDecision] = offered.compactMap { source in
+            let parts = [account, requestToken, fingerprint, draftToken, String(source.id),
+                         String(source.authorID), source.bodyDigest, String(item.observationSession?.revision ?? 0)]
+            guard let reply = try? RemoteDigest.token(parts + ["reply"]),
+                  let human = try? RemoteDigest.token(parts + ["human"]) else { return nil }
+            return .init(id: source.id, authorLabel: source.authorLabel, excerpt: source.excerpt,
+                reply: .init(id: "confirmAIReply:\(draftID):\(source.id)", kind: .confirmAIReply, token: reply),
+                human: .init(id: "markReplyHuman:\(draftID):\(source.id)", kind: .markReplyHuman, token: human))
+        }
+        return decisions.isEmpty ? nil : decisions
+    }
+
     static func card(_ item: MergeRequestAttentionMonitor.Item, account: String,
                      extraActions: [RemoteActionKind] = [], context: [String] = [],
                      failedFollowUp: MRHumanAction.FailedFollowUp? = nil,
@@ -121,7 +138,8 @@ import MergeTetherRemote
             let recipients = draft.discussionID.flatMap { item.replyRecipients[$0] }?.map(\.remotePerson)
             return RemoteDraft(id: draft.id ?? (-1 - index), body: draft.note ?? "", context: context,
                 publicationWarnings: DraftPublicationRisk(draft: draft)?.messages.map { String(localized: $0) },
-                replyRecipients: recipients?.isEmpty == false ? recipients : nil)
+                replyRecipients: recipients?.isEmpty == false ? recipients : nil,
+                aiReplyDecisions: aiReplyDecisions(for: draft, item: item, account: account))
         }
         var card = RemoteCard(id: mergeRequestCardID(item.id), title: item.title,
             project: item.url.gitLabProjectPath, url: item.url,

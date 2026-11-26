@@ -29,6 +29,11 @@ public struct RemoteCardSelection: Identifiable, Equatable, Sendable {
 /// The phone shows each sentence once, like the Mac card: a status or next step that repeats
 /// the card's explanation adds nothing, and older hosts may still send such repeats.
 public extension RemoteCard {
+    var commandActions: [RemoteAction] {
+        actions + drafts.flatMap { ($0.aiReplyDecisions ?? []).flatMap { [$0.reply, $0.human] } }
+    }
+
+
     var reviewSeenAction: RemoteAction? {
         guard boardTraits?.isNew == true else { return nil }
         return actions.first { $0.id == RemoteAction.reviewSeenID && $0.kind == .markDone }

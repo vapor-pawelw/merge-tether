@@ -11,6 +11,7 @@ final class CommentOriginOverrideCenter {
     typealias Gain = @MainActor (MRAutomationScope.Target, [GitLabMergeRequestDiscussion], Set<Int>) async -> Int
     /// Re-evaluates automation for the MR after a change takes effect.
     typealias Resume = @MainActor (MRAutomationScope.Target) async -> Void
+    typealias Activate = @MainActor ([Note]) -> Bool
     typealias Sleep = @Sendable (Duration) async throws -> Void
 
     enum ChangeError: Error, Equatable { case invalidTarget, unknownComment, automatedAuthor, storage }
@@ -36,19 +37,19 @@ final class CommentOriginOverrideCenter {
     private let resume: Resume
     private let sleep: Sleep
     private let now: @MainActor () -> Date
-    private let criteriaOverride: @MainActor () -> String?
+    private let onRevision: @MainActor () -> Void
     /// Changes still inside their undo window, newest last.
     private(set) var pending: [Change] = []
     /// Bumped on every write so open conversations reload their badges.
-    private(set) var revision: UInt64 = 0
+    private(set) var revision: UInt64 = 0 { didSet { onRevision() } }
+    @ObservationIgnored private var activations: [UUID: @MainActor () -> Bool] = [:]
     @ObservationIgnored private var timers: [UUID: Task<Void, Never>] = [:]
 
     init(directory: URL, grace: Duration = gracePeriod, gain: @escaping Gain, resume: @escaping Resume,
-         criteriaOverride: @escaping @MainActor () -> String? = { nil },
+         onRevision: @escaping @MainActor () -> Void = {},
          sleep: @escaping Sleep = { try await Task.sleep(for: $0) }, now: @escaping @MainActor () -> Date = { Date() }) {
         self.directory = directory; self.grace = grace; self.gain = gain; self.resume = resume
-        self.sleep = sleep; self.now = now
-        self.criteriaOverride = criteriaOverride
+        self.sleep = sleep; self.now = now; self.onRevision = onRevision
     }
 
     func pending(for target: MRAutomationScope.Target) -> Change? {
@@ -58,8 +59,24 @@ final class CommentOriginOverrideCenter {
     /// Every note must be a current comment of `discussions`; the verdict binds its author and body.
     @discardableResult
     func apply(_ classification: Classification?, to notes: [Note], in discussions: [GitLabMergeRequestDiscussion],
-               target: MRAutomationScope.Target) async throws -> Change {
-        guard let iid = target.iid, iid > 0, target.projectID > 0, !target.host.isEmpty, !target.username.isEmpty else {
+               target: MRAutomationScope.Target, activate: @escaping Activate = { _ in true }) async throws -> Change {
+        let selected = try validated(notes, in: discussions, target: target)
+        let becomingAI = Set(selected.compactMap(\.id))
+        let drafts = classification == .ai ? await gain(target, discussions, becomingAI) : 0
+        let change = try store(classification, notes: selected, target: target, drafts: drafts, activate: activate)
+        if drafts == 0 { await resume(target) }
+        return change
+    }
+
+    func applyImmediately(_ classification: Classification, to notes: [Note], in discussions: [GitLabMergeRequestDiscussion],
+                          target: MRAutomationScope.Target, activate: @escaping Activate) throws {
+        let selected = try validated(notes, in: discussions, target: target)
+        _ = try store(classification, notes: selected, target: target, drafts: 0, activate: activate)
+    }
+
+    private func validated(_ notes: [Note], in discussions: [GitLabMergeRequestDiscussion],
+                           target: MRAutomationScope.Target) throws -> [Note] {
+        guard (target.iid ?? 0) > 0, target.projectID > 0, !target.host.isEmpty, !target.username.isEmpty else {
             throw ChangeError.invalidTarget
         }
         let current = discussions.flatMap(\.notes).filter { $0.system != true }
@@ -74,16 +91,14 @@ final class CommentOriginOverrideCenter {
             selected.append(note)
         }
         guard !selected.isEmpty else { throw ChangeError.unknownComment }
+        return selected
+    }
+
+    private func store(_ classification: Classification?, notes selected: [Note], target: MRAutomationScope.Target,
+                       drafts: Int, activate: @escaping Activate) throws -> Change {
+        guard let iid = target.iid else { throw ChangeError.invalidTarget }
         let key = { (id: Int) in AICommentOriginOverrideStore.Key(host: target.host, projectID: target.projectID, iid: iid, noteID: id) }
         let directory = directory
-        var becomingAI: Set<Int> = []
-        if classification == .ai {
-            for note in selected where !AICommentAssessmentStore.isAI(note, host: target.host, projectID: target.projectID,
-                    iid: iid, criteriaOverride: criteriaOverride(), in: directory, now: now()) {
-                becomingAI.insert(note.id!)
-            }
-        }
-        let drafts = becomingAI.isEmpty ? 0 : await gain(target, discussions, becomingAI)
         let start = wholeSecond(now())
         let activatesAt = drafts > 0 ? start.addingTimeInterval(grace.seconds) : start
         var previous: [AICommentOriginOverrideStore.Key: AICommentOriginOverride?] = [:]
@@ -102,6 +117,7 @@ final class CommentOriginOverrideCenter {
             for (key, record) in written {
                 try AICommentOriginOverrideStore.restore(key, to: record, in: directory)
             }
+            if drafts == 0, !activate(selected) { throw ChangeError.storage }
         } catch {
             for (key, record) in previous { try? AICommentOriginOverrideStore.restore(key, to: record, in: directory) }
             revision &+= 1
@@ -117,13 +133,12 @@ final class CommentOriginOverrideCenter {
         revision &+= 1
         if drafts > 0 {
             pending.append(change)
+            activations[change.id] = { activate(selected) }
             let sleep = sleep, grace = grace
             timers[change.id] = Task { [weak self] in
                 do { try await sleep(grace) } catch { return }
                 await self?.finish(change.id)
             }
-        } else {
-            await resume(target)
         }
         return change
     }
@@ -145,7 +160,8 @@ final class CommentOriginOverrideCenter {
     /// Ends the grace period early.
     func continueNow(_ id: UUID) async {
         guard let change = pending.first(where: { $0.id == id }) else { return }
-        cancelTimer(id)
+        timers.removeValue(forKey: id)?.cancel()
+        guard acceptActivation(change) else { return }
         let start = wholeSecond(now())
         for (key, written) in change.written {
             guard let written, AICommentOriginOverrideStore.stored(key, in: directory) == written else { continue }
@@ -166,9 +182,20 @@ final class CommentOriginOverrideCenter {
     private func finish(_ id: UUID) async {
         guard let change = pending.first(where: { $0.id == id }) else { return }
         timers.removeValue(forKey: id)
+        guard acceptActivation(change) else { return }
         pending.removeAll { $0.id == id }
         revision &+= 1
         await resume(change.target)
+    }
+
+    private func acceptActivation(_ change: Change) -> Bool {
+        guard let activate = activations.removeValue(forKey: change.id) else { return true }
+        guard change.written.allSatisfy({ AICommentOriginOverrideStore.stored($0.key, in: directory) == $0.value }),
+              activate() else {
+            try? undo(change.id)
+            return false
+        }
+        return true
     }
 
     /// Records store ISO 8601 seconds; whole seconds let a re-read record compare equal to the one written.
@@ -178,6 +205,7 @@ final class CommentOriginOverrideCenter {
 
     private func cancelTimer(_ id: UUID) {
         timers.removeValue(forKey: id)?.cancel()
+        activations.removeValue(forKey: id)
     }
 }
 

@@ -112,7 +112,7 @@ final class AICommentOriginCoordinator {
                       now().timeIntervalSince(attemptedAt) >= ReadOnlyAssessmentRetry.cooldown else { return false }
             }
             if AICommentOriginOverrideStore.override(for: note, host: target.host, projectID: target.projectID,
-                iid: target.iid!, in: overrideDirectory) != nil { return false }
+                iid: target.iid!, username: target.username, in: overrideDirectory) != nil { return false }
             if purpose != .display,
                AICommentAssessmentStore.reusable(note, target: target, in: candidate.directory)?.purpose == .publication { return false }
             if let (record, sealed) = AICommentAssessmentStore.stored(for: note, host: target.host,
@@ -121,7 +121,9 @@ final class AICommentOriginCoordinator {
                 guard purpose == .display || sealed else { return true }
                 if record.qualifiesAsAI && (purpose == .display || record.purpose != .display)
                     && (record.username == nil || record.username == target.username)
-                    && (record.criteriaVersion == nil || record.criteriaVersion == AICommentOriginAssessor.criteriaVersion) { return false }
+                    && (record.criteriaVersion == AICommentOriginAssessor.criteriaVersion
+                        || purpose == .display && record.criteriaVersion == nil)
+                    && (purpose == .display || record.username == target.username && record.authorID == note.author?.id) { return false }
                 if record.provider == assistant.rawValue && record.model == model
                     && record.criteriaVersion == AICommentOriginAssessor.criteriaVersion
                     && record.username == target.username && record.authorID == note.author?.id

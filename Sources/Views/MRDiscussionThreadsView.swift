@@ -21,6 +21,7 @@ struct MRDiscussionThreadsView: View {
     var selectionDisabled = false
     var onDelete: ((GitLabDraftNote) -> Void)? = nil
     var onRegenerate: ((GitLabDraftNote) -> Void)? = nil
+    var aiReplyControls: AIReplyControls? = nil
     var title: LocalizedStringResource = .MRDiscussions.mrDiscussionsTitle
     var codeContext: MRDiscussionCodeContext? = nil
     /// Present when the user may change comment origins; `nil` classification returns to automatic assessment.
@@ -91,7 +92,7 @@ struct MRDiscussionThreadsView: View {
                         mergeRequestURL: mergeRequestURL, codeContext: codeContext,
                         extraContext: extraContexts.forDraft(draft),
                         selection: selection, selectionDisabled: selectionDisabled,
-                        onDelete: onDelete, onRegenerate: onRegenerate)
+                        onDelete: onDelete, onRegenerate: onRegenerate, aiReplyControls: aiReplyControls)
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -124,7 +125,8 @@ struct MRDiscussionThreadsView: View {
                                currentUsername: currentUsername, currentUser: currentUser, markdownCache: markdownCache, initiallyExpanded: expandPendingDrafts && !thread.drafts.isEmpty,
                                selection: selection, selectionDisabled: selectionDisabled,
                                extraContexts: extraContexts, replyTo: replyMessage(thread.id),
-                               onDelete: onDelete, onRegenerate: onRegenerate, onSetOrigin: onSetOrigin,
+                               onDelete: onDelete, onRegenerate: onRegenerate, aiReplyControls: aiReplyControls,
+                               onSetOrigin: onSetOrigin,
                                navigation: expansion)
             .id(anchor)
     }
@@ -132,6 +134,11 @@ struct MRDiscussionThreadsView: View {
     private func replyMessage(_ discussionID: String) -> RemotePeopleMessage? {
         .init(.Board.boardReplyTo, people: replyRecipients[discussionID] ?? [])
     }
+}
+
+struct AIReplyControls {
+    let decisions: [Int: [MergeRequestAttentionMonitor.AIReplyDecision]]
+    let choose: (MergeRequestAttentionMonitor.AIReplyChoice, MergeRequestAttentionMonitor.AIReplyDecision, GitLabDraftNote) -> Void
 }
 
 typealias MRDiscussionOriginAction = (AICommentOriginOverride.Classification?, [GitLabMergeRequestDiscussion.Note]) -> Void
@@ -149,6 +156,7 @@ private struct MRDiscussionThreadView: View {
     var replyTo: RemotePeopleMessage? = nil
     var onDelete: ((GitLabDraftNote) -> Void)? = nil
     var onRegenerate: ((GitLabDraftNote) -> Void)? = nil
+    var aiReplyControls: AIReplyControls? = nil
     var onSetOrigin: MRDiscussionOriginAction? = nil
     let navigation: MRDiscussionNavigation?
     @State private var isExpanded = false
@@ -308,7 +316,7 @@ private struct MRDiscussionThreadView: View {
             MRDiscussionDraftView(draft: draft, author: currentUser, markdownCache: markdownCache,
                                   replyTo: replyTo, threadLocation: thread.location,
                 extraContext: extraContexts.forDraft(draft),
-                selection: selection, selectionDisabled: selectionDisabled, onDelete: onDelete, onRegenerate: onRegenerate)
+                selection: selection, selectionDisabled: selectionDisabled, onDelete: onDelete, onRegenerate: onRegenerate, aiReplyControls: aiReplyControls)
         }
     }
 }
@@ -426,6 +434,7 @@ private struct MRDiscussionDraftView: View {
     var selectionDisabled = false
     var onDelete: ((GitLabDraftNote) -> Void)? = nil
     var onRegenerate: ((GitLabDraftNote) -> Void)? = nil
+    var aiReplyControls: AIReplyControls? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -466,6 +475,25 @@ private struct MRDiscussionDraftView: View {
             }
             MRDiscussionBody(source: draft.note, markdownCache: markdownCache)
             DraftPublicationWarnings(drafts: [draft])
+            if let aiReplyControls, let id = draft.id {
+                ForEach(aiReplyControls.decisions[id] ?? []) { source in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(.CommentReview.commentReviewUnconfirmedAI(source.authorLabel))
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(verbatim: source.excerpt).font(.caption).lineLimit(2)
+                        }
+                        Spacer(minLength: 4)
+                        Button { aiReplyControls.choose(.reply, source, draft) } label: {
+                            Text(.CommentReview.commentReviewReplyAI)
+                        }
+                        Button { aiReplyControls.choose(.human, source, draft) } label: {
+                            Text(.CommentReview.commentReviewMarkHuman)
+                        }
+                    }
+                    .buttonStyle(.bordered).controlSize(.small).disabled(selectionDisabled)
+                }
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

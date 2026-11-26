@@ -39,7 +39,8 @@ struct MREventLogGitLabRow: View {
     }
 
     private var title: Text {
-        if let headline = event.systemHeadline { Text(verbatim: headline) }
+        if let appEvent, appEvent.publicationBasedOnAuthorTrust == true { Text(appEvent.title) }
+        else if let headline = event.systemHeadline { Text(verbatim: headline) }
         else { Text(event.title) }
     }
 

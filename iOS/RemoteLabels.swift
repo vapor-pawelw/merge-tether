@@ -48,6 +48,8 @@ extension RemoteActionKind {
         case .ignoreSuggestion: .FeedbackSuggestions.feedbackSuggestionsIgnore
         case .restoreSuggestion: .FeedbackSuggestions.feedbackSuggestionsRestore
         case .setCommentOrigin: .RemoteDetail.remoteDetailOriginMenuTitle
+        case .confirmAIReply: .CommentReview.commentReviewReplyAI
+        case .markReplyHuman: .CommentReview.commentReviewMarkHuman
         case .startDraftRegeneration: .DraftRegeneration.draftRegenerationGenerate
         case .applyDraftRegeneration: .DraftRegeneration.draftRegenerationSaveDraft
         case .discardDraftRegeneration: .DraftRegeneration.draftRegenerationDiscard

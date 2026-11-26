@@ -1,6 +1,21 @@
 import Foundation
 
 struct ReviewParticipationPreferences: Codable, Equatable, Sendable {
+    struct AIReplyTrust: Codable, Equatable, Identifiable, Sendable {
+        struct ID: Codable, Hashable, Sendable {
+            let host: String
+            let accountID: Int
+            let authorID: Int
+        }
+
+        let id: ID
+        var label: String
+        var confirmedAINotes: [Int: Date] = [:]
+        var humanNotes: [Int: Date] = [:]
+
+        var trustsStyleAssessment: Bool { confirmedAINotes.count >= 2 && humanNotes.isEmpty }
+    }
+
     struct Entry: Codable, Equatable, Identifiable, Sendable {
         let id: UUID
         let host: String
@@ -10,8 +25,9 @@ struct ReviewParticipationPreferences: Codable, Equatable, Sendable {
     }
     private(set) var entries: [Entry] = []
     private(set) var localAutomationAuthors: [Entry] = []
+    private(set) var aiReplyTrustRecords: [AIReplyTrust] = []
 
-    private enum CodingKeys: String, CodingKey { case entries, localAutomationAuthors }
+    private enum CodingKeys: String, CodingKey { case entries, localAutomationAuthors, aiReplyTrustRecords }
 
     init() {}
 
@@ -19,6 +35,7 @@ struct ReviewParticipationPreferences: Codable, Equatable, Sendable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         entries = try values.decode([Entry].self, forKey: .entries)
         localAutomationAuthors = try values.decodeIfPresent([Entry].self, forKey: .localAutomationAuthors) ?? []
+        aiReplyTrustRecords = try values.decodeIfPresent([AIReplyTrust].self, forKey: .aiReplyTrustRecords) ?? []
         let identities = localAutomationAuthors.map { "\($0.host)/\($0.username)/\($0.reviewerID)" }
         guard localAutomationAuthors.allSatisfy({
             !$0.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -29,6 +46,46 @@ struct ReviewParticipationPreferences: Codable, Equatable, Sendable {
             throw DecodingError.dataCorruptedError(forKey: .localAutomationAuthors, in: values,
                 debugDescription: "Invalid local automation author identities")
         }
+        guard Set(aiReplyTrustRecords.map(\.id)).count == aiReplyTrustRecords.count,
+              aiReplyTrustRecords.allSatisfy({ record in
+                  !record.id.host.isEmpty && record.id.accountID > 0 && record.id.authorID > 0
+                      && record.id.accountID != record.id.authorID
+                      && record.confirmedAINotes.keys.allSatisfy { $0 > 0 }
+                      && record.humanNotes.keys.allSatisfy { $0 > 0 }
+              }) else {
+            throw DecodingError.dataCorruptedError(forKey: .aiReplyTrustRecords, in: values,
+                debugDescription: "Invalid AI reply trust records")
+        }
+    }
+
+    func aiReplyTrust(host: String, accountID: Int, authorID: Int) -> AIReplyTrust? {
+        let id = AIReplyTrust.ID(host: host, accountID: accountID, authorID: authorID)
+        return aiReplyTrustRecords.first { $0.id == id }
+    }
+
+    mutating func recordAIReplyTrust(_ classification: AICommentOriginOverride.Classification,
+        notes: [GitLabMergeRequestDiscussion.Note], host: String, user: GitLabAuthenticatedUser, at date: Date) {
+        guard classification != .uncertain, !host.isEmpty, user.id > 0 else { return }
+        for note in notes {
+            guard note.system != true, let noteID = note.id, noteID > 0,
+                  let author = note.author, author.id > 0, author.id != user.id else { continue }
+            let id = AIReplyTrust.ID(host: host, accountID: user.id, authorID: author.id)
+            let index = aiReplyTrustRecords.firstIndex { $0.id == id } ?? aiReplyTrustRecords.endIndex
+            let label = author.username ?? author.name ?? "#\(author.id)"
+            if index == aiReplyTrustRecords.endIndex { aiReplyTrustRecords.append(.init(id: id, label: label)) }
+            if classification == .ai {
+                let original = aiReplyTrustRecords[index].confirmedAINotes[noteID]
+                aiReplyTrustRecords[index].confirmedAINotes[noteID] = original ?? date
+            } else {
+                let original = aiReplyTrustRecords[index].humanNotes[noteID]
+                aiReplyTrustRecords[index].humanNotes[noteID] = original ?? date
+            }
+            aiReplyTrustRecords[index].label = label
+        }
+    }
+
+    mutating func resetAIReplyTrust(_ id: AIReplyTrust.ID) {
+        aiReplyTrustRecords.removeAll { $0.id == id }
     }
 
     @discardableResult mutating func exclude(_ identity: PublicationIdentity, username: String) -> Bool {

@@ -284,6 +284,10 @@ struct RemoteCardDetail: View {
 
     private func showConfirmation(_ action: RemoteAction) {
         let card = current
+        if action.kind == .confirmAIReply || action.kind == .markReplyHuman {
+            Task { await model.perform(card: card, action: action) }
+            return
+        }
         if let preferenceID = action.suppressibleConfirmationID {
             let request = RemoteWorkflowConfirmation(card: card, action: action, preferenceID: preferenceID)
             if MRActionConfirmationPreferences().requiresConfirmation(for: preferenceID) {
