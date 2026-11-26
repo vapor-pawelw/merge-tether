@@ -4,7 +4,7 @@ import Foundation
 enum AssistantJobExecutor {
     enum ExecutionError: String, Error, Equatable, CustomStringConvertible {
         case cliUnavailable, wrongAccount, inactiveMergeRequest, missingResult, disabledPermission, headChanged, contextUnavailable
-        case auditUnavailable, unexpectedRemoteEffects
+        case auditUnavailable, unexpectedRemoteEffects, workspaceLost, workerOutputTooLarge, workerOutputUnavailable, workerAuditPending
 
         var description: String {
             let message: LocalizedStringResource = switch self {
@@ -17,6 +17,10 @@ enum AssistantJobExecutor {
             case .contextUnavailable: .AssistantJobs.assistantJobsErrorContextUnavailable
             case .auditUnavailable: .AssistantJobs.assistantJobsErrorAuditUnavailable
             case .unexpectedRemoteEffects: .AssistantJobs.assistantJobsErrorUnexpectedRemoteEffects
+            case .workspaceLost: .WorkerFailures.assistantJobsErrorWorkspaceLost
+            case .workerOutputTooLarge: .WorkerFailures.assistantJobsErrorWorkerOutputTooLarge
+            case .workerOutputUnavailable: .WorkerFailures.assistantJobsErrorWorkerOutputUnavailable
+            case .workerAuditPending: .WorkerFailures.assistantJobsErrorWorkerAuditPending
             }
             return String(localized: message)
         }
@@ -53,6 +57,7 @@ enum AssistantJobExecutor {
                         detectCLI: @MainActor (AutomationAssistant) async -> AssistantDependencyStatus) async throws -> AssistantJobCoordinator.Outcome {
         let workerTimeout = workerExecutionTimeout(for: handoff)
         try validatePersistence(settings)
+        guard !AssistantWorkerAudit.blocksNewWorker(handoff, in: settings) else { throw ExecutionError.workerAuditPending }
         try validateConfiguration(handoff, automation: settings.automation)
         try validateIgnoredTarget(handoff, ignored: settings.ignoredMergeRequests)
         guard case .ready(let executable) = await detectCLI(handoff.key.assistant) else {
@@ -136,15 +141,20 @@ enum AssistantJobExecutor {
             let baseline = await AssistantWorkerAudit.capture(for: request, host: host, user: user,
                 accountRevision: revision, glab: glab)
             let outcome: Result<AssistantJobCoordinator.Outcome, any Error>
+            var requiresReconciliation = false
             do {
                 outcome = .success(try await ReadOnlyReviewJob(handoff: handoff, settings: settings, glab: glab,
                     target: request, user: user, invocation: invocation, executable: executable,
                     timeout: workerTimeout.seconds, expectedAccountRevision: revision).run())
+            } catch let workerFailure as ProcessRunner.WorkerInterruption {
+                requiresReconciliation = true
+                outcome = .failure(interruptionError(workerFailure, includeStandardOutput: false))
             } catch { outcome = .failure(error) }
             // Full review is user-started only; a missing baseline keeps its outcome, unexpected effects do not.
             let verdict = await AssistantWorkerAudit.recordChanges(since: baseline, handoff: handoff, request: request,
-                user: user, accountRevision: revision, glab: glab, settings: settings)
-            if let violation = AssistantWorkerAudit.enforce(verdict, handoff: handoff, settings: settings),
+                user: user, accountRevision: revision, glab: glab, settings: settings,
+                requireReconciliation: requiresReconciliation)
+            if !requiresReconciliation, let violation = AssistantWorkerAudit.enforce(verdict, handoff: handoff, settings: settings),
                case .success = outcome { throw violation }
             let reviewed = try outcome.get()
             try await AssistantJobJournal.save(reviewed, for: handoff)
@@ -328,12 +338,13 @@ enum AssistantJobExecutor {
                 return false
             }
         }
-        func auditRemoteEffects() async -> ExecutionError? {
-            // Live reads stop on cancellation; a stopped run keeps its cancellation outcome unaudited.
-            guard !Task.isCancelled else { return nil }
+        func auditRemoteEffects(requireReconciliation: Bool = false) async -> ExecutionError? {
+            // An interrupted worker must hold new work even if cancellation prevents the live reads.
+            guard requireReconciliation || !Task.isCancelled else { return nil }
             let verdict = await AssistantWorkerAudit.recordChanges(since: authorization.auditBaseline, handoff: handoff,
-                request: request, user: user, accountRevision: accountRevision, glab: glab, settings: settings)
-            return AssistantWorkerAudit.enforce(verdict, handoff: handoff, settings: settings)
+                request: request, user: user, accountRevision: accountRevision, glab: glab, settings: settings,
+                requireReconciliation: requireReconciliation)
+            return requireReconciliation ? nil : AssistantWorkerAudit.enforce(verdict, handoff: handoff, settings: settings)
         }
         do {
         if handoff.key.assistant == .codex {
@@ -343,6 +354,7 @@ enum AssistantJobExecutor {
             output = try await AssistantUsageRunner.run(executable, arguments: arguments, environment: invocation.childEnvironment(environment),
                                                   currentDirectory: folder, timeout: workerTimeout.seconds, input: input,
                                                   outputDirectory: folder.appendingPathComponent("cli-output"),
+                                                  requiredWorkerDirectories: [invocation.temporaryDirectory],
                                                   usage: .init(role: .codingAgent, assistant: handoff.key.assistant,
                                                     model: (handoff.codingModel ?? handoff.reviewModel)?.rawValue,
                                                     mergeRequest: usageMergeRequest),
@@ -357,6 +369,7 @@ enum AssistantJobExecutor {
             output = try await AssistantUsageRunner.run(executable, arguments: arguments, environment: invocation.childEnvironment(environment),
                                                   currentDirectory: folder, timeout: workerTimeout.seconds, input: input,
                                                   outputDirectory: folder.appendingPathComponent("cli-output"),
+                                                  requiredWorkerDirectories: [invocation.temporaryDirectory],
                                                   usage: .init(role: .codingAgent, assistant: handoff.key.assistant,
                                                     model: handoff.claudeCodingModel?.rawValue,
                                                     mergeRequest: usageMergeRequest),
@@ -365,6 +378,9 @@ enum AssistantJobExecutor {
             guard output.exitCode == 0 else { throw CLIProcessError(exitCode: output.exitCode, diagnostic: output.stderr) }
             result = try AssistantJobResult.claude(output.stdout)
         }
+        } catch let interruption as ProcessRunner.WorkerInterruption {
+            _ = await auditRemoteEffects(requireReconciliation: true)
+            throw interruptionError(interruption)
         } catch {
             if let denial = authorization.denial { throw denial }
             // The failure stays the reported error; the audit still records remote effects.
@@ -406,6 +422,20 @@ enum AssistantJobExecutor {
         catch { Log.monitor.error("Could not checkpoint worker completion: \(String(describing: error), privacy: .private)") }
         try Task.checkCancellation()
         return outcome
+    }
+
+    private static func interruptionError(_ interruption: ProcessRunner.WorkerInterruption,
+                                          includeStandardOutput: Bool = true) -> any Error {
+        let error: ExecutionError
+        switch interruption.reason {
+        case .workspaceLost: error = .workspaceLost
+        case .standardOutputLimitExceeded: error = .workerOutputTooLarge
+        case .outputCaptureFailed: error = .workerOutputUnavailable
+        }
+        guard let output = interruption.output else { return error }
+        let diagnostics = includeStandardOutput ? output
+            : ProcessRunner.Output(stdout: Data(), stderr: output.stderr, exitCode: output.exitCode)
+        return AssistantJobFailure(error: error, output: diagnostics)
     }
 
     @MainActor
@@ -594,6 +624,7 @@ enum AssistantJobExecutor {
     private static func validateWorkerAdmission(_ handoff: AssistantAutomationRunner.Handoff, settings: SettingsManager,
         request: GitLabMergeRequest, detector: ExistingPipelineWorkDetector) throws {
         try validatePersistence(settings)
+        guard !AssistantWorkerAudit.blocksNewWorker(handoff, in: settings) else { throw ExecutionError.workerAuditPending }
         try validateConfiguration(handoff, automation: settings.automation)
         try validateIgnoredTarget(handoff, ignored: settings.ignoredMergeRequests)
         let work = handoff.key.work, project = request.webURL.gitLabProjectPath

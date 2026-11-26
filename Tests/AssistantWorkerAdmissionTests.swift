@@ -168,6 +168,44 @@ struct AssistantWorkerAdmissionTests {
         #expect(try String(contentsOfFile: f.cli.path + ".started", encoding: .utf8) == "started")
     }
 
+    @Test(arguments: AutomationAssistant.allCases)
+    func lostWorkspaceKeepsFailureAndHoldsManualRunsUntilTheAuditRecovers(_ assistant: AutomationAssistant) async throws {
+        let f = try Fixture(assistant: assistant, scenario: "manual-workspace-loss")
+        defer { f.clean() }
+        do {
+            _ = try await AssistantJobExecutor.execute(f.handoff, settings: f.settings, glab: f.glab,
+                pipelineWorkDetector: f.claims, detectCLI: { _ in .ready(f.cli) })
+            Issue.record("A worker with a deleted temporary directory cannot complete")
+        } catch let failure as AssistantJobFailure {
+            #expect(failure.description == AssistantJobExecutor.ExecutionError.workspaceLost.description)
+            #expect(failure.transcript.contains("fixture checkpoint"))
+        }
+        #expect(!AssistantJobJournal.hasCheckpoint(f.handoff.id))
+        if assistant == .codex {
+            let workingDirectory = try #require(f.settings.assistantHandoffs[0].execution?.workingDirectory)
+            #expect(FileManager.default.fileExists(atPath: workingDirectory + "/result.json"))
+        }
+        f.settings.assistantHandoffs[0].execution?.state = .failed
+        f.settings.save()
+        let restarted = SettingsManager(defaults: f.defaults)
+        #expect(restarted.assistantHandoffs[0].execution?.pendingWorkerAudit?.blocksManualWorker == true)
+        let next = AssistantAutomationRunner.Handoff(id: UUID(), key: f.handoff.key,
+            title: "Retry", prompt: "Inspect the prior run.", createdAt: .now, allowsPush: false,
+            execution: .init(state: .running), mergeRequestURL: f.handoff.mergeRequestURL,
+            workflow: .review, manual: true, expectedHeadSHA: f.head)
+        let requestCount = f.gitlab.requests.count
+        await #expect(throws: AssistantJobExecutor.ExecutionError.workerAuditPending) {
+            _ = try await AssistantJobExecutor.execute(next, settings: restarted, glab: f.glab,
+                pipelineWorkDetector: f.claims, detectCLI: { _ in .ready(f.cli) })
+        }
+        #expect(f.gitlab.requests.count == requestCount)
+        f.auditReadRecovered = true
+        await AssistantWorkerAudit.retryPending(host: f.host, user: .init(id: 1, username: "me"), glab: f.glab, settings: restarted)
+        #expect(restarted.assistantHandoffs[0].execution?.pendingWorkerAudit == nil)
+        #expect(restarted.assistantHandoffs[0].execution?.state == .failed)
+        #expect(f.gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
     @Test(arguments: AutomationAssistant.allCases,
           ["current", "initial-claim", "late-claim", "manual-claim", "owned-pipeline", "stale-token", "owned-plus-legacy",
            "label-removed", "target-changed", "late-label", "late-target", "manual-no-rule", "legacy-no-rule", "late-pipeline-running", "late-pipeline-pending", "late-pipeline-passed", "late-pipeline-replaced", "late-pipeline-missing", "confirmed-pipeline", "unconfirmed-pipeline", "wrong-confirmation", "manual-provider", "new-discussion", "new-discussion-off"])
@@ -255,7 +293,7 @@ struct AssistantWorkerAdmissionTests {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             try Data("""
             #!/usr/bin/python3
-            import hashlib,json,pathlib,sys
+            import hashlib,json,os,pathlib,shutil,sys
             args=sys.argv[1:]
             with pathlib.Path(__file__+'.started').open('a') as started:
                 started.write('started')
@@ -272,6 +310,9 @@ struct AssistantWorkerAdmissionTests {
                 print(json.dumps({'type':'turn.completed'}))
             else:
                 print(json.dumps({'is_error':False,'structured_output':result}))
+            if "\(scenario)" == "manual-workspace-loss":
+                print("fixture checkpoint", file=sys.stderr, flush=True)
+                shutil.rmtree(os.environ["TMPDIR"])
             """.utf8).write(to: cli)
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
             let id = UUID()
@@ -388,7 +429,8 @@ struct AssistantWorkerAdmissionTests {
                 }
                 if call.endpoint == "/projects/7/repository/branches/feature" { return try InMemoryGitLab.json(["commit":["id":head]]) }
                 if call.endpoint.hasSuffix("/approvals") {
-                    if workerRan && (scenario == "audit-missing-approvals" || (scenario == "audit-read-outage" && !auditReadRecovered)) {
+                    let auditOutage = ["audit-read-outage", "manual-workspace-loss"].contains(scenario) && !auditReadRecovered
+                    if workerRan && (scenario == "audit-missing-approvals" || auditOutage) {
                         throw GlabError.timedOut
                     }
                     let approvers = workerRan && (fullEffectChange || scenario == "audit-other-account")

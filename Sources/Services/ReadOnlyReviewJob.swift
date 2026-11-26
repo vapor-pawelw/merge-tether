@@ -28,6 +28,7 @@ struct ReadOnlyReviewJob {
         let current: @MainActor @Sendable () -> Bool = {
             !Task.isCancelled && glab.accountRevision == expectedAccountRevision && glab.resolvedHost == work.host
                 && glab.currentUsername == user.username && settings.automation == configuration
+                && !AssistantWorkerAudit.blocksNewWorker(handoff, in: settings)
                 && settings.automaticActionsAllowed && settings.assistantHandoffs.contains {
                     $0.id == handoff.id && $0.key == handoff.key && $0.execution?.state == .running
                 }
@@ -59,6 +60,7 @@ struct ReadOnlyReviewJob {
             environment: Self.environment(endpoint: endpoint, temporaryDirectory: invocation.temporaryDirectory),
             currentDirectory: invocation.workspace, timeout: timeout, input: Data(prompt.utf8),
             outputDirectory: invocation.workspace.appendingPathComponent("cli-output"),
+            requiredWorkerDirectories: [invocation.temporaryDirectory],
             usage: .init(role: .codingAgent, assistant: assistant, model: model,
                 mergeRequest: .init(host: work.host, username: user.username, projectID: work.projectID, iid: work.iid,
                     title: target.title, url: target.webURL.absoluteString)), authorizeLaunch: current)
