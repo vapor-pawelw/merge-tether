@@ -10,7 +10,7 @@ extension TodoMonitorService {
 
     func selfReviewerRemoval(for request: GitLabMergeRequest) -> ReviewerChange? {
         guard let target = scopeTarget(projectID: request.projectID, iid: request.iid, url: request.webURL),
-              request.isOpen, request.author.username != target.username,
+              [.opened, .closed, .merged].contains(request.state), request.author.username != target.username,
               let reviewer = request.reviewers?.first(where: { $0.username == target.username }), reviewer.id > 0
         else { return nil }
         return .init(.remove, reviewerID: reviewer.id, username: reviewer.username)
@@ -38,14 +38,18 @@ extension TodoMonitorService {
               leavingReview || canEditReviewers(of: displayed),
               accountRevision == glab.accountRevision, reviewerEdits.insert(id).inserted else { return .changed }
         defer { reviewerEdits.remove(id) }
+        let hiddenTarget = scopeTarget(projectID: displayed.projectID, iid: displayed.iid, url: displayed.webURL)
+            .flatMap { self.settings.ignoredMergeRequests.contains($0) ? $0 : nil }
+        let hideID = hiddenTarget.flatMap { settings.hiddenReviewDetails[$0]?.hideID }
 
         let authorized: @MainActor @Sendable () -> Bool = {
             !Task.isCancelled && self.glab.accountRevision == accountRevision
                 && self.glab.currentUsername == username && self.glab.resolvedHost == host
         }
         var submitted = false
+        let confirmed: GitLabMergeRequest
         do {
-            try await glab.changeMergeRequestReviewers(changes, of: displayed, host: host,
+            confirmed = try await glab.changeMergeRequestReviewers(changes, of: displayed, host: host,
                 username: username, willSubmit: { submitted = true }, shouldProceed: authorized)
         } catch is CancellationError {
             return submitted ? .uncertain : .changed
@@ -56,6 +60,9 @@ extension TodoMonitorService {
             return submitted ? .uncertain : .failed
         }
         guard authorized() else { return .uncertain }
+        if leavingReview, let removal = changes.first, let hiddenTarget {
+            settings.reconcileHiddenReview(hiddenTarget, request: confirmed, reviewerID: removal.reviewerID, hideID: hideID)
+        }
         await refreshFromGitLab(for: id)
         return authorized() ? .completed : .uncertain
     }
@@ -115,26 +122,28 @@ extension GlabService {
         return await ranks.value
     }
 
+    @discardableResult
     func changeMergeRequestReviewers(_ changes: [ReviewerChange], of displayed: GitLabMergeRequest, host: String,
                                      username: String, willSubmit: () -> Void = {},
-                                     shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws {
+                                     shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws -> GitLabMergeRequest {
         guard let first = changes.first, first.reviewerID > 0, !first.username.isEmpty,
               changes.count == 1 || ReviewerChange.Batch(changes) != nil else { throw CancellationError() }
         let user = try await fetchAuthenticatedUser(host: host, expectedUsername: username)
         let leavingReview = changes.count == 1 && first.operation == .remove
             && first.reviewerID == user.id && first.username == user.username
         let live = try await fetchMergeRequest(projectID: displayed.projectID, iid: displayed.iid, host: host)
+        let canLeave = leavingReview && [.opened, .closed, .merged].contains(live.state)
         guard shouldProceed(), live.projectID == displayed.projectID, live.iid == displayed.iid,
               live.webURL.isGitLabMergeRequest(host: host, iid: live.iid),
               live.webURL.gitLabProjectPath == displayed.webURL.gitLabProjectPath,
-              live.isOpen, live.author.id == user.id || leavingReview, let reviewers = live.reviewers else {
+              canLeave || (live.isOpen && live.author.id == user.id), let reviewers = live.reviewers else {
             throw CancellationError()
         }
 
         let adding = first.operation == .add
         let currentIDs = Set(reviewers.map(\.id))
         let pending = changes.filter { currentIDs.contains($0.reviewerID) != adding }
-        guard !pending.isEmpty else { return }
+        guard !pending.isEmpty else { return live }
         if adding {
             try await withThrowingTaskGroup(of: Void.self) { group in
                 for change in pending {
@@ -181,10 +190,15 @@ extension GlabService {
             throw GlabError.decoding("GitLab did not confirm the reviewer change")
         }
         let confirmed = try await fetchMergeRequest(projectID: live.projectID, iid: live.iid, host: host)
-        guard let assignedIDs = confirmed.reviewers.map({ Set($0.map(\.id)) }),
+        guard shouldProceed() else { throw CancellationError() }
+        guard confirmed.mergeRequestID == live.mergeRequestID,
+              confirmed.webURL.isGitLabMergeRequest(host: host, iid: live.iid),
+              confirmed.webURL.gitLabProjectPath == live.webURL.gitLabProjectPath,
+              let assignedIDs = confirmed.reviewers.map({ Set($0.map(\.id)) }),
               changes.allSatisfy({ assignedIDs.contains($0.reviewerID) == adding }) else {
             throw GlabError.decoding("GitLab did not return the requested reviewer assignment")
         }
+        return confirmed
     }
 
     private func validateReviewer(_ change: ReviewerChange, host: String) async throws {

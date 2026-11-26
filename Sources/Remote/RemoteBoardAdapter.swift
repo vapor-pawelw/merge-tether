@@ -65,10 +65,10 @@ import MergeTetherRemote
         }
     }
 
-    private static func hiddenAssignmentCard(_ review: HiddenReview, account: String) -> RemoteCard {
+    private static func hiddenAssignmentCard(_ review: HiddenReview, account: String, canRestore: Bool) -> RemoteCard {
         var card = RemoteCard(id: hiddenAssignmentCardID(review),
             title: review.title, project: review.url.gitLabProjectPath, url: review.url, mergeRequestIID: review.target.iid)
-        if let token = try? RemoteDigest.token([account, card.id, review.title, review.url.absoluteString,
+        if canRestore, let token = try? RemoteDigest.token([account, card.id, review.title, review.url.absoluteString,
                                                review.hideID?.uuidString ?? ""]) {
             card.actions = [.init(id: RemoteAction.restoreHiddenReviewID, kind: .markDone, token: token)]
         }
@@ -85,7 +85,7 @@ import MergeTetherRemote
               account == "\(username)@\(host)",
               let review = monitor.hiddenReviewAssignments.first(where: { hiddenAssignmentCardID($0) == card.id })
         else { return .changed }
-        let current = hiddenAssignmentCard(review, account: account)
+        let current = hiddenAssignmentCard(review, account: account, canRestore: monitor.canRestoreHiddenReview(review))
         guard current.hasSameActionContext(as: card), current.actions.contains(action) else { return .changed }
         return monitor.restoreReviewedMergeRequests([review]) ? .completed : .failed
     }
@@ -228,7 +228,7 @@ import MergeTetherRemote
         result.codingProvider = monitor.settings.automation.selectedAssistant?.rawValue
         if includesReviewBoard {
             result.hiddenReviews = monitor.hiddenReviewAssignments.filter { account == "\($0.target.username)@\($0.target.host)" }
-                .map { hiddenAssignmentCard($0, account: account) }
+                .map { hiddenAssignmentCard($0, account: account, canRestore: monitor.canRestoreHiddenReview($0)) }
         }
         var orderGroups: [String: RemoteBoardOrderGroup] = [:]
         if includesBoardOrder {

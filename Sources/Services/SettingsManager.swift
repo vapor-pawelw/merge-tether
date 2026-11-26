@@ -83,13 +83,12 @@ final class SettingsManager {
             || hiddenMergeRequests.details[target].map { $0.manuallyHidden != true } == true
     }
 
-    func hideReviewedMergeRequest(_ review: HiddenReview, now: Date = .now) -> Bool {
+    func hideReviewedMergeRequest(_ review: HiddenReview) -> Bool {
         var updated = hiddenMergeRequests
         guard updated.targets.insert(review.target).inserted else { return true }
         var hidden = review
         hidden.hideID = UUID()
         hidden.manuallyHidden = true
-        hidden.restoreUntil = now.addingTimeInterval(HiddenReview.restorationInterval)
         updated.details[review.target] = hidden
         return saveHiddenMergeRequests(updated)
     }
@@ -100,7 +99,6 @@ final class SettingsManager {
         for var review in reviews {
             guard updated.targets.insert(review.target).inserted else { continue }
             review.hideID = UUID()
-            review.restoreUntil = now.addingTimeInterval(HiddenReview.restorationInterval)
             review.inboxNotification = incomingReviewFilterSettings.showHiddenReviewsInInbox
                 ? .init(id: UUID(), observedAt: now, reason: reasons[review.target]) : nil
             updated.details[review.target] = review
@@ -120,29 +118,49 @@ final class SettingsManager {
         return saveHiddenMergeRequests(updated)
     }
 
-    func canRestoreHiddenReview(_ target: MRAutomationScope.Target, now: Date = .now) -> Bool {
-        guard hiddenMergeRequests.targets.contains(target),
-              let deadline = hiddenMergeRequests.details[target]?.restoreUntil ?? hiddenMergeRequests.legacyRestoreUntil,
-              now < deadline else { return false }
-        return MergeRequestFinishedState(mrLifecycleLedger.request(for: target)) == nil
+    func canRestoreHiddenReview(_ target: MRAutomationScope.Target) -> Bool {
+        guard hiddenMergeRequests.targets.contains(target) else { return false }
+        let review = hiddenMergeRequests.details[target]
+        if let request = review?.request { return MergeRequestFinishedState(request) == nil }
+        if review?.wasFinishedBeforeUpgrade == true { return false }
+        let request = mrLifecycleLedger.request(for: target)
+        return MergeRequestFinishedState(request) == nil
     }
 
-    func retireFinishedHiddenReview(_ target: MRAutomationScope.Target, request: GitLabMergeRequest,
-                                    hideID: UUID?, now: Date = .now) {
-        guard MergeRequestFinishedState(request) != nil, canRestoreHiddenReview(target, now: now),
-              hiddenMergeRequests.details[target]?.hideID == hideID else { return }
+    /// Only an authenticated single-MR read may remove a hide due to reviewer changes.
+    @discardableResult
+    func reconcileHiddenReview(_ target: MRAutomationScope.Target, request: GitLabMergeRequest,
+                               reviewerID: Int, hideID: UUID?) -> Bool {
+        guard hiddenMergeRequests.targets.contains(target),
+              hiddenMergeRequests.details[target]?.hideID == hideID,
+              let iid = target.iid, request.mergeRequestID == target.mergeRequestID,
+              request.webURL.isGitLabMergeRequest(host: target.host, iid: iid),
+              [.opened, .closed, .merged].contains(request.state), reviewerID > 0 else { return false }
         var updated = hiddenMergeRequests
+        if request.reviewers?.contains(where: { $0.id == reviewerID }) == false {
+            var assignments = reviewAssignments
+            if assignments.removeAssignment(target), !saveReviewAssignments(assignments) { return false }
+            updated.targets.remove(target)
+            return saveHiddenMergeRequests(updated)
+        }
         var review = updated.details[target] ?? .init(target: target, title: request.title, url: request.webURL,
                                                       manuallyHidden: true)
-        review.restoreUntil = .distantPast
-        review.inboxNotification = nil
+        if let previous = review.request, previous.state == request.state, previous.title == request.title,
+           previous.webURL == request.webURL, previous.author == request.author, previous.reviewers == request.reviewers {
+            return false
+        }
+        review.title = request.title
+        review.url = request.webURL
+        review.restoreUntil = nil
+        review.request = request
         updated.details[target] = review
         _ = saveHiddenMergeRequests(updated)
+        return false
     }
 
-    func restoreHiddenReviews(_ targets: Set<MRAutomationScope.Target>, now: Date = .now) -> Bool {
+    func restoreHiddenReviews(_ targets: Set<MRAutomationScope.Target>) -> Bool {
         var updated = hiddenMergeRequests
-        updated.targets.subtract(targets.filter { canRestoreHiddenReview($0, now: now) })
+        updated.targets.subtract(targets.filter { canRestoreHiddenReview($0) })
         guard updated.targets != hiddenMergeRequests.targets else { return false }
         return saveHiddenMergeRequests(updated)
     }
@@ -306,7 +324,7 @@ final class SettingsManager {
         return true
     }
 
-    init(defaults: UserDefaults = .standard, now: Date = .now) {
+    init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let store = DurableSettingsStore(defaults: defaults)
         persistenceStore = store
@@ -382,16 +400,6 @@ final class SettingsManager {
         }
         lastSavedAutomation = automation
         mrLifecycleLedger.prepareFinishedRemoval()
-        var migratedHides = hiddenMergeRequests
-        if migratedHides.migrateRestorationDeadlines(now: now) {
-            // Preserve the one-time upgrade window even if the app quits before its first settings save.
-            persistenceStore.preserveCorruptValues()
-            if persistenceStore.save(migratedHides, forKey: Key.ignoredMergeRequests), !persistenceStore.synchronize() {
-                persistenceStore.save(hiddenMergeRequests, forKey: Key.ignoredMergeRequests)
-                persistenceStore.synchronize()
-            }
-            hiddenMergeRequests = migratedHides
-        }
     }
 
     @discardableResult
@@ -768,7 +776,6 @@ extension SettingsManager {
                 return result
             }, scope: { MRSettingsKey($0.target) })
         ordered(\.mergeSubmissions, \.mergeSubmissions, Key.mergeSubmissions, scope: { MRSettingsKey($0.target) })
-        let legacyHideDeadline = archive.legacyHideDeadline
         field(\.hiddenMergeRequests, \.hiddenReviews, Key.ignoredMergeRequests, candidate: candidateHides,
             split: { hides in hides.targets.map { .init(target: $0, detail: hides.details[$0]) } },
             combine: { entries in
@@ -776,7 +783,6 @@ extension SettingsManager {
                 hides.targets = Set(entries.map(\.target))
                 hides.details = Dictionary(entries.compactMap { entry in entry.detail.map { (entry.target, $0) } },
                     uniquingKeysWith: { first, _ in first })
-                hides.legacyRestoreUntil = legacyHideDeadline
                 return hides
             }, scope: { MRSettingsKey($0.target) })
         targets(\.newReviewTargets, \.newReviewTargets, Key.newReviewTargets)
@@ -848,9 +854,6 @@ extension SettingsManager {
         if updatedKeys.contains(Key.newReviewTargets) {
             archive.replace(\.newReviewGenerations, with: newReviewGenerations.map { .init(target: $0.key, value: $0.value) },
                 keyedBy: { MRSettingsKey($0.target) })
-        }
-        if updatedKeys.contains(Key.ignoredMergeRequests) {
-            archive.legacyHideDeadline = (candidateHides ?? hiddenMergeRequests).legacyRestoreUntil
         }
         if updatedKeys.contains(Key.automaticActionOptIns) {
             archive.emptyActionOptIns = Set(automaticActionOptIns.compactMap { $0.value.isEmpty ? $0.key : nil })
