@@ -650,6 +650,13 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Scalaj po spełnieniu warunków"}}
       }
     },
+    "settings.automation.autoMergeWithOtherAssignees": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Allow auto-merge for own merge requests with other assignees"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Zezwalaj na automatyczne scalanie moich MR-ów z innymi przypisanymi osobami"}}
+      }
+    },
     "settings.automation.claude.help": {
       "extractionState": "manual",
       "localizations": {
@@ -2255,15 +2262,15 @@
     "settings.assignedOwnership.toggle": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Treat MRs assigned to me as mine" } },
-        "pl": { "stringUnit": { "state": "translated", "value": "Traktuj MR-y przypisane do mnie jako moje" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Use assignees to determine which MRs are mine" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Ustalaj, które MR-y są moje, według przypisania" } }
       }
     },
     "settings.assignedOwnership.help": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "These merge requests appear under Mine and follow your automation profile, including fixes, pushes and merging when enabled." } },
-        "pl": { "stringUnit": { "state": "translated", "value": "Te MR-y trafiają do sekcji Moje. Aktywny profil określa, czy automatyzacja może je poprawiać, wysyłać zmiany i scalać." } }
+        "en": { "stringUnit": { "state": "translated", "value": "Mine and its automation follow the assignee list. If a merge request has no assignees, its author is responsible." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Sekcja Moje i jej automatyzacja uwzględniają listę przypisanych osób. Gdy lista jest pusta, za MR odpowiada autor." } }
       }
     },
     "settings.general.newReviews.section": {

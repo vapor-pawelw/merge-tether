@@ -25,15 +25,15 @@ struct AssistantJobInvocationTests {
     }
 
     @Test(arguments: [false, true])
-    func feedbackInstructionsRequireAReplyInEachThreadWithoutRepeatingDeliveredFixes(_ push: Bool) {
+    func feedbackInstructionsRequireLiveReconciliationBeforeDrafting(_ push: Bool) {
         let instructions = AssistantAutomationRunner.MRWorkflow.followUp.instructions(
             allowFollowUpPush: push, autoResolveOwnReviewThreads: false)
 
-        #expect(instructions.contains("Each actionable feedback thread needs its own private reply draft"))
-        #expect(instructions.contains("For a simple verified fix, prefer a brief reply"))
-        #expect(instructions.contains("link to the original feedback or published explanation"))
+        #expect(instructions.contains("each actionable feedback thread whose correction or explanation still needs a response"))
+        #expect(instructions.contains("Immediately before drafting, check live replies from any participant and the current code"))
+        #expect(instructions.contains("Skip a duplicate reply or a resolved request"))
+        #expect(instructions.contains("If an answer needs a specific addition, explain just that addition"))
         #expect(instructions.contains("Follow applicable user skills and workflow instructions for reply wording"))
-        #expect(instructions.contains("Do not repeat a delivered code change"))
     }
 
     @MainActor @Test(arguments: AutomationAssistant.allCases, [false, true])

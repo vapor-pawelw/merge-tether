@@ -25,12 +25,13 @@ struct MergeRequestBrowserSnapshotTests {
         let requests = try [request(1), request(2, username: "alice", assignment: "[\(me)]"),
             request(3, username: "alice", assignment: "[\(me),\(other)]"),
             request(4, username: "alice", assignment: "[\(other)]"),
-            request(5, username: "alice", assignment: "[]"), request(6, username: "alice")]
+            request(5, username: "alice", assignment: "[]"), request(6, username: "alice"),
+            request(7, assignment: "[\(other)]"), request(8, assignment: "[]")]
         let result = MergeRequestBrowserSnapshot(openItems: requests.map(item), authored: [],
             host: host, username: "me", scope: .init(), treatAssignedMergeRequestsAsOwn: enabled)
-        #expect(result.own.map(\.id.iid) == (enabled ? [1, 2, 3] : [1]))
-        if enabled { #expect(result.own.last?.mergeRequest?.author.username == "alice") }
-        #expect(result.reviewed.map(\.id.iid) == (enabled ? [4, 5, 6] : [2, 3, 4, 5, 6]))
+        #expect(result.own.map(\.id.iid) == (enabled ? [1, 2, 3, 8] : [1, 7, 8]))
+        if enabled { #expect(result.own.first { $0.id.iid == 3 }?.mergeRequest?.author.username == "alice") }
+        #expect(result.reviewed.map(\.id.iid) == (enabled ? [4, 5, 6, 7] : [2, 3, 4, 5, 6]))
     }
 
     @Test(arguments: ["main", "parent"])

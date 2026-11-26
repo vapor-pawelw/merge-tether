@@ -213,15 +213,25 @@ struct GitLabMergeRequest: Codable, Sendable {
     }
 
     func isOwned(by userID: Int, includingAssignee: Bool) -> Bool {
-        userID > 0 && (author.id == userID || (includingAssignee && assignees?.contains { $0.id == userID } == true))
+        guard userID > 0 else { return false }
+        if includingAssignee, let assignees, !assignees.isEmpty { return assignees.contains { $0.id == userID } }
+        return author.id == userID
     }
 
     func isOwned(by username: String, includingAssignee: Bool) -> Bool {
-        !username.isEmpty && (author.username == username || (includingAssignee && assigneeID(for: username) != nil))
+        ownerID(for: username, includingAssignee: includingAssignee) != nil
     }
 
-    func assigneeID(for username: String) -> Int? {
-        assignees?.first { $0.id > 0 && $0.username == username }?.id
+    func ownerID(for username: String, includingAssignee: Bool) -> Int? {
+        guard !username.isEmpty else { return nil }
+        if includingAssignee, let assignees, !assignees.isEmpty {
+            return assignees.first { $0.id > 0 && $0.username == username }?.id
+        }
+        return author.username == username ? author.id : nil
+    }
+
+    func hasOtherAssignees(than username: String) -> Bool {
+        assignees?.contains { $0.username != username } == true
     }
 
     func isDraft(fallback: Bool) -> Bool {

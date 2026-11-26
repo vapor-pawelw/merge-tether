@@ -53,7 +53,15 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
                 aiNoteIDs: Set<Int>, botNoteIDs: Set<Int> = []) -> Bool {
         guard couldAllow(draft, request: request, userID: userID, host: host) else { return false }
         if let discussionID = draft.discussionID,
-           discussions?.contains(where: { $0.id == discussionID && $0.isResolvedForReview }) == true { return false }
+           let discussion = discussions?.first(where: { $0.id == discussionID }) {
+            guard !discussion.isResolvedForReview else { return false }
+            let coAssignees = Set((request.assignees ?? []).map(\.id)).subtracting([userID])
+            let body = DuplicateReplyDrafts.normalized(draft.note)
+            if !body.isEmpty, discussion.notes.contains(where: { note in
+                note.system != true && note.author.map { coAssignees.contains($0.id) } == true
+                    && DuplicateReplyDrafts.normalized(note.body) == body
+            }) { return false }
+        }
         guard requiresSources || request.isOwned(by: userID, includingAssignee: treatAssignedMergeRequestsAsOwn) else { return true }
         guard let sources = Self.sourceNotes(for: draft, discussions: discussions, userID: userID),
               !sources.isEmpty else { return false }
@@ -74,7 +82,8 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
               Self.safeForAutomaticPublication(draft), request.projectID > 0, request.iid > 0,
               request.author.id > 0, request.webURL.isGitLabMergeRequest(host: host, iid: request.iid) else { return false }
         // A standalone status report becomes an unresolved self-discussion in GitLab.
-        if request.isOwned(by: userID, includingAssignee: treatAssignedMergeRequestsAsOwn), draft.discussionID?.isEmpty != false { return false }
+        let owned = request.isOwned(by: userID, includingAssignee: treatAssignedMergeRequestsAsOwn)
+        if (owned || request.author.id == userID), draft.discussionID?.isEmpty != false { return false }
         return covers(request, host: host) && (!requiresSources || draft.discussionID.map { !$0.isEmpty } == true)
     }
 

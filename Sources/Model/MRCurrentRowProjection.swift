@@ -18,7 +18,8 @@ struct MRCurrentRowProjection {
     let evidenceMatchesCatalogContext: Bool
 
     init(evidence: MergeRequestAttentionMonitor.Item, catalog: MergeRequestAttentionMonitor.Item,
-         username: String?, presentation: MergeRequestAttentionMonitor.ItemPresentation? = nil) {
+         username: String?, presentation: MergeRequestAttentionMonitor.ItemPresentation? = nil,
+         treatAssignedMergeRequestsAsOwn: Bool = true) {
         evidenceMatchesCatalogContext = evidence.id == catalog.id
             && evidence.url.gitLabTodoMergeRequestURL(host: catalog.url.host ?? "", iid: evidence.id.iid)
                 == catalog.url.gitLabTodoMergeRequestURL(host: catalog.url.host ?? "", iid: catalog.id.iid)
@@ -38,7 +39,8 @@ struct MRCurrentRowProjection {
             if !value.drafts.isEmpty { value.requiresDiscussionRecheck = true }
         }
         if evidenceMatchesCatalogContext {
-            value.isAuthored = catalog.isAuthored || catalog.mergeRequest?.author.username == username
+            value.isAuthored = catalog.isAuthored || catalog.mergeRequest?.isOwned(by: username ?? "",
+                includingAssignee: treatAssignedMergeRequestsAsOwn) == true
         }
         item = value
         self.presentation = presentation?.replacingEvidence(value, keepsMergeDecision: evidenceMatchesCatalogContext)

@@ -94,8 +94,16 @@ class AuthorFollowUpVerifier:
                 isinstance(assignee, dict) and type(assignee.get("id")) is int and assignee["id"] == user_id
                 for assignee in assignees
             )
+        assignment_policy = run.get("assignmentTakesPrecedence")
+        if assignment_policy is True and isinstance(assignees, list) and assignees:
+            owns_mr = any(isinstance(item, dict) and type(item.get("id")) is int and item["id"] == user_id
+                          for item in assignees)
+        elif assignment_policy is False:
+            owns_mr = author_matches
+        else:
+            owns_mr = author_matches or assignee_matches
         if (mr.get("project_id") != int(projectID) or mr.get("iid") != int(iid) or mr.get("state") != "opened" or
-                type(user_id) is not int or user_id <= 0 or not (author_matches or assignee_matches) or
+                type(user_id) is not int or user_id <= 0 or not owns_mr or
                 type(mr.get("source_project_id")) is not int or not mr.get("source_branch")):
             raise ValueError("The open MR must belong to the authenticated user")
         if type(mr.get("draft")) is not bool:
@@ -113,10 +121,25 @@ class AuthorFollowUpVerifier:
             if len(batch) < 100: return result
         raise ValueError("Too many draft pages to verify safely")
 
-    def status(self, host, projectID, iid, runID):
+    def status(self, host, projectID, iid, runID, expected_head=None, expected_discussions=None):
         _, run, mr, _ = self.context(host, projectID, iid, runID)
+        fingerprint = self.discussion_fingerprint(host, projectID, iid)
+        if expected_head is not None or expected_discussions is not None:
+            if (not isinstance(expected_head, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", expected_head) or
+                    not isinstance(expected_discussions, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_discussions)):
+                raise ValueError("Supply the assessed head SHA and discussion fingerprint together")
+            if fingerprint != expected_discussions:
+                raise ValueError("Discussion content changed; reassess before writing")
+            _, current_run, current_mr, _ = self.context(host, projectID, iid, runID)
+            if (current_run != run or mr["sha"] != expected_head or current_mr.get("sha") != expected_head or
+                    current_mr["source_project_id"] != mr["source_project_id"] or
+                    current_mr["source_branch"] != mr["source_branch"]):
+                raise ValueError("Follow-up context changed; reassess before writing")
+            branch = self.read(host, f"/projects/{mr['source_project_id']}/repository/branches/{quote(mr['source_branch'], safe='')}")
+            if branch.get("commit", {}).get("id") != expected_head:
+                raise ValueError("Source branch HEAD changed; reassess before writing")
         return {"pushAllowed": True, "runID": run["runID"], "headSHA": mr["sha"],
-                "discussionFingerprint": self.discussion_fingerprint(host, projectID, iid),
+                "discussionFingerprint": fingerprint,
                 "sourceProjectID": mr["source_project_id"], "sourceBranch": mr["source_branch"]}
 
     def discussion_fingerprint(self, host, projectID, iid):
@@ -294,6 +317,7 @@ def main():
     parser.add_argument("--iid", required=True)
     parser.add_argument("--run-id")
     parser.add_argument("--head-sha")
+    parser.add_argument("--discussion-fingerprint", help="Assessed discussion fingerprint for an immediate pre-write status check")
     parser.add_argument("--evidence-file", type=Path,
                         help="JSON object {discussionFingerprint,files:[{path,sha256}]} for the discussion snapshot you assessed")
     parser.add_argument("--verification-id")
@@ -304,7 +328,8 @@ def main():
     try:
         if args.action == "status":
             if not args.run_id: parser.error("status requires --run-id")
-            result = verifier.status(args.host, args.project_id, args.iid, args.run_id)
+            result = verifier.status(args.host, args.project_id, args.iid, args.run_id,
+                                     args.head_sha, args.discussion_fingerprint)
         elif args.action == "verify":
             if not args.run_id or not args.head_sha or not args.evidence_file: parser.error("verify requires --run-id, --head-sha and --evidence-file")
             if args.evidence_file.stat().st_size > 50000: raise ValueError("Evidence file is too large")

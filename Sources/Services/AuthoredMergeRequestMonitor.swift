@@ -566,6 +566,7 @@ final class AuthoredMergeRequestMonitor {
                     previous.observedReplacementQueue = true
                     _ = self.settings.saveMergeSubmission(previous)
                 },
+                permitsRequest: { !automatic || self.permitsAutomaticMerge($0, account: account) },
                 beforeWrite: { baseline in
                     receipt.trainNoteIDBeforeAttempt = baseline
                     guard permits(), mayReplaceReceipt(),
@@ -612,7 +613,8 @@ final class AuthoredMergeRequestMonitor {
         var request = request
         let target = MRAutomationScope.Target.mergeRequest(host: host, username: account.username, projectID: request.projectID, iid: request.iid)
         let autoMergeEnabled = settings.automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath,
-            optedIn: settings.autoMergePreference(for: target) == .on)
+            optedIn: settings.autoMergePreference(for: target) == .on,
+            hasOtherAssignees: request.hasOtherAssignees(than: account.username))
             && settings.automation.scope.permits(request, host: host, username: account.username)
         let policy = try? await glab.fetchMergeActionPolicy(projectID: request.projectID, host: host, request: request)
         var trainState: MergeSubmissionState = .none

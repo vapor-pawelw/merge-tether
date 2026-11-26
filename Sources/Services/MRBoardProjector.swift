@@ -410,7 +410,7 @@ struct MRBoardProjector {
             let presentation = byID[catalog.id]
             return (catalog.id, MRCurrentRowProjection(evidence: presentation?.evidence
                 ?? evidence.first { $0.id == catalog.id } ?? catalog, catalog: catalog, username: input.account.username,
-                presentation: presentation))
+                presentation: presentation, treatAssignedMergeRequestsAsOwn: input.treatAssignedMergeRequestsAsOwn))
         }, uniquingKeysWith: { first, _ in first })
         let automaticMerges = Set(input.authored.compactMap { status -> Item.ID? in
             let request = status.request
@@ -429,7 +429,8 @@ struct MRBoardProjector {
             automation: input.automation, displayRequests: input.displayRequests, grouping: input.grouping,
             completions: input.completions, hiddenReviewNotifications: input.hiddenReviewNotifications,
             currentRows: prepared, automaticMerges: automaticMerges, attentionPresentations: byID,
-            assignmentsAreAuthoritative: input.reviewAssignments != nil, newReviewAssignments: newAssignments)
+            assignmentsAreAuthoritative: input.reviewAssignments != nil, newReviewAssignments: newAssignments,
+            treatAssignedMergeRequestsAsOwn: input.treatAssignedMergeRequestsAsOwn)
     }
 
     var pendingUserAttention: ConfirmedAttentionSnapshot.Input {
@@ -446,7 +447,8 @@ struct MRBoardProjector {
                 filtered: attention.first { $0.id == row.id },
                 unfiltered: attentionSnapshot?.attention.first { $0.id == row.id }, assistantReady: preparing)
             let item = MRCurrentRowProjection(evidence: classified.evidence, catalog: row.displayItem,
-                username: input.account.username, presentation: classified).presentation
+                username: input.account.username, presentation: classified,
+                treatAssignedMergeRequestsAsOwn: input.treatAssignedMergeRequestsAsOwn).presentation
             let state = input.confirmationStates[row.id]
             let facts = facts(for: row.item.mergeRequest)
             let recoveryWaitsForHuman = (row.item.draftProofRecoveryChecking || row.isCheckingReadOnlyReconciliation)

@@ -240,7 +240,8 @@ extension SettingsManager {
             owns(request, username: target.username) && request.draft == false
                 && request.detailedMergeStatus != .draftStatus
                 && automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath,
-                    optedIn: autoMergePreference(for: target) == .on)
+                    optedIn: autoMergePreference(for: target) == .on,
+                    hasOtherAssignees: request.hasOtherAssignees(than: target.username))
         case .approval: automation.autoApproveEnabled || actionPreference(.approval, for: target) == .on
         }
     }

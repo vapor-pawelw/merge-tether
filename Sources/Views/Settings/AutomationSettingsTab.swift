@@ -360,6 +360,10 @@ struct AutomationSettingsTab: View {
                     .foregroundStyle(.secondary)
 
                 if editor.draft.autoMergeEnabled {
+                    Toggle(isOn: $editor.draft.autoMergeWithOtherAssignees) {
+                        Text(.Settings.settingsAutomationAutoMergeWithOtherAssignees)
+                    }
+                    .toggleStyle(.checkbox)
                     TextField(text: $editor.draft.autoMergeProjects) {
                         Text(.Settings.settingsAutomationAutoMergeProjects)
                     }

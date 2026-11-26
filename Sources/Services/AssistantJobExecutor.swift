@@ -89,7 +89,7 @@ enum AssistantJobExecutor {
         if request.sha != handoff.expectedHeadSHA { try await stopIfFeedbackResolved(request) }
         try validateHeadSnapshot(expected: handoff.expectedHeadSHA, actual: request.sha)
         try validateReviewOwnership(isReview: handoff.workflow == .review || handoff.reviewModel != nil,
-            owned: settings.owns(request, userID: user.id))
+            owned: request.author.id == user.id || settings.owns(request, userID: user.id))
         try validateWorkerAdmission(handoff, settings: settings, request: request, detector: pipelineWorkDetector)
         if handoff.followUpPushAllowed == true {
             guard settings.automation.permitsFollowUpPush(manual: handoff.manual == true), settings.owns(request, userID: user.id) else { throw ExecutionError.disabledPermission }
@@ -167,14 +167,14 @@ enum AssistantJobExecutor {
             try DraftReplyRepair.validateReservedDraft(repair, drafts: generationBaseline, request: request,
                 user: user, host: handoff.key.work.host)
         }
-        let requiresOwnership = handoff.dependsOnAssignment || settings.owns(request, userID: user.id)
-            || handoff.workflow == .followUp || handoff.followUpPushAllowed == true
-            || handoff.pipelineReservation != nil || handoff.allowsPush
+        let requiresOwnership = handoff.requiresAuthorOwnership || settings.owns(request, userID: user.id)
         if requiresOwnership, !settings.owns(request, userID: user.id) { throw ExecutionError.disabledPermission }
-        let assignmentInstructions = requiresOwnership && request.author.id != user.id ? """
-            The signed-in GitLab account is assigned to this MR and may perform this author workflow within the permissions below.
-            Before pushing, saving a completion draft, or making any other GitLab change, re-read the MR and authenticated user
-            with glab. Proceed only while the assignees array contains the authenticated user's ID. Otherwise stop and report the change.
+        let assignmentInstructions = requiresOwnership && settings.treatAssignedMergeRequestsAsOwn ? """
+            Before each GitLab write, re-read the MR and authenticated user with glab. When assignees exist,
+            the authenticated user must be on that list. With no assignees, that user must be the author.
+            Re-read current discussions before sending or drafting a reply and the live source before pushing.
+            If another assignee already addressed the request fully, skip a duplicate change or comment. Retest and deliver
+            only a concrete remaining improvement based on the latest source. Stop if the MR was handed off.
 
             """ : ""
         let completionInstructions = settings.owns(request, userID: user.id) ? """
@@ -306,14 +306,14 @@ enum AssistantJobExecutor {
             // Unattended runs need comparable evidence afterwards; without a baseline they do not start.
             if handoff.manual != true, authorization.auditBaseline?.isComplete != true { throw ExecutionError.auditUnavailable }
             if requiresLiveWorkflowRule(handoff) || handoff.draftRepair != nil || handoff.pipelineReservation != nil
-                || requiresOwnership && request.author.id != user.id {
+                || requiresOwnership && settings.treatAssignedMergeRequestsAsOwn {
                 let latest = try await glab.fetchMergeRequest(projectID: handoff.key.work.projectID,
                     iid: handoff.key.work.iid, host: handoff.key.work.host)
                 _ = try validateMergeRequestContext(state: latest.state, head: latest.sha)
                 if latest.sha != handoff.expectedHeadSHA { try await stopIfFeedbackResolved(latest) }
                 try validateHeadSnapshot(expected: handoff.expectedHeadSHA, actual: latest.sha)
                 try validateReviewOwnership(isReview: handoff.workflow == .review || handoff.reviewModel != nil,
-                    owned: settings.owns(latest, userID: user.id))
+                    owned: latest.author.id == user.id || settings.owns(latest, userID: user.id))
                 authorization.request = latest
             }
             let latest = authorization.request

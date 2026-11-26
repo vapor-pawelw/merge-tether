@@ -142,7 +142,8 @@ struct MergeRequestBoardSnapshot {
          automaticMerges: Set<MergeRequestAttentionMonitor.Item.ID> = [],
          attentionPresentations: [MergeRequestAttentionMonitor.Item.ID: MergeRequestAttentionMonitor.ItemPresentation] = [:],
          assignmentsAreAuthoritative: Bool = false,
-         newReviewAssignments: [MergeRequestAttentionMonitor.Item.ID: Date] = [:]) {
+         newReviewAssignments: [MergeRequestAttentionMonitor.Item.ID: Date] = [:],
+         treatAssignedMergeRequestsAsOwn: Bool = true) {
         let listedReviewMembership = Set(reviewed.map { ReviewedMembership(id: $0.id, url: $0.url) })
         reviewedMembership = listedReviewMembership
         self.ignoredTargets = ignoredTargets
@@ -188,7 +189,8 @@ struct MergeRequestBoardSnapshot {
         func row(_ original: MergeRequestAttentionMonitor.Item) -> Row {
             let valid = host.map { original.url.isGitLabMergeRequest(host: $0, iid: original.id.iid) } == true
             let projection = currentRows[original.id] ?? MRCurrentRowProjection(evidence: attention.first { sameMergeRequest($0, original) } ?? original,
-                catalog: original, username: username, presentation: attentionPresentations[original.id])
+                catalog: original, username: username, presentation: attentionPresentations[original.id],
+                treatAssignedMergeRequestsAsOwn: treatAssignedMergeRequestsAsOwn)
             let item = projection.item
             var presented = projection.presentation
             let latest = handoffs.filter {
@@ -228,7 +230,8 @@ struct MergeRequestBoardSnapshot {
         for intent in orphanIntents where !orphanRows.contains(where: { $0.id.projectID == intent.target.projectID && $0.id.iid == intent.target.iid }) {
             let request = intent.request
             orphanRows.append(.init(id: .init(projectID: request.projectID, iid: request.iid), title: request.title,
-                url: request.webURL, mergeRequest: request, isAuthored: request.author.username == username))
+                url: request.webURL, mergeRequest: request,
+                isAuthored: request.isOwned(by: username ?? "", includingAssignee: treatAssignedMergeRequestsAsOwn)))
         }
         let ownRows = own + orphanRows.filter(\.isAuthored)
         let reviewedRows = assignmentsAreAuthoritative ? reviewed : reviewed + orphanRows.filter { !$0.isAuthored }

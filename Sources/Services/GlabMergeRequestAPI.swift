@@ -31,10 +31,10 @@ extension GlabService {
     func fetchOwnedMergeRequests(userID: Int, host: String) async throws -> [GitLabMergeRequest] {
         async let authored = fetchAuthoredMergeRequests(host: host)
         async let assigned = fetchAssignedMergeRequests(userID: userID, host: host)
-        let (created, delegated) = try await (authored, assigned)
+        let (authoredRequests, delegated) = try await (authored, assigned)
+        let created = authoredRequests.filter { $0.author.id == userID && owns($0, userID: userID) }
         let createdIDs = Set(created.map(\.mergeRequestID))
-        return created.filter { $0.author.id == userID }
-            + delegated.filter { !createdIDs.contains($0.mergeRequestID) && owns($0, userID: userID) }
+        return created + delegated.filter { !createdIDs.contains($0.mergeRequestID) && owns($0, userID: userID) }
     }
 
     private func fetchAssignedMergeRequests(userID: Int, host: String) async -> [GitLabMergeRequest] {
@@ -89,7 +89,7 @@ extension GlabService {
         let finalUser = try await fetchAuthenticatedUser(host: host, expectedUsername: expectedUser.username)
         guard finalUser == expectedUser else { throw GlabError.notAuthenticated }
         try checkSession()
-        let readyRequest = if current.author.id == expectedUser.id { current }
+        let readyRequest = if ownershipSettings?.treatAssignedMergeRequestsAsOwn != true, current.author.id == expectedUser.id { current }
             else { try await fetchMergeRequest(projectID: projectID, iid: iid, host: host) }
         guard readyRequest.isOpen, readyRequest.sha == headSHA, readyRequest.draft == true,
               readyRequest.webURL == current.webURL, owns(readyRequest, userID: expectedUser.id) else { throw CancellationError() }
@@ -705,6 +705,7 @@ extension GlabService {
         expectedPolicy: GitLabMergeActionPolicy? = nil,
         expectedTrainRecoveryNoteIDs: Set<Int>? = nil,
         onRecoveryQueueObserved: @MainActor () -> Void = {},
+        permitsRequest: @escaping @MainActor @Sendable (GitLabMergeRequest) -> Bool = { _ in true },
         beforeWrite: @MainActor (Int?) throws -> Void = { _ in },
         shouldProceed: @escaping @MainActor @Sendable () -> Bool
     ) async throws -> MergeSubmissionState {
@@ -827,7 +828,7 @@ extension GlabService {
         }
         let final = if let replacementContext { replacementContext } else { try await finalRequest }
         guard MergeRequestDependencySummary.Context(final) == context, final.isReadyForMergeSubmission(action),
-              owns(final, userID: expectedUser.id) else { throw CancellationError() }
+              owns(final, userID: expectedUser.id), permitsRequest(final) else { throw CancellationError() }
         // Outside merge trains, a successful pipeline changes the offered action to Merge now.
         if action == .enqueue, expectedPolicy?.usesMergeTrain == false, final.isReadyForMergeSubmission(.mergeNow) {
             throw CancellationError()
@@ -845,7 +846,7 @@ extension GlabService {
 
         try beforeWrite(trainPreparation?.latestNoteID)
         let permitsWrite: @MainActor @Sendable () -> Bool = {
-            self.owns(final, userID: expectedUser.id) && shouldProceed()
+            self.owns(final, userID: expectedUser.id) && permitsRequest(final) && shouldProceed()
         }
         if action == .enqueue {
             let usesTrain = expectedPolicy?.usesMergeTrain == true

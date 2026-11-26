@@ -3,6 +3,18 @@ import Testing
 @testable import MergeTether
 
 struct AutomaticPublicationPolicyTests {
+    @Test func aCoAssigneesPublishedReplySuppressesOnlyTheDuplicate() throws {
+        let request = try request(assignees: #"[{"id":7,"username":"alice","name":"Alice"},{"id":4,"username":"bob","name":"Bob"}]"#)
+        let discussions = [GitLabMergeRequestDiscussion(id: "thread", notes: [
+            note(10, author: 3), note(11, author: 4, body: "Already  addressed")
+        ])]
+        let policy = AutomaticPublicationPolicy(mode: .all, restrictions: .init())
+        #expect(try !policy.allows(draft(body: "Already addressed", authorID: 7), request: request,
+            discussions: discussions, userID: 7, host: host, aiNoteIDs: []))
+        #expect(try policy.allows(draft(body: "I also covered the empty case", authorID: 7), request: request,
+            discussions: discussions, userID: 7, host: host, aiNoteIDs: []))
+    }
+
     @Test func publishAllIgnoresDormantFiltersForAGenuineAuthorReply() throws {
         let request = try request()
         let reply = try draft(authorID: request.author.id)
@@ -36,17 +48,17 @@ struct AutomaticPublicationPolicyTests {
     func identity(_ id: Int, host: String = "gitlab.example.test", label: String = "Label") -> PublicationIdentity {
         .init(host: host, entityID: id, label: label)
     }
-    func request() throws -> GitLabMergeRequest {
-        try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":7,"username":"alice","name":"Alice"},"title":"MR","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"abc","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
+    func request(assignees: String = "[]") throws -> GitLabMergeRequest {
+        try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":7,"username":"alice","name":"Alice"},"assignees":\#(assignees),"title":"MR","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"abc","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
     }
     func draft(reply: Bool = true, body: String = "Addressed", authorID: Int = 3) throws -> GitLabDraftNote {
         let json: [String: Any] = ["id": 9, "author_id": authorID, "note": body,
                                    "discussion_id": reply ? "thread" as Any : NSNull()]
         return try JSONDecoder().decode(GitLabDraftNote.self, from: JSONSerialization.data(withJSONObject: json))
     }
-    func note(_ id: Int?, author: Int?) -> GitLabMergeRequestDiscussion.Note {
+    func note(_ id: Int?, author: Int?, body: String = "Feedback") -> GitLabMergeRequestDiscussion.Note {
         .init(id: id, author: author.map { .init(id: $0, username: "user\($0)", name: nil) },
-              system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "Feedback")
+              system: false, resolvable: true, resolved: false, resolvedBy: nil, body: body)
     }
     func allows(_ policy: AutomaticPublicationPolicy, reply: Bool = true,
                 notes: [GitLabMergeRequestDiscussion.Note]? = nil, ai: Set<Int> = [], bots: Set<Int> = [],

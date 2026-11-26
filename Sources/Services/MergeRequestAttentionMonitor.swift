@@ -2753,6 +2753,7 @@ final class MergeRequestAttentionMonitor {
               policy.allows(draft, request: live, discussions: discussions, userID: user.id,
                             host: account.host, aiNoteIDs: evidence.ai, botNoteIDs: evidence.bots) else { return false }
         if !glab.owns(live, userID: user.id) {
+            guard live.author.id != user.id else { return false }
             // The discussion reads above can outlive the caller's draft snapshot.
             // Recheck the exact body so a concurrent edit cannot smuggle quick actions.
             guard let latest = try? await glab.fetchOwnDraftNotes(
@@ -2801,7 +2802,7 @@ final class MergeRequestAttentionMonitor {
                   permitsAutomaticPublication(of: currentMR, account: account) else { return blocked() }
             let freshEvidence = await publicationNoteEvidence(in: freshDiscussions, policy: policy, host: account.host,
                                             projectID: id.projectID, iid: id.iid)
-            if currentMR.author.id != currentUser.id {
+            if settings.treatAssignedMergeRequestsAsOwn {
                 let final = try await glab.fetchMergeRequest(projectID: id.projectID, iid: id.iid, host: account.host)
                 guard final.isOpen, settings.owns(final, userID: currentUser.id),
                       MRAttentionRecord.sameContext(currentMR, final) else { return blocked() }
@@ -2809,16 +2810,20 @@ final class MergeRequestAttentionMonitor {
             // Identity verification can await GitLab after the proof snapshot's draft
             // read. Re-read the exact body last so a concurrent edit cannot execute
             // a quick action or publish an unsealed author-follow-up response.
-            let finalDrafts = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid,
+            async let latestDrafts = glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid,
                                                                host: account.host, userID: currentUser.id)
+            async let latestDiscussions = glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
+            let (finalDrafts, finalDiscussions) = try await (latestDrafts, latestDiscussions)
             guard finalDrafts.contains(draft), AutomaticPublicationPolicy.safeForAutomaticPublication(draft),
-                  permitsParticipantReply(draft, request: currentMR, discussions: freshDiscussions, account: account),
+                  let assessedFingerprint = ReviewVerdict.fingerprint(freshDiscussions),
+                  ReviewVerdict.fingerprint(finalDiscussions) == assessedFingerprint,
+                  permitsParticipantReply(draft, request: currentMR, discussions: finalDiscussions, account: account),
                   isCurrent(account), settings.publicationPolicy(for: target) == policy,
                   settings.automation.allowFollowUpPush,
                   publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: user.username).contains(receipt),
                   permitsAutomaticPublication(of: currentMR, account: account) else { return false }
             guard isCurrent(account), settings.publicationPolicy(for: target) == policy,
-                  policy.allows(draft, request: currentMR, discussions: freshDiscussions, userID: currentUser.id,
+                  policy.allows(draft, request: currentMR, discussions: finalDiscussions, userID: currentUser.id,
                                 host: account.host, aiNoteIDs: freshEvidence.ai, botNoteIDs: freshEvidence.bots) else { return false }
             permitted = true
             return true
@@ -2847,17 +2852,19 @@ final class MergeRequestAttentionMonitor {
             else { return false }
             let evidence = await publicationNoteEvidence(in: discussions, policy: policy, host: host,
                 projectID: id.projectID, iid: id.iid)
-            if live.author.id != user.id {
+            if settings.treatAssignedMergeRequestsAsOwn {
                 let final = try await glab.fetchMergeRequest(projectID: id.projectID, iid: id.iid, host: host)
                 guard final.isOpen, settings.owns(final, userID: user.id),
                       MRAttentionRecord.sameContext(live, final) else { return false }
             }
-            let drafts = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: host, userID: user.id)
+            async let latestDrafts = glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: host, userID: user.id)
+            async let latestDiscussions = glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: host)
+            let (drafts, finalDiscussions) = try await (latestDrafts, latestDiscussions)
             return isCurrent(account) && revision == glab.accountRevision && settings.publicationPolicy(for: target) == policy
                 && permitsAutomaticPublication(of: live, account: account) && !hasActiveWorker(for: id, account: account)
                 && drafts.filter { $0.id == draft.id || $0.discussionID == receipt.discussionID } == [draft]
-                && verifiedReplyDrafts?.receipt(for: draft, request: live, discussions: discussions, user: user, host: host) == receipt
-                && policy.allows(draft, request: live, discussions: discussions, userID: user.id,
+                && verifiedReplyDrafts?.receipt(for: draft, request: live, discussions: finalDiscussions, user: user, host: host) == receipt
+                && policy.allows(draft, request: live, discussions: finalDiscussions, userID: user.id,
                     host: host, aiNoteIDs: evidence.ai, botNoteIDs: evidence.bots)
         } catch { return false }
     }
@@ -2884,7 +2891,8 @@ final class MergeRequestAttentionMonitor {
     func changePersonalApproval(_ action: PersonalMRApproval, for displayed: GitLabMergeRequest,
                                 accountRevision: UInt64) async -> PersonalApprovalResult {
         let id = Item.ID(projectID: displayed.projectID, iid: displayed.iid)
-        guard let settings, let account, isCurrent(account), let user, !glab.owns(displayed, userID: user.id),
+        guard let settings, let account, isCurrent(account), let user, displayed.author.id != user.id,
+              !glab.owns(displayed, userID: user.id),
               let head = displayed.sha, GlabService.isFullGitSHA(head), displayed.state == .opened,
               displayed.webURL.isGitLabMergeRequest(host: account.host, iid: id.iid),
               accountRevision == glab.accountRevision, attentionRecordsRevision == accountRevision,
@@ -3149,7 +3157,8 @@ final class MergeRequestAttentionMonitor {
                     host: account.host, projectID: id.projectID, iid: id.iid, user: user,
                     settings: self.settings, in: self.verdictDirectory)))
                 && evidence.user == user && current.state == .opened && current.draft != nil
-                && current.sha == head && !self.glab.owns(current, userID: user.id) && evidence.drafts.isEmpty
+                && current.sha == head && current.author.id != user.id
+                && !self.glab.owns(current, userID: user.id) && evidence.drafts.isEmpty
                 && covered
                 && (!automatic || self.autoApproveApplies(to: current, host: account.host, username: account.username))
                 // App-owned, model-independent proof re-checked against this fresh read, including the final one.

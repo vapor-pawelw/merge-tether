@@ -221,8 +221,7 @@ final class SettingsManager {
     }
 
     func ownerID(of request: GitLabMergeRequest, username: String) -> Int? {
-        if request.author.username == username { return request.author.id }
-        return treatAssignedMergeRequestsAsOwn ? request.assigneeID(for: username) : nil
+        request.ownerID(for: username, includingAssignee: treatAssignedMergeRequestsAsOwn)
     }
     /// Reviewing cards that arrived directly and have not been acted on yet.
     var newReviewTargets: Set<MRAutomationScope.Target> = [] {
