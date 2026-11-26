@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Queue agent work based on free disk space on the Mac and show disk waits and failures on paired iPhones and iPads.
 - Stop agent runs when required workspace directories disappear, record possible GitLab effects before retrying, and cap persistent worker output.
 
-- Treat MRs assigned only to you as yours, including automation under your active profile. The setting is on by default and can be changed in **Settings → Merge requests**.
+- Treat MRs assigned to you as yours, including shared assignments and automation under your active profile. The setting is on by default and can be changed in **Settings → Merge requests**.
 
 - Show **Review needed** again when new commits or a different target diff make your GitLab approval stale, including after restarting MergeTether.
 

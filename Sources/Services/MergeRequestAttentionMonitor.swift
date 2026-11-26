@@ -1178,7 +1178,7 @@ final class MergeRequestAttentionMonitor {
         for start in stride(from: 0, to: ordered.count, by: 4) {
             guard isCurrent(account) else { return }
             let batch = ordered[start..<min(start + 4, ordered.count)]
-            let treatSoleAssigneeAsOwn = settings?.treatSoleAssigneeAsOwn == true
+            let treatAssignedMergeRequestsAsOwn = settings?.treatAssignedMergeRequestsAsOwn == true
             let reviewRevisions = Dictionary(uniqueKeysWithValues: batch.map {
                 ($0.id, settings?.commentReviewRevision(for: commentReviewTarget($0.id, account: account)) ?? 0)
             })
@@ -1225,7 +1225,7 @@ final class MergeRequestAttentionMonitor {
                         updated.remainingApprovalFindings = []
                         if drafts?.isEmpty == true, !item.isAuthored,
                            let request = item.mergeRequest,
-                           !request.isOwned(by: user.id, includingSoleAssignee: treatSoleAssigneeAsOwn), request.draft != nil,
+                           !request.isOwned(by: user.id, includingAssignee: treatAssignedMergeRequestsAsOwn), request.draft != nil,
                            let head = request.sha, head != approvedHead,
                            ReviewVerdictStore.verdict(
                                host: host, projectID: request.projectID, iid: request.iid, user: user, in: verdictDirectory
@@ -1310,12 +1310,12 @@ final class MergeRequestAttentionMonitor {
                             updated.requiresDiscussionRecheck = !Self.draftContextIsCurrent(
                                 request: live, drafts: drafts, discussions: discussions, host: host, user: user,
                                 verdictDirectory: verdictDirectory, followUpReceipts: followUpReceipts,
-                                treatSoleAssigneeAsOwn: treatSoleAssigneeAsOwn
+                                treatAssignedMergeRequestsAsOwn: treatAssignedMergeRequestsAsOwn
                             )
                             contextDraftIDs = Set((drafts ?? []).filter { draft in
                                 Self.draftContextIsCurrent(request: live, drafts: [draft], discussions: discussions,
                                     host: host, user: user, verdictDirectory: verdictDirectory, followUpReceipts: followUpReceipts,
-                                    treatSoleAssigneeAsOwn: treatSoleAssigneeAsOwn)
+                                    treatAssignedMergeRequestsAsOwn: treatAssignedMergeRequestsAsOwn)
                             }.compactMap(\.id))
                         } else {
                             updated.requiresDiscussionRecheck = false
@@ -1328,7 +1328,7 @@ final class MergeRequestAttentionMonitor {
                                 try? await glab.fetchMergeRequest(projectID: item.id.projectID, iid: item.id.iid, host: host)
                             } else { displayed }
                             if ownApproval, let request,
-                               !request.isOwned(by: user.id, includingSoleAssignee: treatSoleAssigneeAsOwn),
+                               !request.isOwned(by: user.id, includingAssignee: treatAssignedMergeRequestsAsOwn),
                                MRAttentionRecord.sameContext(displayed, request), let discussions,
                                let baseline = await Self.observedApprovalBaseline(for: request, previous: approvalBaseline,
                                    approvedAt: updated.approvalProgress?.approvalDates[user.id],
@@ -1339,7 +1339,7 @@ final class MergeRequestAttentionMonitor {
                                 request: request ?? (ownApproval && !hasDrafts ? displayed : nil),
                                 discussions: discussions, host: host, user: user, verdictDirectory: verdictDirectory,
                                 approvedHead: approvedHead, approvalBaseline: approvalRead?.baseline,
-                                treatSoleAssigneeAsOwn: treatSoleAssigneeAsOwn)
+                                treatAssignedMergeRequestsAsOwn: treatAssignedMergeRequestsAsOwn)
                         }
                         updated.replyRecipients = [:]
                         updated.incomingReplyDiscussionIDs = AutomaticPublicationPolicy.incomingDiscussionIDs(in: discussions, userID: user.id)
@@ -1723,13 +1723,13 @@ final class MergeRequestAttentionMonitor {
     private nonisolated static func reviewingProgress(
         for item: Item, request: GitLabMergeRequest?, discussions: [GitLabMergeRequestDiscussion]?,
         host: String, user: GitLabAuthenticatedUser, verdictDirectory: URL, approvedHead: String?,
-        approvalBaseline: ReviewApprovalBaseline?, treatSoleAssigneeAsOwn: Bool
+        approvalBaseline: ReviewApprovalBaseline?, treatAssignedMergeRequestsAsOwn: Bool
     ) -> ReviewingProgress? {
         guard !item.isAuthored, let request, let displayed = item.mergeRequest,
               request.projectID == item.id.projectID, request.iid == item.id.iid,
               request.webURL == item.url, request.webURL == displayed.webURL,
               request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
-              request.isOpen, !request.isOwned(by: user.id, includingSoleAssignee: treatSoleAssigneeAsOwn),
+              request.isOpen, !request.isOwned(by: user.id, includingAssignee: treatAssignedMergeRequestsAsOwn),
               let head = request.sha, !head.isEmpty,
               displayed.evidenceContext().binds(to: request.evidenceContext(), policy: .requestText),
               let discussions, ReviewVerdict.fingerprint(discussions) != nil else { return nil }
@@ -1755,11 +1755,11 @@ final class MergeRequestAttentionMonitor {
     private nonisolated static func draftContextIsCurrent(
         request: GitLabMergeRequest?, drafts: [GitLabDraftNote]?, discussions: [GitLabMergeRequestDiscussion]?,
         host: String, user: GitLabAuthenticatedUser, verdictDirectory: URL, followUpReceipts: [FollowUpVerification],
-        treatSoleAssigneeAsOwn: Bool
+        treatAssignedMergeRequestsAsOwn: Bool
     ) -> Bool {
         guard let request, request.isOpen, let head = request.sha,
               let drafts, !drafts.isEmpty, let discussions else { return false }
-        if request.isOwned(by: user.id, includingSoleAssignee: treatSoleAssigneeAsOwn) {
+        if request.isOwned(by: user.id, includingAssignee: treatAssignedMergeRequestsAsOwn) {
             return drafts.allSatisfy { draft in
                 followUpReceipt(for: draft, request: request, discussions: discussions, host: host, user: user,
                     verdictDirectory: verdictDirectory, receipts: followUpReceipts) != nil
@@ -2738,7 +2738,7 @@ final class MergeRequestAttentionMonitor {
         guard isCurrent(account), Self.draftContextIsCurrent(request: live, drafts: [draft], discussions: discussions,
             host: account.host, user: user, verdictDirectory: verdictDirectory,
             followUpReceipts: publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: user.username),
-            treatSoleAssigneeAsOwn: settings?.treatSoleAssigneeAsOwn == true) else {
+            treatAssignedMergeRequestsAsOwn: settings?.treatAssignedMergeRequestsAsOwn == true) else {
             updateItem(id) { $0.requiresDiscussionRecheck = true }
             return false
         }
@@ -2793,7 +2793,7 @@ final class MergeRequestAttentionMonitor {
                   permitsParticipantReply(draft, request: currentMR, discussions: freshDiscussions, account: account),
                   Self.draftContextIsCurrent(request: currentMR, drafts: [draft], discussions: freshDiscussions,
                     host: account.host, user: currentUser, verdictDirectory: verdictDirectory,
-                    followUpReceipts: [receipt], treatSoleAssigneeAsOwn: settings.treatSoleAssigneeAsOwn),
+                    followUpReceipts: [receipt], treatAssignedMergeRequestsAsOwn: settings.treatAssignedMergeRequestsAsOwn),
                   settings.owns(currentMR, userID: currentUser.id),
                   receipt.covers(draft, request: currentMR, host: account.host, user: currentUser, runID: receipt.runID),
                   isCurrent(account), settings.automation.allowFollowUpPush,
@@ -3338,7 +3338,7 @@ final class MergeRequestAttentionMonitor {
                 host: account.host, user: user, verdictDirectory: verdictDirectory,
                 followUpReceipts: contextReceipts(projectID: item.id.projectID, iid: item.id.iid,
                     host: account.host, username: user.username),
-                treatSoleAssigneeAsOwn: settings?.treatSoleAssigneeAsOwn == true)
+                treatAssignedMergeRequestsAsOwn: settings?.treatAssignedMergeRequestsAsOwn == true)
             let approvalCurrent = contextMatches && (request.flatMap { request in
                 discussions.map { discussions in
                     if let verdict = ReviewVerdictStore.authenticatedVerdict(host: account.host, projectID: item.id.projectID,
@@ -3364,7 +3364,7 @@ final class MergeRequestAttentionMonitor {
                 $0.reviewingProgress = contextMatches ? Self.reviewingProgress(for: item, request: request,
                     discussions: discussions, host: account.host, user: user, verdictDirectory: verdictDirectory,
                     approvedHead: approvedHeads[item.id], approvalBaseline: settings?.approvalBaseline(for: target, user: user),
-                    treatSoleAssigneeAsOwn: settings?.treatSoleAssigneeAsOwn == true) : nil
+                    treatAssignedMergeRequestsAsOwn: settings?.treatAssignedMergeRequestsAsOwn == true) : nil
                 if !$0.isAuthored, let request {
                     $0.reviewingActivity = discussions.map {
                         ReviewingActivity(discussions: $0, reviewerID: user.id, authorID: request.author.id)

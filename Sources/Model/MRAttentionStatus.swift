@@ -264,7 +264,7 @@ extension MergeRequestAttentionMonitor {
             pipelineOwnedAutomatically: Bool = false, feedbackOwnedAutomatically: Bool = false
         ) -> Self {
             guard automation.hasAutomaticActionConsent, let request = evidence.authoredRequest, request.isOpen,
-                  request.isOwned(by: target.username, includingSoleAssignee: true),
+                  request.isOwned(by: target.username, includingAssignee: true),
                   request.projectID == target.projectID, request.iid == target.iid,
                   request.webURL.isGitLabMergeRequest(host: target.host, iid: request.iid),
                   automation.scope.permits(request, host: target.host, username: target.username) else { return self }

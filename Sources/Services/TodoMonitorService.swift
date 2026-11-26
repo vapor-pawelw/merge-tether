@@ -617,7 +617,7 @@ final class TodoMonitorService {
         input.authored = authoredMergeRequests.requests
         input.retainedRequests = settings.mrLifecycleLedger.retainedRequests(host: host, username: username)
         input.ownCatalogIsAuthoritative = attention.hasCurrentOwnListing
-        input.treatSoleAssigneeAsOwn = settings.treatSoleAssigneeAsOwn
+        input.treatAssignedMergeRequestsAsOwn = settings.treatAssignedMergeRequestsAsOwn
         let targets = settings.mrLifecycleLedger.targets(host: host, username: username)
         for target in targets {
             if let iid = target.iid, let id = settings.mrLifecycleLedger.completionID(for: target) {
@@ -940,7 +940,7 @@ final class TodoMonitorService {
                               account: original, currentAccount: current) else { return }
         boardDisplayMetadata = metadata
         if request.assignees != nil, !settings.owns(request, username: target.username) {
-            cancelSoleAssignmentJobs(for: target)
+            cancelAssignmentDependentJobs(for: target)
         }
         mergeRequestIssues?.observe(request, target: target, revision: accountRevision, at: readStartedAt)
     }
@@ -1635,17 +1635,17 @@ final class TodoMonitorService {
             })
     }
 
-    func setTreatSoleAssigneeAsOwn(_ enabled: Bool) {
-        guard settings.treatSoleAssigneeAsOwn != enabled else { return }
-        settings.treatSoleAssigneeAsOwn = enabled
+    func setTreatAssignedMergeRequestsAsOwn(_ enabled: Bool) {
+        guard settings.treatAssignedMergeRequestsAsOwn != enabled else { return }
+        settings.treatAssignedMergeRequestsAsOwn = enabled
         settings.save()
-        if !enabled { cancelSoleAssignmentJobs() }
+        if !enabled { cancelAssignmentDependentJobs() }
         Task { await forceRefreshFromGitLab() }
     }
 
-    private func cancelSoleAssignmentJobs(for target: MRAutomationScope.Target? = nil) {
+    private func cancelAssignmentDependentJobs(for target: MRAutomationScope.Target? = nil) {
         let active = settings.assistantHandoffs.filter {
-            $0.requiresSoleAssignment == true && $0.execution?.state.isActive == true
+            $0.dependsOnAssignment && $0.execution?.state.isActive == true
                 && $0.execution?.cancellationOrigin == nil && (target == nil || $0.key.automationTarget == target)
         }
         guard !active.isEmpty else { return }

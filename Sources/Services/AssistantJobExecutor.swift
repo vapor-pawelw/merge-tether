@@ -167,14 +167,14 @@ enum AssistantJobExecutor {
             try DraftReplyRepair.validateReservedDraft(repair, drafts: generationBaseline, request: request,
                 user: user, host: handoff.key.work.host)
         }
-        let requiresOwnership = handoff.requiresSoleAssignment == true || settings.owns(request, userID: user.id)
+        let requiresOwnership = handoff.dependsOnAssignment || settings.owns(request, userID: user.id)
             || handoff.workflow == .followUp || handoff.followUpPushAllowed == true
             || handoff.pipelineReservation != nil || handoff.allowsPush
         if requiresOwnership, !settings.owns(request, userID: user.id) { throw ExecutionError.disabledPermission }
         let assignmentInstructions = requiresOwnership && request.author.id != user.id ? """
-            The signed-in GitLab account is the sole assignee and may perform this author workflow within the permissions below.
+            The signed-in GitLab account is assigned to this MR and may perform this author workflow within the permissions below.
             Before pushing, saving a completion draft, or making any other GitLab change, re-read the MR and authenticated user
-            with glab. Proceed only while the assignees array contains exactly that user. Otherwise stop and report the change.
+            with glab. Proceed only while the assignees array contains the authenticated user's ID. Otherwise stop and report the change.
 
             """ : ""
         let completionInstructions = settings.owns(request, userID: user.id) ? """
@@ -538,7 +538,7 @@ enum AssistantJobExecutor {
                   live.sourceBranch == request.sourceBranch, live.targetProjectID == request.targetProjectID,
                   live.targetBranch == request.targetBranch, live.isOpen, let head = live.sha, !head.isEmpty,
                   settings.owns(request, userID: user.id) == settings.owns(live, userID: user.id),
-                  handoff.requiresSoleAssignment != true || settings.owns(live, userID: user.id),
+                  !handoff.dependsOnAssignment || settings.owns(live, userID: user.id),
                   live.sha == request.sha || handoff.followUpPushAllowed == true || handoff.allowsPush else { return }
             let drafts = try await glab.fetchOwnDraftNotes(projectID: work.projectID, iid: work.iid, host: work.host, userID: user.id)
             guard current() else { return }

@@ -54,22 +54,38 @@ class AuthorFollowUpTest(unittest.TestCase):
     def verify(self):
         return self.verifier.verify("gitlab.example.org", "1", "2", self.run["runID"], self.head, self.evidence)
 
-    def test_sole_assignee_can_verify_only_with_run_permission(self):
+    def test_legacy_run_permission_only_covers_a_sole_assignee(self):
         self.mr["author"] = {"id": 7}
         self.mr["assignees"] = [{"id": 3}]
         with self.assertRaises(ValueError):
             self.verify()
         self.run["soleAssigneeAllowed"] = True
         self.save_run()
+        self.mr["assignees"].append({"id": 7})
+        with self.assertRaises(ValueError):
+            self.verify()
+        self.mr["assignees"].pop()
         proof = self.verify()
         self.drafts.append({"id": 13, "author_id": 3, "note": "Verified delegated fix"})
         self.assertTrue(self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[13]")["sealed"])
 
-    def test_changing_the_assignment_or_run_permission_blocks_sealing(self):
+    def test_co_assignees_can_change_before_sealing(self):
         self.mr["author"] = {"id": 7}
-        self.run["soleAssigneeAllowed"] = True
+        self.mr["assignees"] = [{"id": 7}, {"id": 3}]
+        with self.assertRaises(ValueError):
+            self.verify()
+        self.run["assigneeAllowed"] = True
         self.save_run()
-        for assignees in ([], [{"id": 7}], [{"id": 3}, {"id": 7}], None, [{"id": "3"}]):
+        proof = self.verify()
+        self.mr["assignees"] = [{"id": 3}, {"id": 8}]
+        self.drafts.append({"id": 13, "author_id": 3, "note": "Verified delegated fix"})
+        self.assertTrue(self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[13]")["sealed"])
+
+    def test_losing_the_assignment_or_run_permission_blocks_sealing(self):
+        self.mr["author"] = {"id": 7}
+        self.run["assigneeAllowed"] = True
+        self.save_run()
+        for assignees in ([], [{"id": 7}], [{"id": 4}, {"id": 7}], None, [{"id": "3"}]):
             with self.subTest(assignees=assignees):
                 self.mr["assignees"] = [{"id": 3}]
                 self.drafts = self.drafts[:1]
@@ -82,7 +98,7 @@ class AuthorFollowUpTest(unittest.TestCase):
         self.drafts = self.drafts[:1]
         proof = self.verify()
         self.drafts.append({"id": 13, "author_id": 3, "note": "Verified delegated fix"})
-        self.run["soleAssigneeAllowed"] = False
+        self.run["assigneeAllowed"] = False
         self.save_run()
         with self.assertRaises(ValueError):
             self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[13]")

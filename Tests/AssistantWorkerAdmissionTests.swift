@@ -223,11 +223,13 @@ struct AssistantWorkerAdmissionTests {
 
     @Test(arguments: AutomationAssistant.allCases,
           ["current", "initial-claim", "late-claim", "manual-claim", "owned-pipeline", "stale-token", "owned-plus-legacy",
-           "label-removed", "target-changed", "late-label", "late-target", "manual-no-rule", "legacy-no-rule", "late-pipeline-running", "late-pipeline-pending", "late-pipeline-passed", "late-pipeline-replaced", "late-pipeline-missing", "confirmed-pipeline", "unconfirmed-pipeline", "wrong-confirmation", "manual-provider", "new-discussion", "new-discussion-off"])
+           "label-removed", "target-changed", "late-label", "late-target", "manual-no-rule", "legacy-no-rule", "late-pipeline-running", "late-pipeline-pending", "late-pipeline-passed", "late-pipeline-replaced", "late-pipeline-missing", "confirmed-pipeline", "unconfirmed-pipeline", "wrong-confirmation", "manual-provider", "new-discussion", "new-discussion-off",
+           "new-discussion-shared", "new-discussion-shared-disabled"])
     func workersRecheckExclusiveOwnershipAndLiveWorkflowRulesBeforeSpawn(_ assistant: AutomationAssistant, _ scenario: String) async throws {
         let f = try Fixture(assistant: assistant, scenario: scenario)
         defer { f.clean() }
-        let allowed = ["current", "owned-pipeline", "manual-no-rule", "legacy-no-rule", "confirmed-pipeline", "manual-provider", "new-discussion"].contains(scenario)
+        let allowed = ["current", "owned-pipeline", "manual-no-rule", "legacy-no-rule", "confirmed-pipeline", "manual-provider",
+            "new-discussion", "new-discussion-shared"].contains(scenario)
         do {
             let outcome = try await AssistantJobExecutor.execute(f.handoff, settings: f.settings,
                 glab: f.glab, pipelineWorkDetector: f.claims, detectCLI: { _ in .ready(f.cli) })
@@ -301,6 +303,8 @@ struct AssistantWorkerAdmissionTests {
                 settings.automation.authorFeedback.isEnabled = false
                 settings.automation.workflowRules[.newDiscussion].mode = scenario == "new-discussion-off" ? .off : .assistant
             }
+            let sharedAssignment = scenario.hasPrefix("new-discussion-shared")
+            if scenario == "new-discussion-shared-disabled" { settings.treatAssignedMergeRequestsAsOwn = false }
             claims = ExistingPipelineWorkDetector(directory: root.appending(path: "claims"), legacyDirectory: root.appending(path: "legacy"))
             cli = root.appending(path: "fixture-cli")
             glab = gitlab.service(host: host, username: "me")
@@ -335,7 +339,7 @@ struct AssistantWorkerAdmissionTests {
             let pipeline = ["owned-pipeline", "stale-token", "owned-plus-legacy", "confirmed-pipeline", "unconfirmed-pipeline", "wrong-confirmation"].contains(scenario) || scenario.hasPrefix("late-pipeline-")
             let allowedPush = scenario == "audit-allowed-push"
             let feedbackFollowUp = scenario.hasPrefix("follow-up-")
-            let authored = pipeline || allowedPush || feedbackFollowUp || scenario.hasPrefix("new-discussion")
+            let authored = pipeline || allowedPush || feedbackFollowUp || (scenario.hasPrefix("new-discussion") && !sharedAssignment)
             let key = ExistingPipelineWorkDetector.Key(host: host, projectID: 7, mergeRequestIID: 11, pipelineID: 10)
             var reservation: ExistingPipelineWorkDetector.Key?
             if pipeline {
@@ -366,7 +370,8 @@ struct AssistantWorkerAdmissionTests {
                 pipelineHandoffConfirmation: ["confirmed-pipeline", "wrong-confirmation"].contains(scenario) ? .init(
                     target: .init(host: host, username: "me", projectID: 7, iid: 11), pipelineID: 10,
                     headSHA: scenario == "wrong-confirmation" ? String(repeating: "b", count: 40) : head,
-                    reservationID: reservation!.reservationID!) : nil)
+                    reservationID: reservation!.reservationID!) : nil,
+                requiresSoleAssignment: sharedAssignment ? true : nil)
             if scenario == "manual-provider" { settings.automation.assistant = assistant == .codex ? .claude : .codex }
             settings.assistantHandoffs = [handoff]
             settings.save()
@@ -397,6 +402,12 @@ struct AssistantWorkerAdmissionTests {
                         "title":"Fixture","web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened",
                         "draft":false,"sha":workerRan && sourceHeadChanged ? newHead : head,
                         "source_branch":"feature","target_branch":targetBranch,"labels":labels]
+                    if sharedAssignment {
+                        payload["assignees"] = [
+                            ["id": 2, "username": "other", "name": "Other"],
+                            ["id": 1, "username": "me", "name": "Me"]
+                        ]
+                    }
                     if pipeline && pipelineStatus != "missing" { payload["head_pipeline"] = ["id":pipelineID,"project_id":7,"status":pipelineStatus,"sha":head,"ref":"feature"] }
                     if scenario == "follow-up-advanced-head" && threadResolved { payload["sha"] = String(repeating: "b", count: 40) }
                     return try InMemoryGitLab.json(payload)

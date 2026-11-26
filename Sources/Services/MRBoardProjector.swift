@@ -22,7 +22,7 @@ struct MRBoardProjector {
             let context: MergeRequestDependencySummary.Context
             let authorID: Int
             let authorUsername: String
-            let soleAssignee: GitLabAuthenticatedUser?
+            let assigneeIdentities: Set<GitLabAuthenticatedUser>
             let draft: Bool?
             let pipeline: Pipeline?
             let hasConflicts: Bool?
@@ -36,7 +36,7 @@ struct MRBoardProjector {
             init(_ request: GitLabMergeRequest) {
                 context = .init(request)
                 authorID = request.author.id; authorUsername = request.author.username; draft = request.draft
-                soleAssignee = request.soleAssignee
+                assigneeIdentities = request.assigneeIdentities
                 pipeline = request.headPipeline.map(Pipeline.init)
                 hasConflicts = request.hasConflicts; detailedMergeStatus = request.detailedMergeStatus
                 trainConflict = request.mergeTrainConflict; trainEvidenceUnavailable = request.mergeTrainEvidenceUnavailable
@@ -119,7 +119,7 @@ struct MRBoardProjector {
         var retainedRequests: [GitLabMergeRequest] = []
         var completionIDs: [Item.ID: UUID] = [:]
         var ownCatalogIsAuthoritative = false
-        var treatSoleAssigneeAsOwn = true
+        var treatAssignedMergeRequestsAsOwn = true
         var reviewAssignments: [ReviewAssignmentLedger.Entry]?
         var trackedReviewedTargets: Set<MRAutomationScope.Target> = []
         var remainingFeedbackIDs: [Item.ID: Set<Int>] = [:]
@@ -209,7 +209,7 @@ struct MRBoardProjector {
             guard let target = scopeTarget(projectID: id.projectID, iid: id.iid, url: request.webURL) else { continue }
             if !MRAttentionRecord.sameContext(rows[id]?.mergeRequest, request) {
                 rows[id] = .init(id: id, title: request.title, url: request.webURL,
-                    mergeRequest: request, isAuthored: request.isOwned(by: input.account.username, includingSoleAssignee: input.treatSoleAssigneeAsOwn))
+                    mergeRequest: request, isAuthored: request.isOwned(by: input.account.username, includingAssignee: input.treatAssignedMergeRequestsAsOwn))
             }
             rows[id]?.lifecycleCompletionID = input.completionIDs[id]
             if input.hiddenTargets.contains(target) { rows[id] = nil }
@@ -222,7 +222,7 @@ struct MRBoardProjector {
     var browser: MergeRequestBrowserSnapshot {
         .init(openItems: catalogItems, authored: input.authored, host: input.account.host, username: input.account.username,
             scope: input.automation.scope, ownCatalogIsAuthoritative: input.ownCatalogIsAuthoritative, draftsLast: input.draftsLast,
-            treatSoleAssigneeAsOwn: input.treatSoleAssigneeAsOwn)
+            treatAssignedMergeRequestsAsOwn: input.treatAssignedMergeRequestsAsOwn)
     }
     var ownItems: [Item] { browser.own }
     var reviewedItems: [Item] {
@@ -268,11 +268,11 @@ struct MRBoardProjector {
             let host = input.account.host, username = input.account.username
             for status in input.authored where status.mayMergeManually {
                 let request = status.request
-                guard request.isOwned(by: username, includingSoleAssignee: input.treatSoleAssigneeAsOwn),
+                guard request.isOwned(by: username, includingAssignee: input.treatAssignedMergeRequestsAsOwn),
                       request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
                       let current = catalogItems.first(where: {
                           $0.id.projectID == request.projectID && $0.id.iid == request.iid
-                      }), current.mergeRequest?.isOwned(by: username, includingSoleAssignee: input.treatSoleAssigneeAsOwn) == true, current.canOfferManualMerge(using: status)
+                      }), current.mergeRequest?.isOwned(by: username, includingAssignee: input.treatAssignedMergeRequestsAsOwn) == true, current.canOfferManualMerge(using: status)
                 else { continue }
                 let id = request.mergeRequestID
                 guard (items.first(where: { $0.id == id })?.draftCount ?? 0) == 0 else { continue }
@@ -328,7 +328,7 @@ struct MRBoardProjector {
                 && (rule.isEnabled || (workflow.mode == .assistant && workflow.includes(intent.request)))
         case .pipeline:
             let rule = configuration.workflowRules[.pipelineFailure]
-            return intent.request.isOwned(by: intent.target.username, includingSoleAssignee: input.treatSoleAssigneeAsOwn) && configuration.autoClaimPipelineFailures
+            return intent.request.isOwned(by: intent.target.username, includingAssignee: input.treatAssignedMergeRequestsAsOwn) && configuration.autoClaimPipelineFailures
                 && rule.mode == .assistant && rule.includes(intent.request)
         default: return false
         }
@@ -415,7 +415,7 @@ struct MRBoardProjector {
         let automaticMerges = Set(input.authored.compactMap { status -> Item.ID? in
             let request = status.request
             let id = request.mergeRequestID
-            guard !input.mrCatalogReadFailed, request.isOwned(by: input.account.username, includingSoleAssignee: input.treatSoleAssigneeAsOwn),
+            guard !input.mrCatalogReadFailed, request.isOwned(by: input.account.username, includingAssignee: input.treatAssignedMergeRequestsAsOwn),
                   let projection = prepared[id], projection.evidenceMatchesCatalogContext,
                   projection.item.canOfferManualMerge(using: status),
                   canMergeAutomatically(status, item: projection.item) else { return nil }
@@ -472,10 +472,10 @@ struct MRBoardProjector {
     }
 
     nonisolated static func browserItems(openItems: [Item], authored: [AuthoredMergeRequestStatus],
-        host: String, username: String, ownCatalogIsAuthoritative: Bool, draftsLast: Bool, treatSoleAssigneeAsOwn: Bool) -> (own: [Item], reviewed: [Item]) {
+        host: String, username: String, ownCatalogIsAuthoritative: Bool, draftsLast: Bool, treatAssignedMergeRequestsAsOwn: Bool) -> (own: [Item], reviewed: [Item]) {
         var rows = Dictionary(uniqueKeysWithValues: openItems.map { ($0.id, $0) })
         let currentAuthored = authored.filter {
-            $0.request.isOwned(by: username, includingSoleAssignee: treatSoleAssigneeAsOwn) && $0.request.isOpen
+            $0.request.isOwned(by: username, includingAssignee: treatAssignedMergeRequestsAsOwn) && $0.request.isOpen
                 && $0.request.webURL.isGitLabMergeRequest(host: host, iid: $0.request.iid)
         }
         for status in currentAuthored {
@@ -500,7 +500,7 @@ struct MRBoardProjector {
                 && $0.mergeRequest?.webURL.isGitLabMergeRequest(host: host, iid: $0.id.iid) == true
         }.map { item in
             var item = item
-            item.isAuthored = item.mergeRequest?.isOwned(by: username, includingSoleAssignee: treatSoleAssigneeAsOwn) == true
+            item.isAuthored = item.mergeRequest?.isOwned(by: username, includingAssignee: treatAssignedMergeRequestsAsOwn) == true
             return item.presentingVerifiedAuthorFeedback()
         }
         let items = ItemPresentation.ordered(visible, draftsLast: draftsLast).map(\.evidence)

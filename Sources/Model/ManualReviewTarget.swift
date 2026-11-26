@@ -11,9 +11,9 @@ struct ManualReviewTarget: Sendable {
         self.host == host && self.username == username
     }
 
-    func accepts(_ request: GitLabMergeRequest, treatSoleAssigneeAsOwn: Bool = true) -> Bool {
+    func accepts(_ request: GitLabMergeRequest, treatAssignedMergeRequestsAsOwn: Bool = true) -> Bool {
         request.isOpen && request.projectID == projectID && request.iid == iid
             && request.webURL == url && url.isGitLabMergeRequest(host: host, iid: iid)
-            && !request.isOwned(by: username, includingSoleAssignee: treatSoleAssigneeAsOwn) && request.sha?.isEmpty == false
+            && !request.isOwned(by: username, includingAssignee: treatAssignedMergeRequestsAsOwn) && request.sha?.isEmpty == false
     }
 }

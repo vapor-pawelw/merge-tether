@@ -38,7 +38,7 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
               let state = job.operationalExecution?.state, [.failed, .interrupted, .cancelled, .blocked].contains(state),
               let selected = job.feedbackNoteIDs, !selected.isEmpty, selected.allSatisfy({ $0 > 0 }),
               job.key.work.projectID == request.projectID, job.key.work.iid == request.iid,
-              request.isOwned(by: job.key.username, includingSoleAssignee: job.requiresSoleAssignment == true), request.isOpen,
+              request.isOwned(by: job.key.username, includingAssignee: job.dependsOnAssignment), request.isOpen,
               request.webURL.isGitLabMergeRequest(host: job.key.work.host, iid: request.iid) else { return false }
         return state != .blocked || (job.expectedHeadSHA == request.sha && job.draftRepair == nil
             && job.execution?.finishedAt != nil && blockedContext(for: job) != nil)

@@ -258,52 +258,57 @@ struct GlabMergeRequestAPITests {
         }
     }
 
-    @Test func personalCatalogIncludesOnlySoleAssignmentsAndDoesNotDuplicateAuthoredRequests() async throws {
+    @Test func personalCatalogIncludesSharedAssignmentsAndDoesNotDuplicateAuthoredRequests() async throws {
         let gitlab = InMemoryGitLab()
         defer { gitlab.close() }
-        let settings = try soleAssigneeSettings()
+        let settings = try assignmentSettings()
         let glab = gitlab.service(host: host, username: "alice")
         glab.ownershipSettings = settings
-        let mine = soleAssignmentRequest(iid: 12, authored: true)
-        let delegated = soleAssignmentRequest(iid: 13)
-        let shared = soleAssignmentRequest(iid: 14, shared: true)
+        let mine = assignmentRequest(iid: 12, authored: true)
+        let delegated = assignmentRequest(iid: 13)
+        let shared = assignmentRequest(iid: 14, assignment: .shared)
+        let assignedToSomeoneElse = assignmentRequest(iid: 15, assignment: .someoneElse)
         gitlab.handler = { call in
             switch call.endpoint {
             case "/merge_requests?scope=created_by_me&state=opened&with_merge_status_recheck=true&per_page=100":
                 return InMemoryGitLab.output("[\(mine)]")
             case "/merge_requests?scope=all&state=opened&assignee_id=8&with_merge_status_recheck=true&per_page=100":
                 #expect(call.arguments.contains("--paginate"))
-                return InMemoryGitLab.output("[\(mine),\(delegated),\(shared)]")
+                return InMemoryGitLab.output("[\(mine),\(delegated),\(shared),\(assignedToSomeoneElse)]")
             default:
                 return try gitlab.unexpected(call)
             }
         }
 
         let owned = try await glab.fetchOwnedMergeRequests(userID: 8, host: host)
-        #expect(owned.map(\.iid) == [12, 13])
+        #expect(owned.map(\.iid) == [12, 13, 14])
         #expect(owned.last?.author.username == "author")
-        settings.treatSoleAssigneeAsOwn = false
+        settings.treatAssignedMergeRequestsAsOwn = false
         gitlab.requests.removeAll()
         #expect(try await glab.fetchOwnedMergeRequests(userID: 8, host: host).map(\.iid) == [12])
         #expect(gitlab.requests.count == 1)
     }
 
-    @Test(arguments: ["valid", "shared", "disabled"])
-    func mergeRechecksSoleAssignmentAndPreferenceAtTheWrite(_ scenario: String) async throws {
+    @Test(arguments: ["valid", "shared", "removed", "disabled"])
+    func mergeRechecksAssignmentAndPreferenceAtTheWrite(_ scenario: String) async throws {
         let gitlab = InMemoryGitLab()
         defer { gitlab.close() }
-        let settings = try soleAssigneeSettings()
+        let settings = try assignmentSettings()
         let glab = gitlab.service(host: host, username: "alice")
         glab.ownershipSettings = settings
-        let assigned = soleAssignmentRequest(iid: 12)
-        let shared = soleAssignmentRequest(iid: 12, shared: true)
+        let assigned = assignmentRequest(iid: 12)
+        let final = switch scenario {
+        case "shared": assignmentRequest(iid: 12, assignment: .shared)
+        case "removed": assignmentRequest(iid: 12, assignment: .someoneElse)
+        default: assigned
+        }
         var detailReads = 0
         gitlab.handler = { call in
             switch call.endpoint {
             case "/user": return InMemoryGitLab.output(#"{"id":8,"username":"alice"}"#)
             case "/projects/34/merge_requests/12":
                 detailReads += 1
-                return InMemoryGitLab.output(scenario == "shared" && detailReads > 1 ? shared : assigned)
+                return InMemoryGitLab.output(detailReads > 1 ? final : assigned)
             case "/projects/34/merge_requests?state=opened&scope=all&per_page=100":
                 return InMemoryGitLab.output("[\(assigned)]")
             case "/projects/34/merge_requests/12/blocks?per_page=100": return InMemoryGitLab.output("[]")
@@ -317,26 +322,34 @@ struct GlabMergeRequestAPITests {
         let merge = {
             try await glab.mergeMergeRequest(projectID: 34, iid: 12, headSHA: sha, host: host,
                 expectedUser: .init(id: 8, username: "alice"), beforeWrite: { _ in
-                    if scenario == "disabled" { settings.treatSoleAssigneeAsOwn = false }
+                    if scenario == "disabled" { settings.treatAssignedMergeRequestsAsOwn = false }
                 }, shouldProceed: { true })
         }
-        if scenario == "valid" { #expect(try await merge() == .merged) }
+        let mayMerge = scenario == "valid" || scenario == "shared"
+        if mayMerge { #expect(try await merge() == .merged) }
         else { await #expect(throws: CancellationError.self) { _ = try await merge() } }
         #expect(detailReads == 2)
-        #expect(gitlab.requests.contains { $0.method == "PUT" } == (scenario == "valid"))
+        #expect(gitlab.requests.contains { $0.method == "PUT" } == mayMerge)
     }
 
-    private func soleAssigneeSettings() throws -> SettingsManager {
-        let defaults = try #require(UserDefaults(suiteName: "SoleAssignmentAPI.\(UUID())"))
+    private func assignmentSettings() throws -> SettingsManager {
+        let defaults = try #require(UserDefaults(suiteName: "AssignmentAPI.\(UUID())"))
         return SettingsManager(defaults: defaults)
     }
 
-    private func soleAssignmentRequest(iid: Int, authored: Bool = false, shared: Bool = false) -> String {
+    private enum Assignment { case currentUser, shared, someoneElse }
+
+    private func assignmentRequest(iid: Int, authored: Bool = false, assignment: Assignment = .currentUser) -> String {
         let alice = #"{"id":8,"username":"alice","name":"Alice"}"#
         let author = #"{"id":7,"username":"author","name":"Author"}"#
+        let assignees = switch assignment {
+        case .currentUser: alice
+        case .shared: "\(author),\(alice)"
+        case .someoneElse: author
+        }
         return """
         {"project_id":34,"iid":\(iid),"author":\(authored ? alice : author),"title":"Sample MR",
-         "assignees":[\(alice)\(shared ? "," + author : "")],"web_url":"https://\(host)/group/repo/-/merge_requests/\(iid)",
+         "assignees":[\(assignees)],"web_url":"https://\(host)/group/repo/-/merge_requests/\(iid)",
          "state":"opened","draft":false,"sha":"\(sha)","source_project_id":34,"source_branch":"feature",
          "target_project_id":34,"target_branch":"main","detailed_merge_status":"mergeable","has_conflicts":false,
          "labels":[],"blocking_discussions_resolved":true,"head_pipeline":{"status":"success","sha":"\(sha)"},"user":{"can_merge":true}}

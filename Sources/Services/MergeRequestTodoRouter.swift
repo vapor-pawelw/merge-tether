@@ -914,7 +914,7 @@ final class MergeRequestTodoRouter {
         let permittedTools = settings.automation.permitsAssistantTools(project: intent.request.webURL.gitLabProjectPath)
         let access: AssistantAutomationRunner.Access = permittedTools ? .configuredTools : (intent.kind == .conflict ? .preparation : .gitLabRead)
         let reservation = try Self.reservePipeline(for: intent, manual: manual,
-            treatSoleAssigneeAsOwn: settings.treatSoleAssigneeAsOwn)
+            treatAssignedMergeRequestsAsOwn: settings.treatAssignedMergeRequestsAsOwn)
         let foreignDiagnosis = intent.kind == .pipeline && workflow == .review
         var transferred = false
         defer { if !transferred, let reservation { try? ExistingPipelineWorkDetector().finishHandoff(for: reservation) } }
@@ -930,10 +930,10 @@ final class MergeRequestTodoRouter {
         return job.id
     }
 
-    static func reservePipeline(for intent: MRTodoIntent, manual: Bool, treatSoleAssigneeAsOwn: Bool = true,
+    static func reservePipeline(for intent: MRTodoIntent, manual: Bool, treatAssignedMergeRequestsAsOwn: Bool = true,
                                 detector: ExistingPipelineWorkDetector = ExistingPipelineWorkDetector()) throws -> ExistingPipelineWorkDetector.Key? {
         guard intent.kind == .pipeline,
-              intent.request.isOwned(by: intent.target.username, includingSoleAssignee: treatSoleAssigneeAsOwn) else { return nil }
+              intent.request.isOwned(by: intent.target.username, includingAssignee: treatAssignedMergeRequestsAsOwn) else { return nil }
         guard let iid = intent.target.iid, let pipeline = intent.request.headPipeline,
               let pipelineID = pipeline.id, pipelineID > 0, pipeline.status == .failed else { throw CancellationError() }
         let key = ExistingPipelineWorkDetector.Key(host: intent.target.host, projectID: intent.target.projectID,

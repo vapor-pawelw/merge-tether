@@ -19,7 +19,7 @@ struct MergeRequestBrowserSnapshotTests {
     }
 
     @Test(arguments: [true, false])
-    func soleAssignmentPlacesTheRequestInOwnWithoutChangingItsAuthor(_ enabled: Bool) throws {
+    func assignmentsPlaceTheRequestInMineWithoutChangingItsAuthor(_ enabled: Bool) throws {
         let me = #"{"id":3,"username":"me","name":"Me"}"#
         let other = #"{"id":4,"username":"alice","name":"Alice"}"#
         let requests = try [request(1), request(2, username: "alice", assignment: "[\(me)]"),
@@ -27,10 +27,10 @@ struct MergeRequestBrowserSnapshotTests {
             request(4, username: "alice", assignment: "[\(other)]"),
             request(5, username: "alice", assignment: "[]"), request(6, username: "alice")]
         let result = MergeRequestBrowserSnapshot(openItems: requests.map(item), authored: [],
-            host: host, username: "me", scope: .init(), treatSoleAssigneeAsOwn: enabled)
-        #expect(result.own.map(\.id.iid) == (enabled ? [1, 2] : [1]))
+            host: host, username: "me", scope: .init(), treatAssignedMergeRequestsAsOwn: enabled)
+        #expect(result.own.map(\.id.iid) == (enabled ? [1, 2, 3] : [1]))
         if enabled { #expect(result.own.last?.mergeRequest?.author.username == "alice") }
-        #expect(result.reviewed.map(\.id.iid) == (enabled ? [3, 4, 5, 6] : [2, 3, 4, 5, 6]))
+        #expect(result.reviewed.map(\.id.iid) == (enabled ? [4, 5, 6] : [2, 3, 4, 5, 6]))
     }
 
     @Test(arguments: ["main", "parent"])

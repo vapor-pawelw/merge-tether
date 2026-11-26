@@ -208,17 +208,20 @@ struct GitLabMergeRequest: Codable, Sendable {
     var isOpen: Bool { state == .opened }
     var isDraft: Bool { isDraft(fallback: false) }
 
-    var soleAssignee: GitLabAuthenticatedUser? {
-        guard let assignees, assignees.count == 1, let assignee = assignees.first, assignee.id > 0 else { return nil }
-        return .init(id: assignee.id, username: assignee.username)
+    var assigneeIdentities: Set<GitLabAuthenticatedUser> {
+        Set((assignees ?? []).filter { $0.id > 0 }.map { .init(id: $0.id, username: $0.username) })
     }
 
-    func isOwned(by userID: Int, includingSoleAssignee: Bool) -> Bool {
-        userID > 0 && (author.id == userID || (includingSoleAssignee && soleAssignee?.id == userID))
+    func isOwned(by userID: Int, includingAssignee: Bool) -> Bool {
+        userID > 0 && (author.id == userID || (includingAssignee && assignees?.contains { $0.id == userID } == true))
     }
 
-    func isOwned(by username: String, includingSoleAssignee: Bool) -> Bool {
-        !username.isEmpty && (author.username == username || (includingSoleAssignee && soleAssignee?.username == username))
+    func isOwned(by username: String, includingAssignee: Bool) -> Bool {
+        !username.isEmpty && (author.username == username || (includingAssignee && assigneeID(for: username) != nil))
+    }
+
+    func assigneeID(for username: String) -> Int? {
+        assignees?.first { $0.id > 0 && $0.username == username }?.id
     }
 
     func isDraft(fallback: Bool) -> Bool {

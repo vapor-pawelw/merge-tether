@@ -30,22 +30,22 @@ extension GlabService {
 
     func fetchOwnedMergeRequests(userID: Int, host: String) async throws -> [GitLabMergeRequest] {
         async let authored = fetchAuthoredMergeRequests(host: host)
-        async let assigned = fetchSoleAssignments(userID: userID, host: host)
+        async let assigned = fetchAssignedMergeRequests(userID: userID, host: host)
         let (created, delegated) = try await (authored, assigned)
         let createdIDs = Set(created.map(\.mergeRequestID))
         return created.filter { $0.author.id == userID }
             + delegated.filter { !createdIDs.contains($0.mergeRequestID) && owns($0, userID: userID) }
     }
 
-    private func fetchSoleAssignments(userID: Int, host: String) async -> [GitLabMergeRequest] {
-        guard ownershipSettings?.treatSoleAssigneeAsOwn == true else { return [] }
+    private func fetchAssignedMergeRequests(userID: Int, host: String) async -> [GitLabMergeRequest] {
+        guard userID > 0, ownershipSettings?.treatAssignedMergeRequestsAsOwn == true else { return [] }
         do {
             let assigned: [GitLabMergeRequest] = try await fetchMergeRequestPages(
                 "/merge_requests?scope=all&state=opened&assignee_id=\(userID)&with_merge_status_recheck=true&per_page=100",
                 host: host)
-            return assigned.filter { $0.soleAssignee?.id == userID }
+            return assigned.filter { $0.assignees?.contains { $0.id == userID } == true }
         } catch {
-            Log.monitor.error("Sole assignee catalog refresh failed: \(String(describing: error), privacy: .private)")
+            Log.monitor.error("Assigned merge request catalog refresh failed: \(String(describing: error), privacy: .private)")
             return []
         }
     }

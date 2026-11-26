@@ -210,10 +210,10 @@ final class SettingsManager {
     var keepMacAwakeDuringAgentTasks: Bool
     /// New review candidates go straight to Reviewing (marked NEW) instead of waiting in the inbox.
     var addNewReviewsToReviewed: Bool
-    var treatSoleAssigneeAsOwn: Bool
+    var treatAssignedMergeRequestsAsOwn: Bool
 
     func owns(_ request: GitLabMergeRequest, userID: Int) -> Bool {
-        request.isOwned(by: userID, includingSoleAssignee: treatSoleAssigneeAsOwn)
+        request.isOwned(by: userID, includingAssignee: treatAssignedMergeRequestsAsOwn)
     }
 
     func owns(_ request: GitLabMergeRequest, username: String) -> Bool {
@@ -222,8 +222,7 @@ final class SettingsManager {
 
     func ownerID(of request: GitLabMergeRequest, username: String) -> Int? {
         if request.author.username == username { return request.author.id }
-        guard treatSoleAssigneeAsOwn, let assignee = request.soleAssignee, assignee.username == username else { return nil }
-        return assignee.id
+        return treatAssignedMergeRequestsAsOwn ? request.assigneeID(for: username) : nil
     }
     /// Reviewing cards that arrived directly and have not been acted on yet.
     var newReviewTargets: Set<MRAutomationScope.Target> = [] {
@@ -381,7 +380,7 @@ final class SettingsManager {
         confirmGlobalAutomationChanges = defaults.bool(forKey: Key.confirmGlobalAutomationChanges)
         keepMacAwakeDuringAgentTasks = defaults.bool(forKey: Key.keepMacAwakeDuringAgentTasks)
         addNewReviewsToReviewed = defaults.bool(forKey: Key.addNewReviewsToReviewed)
-        treatSoleAssigneeAsOwn = defaults.bool(forKey: Key.treatSoleAssigneeAsOwn)
+        treatAssignedMergeRequestsAsOwn = defaults.bool(forKey: Key.treatAssignedMergeRequestsAsOwn)
         var runtimeAutomation = loadedAutomation
         runtimeAutomation.isGloballySuspended = !globallyEnabled
         automation = runtimeAutomation
@@ -471,7 +470,7 @@ final class SettingsManager {
         defaults.set(confirmGlobalAutomationChanges, forKey: Key.confirmGlobalAutomationChanges)
         defaults.set(keepMacAwakeDuringAgentTasks, forKey: Key.keepMacAwakeDuringAgentTasks)
         defaults.set(addNewReviewsToReviewed, forKey: Key.addNewReviewsToReviewed)
-        defaults.set(treatSoleAssigneeAsOwn, forKey: Key.treatSoleAssigneeAsOwn)
+        defaults.set(treatAssignedMergeRequestsAsOwn, forKey: Key.treatAssignedMergeRequestsAsOwn)
         defaults.set(onboardingCompleted, forKey: Key.onboardingCompleted)
         defaults.set(launchAtLoginPreference, forKey: Key.launchAtLoginPreference)
         if let glabPath {
@@ -621,7 +620,7 @@ final class SettingsManager {
             Key.confirmGlobalAutomationChanges: true,
             Key.keepMacAwakeDuringAgentTasks: true,
             Key.addNewReviewsToReviewed: true,
-            Key.treatSoleAssigneeAsOwn: true,
+            Key.treatAssignedMergeRequestsAsOwn: true,
             Key.boardGrouping: MRBoardGrouping.withoutAutomation.rawValue,
             Key.ownAutomationOffExpanded: true,
             Key.reviewingAutomationOffExpanded: true,
@@ -643,7 +642,8 @@ final class SettingsManager {
         static let confirmGlobalAutomationChanges = "confirmGlobalAutomationChanges"
         static let keepMacAwakeDuringAgentTasks = "keepMacAwakeDuringAgentTasks"
         static let addNewReviewsToReviewed = "addNewReviewsToReviewed"
-        static let treatSoleAssigneeAsOwn = "treatSoleAssigneeAsOwn"
+        // Retain the persisted key so upgrades preserve the user's choice.
+        static let treatAssignedMergeRequestsAsOwn = "treatSoleAssigneeAsOwn"
         static let newReviewTargets = "newReviewTargets"
         static let heldNewReviewTargets = "heldNewReviewTargets"
         static let automationReceipts = "automationReceipts"

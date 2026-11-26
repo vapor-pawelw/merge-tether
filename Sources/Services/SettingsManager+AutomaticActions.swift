@@ -210,7 +210,7 @@ extension SettingsManager {
         case .off: .manual
         }
         return .init(mode: effectiveMode, restrictions: automation.publicationRestrictions,
-                     aiCommentCriteriaOverride: automation.aiCommentCriteriaOverride, treatSoleAssigneeAsOwn: treatSoleAssigneeAsOwn)
+                     aiCommentCriteriaOverride: automation.aiCommentCriteriaOverride, treatAssignedMergeRequestsAsOwn: treatAssignedMergeRequestsAsOwn)
     }
 
     /// A pending audit affects automatic execution for this account and MR until its reads recover.

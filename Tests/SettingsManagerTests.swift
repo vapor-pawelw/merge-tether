@@ -95,8 +95,8 @@ struct SettingsManagerTests {
     }
 
     @Test(arguments: [false, true])
-    func soleAssigneesDefaultToOwnMergeRequests(_ existingInstallation: Bool) throws {
-        let suite = "SoleAssigneeOwnership.\(UUID())"
+    func assignedMergeRequestsDefaultToMineAndPreserveExistingPreference(_ existingInstallation: Bool) throws {
+        let suite = "AssignedMergeRequestOwnership.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         if existingInstallation { defaults.set(true, forKey: "onboardingCompleted") }
@@ -105,7 +105,9 @@ struct SettingsManagerTests {
         #expect(defaults.bool(forKey: "treatSoleAssigneeAsOwn"))
 
         defaults.set(false, forKey: "treatSoleAssigneeAsOwn")
-        #expect(SettingsManager(defaults: defaults).save())
+        let restarted = SettingsManager(defaults: defaults)
+        #expect(!restarted.treatAssignedMergeRequestsAsOwn)
+        #expect(restarted.save())
         #expect(!defaults.bool(forKey: "treatSoleAssigneeAsOwn"))
     }
 

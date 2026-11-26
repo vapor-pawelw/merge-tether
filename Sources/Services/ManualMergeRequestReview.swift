@@ -43,7 +43,7 @@ extension TodoMonitorService {
 
     func canRunReview(for item: MergeRequestAttentionMonitor.Item) -> Bool {
         guard let target = manualReviewTarget(for: item), let request = item.mergeRequest,
-              target.accepts(request, treatSoleAssigneeAsOwn: settings.treatSoleAssigneeAsOwn) else { return false }
+              target.accepts(request, treatAssignedMergeRequestsAsOwn: settings.treatAssignedMergeRequestsAsOwn) else { return false }
         return !AssistantAutomationRunner.isWorking(on: .init(host: target.host, projectID: target.projectID, iid: target.iid))
     }
 
@@ -66,7 +66,7 @@ extension TodoMonitorService {
             let user = try await glab.fetchAuthenticatedUser(host: target.host, expectedUsername: target.username)
             let request = try await glab.fetchMergeRequest(projectID: target.projectID, iid: target.iid, host: target.host)
             guard target.matchesAccount(host: glab.resolvedHost, username: glab.currentUsername),
-                  glab.accountRevision == accountRevision, target.accepts(request, treatSoleAssigneeAsOwn: settings.treatSoleAssigneeAsOwn),
+                  glab.accountRevision == accountRevision, target.accepts(request, treatAssignedMergeRequestsAsOwn: settings.treatAssignedMergeRequestsAsOwn),
                   settings.automation.selectedAssistant == assistant else { throw CancellationError() }
             let dependency = await assistantDependencies.check(assistant)
             guard dependency.isReady, target.matchesAccount(host: glab.resolvedHost, username: glab.currentUsername),

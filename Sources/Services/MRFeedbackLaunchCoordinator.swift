@@ -16,7 +16,7 @@ final class MRFeedbackLaunchCoordinator {
         let semanticContext: String
         let authorID: Int
         let authorUsername: String
-        let soleAssignee: GitLabAuthenticatedUser?
+        let assigneeIdentities: Set<GitLabAuthenticatedUser>
         let draft: Bool?
         let noteIDs: [Int]
         let discussionFingerprint: String?
@@ -29,7 +29,7 @@ final class MRFeedbackLaunchCoordinator {
              decisionRevision: String? = nil) {
             source = .init(request); semanticContext = request.semanticContextFingerprint
             authorID = request.author.id; authorUsername = request.author.username; draft = request.draft
-            soleAssignee = request.soleAssignee
+            assigneeIdentities = request.assigneeIdentities
             self.noteIDs = Array(Set(noteIDs)).sorted(); discussionFingerprint = fingerprint
             noteRevisions = notes.map { notes in
                 Dictionary(notes.compactMap { note -> (Int, String)? in
@@ -51,7 +51,7 @@ final class MRFeedbackLaunchCoordinator {
         func matches(_ item: Item, configuration: AutomationSettings, decisionRevision: String?) -> Bool {
             guard let request = item.mergeRequest,
                   source == .init(request), semanticContext == request.semanticContextFingerprint,
-                  authorID == request.author.id, authorUsername == request.author.username, soleAssignee == request.soleAssignee, draft == request.draft,
+                  authorID == request.author.id, authorUsername == request.author.username, assigneeIdentities == request.assigneeIdentities, draft == request.draft,
                   self.configuration == configuration, self.decisionRevision == decisionRevision,
                   discussionFingerprint == item.observedDiscussionFingerprint,
                   Set(noteIDs).isSubset(of: Set(item.feedback.compactMap(\.id))) else { return false }

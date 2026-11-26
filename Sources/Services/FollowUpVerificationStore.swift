@@ -36,7 +36,7 @@ struct FollowUpVerification: Codable, Equatable, Sendable {
         version == 1 && sealed && evidenceContext.binds(
             to: .init(account: .init(host: host, username: user.username), mergeRequestID: request.mergeRequestID),
             policy: .accountAndRequest)
-            && userID == user.id && request.isOwned(by: user.id, includingSoleAssignee: true) && request.isOpen
+            && userID == user.id && request.isOwned(by: user.id, includingAssignee: true) && request.isOpen
             && sourceProjectID == request.sourceProjectID && sourceBranch == request.sourceBranch
             && draft.authorID == user.id && !files.isEmpty && files.count <= 20
             && drafts.contains { $0.id == draft.id && $0.bodySHA256 == AICommentAssessmentStore.digest(draft.note ?? "") }
@@ -61,7 +61,7 @@ enum FollowUpVerificationStore {
         let username: String
         let pushAllowed: Bool
         var draftAutomationAllowed = false
-        var soleAssigneeAllowed: Bool? = nil
+        var assigneeAllowed: Bool? = nil
         var repairDrafts: [FollowUpVerification.DraftEvidence]? = nil
     }
 
@@ -97,13 +97,13 @@ enum FollowUpVerificationStore {
         let work = handoff.key.work
         let target = MRAutomationScope.Target.mergeRequest(host: work.host, username: handoff.key.username,
             projectID: work.projectID, iid: work.iid)
-        let soleAssignmentPermitted = handoff.requiresSoleAssignment == true && settings.treatSoleAssigneeAsOwn
+        let assignmentPermitted = handoff.dependsOnAssignment && settings.treatAssignedMergeRequestsAsOwn
         let pushAllowed = canPush(handoff, configuration: settings.automation)
-            && (handoff.requiresSoleAssignment != true || soleAssignmentPermitted)
+            && (!handoff.dependsOnAssignment || assignmentPermitted)
         let record = Run(runID: handoff.id, host: work.host, projectID: work.projectID, iid: work.iid,
                          username: handoff.key.username, pushAllowed: pushAllowed,
                          draftAutomationAllowed: handoff.manual == true || settings.automation.scope.allowsDraftAutomation(for: target),
-                         soleAssigneeAllowed: soleAssignmentPermitted ? true : nil,
+                         assigneeAllowed: assignmentPermitted ? true : nil,
                          repairDrafts: handoff.draftRepair.map { [.init(id: $0.draftID, bodySHA256: $0.bodySHA256)] })
         let url = recordURL(kind: "follow-up-runs", work: work, username: handoff.key.username, in: directory)
         do {
