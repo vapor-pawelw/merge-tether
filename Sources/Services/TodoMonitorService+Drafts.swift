@@ -5,7 +5,7 @@ extension TodoMonitorService {
         guard item.isAuthored, let request = item.mergeRequest,
               request.projectID == item.id.projectID, request.iid == item.id.iid,
               request.isOpen, request.draft == true,
-              request.author.username == glab.currentUsername,
+              let username = glab.currentUsername, settings.owns(request, username: username),
               let host = glab.resolvedHost, request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
               let sha = request.sha, GlabService.isFullGitSHA(sha) else { return false }
         return true

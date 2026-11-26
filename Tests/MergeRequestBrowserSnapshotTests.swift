@@ -7,14 +7,30 @@ struct MergeRequestBrowserSnapshotTests {
 
     private func request(_ iid: Int, username: String = "me", title: String = "Fix",
                          host: String = "gitlab.example.org", draft: Bool = false, state: String = "opened",
-                         target: String = "main") throws -> GitLabMergeRequest {
+                         target: String = "main", assignment: String = "null") throws -> GitLabMergeRequest {
         try JSONDecoder().decode(GitLabMergeRequest.self, from: Data("""
         {"project_id":1,"iid":\(iid),"author":{"id":3,"username":"\(username)","name":"Author"},
          "title":"\(title)","web_url":"https://\(host)/g/p/-/merge_requests/\(iid)",
          "state":"\(state)","draft":\(draft),"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
          "source_branch":"fix","target_branch":"\(target)","detailed_merge_status":"mergeable",
-         "has_conflicts":false,"labels":[],"blocking_discussions_resolved":true,"user":{"can_merge":true}}
+         "has_conflicts":false,"labels":[],"blocking_discussions_resolved":true,"user":{"can_merge":true},
+         "assignees":\(assignment)}
         """.utf8))
+    }
+
+    @Test(arguments: [true, false])
+    func soleAssignmentPlacesTheRequestInOwnWithoutChangingItsAuthor(_ enabled: Bool) throws {
+        let me = #"{"id":3,"username":"me","name":"Me"}"#
+        let other = #"{"id":4,"username":"alice","name":"Alice"}"#
+        let requests = try [request(1), request(2, username: "alice", assignment: "[\(me)]"),
+            request(3, username: "alice", assignment: "[\(me),\(other)]"),
+            request(4, username: "alice", assignment: "[\(other)]"),
+            request(5, username: "alice", assignment: "[]"), request(6, username: "alice")]
+        let result = MergeRequestBrowserSnapshot(openItems: requests.map(item), authored: [],
+            host: host, username: "me", scope: .init(), treatSoleAssigneeAsOwn: enabled)
+        #expect(result.own.map(\.id.iid) == (enabled ? [1, 2] : [1]))
+        if enabled { #expect(result.own.last?.mergeRequest?.author.username == "alice") }
+        #expect(result.reviewed.map(\.id.iid) == (enabled ? [3, 4, 5, 6] : [2, 3, 4, 5, 6]))
     }
 
     @Test(arguments: ["main", "parent"])

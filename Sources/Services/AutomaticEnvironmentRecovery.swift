@@ -95,7 +95,7 @@ final class AutomaticEnvironmentRecovery {
     private func valid(_ snapshot: Snapshot, for original: AssistantAutomationRunner.Handoff) -> Bool {
         let request = snapshot.request
         let configuration = settings.automation
-        return snapshot.user.username == original.key.username && request.author.id == snapshot.user.id
+        return snapshot.user.username == original.key.username && settings.owns(request, userID: snapshot.user.id)
             && request.projectID == original.key.work.projectID && request.iid == original.key.work.iid
             && request.webURL.isGitLabMergeRequest(host: original.key.work.host, iid: request.iid)
             && request.isOpen

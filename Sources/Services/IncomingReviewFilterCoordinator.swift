@@ -227,11 +227,12 @@ final class IncomingReviewFilterCoordinator {
     private func readEvidence(_ batch: [Candidate], account: Account) async -> [UUID: Verifier.Evidence] {
         await withTaskGroup(of: Verifier.Evidence?.self) { group in
             for candidate in batch {
-                group.addTask { [glab] in
+                group.addTask { [glab, settings] in
                     let target = candidate.target
                     guard await glab.accountRevision == account.revision, let iid = target.iid,
                           let request = try? await glab.fetchMergeRequest(
-                        projectID: target.projectID, iid: iid, host: target.host) else { return nil }
+                        projectID: target.projectID, iid: iid, host: target.host),
+                          await !settings.owns(request, username: target.username) else { return nil }
                     return Verifier.Evidence(id: candidate.entry.id, request: request, target: target, url: candidate.entry.url)
                 }
             }

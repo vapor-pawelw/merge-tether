@@ -97,7 +97,7 @@ struct MRAutomationScopeEditor {
 
     var applicableActions: [MRAutomaticAction] {
         guard let request else { return [.commentPublication] }
-        return [.commentPublication, request.author.username == target.username ? .merge : .approval]
+        return [.commentPublication, monitor.settings.owns(request, username: target.username) ? .merge : .approval]
     }
 
     /// Flips this MR's effective state, as the popover's main button and an Option-click do.

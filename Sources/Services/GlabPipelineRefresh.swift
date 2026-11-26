@@ -73,7 +73,7 @@ extension GlabService {
                 && configuration.scope.permits(request, host: host, username: expectedUser.username)
                 && configuration.scope.permits(proof.request, host: host, username: expectedUser.username)
                 && !settings.ignoredMergeRequests.contains(target)
-                && request.author.id == expectedUser.id && request.hasConflicts == false
+                && settings.owns(proof.request, userID: expectedUser.id) && request.hasConflicts == false
                 && self.resolvedHost == host && self.currentUsername == expectedUser.username
                 && self.accountRevision == proof.accountRevision && shouldProceed()
         }
@@ -100,6 +100,7 @@ extension GlabService {
             throw CancellationError()
         } catch GitLabPipelineEvidenceError.staleTarget(let latest) {
             guard latest.targetHeadSHA == proof.targetHeadSHA, latest.user == proof.user,
+                  settings.owns(latest.request, userID: expectedUser.id),
                   configuration.scope.permits(latest.request, host: host, username: expectedUser.username)
             else { throw CancellationError() }
         }
@@ -133,7 +134,7 @@ extension GlabService {
         let sourceHead = try await fetchBranchHeadSHA(projectID: sourceProject, branch: request.sourceBranch, host: host)
         let targetHead = try await fetchBranchHeadSHA(projectID: targetProject, branch: request.targetBranch, host: host)
         guard permitted(), user == expectedUser, sourceHead == source, targetHead == proof.targetHeadSHA,
-              current.state == .opened, current.author.id == expectedUser.id, current.sha == source,
+              current.state == .opened, settings.owns(current, userID: expectedUser.id), current.sha == source,
               configuration.scope.permits(current, host: host, username: expectedUser.username),
               current.hasConflicts == false,
               current.sourceProjectID == sourceProject, current.sourceBranch == request.sourceBranch,

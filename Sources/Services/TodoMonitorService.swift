@@ -617,6 +617,7 @@ final class TodoMonitorService {
         input.authored = authoredMergeRequests.requests
         input.retainedRequests = settings.mrLifecycleLedger.retainedRequests(host: host, username: username)
         input.ownCatalogIsAuthoritative = attention.hasCurrentOwnListing
+        input.treatSoleAssigneeAsOwn = settings.treatSoleAssigneeAsOwn
         let targets = settings.mrLifecycleLedger.targets(host: host, username: username)
         for target in targets {
             if let iid = target.iid, let id = settings.mrLifecycleLedger.completionID(for: target) {
@@ -829,7 +830,7 @@ final class TodoMonitorService {
                   glab.accountRevision == revision, settings.addNewReviewsToReviewed,
                   settings.automation.reviewRequested.runner == .assistant,
                   request.projectID == target.projectID, request.iid == iid, request.isOpen,
-                  request.author.username != username, request.webURL.isGitLabMergeRequest(host: host, iid: iid),
+                  !settings.owns(request, username: username), request.webURL.isGitLabMergeRequest(host: host, iid: iid),
                   !settings.ignoredMergeRequests.contains(target), !settings.intakeFilterHolds(target) else { continue }
             let siblings = currentAccountTodos.filter {
                 MRTodoIntent.kind(for: $0, username: username) == .review && $0.project.id == target.projectID && $0.target.iid == iid
@@ -938,6 +939,9 @@ final class TodoMonitorService {
         guard metadata.record(request, for: target, url: url, readStartedAt: readStartedAt,
                               account: original, currentAccount: current) else { return }
         boardDisplayMetadata = metadata
+        if request.assignees != nil, !settings.owns(request, username: target.username) {
+            cancelSoleAssignmentJobs(for: target)
+        }
         mergeRequestIssues?.observe(request, target: target, revision: accountRevision, at: readStartedAt)
     }
 
@@ -1084,7 +1088,7 @@ final class TodoMonitorService {
             guard target.host == account.host, target.username == account.username, hidden[target] == nil else { return nil }
             return settings.mrLifecycleLedger.request(for: target)
         }
-        for request in assigned + retained where request.author.username != account.username {
+        for request in assigned + retained where !settings.owns(request, username: account.username) {
             guard let target = scopeTarget(projectID: request.projectID, iid: request.iid, url: request.webURL),
                   hidden[target] == nil, settings.ignoredMergeRequests.contains(target) else { continue }
             hidden[target] = .init(target: target, title: request.title, url: request.webURL, request: request)
@@ -1108,7 +1112,7 @@ final class TodoMonitorService {
     @discardableResult
     func removeReviewedMergeRequest(_ item: MergeRequestAttentionMonitor.Item) -> Bool {
         guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
-              let request = item.mergeRequest, request.author.username != target.username,
+              let request = item.mergeRequest, !settings.owns(request, username: target.username),
               request.projectID == target.projectID, request.iid == target.iid, request.webURL == item.url else { return false }
         guard !settings.ignoredMergeRequests.contains(target) else { return true }
         let review = HiddenReview(target: target, title: request.title, url: request.webURL, request: request)
@@ -1129,7 +1133,7 @@ final class TodoMonitorService {
             guard glab.resolvedHost == target.host, glab.currentUsername == target.username,
                   currentRequest.projectID == projectID, currentRequest.iid == iid,
                   currentRequest.webURL.isGitLabMergeRequest(host: target.host, iid: iid),
-                  currentRequest.author.id != currentUser.id, glab.accountRevision == accountRevision else { return }
+                  !settings.owns(currentRequest, userID: currentUser.id), glab.accountRevision == accountRevision else { return }
             review = .init(target: target, title: currentRequest.title, url: currentRequest.webURL, request: currentRequest)
         } catch {
             guard !(error is CancellationError), glab.accountRevision == accountRevision else { return }
@@ -1432,7 +1436,7 @@ final class TodoMonitorService {
         guard authoredMergeRequests.hasSyncedCurrentCatalog,
               let host = glab.resolvedHost, let username = glab.currentUsername else { return [] }
         return authoredMergeRequests.requests.map(\.request).filter {
-            $0.author.username == username && $0.webURL.isGitLabMergeRequest(host: host, iid: $0.iid)
+            settings.owns($0, username: username) && $0.webURL.isGitLabMergeRequest(host: host, iid: $0.iid)
         }
     }
 
@@ -1631,9 +1635,27 @@ final class TodoMonitorService {
             })
     }
 
+    func setTreatSoleAssigneeAsOwn(_ enabled: Bool) {
+        guard settings.treatSoleAssigneeAsOwn != enabled else { return }
+        settings.treatSoleAssigneeAsOwn = enabled
+        settings.save()
+        if !enabled { cancelSoleAssignmentJobs() }
+        Task { await forceRefreshFromGitLab() }
+    }
+
+    private func cancelSoleAssignmentJobs(for target: MRAutomationScope.Target? = nil) {
+        let active = settings.assistantHandoffs.filter {
+            $0.requiresSoleAssignment == true && $0.execution?.state.isActive == true
+                && $0.execution?.cancellationOrigin == nil && (target == nil || $0.key.automationTarget == target)
+        }
+        guard !active.isEmpty else { return }
+        for job in active { cancelPolicyJob(job.id, settings) }
+        FollowUpVerificationStore.synchronizeRuns(settings: settings)
+    }
+
     private func recordOwnedLifecycleObservations(_ requests: [GitLabMergeRequest], observedAt: Date) {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return }
-        for request in requests where request.author.username == username {
+        for request in requests where settings.owns(request, username: username) {
             let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
             guard !settings.ignoredMergeRequests.contains(target) else { continue }
             settings.mrLifecycleLedger.record(request, for: target, now: observedAt,

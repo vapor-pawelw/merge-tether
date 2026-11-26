@@ -13,6 +13,12 @@ struct FeedbackAccountKindUpdate: Sendable {
 @MainActor
 @Observable
 final class GlabService {
+    @ObservationIgnored weak var ownershipSettings: SettingsManager?
+
+    func owns(_ request: GitLabMergeRequest, userID: Int) -> Bool {
+        request.isOwned(by: userID, includingSoleAssignee: ownershipSettings?.treatSoleAssigneeAsOwn == true)
+    }
+
     var evidenceAccountContext: EvidenceContext {
         let account = resolvedHost.flatMap { host in
             currentUsername.map { GitLabAccountIdentity(host: host, username: $0) }
@@ -131,7 +137,9 @@ final class GlabService {
     }
 
     func freshSession() -> GlabService {
-        GlabService(commandRunner: commandRunner)
+        let session = GlabService(commandRunner: commandRunner)
+        session.ownershipSettings = ownershipSettings
+        return session
     }
 
     /// Path to the resolved `glab` executable. Set by `OnboardingDetector` / `recheck()`.

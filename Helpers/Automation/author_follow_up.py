@@ -81,8 +81,15 @@ class AuthorFollowUpVerifier:
             raise ValueError("This author follow-up run is not authorized to push")
         self.repair_scope(run)
         mr = self.read(host, f"/projects/{projectID}/merge_requests/{iid}")
+        user_id = user.get("id")
+        author = mr.get("author")
+        assignees = mr.get("assignees")
+        author_matches = isinstance(author, dict) and type(author.get("id")) is int and author["id"] == user_id
+        sole_assignee_matches = (run.get("soleAssigneeAllowed") is True and isinstance(assignees, list) and
+                                 len(assignees) == 1 and isinstance(assignees[0], dict) and
+                                 type(assignees[0].get("id")) is int and assignees[0]["id"] == user_id)
         if (mr.get("project_id") != int(projectID) or mr.get("iid") != int(iid) or mr.get("state") != "opened" or
-                mr.get("author", {}).get("id") != user.get("id") or type(user.get("id")) is not int or
+                type(user_id) is not int or user_id <= 0 or not (author_matches or sole_assignee_matches) or
                 type(mr.get("source_project_id")) is not int or not mr.get("source_branch")):
             raise ValueError("The open MR must belong to the authenticated user")
         if type(mr.get("draft")) is not bool:

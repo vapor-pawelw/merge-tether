@@ -583,8 +583,9 @@ import MergeTetherRemote
     private static func mergeActions(_ original: RemoteCard, item: MergeRequestAttentionMonitor.Item,
                                      controls: MRManualMergePresentation, monitor: TodoMonitorService, account: String) -> RemoteCard {
         var card = original
-        guard item.isAuthored, item.mergeRequest?.author.username == monitor.glab.currentUsername,
-              let request = item.mergeRequest, request.isOpen,
+        guard item.isAuthored, let request = item.mergeRequest, let username = monitor.glab.currentUsername,
+              monitor.settings.owns(request, username: username),
+              request.isOpen,
               let token = try? RemoteDigest.token([account, try RemoteDigest.token(request),
                   item.observedDiscussionFingerprint ?? "", try MergeSubmissionFingerprint.configuration(monitor.settings)]) else { return card }
         if let action = controls.action {

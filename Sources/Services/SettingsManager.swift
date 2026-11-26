@@ -210,6 +210,21 @@ final class SettingsManager {
     var keepMacAwakeDuringAgentTasks: Bool
     /// New review candidates go straight to Reviewing (marked NEW) instead of waiting in the inbox.
     var addNewReviewsToReviewed: Bool
+    var treatSoleAssigneeAsOwn: Bool
+
+    func owns(_ request: GitLabMergeRequest, userID: Int) -> Bool {
+        request.isOwned(by: userID, includingSoleAssignee: treatSoleAssigneeAsOwn)
+    }
+
+    func owns(_ request: GitLabMergeRequest, username: String) -> Bool {
+        ownerID(of: request, username: username) != nil
+    }
+
+    func ownerID(of request: GitLabMergeRequest, username: String) -> Int? {
+        if request.author.username == username { return request.author.id }
+        guard treatSoleAssigneeAsOwn, let assignee = request.soleAssignee, assignee.username == username else { return nil }
+        return assignee.id
+    }
     /// Reviewing cards that arrived directly and have not been acted on yet.
     var newReviewTargets: Set<MRAutomationScope.Target> = [] {
         didSet {
@@ -366,6 +381,7 @@ final class SettingsManager {
         confirmGlobalAutomationChanges = defaults.bool(forKey: Key.confirmGlobalAutomationChanges)
         keepMacAwakeDuringAgentTasks = defaults.bool(forKey: Key.keepMacAwakeDuringAgentTasks)
         addNewReviewsToReviewed = defaults.bool(forKey: Key.addNewReviewsToReviewed)
+        treatSoleAssigneeAsOwn = defaults.bool(forKey: Key.treatSoleAssigneeAsOwn)
         var runtimeAutomation = loadedAutomation
         runtimeAutomation.isGloballySuspended = !globallyEnabled
         automation = runtimeAutomation
@@ -455,6 +471,7 @@ final class SettingsManager {
         defaults.set(confirmGlobalAutomationChanges, forKey: Key.confirmGlobalAutomationChanges)
         defaults.set(keepMacAwakeDuringAgentTasks, forKey: Key.keepMacAwakeDuringAgentTasks)
         defaults.set(addNewReviewsToReviewed, forKey: Key.addNewReviewsToReviewed)
+        defaults.set(treatSoleAssigneeAsOwn, forKey: Key.treatSoleAssigneeAsOwn)
         defaults.set(onboardingCompleted, forKey: Key.onboardingCompleted)
         defaults.set(launchAtLoginPreference, forKey: Key.launchAtLoginPreference)
         if let glabPath {
@@ -604,6 +621,7 @@ final class SettingsManager {
             Key.confirmGlobalAutomationChanges: true,
             Key.keepMacAwakeDuringAgentTasks: true,
             Key.addNewReviewsToReviewed: true,
+            Key.treatSoleAssigneeAsOwn: true,
             Key.boardGrouping: MRBoardGrouping.withoutAutomation.rawValue,
             Key.ownAutomationOffExpanded: true,
             Key.reviewingAutomationOffExpanded: true,
@@ -625,6 +643,7 @@ final class SettingsManager {
         static let confirmGlobalAutomationChanges = "confirmGlobalAutomationChanges"
         static let keepMacAwakeDuringAgentTasks = "keepMacAwakeDuringAgentTasks"
         static let addNewReviewsToReviewed = "addNewReviewsToReviewed"
+        static let treatSoleAssigneeAsOwn = "treatSoleAssigneeAsOwn"
         static let newReviewTargets = "newReviewTargets"
         static let heldNewReviewTargets = "heldNewReviewTargets"
         static let automationReceipts = "automationReceipts"

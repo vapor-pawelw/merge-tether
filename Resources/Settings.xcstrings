@@ -2293,6 +2293,20 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzaj istniejące rezerwacje i atomowo rezerwuj obsługę wolnych awarii w Twoich MR. Wyłącz tę opcję, aby potwierdzać każde przekazanie. Dane pipeline’u i uprawnienie do wysyłania zmian są sprawdzane osobno."}}
       }
     },
+    "settings.soleAssignee.toggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Treat MRs assigned only to me as mine" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Traktuj MR-y przypisane wyłącznie do mnie jako moje" } }
+      }
+    },
+    "settings.soleAssignee.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "These merge requests appear under Mine and follow your automation profile, including fixes, pushes and merging when enabled." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Te MR-y trafiają do sekcji Moje. Aktywny profil określa, czy automatyzacja może je poprawiać, wysyłać zmiany i scalać." } }
+      }
+    },
     "settings.general.newReviews.section": {
       "extractionState": "manual",
       "localizations": {
