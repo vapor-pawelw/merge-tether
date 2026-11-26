@@ -60,43 +60,7 @@ struct MergeRequestSettingsTab: View {
             }
 
             IncomingReviewFilterSettingsSection(monitor: monitor)
-
-            Section {
-                hiddenReviews
-            }
         }
         .formStyle(.grouped)
-    }
-
-    private var hiddenReviews: some View {
-        let requests = monitor.hiddenReviewAssignments
-        return DisclosureGroup {
-            Text(.Settings.settingsHiddenReviewsHelp).font(.caption).foregroundStyle(.secondary)
-            if requests.isEmpty {
-                Text(.Settings.settingsHiddenReviewsEmpty).foregroundStyle(.secondary)
-            }
-            ForEach(requests) { request in
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(request.title)
-                        Text(verbatim: "\(request.url.gitLabProjectPath) !\(request.target.iid ?? 0)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 12)
-                    Button(.Board.boardReviewAssignmentRestore) {
-                        monitor.restoreReviewedMergeRequests([request])
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
-                }
-            }
-        } label: {
-            HStack {
-                Text(.Settings.settingsHiddenReviewsTitle)
-                if !requests.isEmpty {
-                    Text(requests.count, format: .number).foregroundStyle(.secondary)
-                }
-            }
-        }
     }
 }

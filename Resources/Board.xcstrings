@@ -57,6 +57,13 @@
         "pl": { "stringUnit": { "state": "translated", "value": "Usuń siebie z listy reviewerów w GitLabie. MR zniknie z kolumny „Do przeglądu”." } }
       }
     },
+    "board.reviewAssignment.leaveHiddenExplanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Remove yourself from the reviewers in GitLab." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Usuń siebie z listy reviewerów w GitLabie." } }
+      }
+    },
     "board.reviewAssignment.seen": {
       "extractionState": "manual",
       "localizations": {
@@ -592,28 +599,28 @@
         "pl": { "stringUnit": { "state": "translated", "value": "Pokaż czas od otrzymania aktualizacji" } }
       }
     },
-    "board.lane.own": {
+    "board.lane.own.%lld": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "My merge requests"
+            "value": "My merge requests (%lld)"
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Moje merge requesty"}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Moje merge requesty (%lld)"}}
       }
     },
-    "board.lane.reviewing": {
+    "board.lane.reviewing.%lld": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Reviewing"
+            "value": "Reviewing (%lld)"
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Do przeglądu"}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Do przeglądu (%lld)"}}
       }
     },
     "board.lane.ownEmpty": {
@@ -720,10 +727,10 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Hide this merge request from Reviewing. You can restore it from Hidden merge requests while it’s open."
+            "value": "Hide this merge request from Reviewing. You can restore it under Reviewing → Hidden while it’s open."
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Ukryj ten MR w kolumnie „Do przeglądu”. Dopóki jest otwarty, możesz go przywrócić z listy ukrytych MR-ów."}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Ukryj ten MR w kolumnie „Do przeglądu”. Dopóki jest otwarty, możesz go przywrócić w sekcji Do przeglądu → Ukryte."}}
       }
     },
     "board.intent.review": {

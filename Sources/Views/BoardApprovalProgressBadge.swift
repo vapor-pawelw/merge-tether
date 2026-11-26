@@ -17,6 +17,7 @@ struct BoardApprovalProgressBadge: View {
     var personalAction: Action? = nil
     var reviewerEditing: ReviewerEditing? = nil
     var automaticApprovalOff = false
+    var readOnly = false
     @State private var showingPeople = false
     @State private var pinned = false
     @State private var badgeHovered = false
@@ -70,69 +71,84 @@ struct BoardApprovalProgressBadge: View {
     }
 
     var body: some View {
-        let assigned = assignedReviewerCount
+        if personalAction != nil || reviewerEditing != nil || automaticApprovalOff
+            || (progress.map { $0.required > 0 || $0.completed > 0 } ?? true)
+            || viewerApproval != nil || assignedReviewerCount != nil {
+            if readOnly {
+                badge
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(label)
+                    .help(label)
+            } else {
+                interactiveBadge
+            }
+        }
+    }
+
+    private var badge: some View {
+        HStack(spacing: 4) {
+            HStack(spacing: 3) {
+                Image(systemName: satisfied ? "checkmark.seal.fill" : "checkmark.seal").accessibilityHidden(true)
+                if let progress, progress.required == 0 {
+                    Text(verbatim: "\(progress.completed)")
+                } else if let progress {
+                    Text(.Board.boardApprovalRatio(progress.completed, progress.required))
+                } else { Text(.Board.boardApprovalsUnknownRatio) }
+                if let assigned = assignedReviewerCount { Text(.Board.boardApprovalsReviewerCountBadge(assigned)) }
+            }
+            .font(.caption2).monospacedDigit().foregroundStyle(approvalColor)
+            if let viewerApproval { viewerSegment(viewerApproval) }
+        }
+        .fixedSize()
+        .padding(.horizontal, 5).padding(.vertical, 2)
+        .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var interactiveBadge: some View {
         let confirmationTitle: LocalizedStringResource = pendingAction?.change == .remove
             ? .Board.boardApprovalsRemoveWarningTitle : .Board.boardApprovalsApprove
-        if personalAction != nil || reviewerEditing != nil || automaticApprovalOff
-            || (progress.map { $0.required > 0 || $0.completed > 0 } ?? true) || viewerApproval != nil || assigned != nil {
-            Button {
-                hoverTask?.cancel()
-                pinned = true
-                showingPeople = true
-            } label: {
-                HStack(spacing: 4) {
-                    HStack(spacing: 3) {
-                        Image(systemName: satisfied ? "checkmark.seal.fill" : "checkmark.seal").accessibilityHidden(true)
-                        if let progress, progress.required == 0 {
-                            Text(verbatim: "\(progress.completed)")
-                        } else if let progress {
-                            Text(.Board.boardApprovalRatio(progress.completed, progress.required))
-                        } else { Text(.Board.boardApprovalsUnknownRatio) }
-                        if let assigned { Text(.Board.boardApprovalsReviewerCountBadge(assigned)) }
+        return Button {
+            hoverTask?.cancel()
+            pinned = true
+            showingPeople = true
+        } label: {
+            badge
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .help(label)
+        .onHover { badgeHovered = $0; updateHover() }
+        .popover(isPresented: $showingPeople, arrowEdge: .bottom) {
+            approvalPopover.onHover { peopleHovered = $0; updateHover() }
+        }
+        .onChange(of: showingPeople) { _, visible in
+            if !visible {
+                hoverTask?.cancel(); peopleHovered = false; pinned = false
+                reviewerEditor.finishAdding()
+            }
+        }
+        .onDisappear { hoverTask?.cancel(); showingPeople = false; reviewerEditor.finishAdding() }
+        .modifier(ReviewerSaveErrorAlert(state: reviewerEditor, editorClosed: !showingPeople))
+        .alert(Text(confirmationTitle), isPresented: Binding(
+            get: { pendingAction != nil }, set: { if !$0 { pendingAction = nil } }
+        ), presenting: pendingAction) { action in
+            Button(role: action.change == .remove ? .destructive : nil) {
+                Task {
+                    switch await action.perform() {
+                    case .completed: break
+                    case .changed: actionError = .Menu.menuConfirmChanged
+                    case .failed, .uncertain: actionError = .Menu.menuConfirmFailed
                     }
-                    .font(.caption2).monospacedDigit().foregroundStyle(approvalColor)
-                    if let viewerApproval { viewerSegment(viewerApproval) }
                 }
-                .fixedSize()
-                .padding(.horizontal, 5).padding(.vertical, 2)
-                .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(label)
-            .help(label)
-            .onHover { badgeHovered = $0; updateHover() }
-            .popover(isPresented: $showingPeople, arrowEdge: .bottom) {
-                approvalPopover.onHover { peopleHovered = $0; updateHover() }
-            }
-            .onChange(of: showingPeople) { _, visible in
-                if !visible {
-                    hoverTask?.cancel(); peopleHovered = false; pinned = false
-                    reviewerEditor.finishAdding()
-                }
-            }
-            .onDisappear { hoverTask?.cancel(); showingPeople = false; reviewerEditor.finishAdding() }
-            .modifier(ReviewerSaveErrorAlert(state: reviewerEditor, editorClosed: !showingPeople))
-            .alert(Text(confirmationTitle), isPresented: Binding(
-                get: { pendingAction != nil }, set: { if !$0 { pendingAction = nil } }
-            ), presenting: pendingAction) { action in
-                Button(role: action.change == .remove ? .destructive : nil) {
-                    Task {
-                        switch await action.perform() {
-                        case .completed: break
-                        case .changed: actionError = .Menu.menuConfirmChanged
-                        case .failed, .uncertain: actionError = .Menu.menuConfirmFailed
-                        }
-                    }
-                } label: { Text(action.change.title) }
-                Button(role: .cancel) { } label: { Text(.Remote.remoteCancel) }
-            } message: { action in
-                Text(action.change.confirmation)
-            }
-            .alert(Text(actionError ?? .Menu.menuConfirmFailed), isPresented: Binding(
-                get: { actionError != nil }, set: { if !$0 { actionError = nil } }
-            )) {
-                Button(.Remote.remoteClose) { actionError = nil }
-            }
+            } label: { Text(action.change.title) }
+            Button(role: .cancel) { } label: { Text(.Remote.remoteCancel) }
+        } message: { action in
+            Text(action.change.confirmation)
+        }
+        .alert(Text(actionError ?? .Menu.menuConfirmFailed), isPresented: Binding(
+            get: { actionError != nil }, set: { if !$0 { actionError = nil } }
+        )) {
+            Button(.Remote.remoteClose) { actionError = nil }
         }
     }
 

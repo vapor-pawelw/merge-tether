@@ -25,47 +25,6 @@
         }
       }
     },
-    "settings.hiddenReviews.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hidden merge requests"
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ukryte MR-y"
-          }
-        }
-      }
-    },
-    "settings.hiddenReviews.help": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {"stringUnit": {"state": "translated", "value": "Hidden merge requests stay here while you’re a reviewer. You can restore an open merge request at any time."}},
-        "pl": {"stringUnit": {"state": "translated", "value": "Ukryte MR-y pozostają na tej liście, dopóki jesteś ich recenzentem. Otwarty MR możesz przywrócić w każdej chwili."}}
-      }
-    },
-    "settings.hiddenReviews.empty": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No hidden merge requests."
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Brak ukrytych MR-ów."
-          }
-        }
-      }
-    },
     "settings.assistant.resumeAction": {
       "extractionState": "manual",
       "localizations": {

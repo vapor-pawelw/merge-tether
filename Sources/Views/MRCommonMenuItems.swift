@@ -185,6 +185,8 @@ struct LeaveReviewButton: View {
     let request: GitLabMergeRequest
     let monitor: TodoMonitorService
     var inline = false
+    var confirmationExplanation: LocalizedStringResource = .Board.boardReviewAssignmentLeaveExplanation
+    var afterLeaving: @MainActor () async -> Void = {}
     @State private var leaving = false
 
     var body: some View {
@@ -209,14 +211,16 @@ struct LeaveReviewButton: View {
         let revision = monitor.glab.accountRevision
         let reference = "\(request.webURL.gitLabProjectPath) !\(request.iid)"
         guard confirmMRAction(id: "leaveReview", title: .Board.boardReviewAssignmentLeave,
-            message: reference + "\n\n" + String(localized: .Board.boardReviewAssignmentLeaveExplanation)) else { return }
+            message: reference + "\n\n" + String(localized: confirmationExplanation)) else { return }
         leaving = true
         Task {
             defer { leaving = false }
             let status = await monitor.leaveReview(request, accountRevision: revision)
             let message: LocalizedStringResource
             switch status {
-            case .completed: return
+            case .completed:
+                await afterLeaving()
+                return
             case .changed: message = .Board.boardReviewersChanged
             case .uncertain: message = .Board.boardReviewersUncertain
             default: message = .Board.boardReviewersSaveFailed
