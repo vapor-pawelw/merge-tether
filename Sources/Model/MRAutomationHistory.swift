@@ -5,6 +5,9 @@ struct MRAutomationEvent: Codable, Identifiable, Equatable, Sendable {
     enum Action: String, Codable, Sendable {
         case retry, review, followUp, draftReply, verification, feedbackDecision, pipeline, conflict, refresh, approval
         case approve, removeApproval, publication, merge, enqueueMerge
+        case approvalPrompt, mergePrompt
+
+        var isActionPrompt: Bool { self == .approvalPrompt || self == .mergePrompt }
     }
     enum Origin: String, Codable, Sendable { case manual, automatic }
     enum State: String, Codable, Sendable { case requested, queued, failed, completed, blocked }
@@ -38,6 +41,8 @@ struct MRAutomationEvent: Codable, Identifiable, Equatable, Sendable {
         case .publication: .AutomationHistory.automationHistoryActionPublication
         case .merge: .AutomationHistory.automationHistoryMerged
         case .enqueueMerge: .AutomationHistory.automationHistoryActionEnqueueMerge
+        case .approvalPrompt: .AutomationHistory.automationHistoryActionApprovalPrompt
+        case .mergePrompt: .AutomationHistory.automationHistoryActionMergePrompt
         }
     }
 }

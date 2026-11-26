@@ -89,7 +89,8 @@ enum FollowUpVerificationStore {
         let work = handoff.key.work
         let target = MRAutomationScope.Target.mergeRequest(host: work.host, username: handoff.key.username,
                                              projectID: work.projectID, iid: work.iid)
-        return handoff.manual == true || configuration.scope.resolve(target).active
+        return handoff.manual == true || (configuration.scope.resolve(target).active
+            && (!handoff.dependsOnAssignment || !configuration.scope.assignmentClaimRequired(for: target)))
     }
 
     @MainActor

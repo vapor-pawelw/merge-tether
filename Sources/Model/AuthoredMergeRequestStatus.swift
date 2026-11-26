@@ -23,7 +23,7 @@ enum MergeRequestBlocker: Hashable {
 struct AuthoredMergeRequestStatus: Identifiable {
     let request: GitLabMergeRequest
     let blockers: [MergeRequestBlocker]
-    let mayAutoMerge: Bool
+    var mayAutoMerge: Bool
     let mayMergeManually: Bool
     let action: MergeSubmissionAction?
     var submissionState: MergeSubmissionState

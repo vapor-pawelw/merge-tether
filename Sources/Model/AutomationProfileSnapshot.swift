@@ -15,6 +15,10 @@ struct AutomationProfileSnapshot: Codable, Equatable, Sendable {
     let reReview: Bool
     let approval: Bool
     let merge: Bool
+    let approvalByPrompt: Bool?
+    let mergeByPrompt: Bool?
+    let mergeAuthorOnly: Bool?
+    let requiresAssignmentClaim: Bool?
     let followUpPush: Bool
     let ownThreadResolution: Bool
     let acceptedFeedbackResolution: Bool
@@ -39,6 +43,10 @@ struct AutomationProfileSnapshot: Codable, Equatable, Sendable {
         reReview = configuration.autoReReviewEnabled
         approval = configuration.autoApproveEnabled
         merge = configuration.autoMergeEnabled
+        approvalByPrompt = configuration.autoApproveMode == .prompt
+        mergeByPrompt = configuration.autoMergeMode == .prompt
+        mergeAuthorOnly = configuration.autoMergeAuthorOnly
+        requiresAssignmentClaim = configuration.requiresAssignmentClaim
         followUpPush = configuration.allowFollowUpPush
         ownThreadResolution = configuration.autoResolveOwnReviewThreads
         acceptedFeedbackResolution = configuration.autoResolveAcceptedFeedback
@@ -89,6 +97,10 @@ struct AutomationProfileSnapshot: Codable, Equatable, Sendable {
         configuration.autoReReviewEnabled = reReview
         configuration.autoApproveEnabled = approval
         configuration.autoMergeEnabled = merge
+        configuration.autoApprovePrompt.required = approvalByPrompt == true
+        configuration.autoMergePrompt.required = mergeByPrompt == true
+        configuration.autoMergeAuthorOnly = mergeAuthorOnly ?? true
+        configuration.requiresAssignmentClaim = requiresAssignmentClaim ?? true
         configuration.allowFollowUpPush = followUpPush
         configuration.autoResolveOwnReviewThreads = ownThreadResolution
         configuration.autoResolveAcceptedFeedback = acceptedFeedbackResolution

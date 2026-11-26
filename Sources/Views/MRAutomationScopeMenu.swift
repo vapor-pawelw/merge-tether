@@ -73,7 +73,8 @@ struct MRAutomationScopeEditor {
                     && (automation.publicationMode != .filtered || automation.publicationRestrictions.hasConditions)
             case .merge:
                 !isDraft && automation.permitsAutoMerge(project: projectPath ?? request?.webURL.gitLabProjectPath ?? "",
-                    hasOtherAssignees: request?.hasOtherAssignees(than: target.username) == true)
+                    hasOtherAssignees: request?.hasOtherAssignees(than: target.username) == true,
+                    isAuthor: request.map { $0.author.username == target.username } ?? true)
             case .approval: automation.autoApproveEnabled
             }
             return enabled ? .on : .off

@@ -34,7 +34,7 @@ final class SettingsPolicyEditor {
     }
 
     func updateScope(from settings: SettingsManager) {
-        draft.scope = settings.automation.ignoringGlobalSuspension.scope
+        draft = draft.preservingScope(from: settings.configuredAutomation)
         saveState.updateSavedScope(settings.acceptedAutomation.scope)
     }
 
@@ -228,6 +228,11 @@ struct AutomationSettingsTab: View {
 
     private var preparationFields: some View {
         Section {
+            Toggle(isOn: $editor.draft.requiresAssignmentClaim) {
+                Text(.Settings.settingsAutomationRequireAssignmentClaim)
+            }
+            .toggleStyle(.checkbox)
+            Text(.Settings.settingsAutomationRequireAssignmentClaimHelp).font(.caption).foregroundStyle(.secondary)
             effectToggle($editor.draft.reviewRequested.isEnabled, .Settings.settingsAutomationReviewRequested,
                          effect: editor.draft.reviewRequested.runner == .assistant ? .agent : nil)
                 .disabled(editor.draft.reviewRequested.runner == .shell)
@@ -326,8 +331,16 @@ struct AutomationSettingsTab: View {
 
     private var completionFields: some View {
         Section {
-            checkpointToggle($editor.draft.autoApproveEnabled, .Settings.settingsAutomationCheckpointAutoApprove,
-                             help: .Settings.settingsAutomationCheckpointAutoApproveHelp, reset: .approval)
+            HStack {
+                automaticActionPicker($editor.draft.autoApproveMode, .Settings.settingsAutomationCheckpointAutoApprove)
+                    .help(Text(.Settings.settingsAutomationCheckpointAutoApproveHelp))
+                AutomationDefaultsResetButton(preset: editor.draft.baselinePreset) {
+                    editor.draft.resetCheckpoint(.approval, to: $0)
+                }
+            }
+            if editor.draft.autoApproveMode == .prompt {
+                actionPromptEditor($editor.draft.autoApprovePrompt.criteria, .Settings.settingsAutomationApprovalPrompt)
+            }
             Picker(selection: $editor.draft.autoApprovalThreshold) {
                 Text(.Settings.settingsAutomationApprovalNoMajorIssues).tag(AutoApprovalThreshold.noMajorIssues)
                 Text(.Settings.settingsAutomationApprovalNoCodeIssues).tag(AutoApprovalThreshold.noCodeIssues)
@@ -350,10 +363,16 @@ struct AutomationSettingsTab: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Toggle(isOn: $editor.draft.autoMergeEnabled) {
-                    Text(.Settings.settingsAutomationAutoMergeToggle)
+                automaticActionPicker($editor.draft.autoMergeMode, .Settings.settingsAutomationAutoMergeToggle)
+
+                if editor.draft.autoMergeMode == .prompt {
+                    actionPromptEditor($editor.draft.autoMergePrompt.criteria, .Settings.settingsAutomationMergePrompt)
+                }
+                Toggle(isOn: $editor.draft.autoMergeAuthorOnly) {
+                    Text(.Settings.settingsAutomationMergeAuthorOnly)
                 }
                 .toggleStyle(.checkbox)
+                .help(Text(.Settings.settingsAutomationMergeAuthorOnlyHelp))
 
                 Text(.Settings.settingsAutomationAutoMergeHelp)
                     .font(.caption)
@@ -385,6 +404,23 @@ struct AutomationSettingsTab: View {
                 Text(.Settings.settingsAutomationProfilePermissionsHelp)
                 if editor.draft.autoMergeEnabled { Text(.Settings.settingsAutomationAuthoredMergeRequestsProjectsHelp) }
             }.font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func automaticActionPicker(_ mode: Binding<AutomaticActionMode>, _ title: LocalizedStringResource) -> some View {
+        Picker(selection: mode) {
+            Text(.Settings.settingsAutomationActionOff).tag(AutomaticActionMode.off)
+            Text(.Settings.settingsAutomationActionOn).tag(AutomaticActionMode.on)
+            Text(.Settings.settingsAutomationActionByPrompt).tag(AutomaticActionMode.prompt)
+        } label: { Text(title) }
+        .pickerStyle(.segmented)
+    }
+
+    private func actionPromptEditor(_ criteria: Binding<String>, _ title: LocalizedStringResource) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            TextField(text: criteria, axis: .vertical) { Text(title) }
+                .lineLimit(3...8)
+            Text(.Settings.settingsAutomationActionPromptHelp).font(.caption).foregroundStyle(.secondary)
         }
     }
 

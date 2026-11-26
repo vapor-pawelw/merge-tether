@@ -141,7 +141,11 @@ struct MRAutomationEventLogRow: View {
                 raw(.AutomationHistory.automationHistoryRunID, workflow.assistantJobID?.uuidString)
             case .event(let event):
                 raw(.AutomationHistory.automationHistoryEventID, event.id.uuidString)
-                raw(.AutomationHistory.automationHistoryError, event.message.map(AssistantJobExecutor.ExecutionError.displayMessage))
+                if event.action.isActionPrompt {
+                    raw(.AutomationHistory.automationHistorySummary, event.message)
+                } else {
+                    raw(.AutomationHistory.automationHistoryError, event.message.map(AssistantJobExecutor.ExecutionError.displayMessage))
+                }
                 raw(.AutomationHistory.automationHistoryIntentID, event.intentID?.uuidString)
                 raw(.AutomationHistory.automationHistoryRunID, event.jobID?.uuidString)
                 raw(.AutomationHistory.automationHistoryPreviousRunID, event.relatedJobID?.uuidString)

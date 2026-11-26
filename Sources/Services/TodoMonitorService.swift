@@ -941,6 +941,8 @@ final class TodoMonitorService {
         boardDisplayMetadata = metadata
         if request.assignees != nil, !settings.owns(request, username: target.username) {
             cancelAuthorJobsAfterAssignmentChange(for: target)
+        } else if settings.automation.scope.awaitsAssignmentClaim(request, target: target) {
+            cancelIneligibleDraftAutomation()
         }
         mergeRequestIssues?.observe(request, target: target, revision: accountRevision, at: readStartedAt)
     }
@@ -1663,6 +1665,22 @@ final class TodoMonitorService {
                 let state = settings.mrLifecycleLedger.request(for: target)?.state
                 return state == .merged || state == .closed
             })
+    }
+
+    func confirmAssignedOwnership(of expected: GitLabMergeRequest) async -> Bool {
+        guard let target = scopeTarget(projectID: expected.projectID, iid: expected.iid, url: expected.webURL),
+              let iid = target.iid else { return false }
+        let revision = glab.accountRevision
+        guard let user = try? await glab.fetchAuthenticatedUser(host: target.host, expectedUsername: target.username),
+              let live = try? await glab.fetchMergeRequest(projectID: target.projectID, iid: iid, host: target.host),
+              !Task.isCancelled, glab.accountRevision == revision, glab.resolvedHost == target.host,
+              glab.currentUsername == target.username, live.webURL == expected.webURL,
+              live.author.id != user.id, settings.owns(live, userID: user.id),
+              settings.confirmAssignedOwnership(live, target: target) else { return false }
+        boardAttentionPresenter.updateAttention(pendingUserAttention)
+        authoredMergeRequests.refreshIfNeeded()
+        await routeMRTodos(host: target.host, username: target.username)
+        return true
     }
 
     func setTreatAssignedMergeRequestsAsOwn(_ enabled: Bool) {

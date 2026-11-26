@@ -80,6 +80,8 @@ struct AutomationPresetProfilesTests {
         draft.publicationMode = .all
         #expect(selection.wrappedValue == .custom)
         draft.autoMergeWithOtherAssignees = true
+        draft.autoMergeAuthorOnly = false
+        draft.requiresAssignmentClaim = false
         #expect(selection.wrappedValue == .preset(.full) && draft.baselinePreset == .trusted)
         for _ in 0..<5 { _ = selection.wrappedValue }
         #expect(draftWrites == 1)

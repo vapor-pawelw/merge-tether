@@ -7,6 +7,8 @@ enum AssistantUsageRole: String, Codable, CaseIterable, Sendable {
 enum AssistantUsagePurpose: String, Codable, CaseIterable, Sendable {
     case authorFeedback, reReview, manualFeedback, draftProofRecovery, commentOrigin, noticeClassification, issueAssessment
 
+    case automaticActionPrompt
+
     var title: LocalizedStringResource {
         switch self {
         case .authorFeedback: .AssistantUsage.assistantUsagePurposeAuthorFeedback
@@ -16,6 +18,7 @@ enum AssistantUsagePurpose: String, Codable, CaseIterable, Sendable {
         case .commentOrigin: .AssistantUsage.assistantUsagePurposeCommentOrigin
         case .noticeClassification: .AssistantUsage.assistantUsagePurposeNotice
         case .issueAssessment: .AssistantUsage.assistantUsagePurposeIssue
+        case .automaticActionPrompt: .AssistantUsage.assistantUsagePurposeAutomaticActionPrompt
         }
     }
 }

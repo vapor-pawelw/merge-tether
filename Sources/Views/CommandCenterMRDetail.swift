@@ -182,6 +182,12 @@ private struct CommandCenterMRDetailContent: View {
                 VStack(alignment: .leading, spacing: 16) {
                     header(presentation, showsFeedbackRecheck: failedFollowUp == nil && feedbackRecheck == nil,
                         isRecheckingFeedback: feedbackRecheck != nil).id(Anchor.overview)
+                    if row.waitsForAssignmentClaim, let request = row.displayRequest {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(.Board.boardAssignmentAwaitingClaim)
+                            AssignedMergeRequestClaimButton(request: request, monitor: monitor)
+                        }
+                    }
                     // The decision the user has to make leads; merge state and automation rules support it.
                     if showsDecisions {
                         nextStep(proxy: proxy, citationContext: citationContext, discussions: discussions,

@@ -39,6 +39,14 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
     private var repositoryLabels: [Target: String]?
     private var targetsFollowingActionDefaults: Set<Target>?
     var pauseDraftsByDefault = true
+    var assignedOwnershipConfirmation: Bool? = true
+    private var claimedAssignments: Set<Target>?
+    var requiresAssignmentClaim: Bool {
+        get { assignedOwnershipConfirmation ?? true }
+        set { assignedOwnershipConfirmation = newValue }
+    }
+    // Runtime mirror of the separate MR ownership preference.
+    var treatsAssignedRequestsAsOwn = true
     /// Runtime-only global killswitch. It is never encoded, so stored overrides and presets stay unchanged.
     var isGloballySuspended = false
 
@@ -46,6 +54,7 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case mode, overrides, managedTargets, repositoryLabels, pauseDraftsByDefault, targetsFollowingActionDefaults
+        case assignedOwnershipConfirmation, claimedAssignments
     }
 
     init(from decoder: Decoder) throws {
@@ -56,6 +65,8 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
         repositoryLabels = try values.decodeIfPresent([Target: String].self, forKey: .repositoryLabels)
         targetsFollowingActionDefaults = try values.decodeIfPresent(Set<Target>.self, forKey: .targetsFollowingActionDefaults)
         pauseDraftsByDefault = try values.decodeIfPresent(Bool.self, forKey: .pauseDraftsByDefault) ?? true
+        assignedOwnershipConfirmation = try values.decodeIfPresent(Bool.self, forKey: .assignedOwnershipConfirmation)
+        claimedAssignments = try values.decodeIfPresent(Set<Target>.self, forKey: .claimedAssignments)
     }
 
     func manualChoice(for target: Target) -> Choice {
@@ -128,11 +139,11 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
     /// A transient revocation view for legacy cancellation consumers; never persist it as user policy.
     func cancellationScope(for requests: [GitLabMergeRequest], host: String, username: String) -> Self {
         var result = self
-        for request in requests where (request.draft == nil || request.isDraft
-            || request.state == .merged || request.state == .closed)
-            && request.webURL.isGitLabMergeRequest(host: host, iid: request.iid)
-            && !permits(request, host: host, username: username) {
-            result[.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)] = .paused
+        for request in requests where request.webURL.isGitLabMergeRequest(host: host, iid: request.iid) {
+            let target = Target.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
+            let needsRuntimeCheck = request.draft == nil || request.isDraft || !request.isOpen
+                || awaitsAssignmentClaim(request, target: target)
+            if needsRuntimeCheck && !permits(request, host: host, username: username) { result[target] = .paused }
         }
         return result
     }
@@ -140,7 +151,23 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
     func permits(_ request: GitLabMergeRequest, host: String, username: String) -> Bool {
         guard request.isOpen, request.draft != nil else { return false }
         let target = Target.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
-        return resolve(target, isDraft: request.isDraft).active
+        return resolve(target, isDraft: request.isDraft).active && !awaitsAssignmentClaim(request, target: target)
+    }
+
+    func assignmentClaimRequired(for target: Target) -> Bool {
+        treatsAssignedRequestsAsOwn && requiresAssignmentClaim && claimedAssignments?.contains(target) != true
+    }
+
+    func awaitsAssignmentClaim(_ request: GitLabMergeRequest, target: Target) -> Bool {
+        assignmentClaimRequired(for: target) && request.isOpen
+            && request.author.username != target.username && request.isOwned(by: target.username, includingAssignee: true)
+            && request.projectID == target.projectID && request.iid == target.iid
+            && request.webURL.isGitLabMergeRequest(host: target.host, iid: request.iid)
+    }
+
+    mutating func claimAssignment(for target: Target) {
+        if claimedAssignments == nil { claimedAssignments = [] }
+        claimedAssignments?.insert(target)
     }
 
     func individualOverrides(host: String, username: String) -> [Target] {

@@ -118,6 +118,7 @@ final class BoardAttentionPresenter {
             func add(_ reason: UserAttentionSnapshot.Reason, _ token: String, automatic: Bool = false) {
                 actions.append(.init(reason: reason, token: token, automatic: automatic))
             }
+            if row.waitsForAssignmentClaim { add(.assignmentClaim, "awaiting-claim") }
             let drafts = item.drafts.filter { !automaticDrafts.contains($0.id ?? -1) }
             for draft in drafts { add(.drafts, "\(draft.id ?? -1):" + UserAttentionSnapshot.digest(draft.note ?? "")) }
             if row.item.requiresCommentReview, row.item.drafts.isEmpty {
@@ -178,9 +179,10 @@ final class BoardAttentionPresenter {
             }
             let id = key(row.id.projectID, row.id.iid)
             let candidate = UserAttentionSnapshot.Candidate(id: id, title: row.displayTitle,
-                subtitle: row.displayURL.gitLabProjectPath, actions: actions, working: presented.busy)
+                subtitle: row.displayURL.gitLabProjectPath, actions: actions,
+                working: presented.busy && !row.waitsForAssignmentClaim)
             candidates.append(candidate)
-            if presented.checking { checkingIDs.insert(id) }
+            if presented.checking && !row.waitsForAssignmentClaim { checkingIDs.insert(id) }
             if UserAttentionSnapshot(candidates: [candidate]).hasAttention {
                 var confirmedRow = row
                 var presentation = row.presented

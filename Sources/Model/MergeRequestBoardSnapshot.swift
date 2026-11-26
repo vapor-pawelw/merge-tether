@@ -19,6 +19,7 @@ struct MergeRequestBoardSnapshot {
         var manualOrderEntry: MRBoardManualOrder.Entry? = nil
         var newReviewAssignedAt: Date? = nil
         var waitsForReviewStart: Bool = false
+        var waitsForAssignmentClaim: Bool = false
         var displayRequest: GitLabMergeRequest? { catalog?.facts.request ?? item.mergeRequest }
         var displayTitle: String { catalog?.facts.title ?? item.title }
         var displayURL: URL { catalog?.facts.url ?? item.url }
@@ -82,6 +83,7 @@ struct MergeRequestBoardSnapshot {
         }
         var needsAttention: Bool {
             if displayRequest.map({ [.merged, .closed].contains($0.state) }) == true { return false }
+            if waitsForAssignmentClaim { return true }
             if let humanActionRequired = presented.humanActionRequired { return humanActionRequired }
             if latestJob?.operationalExecution?.state.isActive == true { return false }
             if item.draftProofRecoveryChecking || isCheckingReadOnlyReconciliation {
@@ -213,12 +215,16 @@ struct MergeRequestBoardSnapshot {
                     && (item.reviewingActivity?.publishedCommentCount ?? 0) == 0
                     && target.map { configuration.waitsForReviewStart(on: projection.catalog.facts.request, target: $0) } == true
             } ?? false
+            let waitsForAssignmentClaim = if let automation, let target, let request = projection.catalog.facts.request {
+                automation.hasEnabledAutomation && automation.scope.awaitsAssignmentClaim(request, target: target)
+            } else { false }
             return Row(item: item, latestJob: latest, intents: currentIntents, attentionPresentation: presented,
                 pipelineEvidence: pipelineEvidence.first { $0.projectID == item.id.projectID && $0.iid == item.id.iid },
                 pipelineEvidenceCheckedAt: pipelineEvidenceCheckedAt, catalog: projection.catalog,
                 evidenceMatchesCatalogContext: projection.evidenceMatchesCatalogContext,
                 isEligibleForAutomaticMerge: automaticMerges.contains(item.id),
-                newReviewAssignedAt: newReviewAssignments[item.id], waitsForReviewStart: waiting)
+                newReviewAssignedAt: newReviewAssignments[item.id], waitsForReviewStart: waiting,
+                waitsForAssignmentClaim: waitsForAssignmentClaim)
         }
         let originalListed = own + reviewed
         let orphanIntents = accountIntents.filter { intent in

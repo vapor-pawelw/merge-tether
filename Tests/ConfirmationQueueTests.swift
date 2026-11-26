@@ -563,7 +563,10 @@ import MergeTetherRemote
                              assessment: ReReviewAssessment? = nil,
                              assessAIOrigin: AICommentOriginCoordinator.Assess? = nil,
                              verifyDraftRecovery: DraftProofRecoveryCoordinator.Verify? = nil,
-                             reReviewGate: (@MainActor () async throws -> Void)? = nil) throws -> Harness {
+                             reReviewGate: (@MainActor () async throws -> Void)? = nil,
+                             verifyActionPrompt: @escaping AutomaticActionPromptVerifier.Verify = { _, _ in
+                                throw CancellationError()
+                             }) throws -> Harness {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         let suite = "ConfirmationQueueTests.\(UUID())"
@@ -813,6 +816,7 @@ import MergeTetherRemote
                 return !gitlab.has("assistant-unavailable")
             },
             approvalReadClock: approvalReadClock, approvalReadWait: { _ in },
+            verifyActionPrompt: verifyActionPrompt,
             verifyReReview: { input, _, _ in
                 try await reReviewGate?()
                 try JSONEncoder().encode(input).store(in: gitlab, as: "verifier-input.json")
@@ -2899,6 +2903,47 @@ import MergeTetherRemote
         #expect(harness.log("approve.log").isEmpty)
         try await harness.poll()
         #expect(harness.monitor.currentItems.first?.canApprove != true)
+    }
+
+    @Test(arguments: ["allow", "deny", "uncertain", "blank", "off", "on", "unready", "changed", "editedPrompt"])
+    func approvalPromptIsAnAdditionalGateForEligibleDefaults(_ scenario: String) async throws {
+        var verifications = 0
+        var gitlab: InMemoryGitLab?
+        var settings: SettingsManager?
+        let harness = try makeHarness(assistantWorked: true, verifyActionPrompt: { input, _ in
+            verifications += 1
+            #expect(input.action == .approval && input.target.iid == 2)
+            #expect(input.criteria == "Approve Alice's MRs.")
+            if scenario == "changed" { gitlab?.write("discussions.json", self.othersThread) }
+            if scenario == "editedPrompt" { settings?.automation.autoApprovePrompt.criteria = "Deny all." }
+            return .init(decision: scenario == "deny" ? .deny : scenario == "uncertain" ? .uncertain : .allow,
+                         reason: "Matched the fixture criteria.")
+        })
+        defer { harness.cleanUp() }
+        gitlab = harness.gitlab
+        settings = harness.settings
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        harness.settings.automation.autoApproveMode = .prompt
+        harness.settings.automation.autoApprovePrompt.criteria = scenario == "blank" ? " " : "Approve Alice's MRs."
+        if scenario == "off" || scenario == "on" {
+            harness.settings.setActionPreference(scenario == "on" ? .on : .off, for: .approval, target: target)
+        }
+        if scenario != "unready" { try harness.recordVerdict("no_objections", head: head) }
+
+        try await harness.poll()
+        if scenario == "deny" || scenario == "uncertain" { try await harness.poll() }
+
+        let invoked = ["allow", "deny", "uncertain", "changed", "editedPrompt"].contains(scenario)
+        #expect(verifications == (invoked ? 1 : 0))
+        #expect(harness.log("approve.log").contains("sha=\(head)") == (scenario == "allow" || scenario == "on"))
+        let events = harness.settings.automationEvents.filter { $0.action == .approvalPrompt }
+        #expect(events.count == (invoked || scenario == "blank" ? 1 : 0))
+        #expect(events.allSatisfy { $0.origin == .automatic && $0.message?.isEmpty == false })
+        if scenario == "deny" {
+            await harness.monitor.approve(.init(projectID: 1, iid: 2))
+            #expect(harness.log("approve.log").contains("sha=\(head)"))
+            #expect(verifications == 1)
+        }
     }
 
     @Test func explicitAutoApprovalWaitsForEveryDiscussion() async throws {

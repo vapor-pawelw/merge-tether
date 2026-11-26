@@ -202,6 +202,13 @@ private struct CommandCenterMRCardContent: View {
                    let notice = monitor.settings.reviewAssignments.incomingReviewFilter.notice(for: scopeTarget) {
                     IncomingReviewFilterNoticeView(notice: notice)
                 }
+                if row.waitsForAssignmentClaim {
+                    Label { Text(.Board.boardAssignmentAwaitingClaim) } icon: {
+                        Image(systemName: "person.crop.circle.badge.exclamationmark").foregroundStyle(.orange)
+                    }
+                    .labelStyle(BoardCardStatusLabelStyle())
+                    .font(.subheadline)
+                }
                 attentionAndDrafts
                 if let retryError {
                     Label { Text(verbatim: retryError) } icon: {
@@ -380,7 +387,9 @@ private struct CommandCenterMRCardContent: View {
 
     @ViewBuilder
     private func primaryAction(hasDirectMergeAction: Bool) -> some View {
-        if let job = row.latestJob, job.execution?.state.isActive == true {
+        if row.waitsForAssignmentClaim, let request = row.displayRequest {
+            AssignedMergeRequestClaimButton(request: request, monitor: monitor)
+        } else if let job = row.latestJob, job.execution?.state.isActive == true {
             Button(role: .destructive) {
                 markReviewSeen()
                 monitor.cancelAssistantJob(job.id)
@@ -795,5 +804,32 @@ struct BoardStepChain: View {
         .font(.subheadline)
         .help(Text(.CommentReview.commentReviewStepsHelp))
         .accessibilityElement(children: .combine)
+    }
+}
+
+struct AssignedMergeRequestClaimButton: View {
+    let request: GitLabMergeRequest
+    let monitor: TodoMonitorService
+    @State private var confirming = false
+    @State private var failed = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                confirming = true
+                failed = false
+                Task {
+                    failed = !(await monitor.confirmAssignedOwnership(of: request))
+                    confirming = false
+                }
+            } label: {
+                MRActionProgressLabel(working: confirming) { Text(.Board.boardAssignmentClaim) }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(confirming)
+            if failed {
+                Text(.Board.boardAssignmentClaimFailed).font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
 }

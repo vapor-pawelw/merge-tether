@@ -73,12 +73,6 @@ final class MergeRequestTodoRouter {
                   todo.targetURL.gitLabTodoMergeRequestURL(host: host, iid: iid) != nil else { continue }
             let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: todo.project.id, iid: iid)
             guard !settings.intakeFilterHolds(target) else { continue }
-            let priorReceipt = settings.routedMRTodoReceipts.first { $0.target == target && $0.event == todo.feedbackIdentity }
-            let persistedIntent = settings.mrActionIntents.first { $0.target == target && $0.sourceEvents.contains(todo.feedbackIdentity) }
-            if priorReceipt != nil || persistedIntent != nil || settings.ignoredMergeRequests.contains(target) {
-                if await acknowledge(todo, target: target, intentID: priorReceipt?.intentID ?? persistedIntent?.id, automatically: automatically) { acknowledged.insert(todo.id) }
-                continue
-            }
             let request: GitLabMergeRequest
             do {
                 if let cached = requests[target] { request = cached }
@@ -90,6 +84,16 @@ final class MergeRequestTodoRouter {
             guard isCurrentPass(), let head = request.sha, !head.isEmpty,
                   request.projectID == target.projectID, request.iid == iid,
                   request.webURL.isGitLabMergeRequest(host: host, iid: iid) else { continue }
+            guard !automatically || !settings.automation.scope.awaitsAssignmentClaim(request, target: target) else { continue }
+            let priorReceipt = settings.routedMRTodoReceipts.first { $0.target == target && $0.event == todo.feedbackIdentity }
+            let persistedIntent = settings.mrActionIntents.first { $0.target == target && $0.sourceEvents.contains(todo.feedbackIdentity) }
+            if priorReceipt != nil || persistedIntent != nil || settings.ignoredMergeRequests.contains(target) {
+                if await acknowledge(todo, target: target, request: request,
+                    intentID: priorReceipt?.intentID ?? persistedIntent?.id, automatically: automatically) {
+                    acknowledged.insert(todo.id)
+                }
+                continue
+            }
             let classification: (MRTodoIntent.Kind, Set<Int>)
             do {
                 guard let result = try await classify(todo, request: request, user: user, host: host) else { continue }
@@ -139,7 +143,7 @@ final class MergeRequestTodoRouter {
             if automatically, let accepted = settings.mrActionIntents.first(where: { $0.id == intentID }) {
                 onAcceptedIntent?(accepted)
             }
-            if await acknowledge(todo, target: target, intentID: intentID, automatically: automatically) { acknowledged.insert(todo.id) }
+            if await acknowledge(todo, target: target, request: request, intentID: intentID, automatically: automatically) { acknowledged.insert(todo.id) }
         }
         await synchronize(host: host, username: username, cachedRequests: requests)
         guard !Task.isCancelled, isCurrentPass() else { return acknowledged }
@@ -553,21 +557,23 @@ final class MergeRequestTodoRouter {
         }
     }
 
-    private func acknowledge(_ todo: Todo, target: MRAutomationScope.Target, intentID: UUID?, automatically: Bool) async -> Bool {
-        guard settings.automaticActionsAllowed, (!automatically || settings.automaticPublicWritesAllowed), isCurrent(target.host, target.username) else { return false }
+    private func acknowledge(_ todo: Todo, target: MRAutomationScope.Target, request: GitLabMergeRequest,
+                             intentID: UUID?, automatically: Bool) async -> Bool {
         let revision = glab.accountRevision
+        let permits: @MainActor @Sendable () -> Bool = {
+            !Task.isCancelled && self.settings.automaticActionsAllowed
+                && (!automatically || (self.settings.automaticPublicWritesAllowed
+                    && !self.settings.automation.scope.awaitsAssignmentClaim(request, target: target)))
+                && self.isCurrent(target.host, target.username) && self.glab.accountRevision == revision
+        }
+        guard permits() else { return false }
         // Persist acceptance before the remote write. A failed acknowledgement
         // retries only this receipt, even if the worker finishes in the meantime.
         settings.routedMRTodoReceipts.insert(.init(target: target, event: todo.feedbackIdentity, intentID: intentID))
         settings.save()
         // Durable acceptance is required for both automatic routing and manual Add/handle.
-        guard settings.automaticActionsAllowed, (!automatically || settings.automaticPublicWritesAllowed), isCurrent(target.host, target.username),
-              glab.accountRevision == revision else { return false }
-        switch await glab.markAsDone(id: todo.id, host: target.host, shouldProceed: {
-            !Task.isCancelled && self.settings.automaticActionsAllowed
-                && (!automatically || self.settings.automaticPublicWritesAllowed)
-                && self.isCurrent(target.host, target.username) && self.glab.accountRevision == revision
-        }) {
+        guard permits() else { return false }
+        switch await glab.markAsDone(id: todo.id, host: target.host, shouldProceed: permits) {
         case .success:
             settings.routedMRTodoReceipts.insert(.init(target: target, event: todo.feedbackIdentity, intentID: intentID))
             settings.save()

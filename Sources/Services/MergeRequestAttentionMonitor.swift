@@ -310,6 +310,7 @@ final class MergeRequestAttentionMonitor {
     private var recentTodos: [Item] = []
     private var latestTodoSnapshot: (account: Account, revision: UInt64, todos: [Todo])?
     let authorFeedbackCoordinator: AuthorFeedbackCoordinator?
+    private let actionPromptGate: AutomaticActionPromptGate
     private let verifiedReplyDrafts: VerifiedAuthorReplyDrafts?
     let aiOriginCoordinator: AICommentOriginCoordinator
     let displayAIOriginCoordinator: AICommentDisplayCoordinator?
@@ -337,6 +338,7 @@ final class MergeRequestAttentionMonitor {
         },
         approvalReadClock: @escaping ReadOnlyAssessmentRetry.Clock = { Date() },
         approvalReadWait: @escaping ReadOnlyAssessmentRetry.Wait = ReadOnlyAssessmentRetry.wait,
+        verifyActionPrompt: @escaping AutomaticActionPromptVerifier.Verify = AutomaticActionPromptVerifier.verify,
         verifyReReview: ReReviewCoordinator.Verify? = nil,
         verifyAuthorFeedback: ReReviewCoordinator.Verify? = nil,
         verificationExecutableResolver: ReReviewVerifier.ExecutableResolver? = nil,
@@ -357,6 +359,7 @@ final class MergeRequestAttentionMonitor {
         self.authorFeedbackAssessmentDirectory = authorFeedbackAssessmentDirectory
         self.runStorage = runStorage
         self.canAutomate = canAutomate
+        self.actionPromptGate = AutomaticActionPromptGate(verify: verifyActionPrompt)
         self.approvalReadClock = approvalReadClock
         self.approvalReadWait = approvalReadWait
         let originReadContexts = OriginReadContexts()
@@ -3210,10 +3213,33 @@ final class MergeRequestAttentionMonitor {
                     return false
                 }
             }
-            if automatic, ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid,
-                    user: user, in: verdictDirectory)?.verdict == .classifiedFindings {
+            let target = commentReviewTarget(id, account: account)
+            @MainActor func currentPromptPolicy() -> AutomaticActionPromptGate.Policy? {
+                guard automatic, let settings else { return nil }
+                return .init(.approval, target: target, settings: settings)
+            }
+            let promptPolicy = currentPromptPolicy()
+            var promptCandidate: AutomaticActionPromptGate.Candidate?
+            if let promptPolicy, let settings {
+                guard permits(evidence),
+                      let candidate = AutomaticActionPromptGate.Candidate(action: .approval, target: target,
+                          userID: user.id, accountRevision: revision, policy: promptPolicy, request: evidence.request,
+                          discussions: evidence.discussions) else { return false }
+                let assessedEvidence = evidence
+                guard await actionPromptGate.allows(candidate, request: evidence.request, discussions: evidence.discussions,
+                    settings: settings, accountIsCurrent: currentAccount,
+                    isEligible: { permits(assessedEvidence) && currentPromptPolicy() == promptPolicy }) else {
+                    if currentAccount() { updateItem(id) { $0.approvalObservation = .manualFallback } }
+                    return false
+                }
+                promptCandidate = candidate
+            }
+            let checkedPromptCandidate = promptCandidate
+            if checkedPromptCandidate != nil || (automatic && evidence.checkedVerdict?.verdict == .classifiedFindings) {
                 evidence = try await ReadOnlyAssessmentRetry.run(isCurrent: currentAccount, wait: approvalReadWait, operation: readEvidence)
-                guard permits(evidence) else { return false }
+                guard permits(evidence), currentPromptPolicy() == promptPolicy,
+                      checkedPromptCandidate?.matches(evidence.request) != false,
+                      checkedPromptCandidate?.matches(evidence.discussions) != false else { return false }
                 if evidence.approvers.contains(user.id) { return confirmed(evidence.approvalProgress, for: evidence.request) }
             }
             let checkedEvidence = evidence
@@ -3228,7 +3254,7 @@ final class MergeRequestAttentionMonitor {
                             semanticContextFingerprint: checkedEvidence.request.semanticContextFingerprint, in: self.verdictDirectory) {
                         approvalWithOpenFindingsRunID = verdict.runID
                     }
-                }, shouldProceed: { permits(checkedEvidence) })
+                }, shouldProceed: { permits(checkedEvidence) && currentPromptPolicy() == promptPolicy })
             guard currentAccount() else { return false }
             if progress == nil,
                let observed = try? await glab.fetchMergeRequestApprovalProgress(projectID: id.projectID, iid: id.iid, host: account.host),

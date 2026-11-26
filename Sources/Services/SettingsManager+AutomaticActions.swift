@@ -213,6 +213,17 @@ extension SettingsManager {
                      aiCommentCriteriaOverride: automation.aiCommentCriteriaOverride, treatAssignedMergeRequestsAsOwn: treatAssignedMergeRequestsAsOwn)
     }
 
+    func confirmAssignedOwnership(_ request: GitLabMergeRequest, target: MRAutomationScope.Target) -> Bool {
+        guard automaticActionsAllowed, configuredAutomation.hasEnabledAutomation,
+              automation.scope.awaitsAssignmentClaim(request, target: target) else { return false }
+        let previous = automation.scope
+        automation.scope.claimAssignment(for: target)
+        if save() { return true }
+        automation.scope = previous
+        save()
+        return false
+    }
+
     /// A pending audit affects automatic execution for this account and MR until its reads recover.
     var effectiveAutomationScope: MRAutomationScope {
         assistantHandoffs.reduce(into: automation.scope) { scope, handoff in
@@ -241,7 +252,8 @@ extension SettingsManager {
                 && request.detailedMergeStatus != .draftStatus
                 && automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath,
                     optedIn: autoMergePreference(for: target) == .on,
-                    hasOtherAssignees: request.hasOtherAssignees(than: target.username))
+                    hasOtherAssignees: request.hasOtherAssignees(than: target.username),
+                    isAuthor: request.author.username == target.username)
         case .approval: automation.autoApproveEnabled || actionPreference(.approval, for: target) == .on
         }
     }
