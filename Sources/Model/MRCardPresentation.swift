@@ -6,7 +6,7 @@ enum MergeRequestFinishedState: String, Error {
 
     init?(_ request: GitLabMergeRequest?) {
         guard let state = request?.state else { return nil }
-        self.init(rawValue: state)
+        self.init(rawValue: state.rawValue)
     }
 
     var badge: LocalizedStringResource { self == .merged ? .MRLifecycle.merged : .MRLifecycle.closed }
@@ -135,7 +135,7 @@ struct MRCardPresentation {
     }
 
     var mergeStage: MergeStage? {
-        guard let request = row.displayRequest, request.state == "opened", request.draft != true else { return nil }
+        guard let request = row.displayRequest, request.isOpen, request.draft != true else { return nil }
         if automaticMergeProgress { return .merging }
         switch confirmedSubmission ?? (request.hasQueuedMerge ? .queued : .none) {
         case .inTrain: return .inTrain
@@ -343,11 +343,11 @@ struct MRCardPresentation {
             result.append(.init(title: .Board.boardCompactConflict, symbol: "arrow.triangle.branch"))
         }
         if let pipeline = row.currentPipelineRequest?.headPipeline,
-           ["running", "pending", "created", "preparing", "waiting_for_resource"].contains(pipeline.status) {
+           [.running, .pending, .created, .preparing, .waitingForResource].contains(pipeline.status) {
             result.append(.init(title: .Board.boardCompactPipelineRunning, symbol: "clock"))
         } else if automaticPipelineProgress {
             result.append(.init(title: .PipelineAutomation.pipelineHandling, symbol: "gearshape"))
-        } else if item.failedPipeline || item.mergeRequest?.headPipeline?.status == "failed" {
+        } else if item.failedPipeline || item.mergeRequest?.headPipeline?.status == .failed {
             result.append(.init(title: .Board.boardCompactPipelineFailed, symbol: "xmark.circle"))
         }
         if humanAction == nil, !busy, !allowsRemoval, max(item.draftCount, item.drafts.count) > 0 {

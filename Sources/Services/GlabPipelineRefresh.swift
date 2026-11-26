@@ -64,7 +64,7 @@ extension GlabService {
         shouldProceed: @escaping @MainActor @Sendable () -> Bool
     ) async throws {
         let configuration = settings.automation
-        let target = MRAutomationScope.Target(host: host, username: expectedUser.username,
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: expectedUser.username,
                                              projectID: request.projectID, iid: request.iid)
         let permitted: @MainActor @Sendable () -> Bool = {
             settings.automaticPublicWritesAllowed && configuration == settings.automation && configuration.autoClaimPipelineFailures
@@ -133,7 +133,7 @@ extension GlabService {
         let sourceHead = try await fetchBranchHeadSHA(projectID: sourceProject, branch: request.sourceBranch, host: host)
         let targetHead = try await fetchBranchHeadSHA(projectID: targetProject, branch: request.targetBranch, host: host)
         guard permitted(), user == expectedUser, sourceHead == source, targetHead == proof.targetHeadSHA,
-              current.state == "opened", current.author.id == expectedUser.id, current.sha == source,
+              current.state == .opened, current.author.id == expectedUser.id, current.sha == source,
               configuration.scope.permits(current, host: host, username: expectedUser.username),
               current.hasConflicts == false,
               current.sourceProjectID == sourceProject, current.sourceBranch == request.sourceBranch,

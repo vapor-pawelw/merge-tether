@@ -63,7 +63,7 @@ struct MREffectivePolicyPresentation {
             packageDecision = automation.packageDecision
             publicActionsAllowed = automation.allowAutomaticPublicActions
             enabled = target.map { settings.hasConfiguredAutomation(for: $0) } ?? automation.hasEnabledAutomation
-            let scope = target.map { automation.scope.resolve($0, isDraft: bound?.draft == true || bound?.detailedMergeStatus == "draft_status") }
+            let scope = target.map { automation.scope.resolve($0, isDraft: bound?.isDraft ?? false) }
             scopeActive = scope?.active == true
             draftPaused = scope?.source == .draft
             let publication = target.map { settings.publicationPolicy(for: $0) } ?? automation.automaticPublicationPolicy
@@ -101,7 +101,7 @@ struct MREffectivePolicyPresentation {
 
     init(input: Input) {
         guard let request = input.request else { clauses = [.requiresVerification]; return }
-        guard request.state == "opened", input.submission != .merged else { clauses = []; return }
+        guard request.isOpen, input.submission != .merged else { clauses = []; return }
         if input.submission != .none { clauses = [.mergeSubmission(input.submission)]; return }
         if !input.automaticActionsAllowed { clauses = [.savedDataHold]; return }
         if input.packageDecision == .undecided { clauses = [.automationDecisionRequired]; return }

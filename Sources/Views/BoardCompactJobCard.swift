@@ -129,8 +129,7 @@ struct BoardJobStatusActions: View {
 
     private var active: Bool { handoff.operationalExecution?.state.isActive == true }
     private var isFinished: Bool {
-        let target = MRAutomationScope.Target(host: handoff.key.work.host, username: handoff.key.username,
-            projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
+        let target = handoff.key.automationTarget
         return MergeRequestFinishedState(monitor.settings.mrLifecycleLedger.request(for: target)
             ?? monitor.currentRequest(for: handoff)) != nil
     }

@@ -4,19 +4,14 @@ import Foundation
 @MainActor
 struct MRBoardProjector {
     typealias Item = MergeRequestAttentionMonitor.Item
-    struct Account: Equatable {
-        let host: String
-        let username: String
-        let revision: UInt64
-        var presentationKey: String { "\(host)/\(username)/\(revision)" }
-    }
+    typealias Account = GitLabAccountSession
     struct RequestFacts {
         /// Includes the mutable fields consumed by CI/conflict/policy readers; envelope compatibility is weaker.
         private struct Fields: Hashable {
             struct Pipeline: Hashable {
                 let id: Int?
                 let projectID: Int?
-                let status: String
+                let status: GitLabPipelineStatus
                 let sha: String?
                 let ref: String?
                 init(_ value: GitLabMergeRequest.Pipeline) {
@@ -31,7 +26,7 @@ struct MRBoardProjector {
             let hasConflicts: Bool?
             let trainConflict: MergeTrainPreparationConflict?
             let trainEvidenceUnavailable: Bool
-            let detailedMergeStatus: String?
+            let detailedMergeStatus: GitLabDetailedMergeStatus?
             let blockingDiscussionsResolved: Bool?
             let mergeWhenPipelineSucceeds: Bool?
             let canMerge: Bool?
@@ -180,7 +175,7 @@ struct MRBoardProjector {
     }
     private func scopeTarget(projectID: Int, iid: Int, url: URL) -> MRAutomationScope.Target? {
         guard projectID > 0, iid > 0, url.isGitLabMergeRequest(host: input.account.host, iid: iid) else { return nil }
-        return .init(host: input.account.host, username: input.account.username, projectID: projectID, iid: iid)
+        return .mergeRequest(host: input.account.host, username: input.account.username, projectID: projectID, iid: iid)
     }
     private func facts(for request: GitLabMergeRequest?) -> RequestFacts? {
         guard let request else { return nil }
@@ -200,13 +195,13 @@ struct MRBoardProjector {
         var rows = Dictionary((attentionSnapshot?.catalog ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for entry in input.reviewAssignments ?? [] {
             let request = entry.request
-            let id = Item.ID(projectID: request.projectID, iid: request.iid)
+            let id = request.mergeRequestID
             if rows[id] == nil {
                 rows[id] = .init(id: id, title: request.title, url: request.webURL, mergeRequest: request)
             }
         }
         for request in input.retainedRequests {
-            let id = Item.ID(projectID: request.projectID, iid: request.iid)
+            let id = request.mergeRequestID
             guard let target = scopeTarget(projectID: id.projectID, iid: id.iid, url: request.webURL) else { continue }
             if !MRAttentionRecord.sameContext(rows[id]?.mergeRequest, request) {
                 rows[id] = .init(id: id, title: request.title, url: request.webURL,
@@ -234,7 +229,7 @@ struct MRBoardProjector {
             Set($0.map { Item.ID(projectID: $0.request.projectID, iid: $0.request.iid) })
         }
         return browser.reviewed.filter { item in
-            guard item.mergeRequest?.state == "opened",
+            guard item.mergeRequest?.state == .opened,
                   let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
                   !input.ignoredTargets.contains(target) else { return false }
             return assignments?.contains(item.id) ?? input.trackedReviewedTargets.contains(target)
@@ -253,7 +248,7 @@ struct MRBoardProjector {
         let handoffs = input.pipelineHandoffs
         for handoff in handoffs {
             let mr = handoff.event.mergeRequest
-            let id = MergeRequestAttentionMonitor.Item.ID(projectID: mr.projectID, iid: mr.iid)
+            let id = mr.mergeRequestID
             if let index = items.firstIndex(where: { $0.id == id }) {
                 items[index].needsPipelineHandoff = true
                 if items[index].mergeRequest == nil { items[index].mergeRequest = mr }
@@ -271,7 +266,7 @@ struct MRBoardProjector {
                           $0.id.projectID == request.projectID && $0.id.iid == request.iid
                       }), current.mergeRequest?.author.username == username, current.canOfferManualMerge(using: status)
                 else { continue }
-                let id = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
+                let id = request.mergeRequestID
                 guard (items.first(where: { $0.id == id })?.draftCount ?? 0) == 0 else { continue }
                 guard !canMergeAutomatically(status, item: current) else { continue }
                 if let index = items.firstIndex(where: { $0.id == id }) { items[index].needsMerge = true }
@@ -310,7 +305,7 @@ struct MRBoardProjector {
     func attentionIntentIsAutomatic(_ intent: MRTodoIntent, ready: Bool) -> Bool {
         let configuration = input.automation
         guard configuration.hasAutomaticActionConsent, configuration.scope.resolve(intent.target).active,
-              !input.ignoredTargets.contains(intent.target), intent.request.state == "opened",
+              !input.ignoredTargets.contains(intent.target), intent.request.isOpen,
               intent.isDeferredReview || (ready && configuration.scope.permits(intent.request,
                   host: intent.target.host, username: intent.target.username)) else { return false }
         let project = intent.request.webURL.gitLabProjectPath
@@ -409,7 +404,7 @@ struct MRBoardProjector {
         }, uniquingKeysWith: { first, _ in first })
         let automaticMerges = Set(input.authored.compactMap { status -> Item.ID? in
             let request = status.request
-            let id = Item.ID(projectID: request.projectID, iid: request.iid)
+            let id = request.mergeRequestID
             guard !input.mrCatalogReadFailed, request.author.username == input.account.username,
                   let projection = prepared[id], projection.evidenceMatchesCatalogContext,
                   projection.item.canOfferManualMerge(using: status),
@@ -433,8 +428,8 @@ struct MRBoardProjector {
         let attention = attentionItems
         var rows: [BoardAttentionPresenter.PresentedRow] = []
         for row in board.own + board.reviewed {
-            guard row.displayRequest?.state == "opened" else { continue }
-            let target = MRAutomationScope.Target(host: input.account.host, username: input.account.username,
+            guard row.displayRequest?.state == .opened else { continue }
+            let target = MRAutomationScope.Target.mergeRequest(host: input.account.host, username: input.account.username,
                 projectID: row.id.projectID, iid: row.id.iid)
             guard !input.ignoredTargets.contains(target) else { continue }
             let classified = row.item.presentingHumanAttention(filtered: attention.first { $0.id == row.id },
@@ -458,7 +453,7 @@ struct MRBoardProjector {
                 automaticDraftIDs: automaticDrafts, checking: isRecheckingAttention(for: row) || attentionRefreshFailed(for: row),
                 automaticIntentIDs: Set(row.attentionIntents.filter { attentionIntentIsAutomatic($0, ready: preparing) }.map(\.id))))
         }
-        return BoardAttentionPresenter.project(.init(account: input.account.presentationKey,
+        return BoardAttentionPresenter.project(.init(account: input.account,
             host: input.account.host, username: input.account.username, rows: rows, proposals: board.proposals,
             otherTodos: board.otherTodos, inboxLoading: input.inboxLoading,
             assessingMentionNoteIDs: input.assessingMentionNoteIDs,
@@ -469,12 +464,12 @@ struct MRBoardProjector {
         host: String, username: String, ownCatalogIsAuthoritative: Bool, draftsLast: Bool) -> (own: [Item], reviewed: [Item]) {
         var rows = Dictionary(uniqueKeysWithValues: openItems.map { ($0.id, $0) })
         let currentAuthored = authored.filter {
-            $0.request.author.username == username && $0.request.state == "opened"
+            $0.request.author.username == username && $0.request.isOpen
                 && $0.request.webURL.isGitLabMergeRequest(host: host, iid: $0.request.iid)
         }
         for status in currentAuthored {
             let request = status.request
-            let id = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
+            let id = request.mergeRequestID
             if ownCatalogIsAuthoritative && rows[id] == nil { continue }
             if let currentHead = rows[id]?.mergeRequest?.sha, currentHead != request.sha { continue }
             var item = rows[id] ?? .init(id: id, title: request.title, url: request.webURL)
@@ -489,7 +484,7 @@ struct MRBoardProjector {
             rows[id] = item
         }
         let items = MergeRequestAttentionMonitor.Item.ordered(rows.values.filter {
-            ["opened", "merged", "closed"].contains($0.mergeRequest?.state ?? "")
+            [.opened, .merged, .closed].contains($0.mergeRequest?.state)
                 && $0.url.isGitLabMergeRequest(host: host, iid: $0.id.iid)
                 && $0.mergeRequest?.webURL.isGitLabMergeRequest(host: host, iid: $0.id.iid) == true
         }, draftsLast: draftsLast)

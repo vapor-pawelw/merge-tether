@@ -149,7 +149,7 @@ struct AttentionAutomationTests {
         #expect(visible.needsChanges == (scenario != "verified"))
         #expect(visible.needsAttention == (scenario != "verified"))
         #expect(original.needsChanges)
-        #expect(visible.mergeRequest?.detailedMergeStatus == "requested_changes")
+        #expect(visible.mergeRequest?.detailedMergeStatus == .requestedChanges)
         let serverStatus = AuthoredMergeRequestStatus(request: request, approvals: nil, discussionsResolved: true,
             projectRequiresResolvedDiscussions: true, autoMergeEnabled: true)
         #expect(serverStatus.blockers.contains(.changesRequested))

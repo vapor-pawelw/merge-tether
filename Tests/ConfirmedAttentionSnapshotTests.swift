@@ -5,6 +5,7 @@ import MergeTetherRemote
 
 @MainActor
 struct ConfirmedAttentionSnapshotTests {
+    private let account = GitLabAccountSession(host: "host", username: "me", revision: 1)
     private let id = "host/me/mr/1/2"
     private func candidate(_ attention: Bool, working: Bool = false) -> UserAttentionSnapshot.Candidate {
         .init(id: id, title: "Example", actions: attention ? [.init(reason: .drafts, token: "same-reply")] : [], working: working)
@@ -12,33 +13,33 @@ struct ConfirmedAttentionSnapshotTests {
 
     @Test func refreshKeepsTheLastConfirmedAttentionAndNotificationIdentity() {
         var cache = ConfirmedAttentionSnapshot()
-        cache.update(.init(account: "me", candidates: [candidate(true)]))
+        cache.update(.init(account: account, candidates: [candidate(true)]))
         let before = cache.snapshot
         for _ in 0..<3 {
-            cache.update(.init(account: "me", candidates: [candidate(false, working: true)], checkingIDs: [id]))
+            cache.update(.init(account: account, candidates: [candidate(false, working: true)], checkingIDs: [id]))
             #expect(cache.snapshot == before)
         }
-        cache.update(.init(account: "me", candidates: [candidate(true)]))
+        cache.update(.init(account: account, candidates: [candidate(true)]))
         #expect(cache.snapshot == before)
-        cache.update(.init(account: "me", candidates: [candidate(false)]))
+        cache.update(.init(account: account, candidates: [candidate(false)]))
         #expect(!cache.snapshot.hasAttention)
     }
 
     @Test func aNewAttentionReasonMustWaitForTheCheckToFinish() {
         var cache = ConfirmedAttentionSnapshot()
-        cache.update(.init(account: "me", candidates: [candidate(false)]))
-        cache.update(.init(account: "me", candidates: [candidate(true)], checkingIDs: [id]))
+        cache.update(.init(account: account, candidates: [candidate(false)]))
+        cache.update(.init(account: account, candidates: [candidate(true)], checkingIDs: [id]))
         #expect(!cache.snapshot.hasAttention)
-        cache.update(.init(account: "me", candidates: [candidate(true)]))
+        cache.update(.init(account: account, candidates: [candidate(true)]))
         #expect(cache.snapshot.hasAttention)
     }
 
     @Test func firstLoadAndAnAccountSwitchCannotReuseUnconfirmedAttention() {
         var cache = ConfirmedAttentionSnapshot()
-        cache.update(.init(account: "me", candidates: [candidate(true)], checkingIDs: [id]))
+        cache.update(.init(account: account, candidates: [candidate(true)], checkingIDs: [id]))
         #expect(!cache.snapshot.hasAttention)
-        cache.update(.init(account: "me", candidates: [candidate(true)]))
-        cache.update(.init(account: "other", candidates: [candidate(true)], checkingIDs: [id]))
+        cache.update(.init(account: account, candidates: [candidate(true)]))
+        cache.update(.init(account: .init(host: "host", username: "other", revision: 1), candidates: [candidate(true)], checkingIDs: [id]))
         #expect(!cache.snapshot.hasAttention)
         cache.update(.init(account: nil))
         #expect(!cache.snapshot.hasAttention)
@@ -46,11 +47,11 @@ struct ConfirmedAttentionSnapshotTests {
 
     @Test func realExecutionAndExplicitRemovalStillChangeAttentionImmediately() {
         var cache = ConfirmedAttentionSnapshot()
-        cache.update(.init(account: "me", candidates: [candidate(true)]))
-        cache.update(.init(account: "me", candidates: [candidate(true, working: true)]))
+        cache.update(.init(account: account, candidates: [candidate(true)]))
+        cache.update(.init(account: account, candidates: [candidate(true, working: true)]))
         #expect(!cache.snapshot.hasAttention)
-        cache.update(.init(account: "me", candidates: [candidate(true)]))
-        cache.update(.init(account: "me"))
+        cache.update(.init(account: account, candidates: [candidate(true)]))
+        cache.update(.init(account: account))
         #expect(!cache.snapshot.hasAttention)
     }
     @Test func cardsAndPhoneKeepTheConfirmedExplanationWhileShowingReadProgress() throws {
@@ -62,11 +63,11 @@ struct ConfirmedAttentionSnapshotTests {
         let previous = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
         let action = try #require(MRHumanAction(row: previous, assistantReady: true))
         var cache = ConfirmedAttentionSnapshot()
-        cache.update(.init(account: "me", candidates: [candidate(true)], humanActions: [id: action]))
+        cache.update(.init(account: account, candidates: [candidate(true)], humanActions: [id: action]))
         item.draftProofRecoveryFailure = nil
         item.authorFeedbackStatus = .init(head: "head", fingerprint: "notes", phase: .checking)
         let checking = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
-        cache.update(.init(account: "me", candidates: [candidate(false, working: true)], checkingIDs: [id]))
+        cache.update(.init(account: account, candidates: [candidate(false, working: true)], checkingIDs: [id]))
         let model = MRCardPresentation(row: checking, reviewingContext: ReviewingContext(row: checking),
             allowsRemoval: false, assistantReady: true, preservedHumanAction: cache.humanActions[id], isRefreshingAttention: true)
         #expect(model.working && model.humanAction != nil)
@@ -112,11 +113,11 @@ struct ConfirmedAttentionSnapshotTests {
             MergeRequestBoardSnapshot(own: [b, a], reviewed: [], todos: [], attention: [], handoffs: [],
                 host: "host", username: "me", humanAttention: cache.snapshot).own.map { $0.id.iid }
         }
-        cache.update(.init(account: "me", candidates: [candidate(true)]))
+        cache.update(.init(account: account, candidates: [candidate(true)]))
         #expect(order() == [2, 3])
-        cache.update(.init(account: "me", candidates: [candidate(false, working: true)], checkingIDs: [id]))
+        cache.update(.init(account: account, candidates: [candidate(false, working: true)], checkingIDs: [id]))
         #expect(order() == [2, 3])
-        cache.update(.init(account: "me", candidates: [candidate(false)]))
+        cache.update(.init(account: account, candidates: [candidate(false)]))
         #expect(order() == [3, 2])
     }
 

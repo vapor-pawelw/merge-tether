@@ -935,7 +935,7 @@ import MergeTetherRemote
         }
         private var dependencyPresentationReady: Bool {
             (monitor.attention.currentOpenItems + monitor.attention.currentItems).allSatisfy {
-                $0.mergeRequest?.state != "opened" || $0.dependencies != nil
+                $0.mergeRequest?.state != .opened || $0.dependencies != nil
             }
         }
         func waitForRead(_ index: Int) async throws {

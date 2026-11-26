@@ -30,10 +30,10 @@ struct AuthoredMergeRequestStatus: Identifiable {
     let queueHasEnded: Bool
     let dependencyReadiness: MergeRequestDependencySummary.MergeReadiness
 
-    var id: String { "\(request.projectID)!\(request.iid)" }
+    var id: GitLabMergeRequestID { request.mergeRequestID }
 
     var waitsForApprovalsAfterQueueDeparture: Bool {
-        queueHasEnded && submissionState == .changed && request.headPipeline?.status == "success" && blockers == [.approvals]
+        queueHasEnded && submissionState == .changed && request.headPipeline?.status == .success && blockers == [.approvals]
     }
 
     var displayedSubmissionState: MergeSubmissionState {
@@ -47,7 +47,7 @@ struct AuthoredMergeRequestStatus: Identifiable {
 
     func matchesCurrentRequest(_ current: GitLabMergeRequest) -> Bool {
         MergeRequestDependencySummary.Context(request) == .init(current)
-            && request.semanticContextFingerprint == current.semanticContextFingerprint
+            && request.evidenceContext().binds(to: current.evidenceContext(), policy: .semanticText)
             && request.draft == current.draft && request.author.id == current.author.id
             && request.author.username == current.author.username
     }
@@ -64,7 +64,7 @@ struct AuthoredMergeRequestStatus: Identifiable {
             case .changesRequested, .discussions, .conflicts, .conflictTaskFailed:
                 true
             case .pipeline:
-                ["failed", "canceled", "manual"].contains(request.headPipeline?.status ?? "")
+                [.failed, .canceled, .manual].contains(request.headPipeline?.status)
             default:
                 false
             }
@@ -93,14 +93,14 @@ struct AuthoredMergeRequestStatus: Identifiable {
         self.dependencyReadiness = dependencyReadiness
         var blockers: [MergeRequestBlocker] = []
 
-        if request.draft == true || request.detailedMergeStatus == "draft_status" { blockers.append(.draft) }
+        if request.isDraft { blockers.append(.draft) }
         if let pendingDraftCount, pendingDraftCount > 0 { blockers.append(.unpublishedDrafts) }
         if requiresCommentReview { blockers.append(.commentReview) }
-        if approvals?.allRequiredRulesApproved == false || request.detailedMergeStatus == "not_approved" {
+        if approvals?.allRequiredRulesApproved == false || request.detailedMergeStatus == .notApproved {
             blockers.append(.approvals)
         }
-        if request.detailedMergeStatus == "requested_changes" { blockers.append(.changesRequested) }
-        if discussionsResolved == false || request.detailedMergeStatus == "discussions_not_resolved" {
+        if request.detailedMergeStatus == .requestedChanges { blockers.append(.changesRequested) }
+        if discussionsResolved == false || request.detailedMergeStatus == .discussionsNotResolved {
             blockers.append(.discussions)
         }
         if request.hasMergeConflict { blockers.append(.conflicts) }
@@ -108,11 +108,11 @@ struct AuthoredMergeRequestStatus: Identifiable {
 
         let canQueuePipeline = action == .enqueue && request.isReadyForMergeSubmission(.enqueue)
         switch request.detailedMergeStatus {
-        case "ci_must_pass", "ci_still_running", "security_policy_pipeline_check", "status_checks_must_pass":
+        case .ciMustPass, .ciStillRunning, .securityPolicyPipelineCheck, .statusChecksMustPass:
             if !canQueuePipeline { blockers.append(.pipeline) }
-        case "approvals_syncing", "checking", "preparing", "unchecked":
+        case .approvalsSyncing, .checking, .preparing, .unchecked:
             blockers.append(.checking)
-        case "mergeable", "draft_status", "not_approved", "requested_changes", "discussions_not_resolved", "conflict":
+        case .mergeable, .draftStatus, .notApproved, .requestedChanges, .discussionsNotResolved, .conflict:
             break
         case nil:
             break
@@ -120,14 +120,14 @@ struct AuthoredMergeRequestStatus: Identifiable {
             blockers.append(.other)
         }
 
-        if let pipeline = request.headPipeline, pipeline.status != "success", !canQueuePipeline, !blockers.contains(.pipeline) {
+        if let pipeline = request.headPipeline, pipeline.status != .success, !canQueuePipeline, !blockers.contains(.pipeline) {
             blockers.append(.pipeline)
         }
 
         if pendingDraftCount == nil || approvals == nil || discussionsResolved == nil || request.canMerge == nil
             || request.mergeTrainEvidenceUnavailable
             || request.draft == nil || request.detailedMergeStatus == nil
-            || (request.detailedMergeStatus == "mergeable" && (request.sha == nil || request.hasConflicts == nil)) {
+            || (request.detailedMergeStatus == .mergeable && (request.sha == nil || request.hasConflicts == nil)) {
             blockers.append(.unknown)
         }
 
@@ -159,13 +159,13 @@ struct AuthoredMergeRequestStatus: Identifiable {
 
 extension GitLabMergeRequest {
     var hasMergeConflict: Bool {
-        hasConflicts == true || detailedMergeStatus == "conflict" || mergeTrainConflict?.matches(self) == true
+        hasConflicts == true || detailedMergeStatus == .conflict || mergeTrainConflict?.matches(self) == true
     }
 
     var isReadyForMergeChecks: Bool {
-        state == "opened" && draft == false && detailedMergeStatus == "mergeable"
+        isOpen && draft == false && detailedMergeStatus == .mergeable
             && hasConflicts == false && !hasMergeConflict && !mergeTrainEvidenceUnavailable && canMerge == true && sha != nil
-            && (headPipeline == nil || headPipeline?.status == "success")
+            && (headPipeline == nil || headPipeline?.status == .success)
     }
 }
 

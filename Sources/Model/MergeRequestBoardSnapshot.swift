@@ -40,7 +40,7 @@ struct MergeRequestBoardSnapshot {
             if item.isAuthored { return true }
             guard let author = displayRequest?.author.username, !author.isEmpty else { return true }
             guard let viewer, !viewer.isEmpty else { return true }
-            return author.lowercased() == viewer.lowercased()
+            return GitLabAccountIdentity.normalize(author) == GitLabAccountIdentity.normalize(viewer)
         }
         var isCheckingReadOnlyReconciliation: Bool {
             guard let status = item.authorFeedbackStatus, let request = item.mergeRequest else { return false }
@@ -77,7 +77,7 @@ struct MergeRequestBoardSnapshot {
             stoppedJobNeedsAttention || attentionIntents.contains { $0.state == .failed && !isReconciling($0) }
         }
         var needsAttention: Bool {
-            if displayRequest.map({ ["merged", "closed"].contains($0.state) }) == true { return false }
+            if displayRequest.map({ [.merged, .closed].contains($0.state) }) == true { return false }
             if let humanActionRequired = item.humanActionRequired { return humanActionRequired }
             if latestJob?.operationalExecution?.state.isActive == true { return false }
             if item.draftProofRecoveryChecking || isCheckingReadOnlyReconciliation {
@@ -164,7 +164,7 @@ struct MergeRequestBoardSnapshot {
             guard let host, let username, todo.targetType == .mergeRequest,
                   let iid = todo.target.iid, iid > 0, todo.project.id > 0,
                   todo.targetURL.gitLabTodoMergeRequestURL(host: host, iid: iid) != nil else { return nil }
-            return .init(host: host, username: username, projectID: todo.project.id, iid: iid)
+            return .mergeRequest(host: host, username: username, projectID: todo.project.id, iid: iid)
         }
         func recognized(_ todo: Todo) -> Bool {
             guard let username else { return false }
@@ -196,7 +196,7 @@ struct MergeRequestBoardSnapshot {
             let actionKey = "\(host ?? "")/\(username ?? "")/mr/\(item.id.projectID)/\(item.id.iid)"
             item.humanActionRequired = humanAttention.map { $0.items.contains { $0.id == actionKey } }
             let target = host.flatMap { host in username.map {
-                MRAutomationScope.Target(host: host, username: $0, projectID: item.id.projectID, iid: item.id.iid)
+                MRAutomationScope.Target.mergeRequest(host: host, username: $0, projectID: item.id.projectID, iid: item.id.iid)
             } }
             let waiting = automation.map { configuration in
                 listedReviewMembership.contains(.init(id: item.id, url: item.url))
@@ -238,7 +238,7 @@ struct MergeRequestBoardSnapshot {
         var grouped: [Proposal] = []
         if let host, let username {
             for row in otherMergeRequests where row.item.url.isGitLabMergeRequest(host: host, iid: row.item.id.iid) {
-                grouped.append(.init(target: .init(host: host, username: username, projectID: row.item.id.projectID, iid: row.item.id.iid),
+                grouped.append(.init(target: .mergeRequest(host: host, username: username, projectID: row.item.id.projectID, iid: row.item.id.iid),
                     title: row.item.title, url: row.item.url, item: row.item, todos: [], intents: row.intents))
             }
         }
@@ -299,15 +299,15 @@ struct MergeRequestBoardSnapshot {
             var fixed: [Row] = []
             var movable: [MRAutomationScope.Target: Row] = [:]
             for var row in rows {
-                guard let request = row.displayRequest, request.state == "opened",
+                guard let request = row.displayRequest, request.isOpen,
                       row.displayURL.isGitLabMergeRequest(host: host, iid: row.id.iid),
                       let pin = BoardCardPin.mergeRequest(host: host, username: username,
                           projectID: row.id.projectID, iid: row.id.iid) else {
                     fixed.append(row)
                     continue
                 }
-                let target = MRAutomationScope.Target(host: host, username: username, projectID: row.id.projectID, iid: row.id.iid)
-                let isDraft = row.isDraft || request.detailedMergeStatus == "draft_status"
+                let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: row.id.projectID, iid: row.id.iid)
+                let isDraft = row.isDraft || request.detailedMergeStatus == .draftStatus
                 let enabled = automation.hasEnabledAutomation && automation.scope.resolve(target, isDraft: isDraft).active
                 row.manualOrderEntry = .init(target: target,
                     group: .init(reviewing: reviewing, automationEnabled: enabled, pinned: pinnedCards.contains(pin)),
@@ -398,7 +398,7 @@ struct MergeRequestBoardSnapshot {
             return lhs.createdAt > rhs.createdAt
         }
         for job in latestJobs {
-            let target = MRAutomationScope.Target(host: host, username: username, projectID: job.key.work.projectID, iid: job.key.work.iid)
+            let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: job.key.work.projectID, iid: job.key.work.iid)
             guard !ignoredTargets.contains(target),
                   job.execution?.state.isActive == true || Row.jobNeedsAttention(job.execution?.state),
                   !rows.contains(where: { $0.item.id.projectID == target.projectID && $0.item.id.iid == target.iid
@@ -435,13 +435,13 @@ struct MergeRequestBoardSnapshot {
         case .todo(let todo):
             guard todo.targetType == .mergeRequest, let iid = todo.target.iid,
                   let url = todo.targetURL.gitLabTodoMergeRequestURL(host: host, iid: iid) else { return .regular }
-            target = .init(host: host, username: username, projectID: todo.project.id, iid: iid)
+            target = .mergeRequest(host: host, username: username, projectID: todo.project.id, iid: iid)
             let request = knownRequests[.init(projectID: target.projectID, iid: iid)]
                 .flatMap { $0.webURL == url ? $0 : nil }
             isDraft = request?.draft ?? todo.isDraft
             finished = MergeRequestFinishedState(request) != nil
         case .job(let job):
-            target = .init(host: host, username: username, projectID: job.key.work.projectID, iid: job.key.work.iid)
+            target = .mergeRequest(host: host, username: username, projectID: job.key.work.projectID, iid: job.key.work.iid)
             let request = knownRequests[.init(projectID: target.projectID, iid: target.iid ?? 0)]
             if let url = job.mergeRequestURL {
                 guard url.isGitLabMergeRequest(host: host, iid: job.key.work.iid),
@@ -466,13 +466,13 @@ struct MergeRequestBoardSnapshot {
             return pinnedCards.contains(pin)
         }
         func isFinished(_ row: Row) -> Bool {
-            row.displayRequest.map { ["merged", "closed"].contains($0.state) } == true
+            row.displayRequest.map { [.merged, .closed].contains($0.state) } == true
         }
         func activityRank(_ row: Row) -> Int {
             guard let automation, let host, let username else { return 0 }
             let target: MRAutomationScope.Target? = row.id.projectID > 0 && row.id.iid > 0
                 && row.item.url.isGitLabMergeRequest(host: host, iid: row.id.iid)
-                ? .init(host: host, username: username, projectID: row.id.projectID, iid: row.id.iid) : nil
+                ? .mergeRequest(host: host, username: username, projectID: row.id.projectID, iid: row.id.iid) : nil
             return MRBoardActivity(automation: automation, target: target,
                 isDraft: row.isDraft, isFinished: isFinished(row), grouping: grouping).group.rawValue
         }

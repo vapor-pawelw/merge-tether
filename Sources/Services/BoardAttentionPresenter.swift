@@ -25,11 +25,11 @@ final class BoardAttentionPresenter {
 
     func updateAttention(_ input: ConfirmedAttentionSnapshot.Input) { confirmedAttention.update(input) }
 
-    func userAttention(account: String?) -> UserAttentionSnapshot {
+    func userAttention(account: GitLabAccountSession?) -> UserAttentionSnapshot {
         confirmedAttention.matches(account: account) ? confirmedAttention.snapshot : .empty
     }
 
-    func confirmedHumanAction(key: String?, account: String?) -> MRHumanAction? {
+    func confirmedHumanAction(key: String?, account: GitLabAccountSession?) -> MRHumanAction? {
         guard confirmedAttention.matches(account: account), let key else { return nil }
         return confirmedAttention.humanActions[key]
     }
@@ -88,7 +88,7 @@ final class BoardAttentionPresenter {
         let automaticIntentIDs: Set<UUID>
     }
     struct ProjectionInput {
-        let account: String?
+        let account: GitLabAccountSession?
         let host: String
         let username: String
         let rows: [PresentedRow]

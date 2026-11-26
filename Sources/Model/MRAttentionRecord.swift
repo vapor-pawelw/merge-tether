@@ -61,7 +61,7 @@ struct MRAttentionRecord {
     static func sameContext(_ left: GitLabMergeRequest?, _ right: GitLabMergeRequest?) -> Bool {
         guard let left, let right else { return left == nil && right == nil }
         return MergeRequestDependencySummary.Context(left) == MergeRequestDependencySummary.Context(right)
-            && left.semanticContextFingerprint == right.semanticContextFingerprint
+            && left.evidenceContext().binds(to: right.evidenceContext(), policy: .semanticText)
             && left.draft == right.draft && left.author.id == right.author.id
             && left.author.username == right.author.username
     }

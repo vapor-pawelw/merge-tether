@@ -28,7 +28,7 @@ struct WorkerExecutionTimeout: Codable, Equatable, Sendable {
         let projectID: Int
 
         init?(host: String, projectID: Int) {
-            let host = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let host = GitLabAccountIdentity.normalize(host.trimmingCharacters(in: .whitespacesAndNewlines))
             let hostCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789.-:[]")
             guard projectID > 0, !host.isEmpty,
                   host.unicodeScalars.allSatisfy({ hostCharacters.contains($0) }),

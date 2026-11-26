@@ -21,9 +21,9 @@ struct BoardPolicyOrder {
 
     mutating func policyChanged(from previous: AutomationSettings, to current: AutomationSettings,
                                 grouping: MRBoardGrouping = .withoutAutomation) {
-        for entry in latest.values where entry.request.state == "opened" {
+        for entry in latest.values where entry.request.isOpen {
             let id = MergeRequestAttentionMonitor.Item.ID(projectID: entry.target.projectID, iid: entry.request.iid)
-            let isDraft = entry.request.draft == true || entry.request.detailedMergeStatus == "draft_status"
+            let isDraft = entry.request.isDraft
             let oldGroup = MRBoardActivity(automation: previous, target: entry.target, isDraft: isDraft, grouping: grouping).group
             let newGroup = MRBoardActivity(automation: current, target: entry.target, isDraft: isDraft, grouping: grouping).group
             // The explicit activity-section move takes precedence over the old absolute-position latch.
@@ -40,7 +40,7 @@ struct BoardPolicyOrder {
 
     func positions(for entries: [Entry]) -> [MergeRequestAttentionMonitor.Item.ID: Int] {
         var result: [MergeRequestAttentionMonitor.Item.ID: Int] = [:]
-        for entry in entries where entry.request.state == "opened" {
+        for entry in entries where entry.request.isOpen {
             let id = MergeRequestAttentionMonitor.Item.ID(projectID: entry.target.projectID, iid: entry.request.iid)
             guard let rank = preserved[id], let old = latest[entry.target],
                   old.discussionFingerprint == entry.discussionFingerprint, old.jobID == entry.jobID,

@@ -107,7 +107,7 @@ extension TodoMonitorService {
               glab.resolvedHost == target.host, glab.currentUsername == target.username else {
             throw FeedbackSuggestionDecisionError.accountChanged
         }
-        guard request.projectID == target.projectID, request.iid == iid, request.state == "opened",
+        guard request.projectID == target.projectID, request.iid == iid, request.isOpen,
               request.webURL.isGitLabMergeRequest(host: target.host, iid: iid) else {
             throw FeedbackSuggestionDecisionError.invalidTarget
         }

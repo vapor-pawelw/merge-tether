@@ -13,17 +13,22 @@ struct FeedbackAccountKindUpdate: Sendable {
 @MainActor
 @Observable
 final class GlabService {
+    var evidenceAccountContext: EvidenceContext {
+        let account = resolvedHost.flatMap { host in
+            currentUsername.map { GitLabAccountIdentity(host: host, username: $0) }
+        }
+        return .init(account: account, accountRevision: accountRevision)
+    }
+
     typealias CommandRunner = @MainActor (URL, [String], [String: String], TimeInterval, (@MainActor @Sendable () -> Bool)?) async throws -> ProcessRunner.Output
     @ObservationIgnored private let commandRunner: CommandRunner
     @ObservationIgnored private var feedbackAccountObservers: [UUID: @MainActor (FeedbackAccountKindUpdate) -> Void] = [:]
     @ObservationIgnored private var feedbackAccountRevision: UInt64 = 0
     // This bounded cache only restores display after removing a local designation; policy reads remain fresh.
-    @ObservationIgnored private var feedbackAccountCacheKey = ""
-    @ObservationIgnored private var feedbackAccountCacheRevision: UInt64?
+    @ObservationIgnored private var feedbackAccountCacheKey: GitLabAccountSession?
     @ObservationIgnored private var feedbackAccountCache: [Int: AuthorFeedbackPolicy.AccountKind] = [:]
-    @ObservationIgnored private var localAutomationAuthors: [String: Set<Int>] = [:]
-    private struct DiscussionKey: Hashable { let projectID: Int; let iid: Int }
-    @ObservationIgnored private var recentDiscussions: [DiscussionKey: (readAt: Date, discussions: [GitLabMergeRequestDiscussion])] = [:]
+    @ObservationIgnored private var localAutomationAuthors: [GitLabAccountIdentity: Set<Int>] = [:]
+    @ObservationIgnored private var recentDiscussions: [GitLabMergeRequestID: (readAt: Date, discussions: [GitLabMergeRequestDiscussion])] = [:]
     @ObservationIgnored var reviewerActivity: [Int: (host: String, expiresAt: Date, ranks: Task<[Int: Int], Never>)] = [:]
 
     private func clearReviewerActivity() {
@@ -32,11 +37,11 @@ final class GlabService {
     }
 
     func cachedDiscussions(projectID: Int, iid: Int) -> (readAt: Date, discussions: [GitLabMergeRequestDiscussion])? {
-        recentDiscussions[DiscussionKey(projectID: projectID, iid: iid)]
+        recentDiscussions[GitLabMergeRequestID(projectID: projectID, iid: iid)]
     }
 
     func rememberDiscussions(_ discussions: [GitLabMergeRequestDiscussion], projectID: Int, iid: Int, readAt: Date) {
-        let key = DiscussionKey(projectID: projectID, iid: iid)
+        let key = GitLabMergeRequestID(projectID: projectID, iid: iid)
         if let previous = recentDiscussions[key], previous.readAt > readAt { return }
         // Cap retained discussion bodies independently of the live API response.
         if discussions.reduce(0, { $0 + $1.notes.count }) > 1_000 ||
@@ -52,13 +57,14 @@ final class GlabService {
 
     func updateLocalAutomationAuthors(_ ids: Set<Int>, host: String, username: String) {
         guard !host.isEmpty, !username.isEmpty else { return }
-        let key = host + "\n" + username
+        let key = GitLabAccountIdentity(host: host, username: username)
         let previous = localAutomationAuthors[key] ?? []
         let current = Set(ids.filter { $0 > 0 })
         localAutomationAuthors[key] = current
         guard resolvedHost == host, currentUsername == username else { return }
+        let session = GitLabAccountSession(host: host, username: username, revision: accountRevision)
         for id in previous.symmetricDifference(current).sorted() {
-            let cached = feedbackAccountCacheKey == key && feedbackAccountCacheRevision == accountRevision
+            let cached = feedbackAccountCacheKey == session
                 ? feedbackAccountCache[id] ?? .unknown : .unknown
             publishFeedbackAccountKind(userID: id, kind: current.contains(id) ? .automation : cached,
                 host: host, username: username, accountRevision: accountRevision)
@@ -67,7 +73,7 @@ final class GlabService {
 
     func feedbackDisplayAccountKind(userID: Int, kind: AuthorFeedbackPolicy.AccountKind,
                                     host: String, username: String) -> AuthorFeedbackPolicy.AccountKind {
-        localAutomationAuthors[host + "\n" + username]?.contains(userID) == true ? .automation : kind
+        localAutomationAuthors[.init(host: host, username: username)]?.contains(userID) == true ? .automation : kind
     }
 
     func observeFeedbackAccountKinds(_ observer: @escaping @MainActor (FeedbackAccountKindUpdate) -> Void) -> UUID {
@@ -80,9 +86,10 @@ final class GlabService {
                                    username: String, accountRevision: UInt64) {
         guard !Task.isCancelled, userID > 0, resolvedHost == host, currentUsername == username,
               self.accountRevision == accountRevision else { return }
-        let key = host + "\n" + username
-        if feedbackAccountCacheKey != key || feedbackAccountCacheRevision != accountRevision {
-            feedbackAccountCacheKey = key; feedbackAccountCacheRevision = accountRevision; feedbackAccountCache = [:]
+        let key = GitLabAccountSession(host: host, username: username, revision: accountRevision)
+        if feedbackAccountCacheKey != key {
+            feedbackAccountCacheKey = key
+            feedbackAccountCache = [:]
         }
         if feedbackAccountCache.count >= 256, feedbackAccountCache[userID] == nil,
            let remove = feedbackAccountCache.keys.min() { feedbackAccountCache.removeValue(forKey: remove) }

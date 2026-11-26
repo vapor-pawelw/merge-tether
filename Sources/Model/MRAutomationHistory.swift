@@ -109,13 +109,13 @@ struct MRAutomationHistory {
         var attributedDecisions = Set<UUID>()
         var seen = Set<String>()
         let distinctActivity = gitLab.filter { seen.insert($0.id).inserted }
-        let mergeCount = distinctActivity.count { if case .state("merged") = $0.kind { true } else { false } }
+        let mergeCount = distinctActivity.count { if case .state(.merged) = $0.kind { true } else { false } }
         let gitLabEntries = distinctActivity.map { activity in
             let appEvent: MRAutomationEvent?
             switch activity.kind {
             case .comment(let id, _) where publicationsByNote[id]?.count == 1:
                 appEvent = publicationsByNote[id]?.first
-            case .state("merged") where mergeCount == 1 && merges.count == 1:
+            case .state(.merged) where mergeCount == 1 && merges.count == 1:
                 appEvent = merges.first
             default: appEvent = nil
             }

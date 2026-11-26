@@ -41,8 +41,7 @@ struct AssistantJobRow: View {
     let monitor: TodoMonitorService
     var readOnly = false
     private var finished: Bool {
-        let target = MRAutomationScope.Target(host: handoff.key.work.host, username: handoff.key.username,
-            projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
+        let target = handoff.key.automationTarget
         return readOnly || MergeRequestFinishedState(monitor.settings.mrLifecycleLedger.request(for: target)
             ?? monitor.currentRequest(for: handoff)) != nil
     }

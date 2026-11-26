@@ -6,8 +6,8 @@ import MergeTetherRemote
     static func automationStatus(settings: SettingsManager, target: MRAutomationScope.Target,
                                  request: GitLabMergeRequest) -> RemoteAutomationStatus? {
         let automation = settings.configuredAutomation
-        guard settings.hasConfiguredAutomation(for: target), request.state == "opened" else { return nil }
-        let isDraft = request.draft == true || request.detailedMergeStatus == "draft_status"
+        guard settings.hasConfiguredAutomation(for: target), request.isOpen else { return nil }
+        let isDraft = request.isDraft
         let summary = MRAutomationControl.summary(automation.scope, target: target, isDraft: isDraft)
         let state = String(localized: summary.active ? .Menu.menuScopeActive : .Menu.menuScopePaused)
         let source = String(localized: .Menu.menuScopePopoverSource(String(localized: MRAutomationControl.sourceLabel(summary.source))))
@@ -20,7 +20,7 @@ import MergeTetherRemote
         guard let request = row.displayRequest, let host = monitor.glab.resolvedHost,
               let username = monitor.glab.currentUsername else { return }
         details.issues = monitor.issueTags(for: request)
-        let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
         let people = request.personDirectory(approvals: item.approvalProgress, notes: item.feedback)
         let assessment = details.discussionFingerprint.flatMap {
             monitor.attention.discussionAssessment(for: request, fingerprint: $0,

@@ -99,7 +99,7 @@ extension TodoMonitorService {
                 readOnlyReview: readOnly)
             // Starting the review is the go-ahead for a new review that waited for the user.
             if !readOnly {
-                releaseNewReview(.init(host: target.host, username: target.username, projectID: target.projectID, iid: target.iid))
+                releaseNewReview(.mergeRequest(host: target.host, username: target.username, projectID: target.projectID, iid: target.iid))
             }
             return true
         } catch {
@@ -120,7 +120,7 @@ extension TodoMonitorService {
     }
 
     func canResetReviewState(for item: MergeRequestAttentionMonitor.Item) -> Bool {
-        item.isAuthored ? item.mergeRequest?.state == "opened" : canRunReview(for: item)
+        item.isAuthored ? item.mergeRequest?.state == .opened : canRunReview(for: item)
     }
 
     private func manualReviewTarget(for item: MergeRequestAttentionMonitor.Item) -> ManualReviewTarget? {

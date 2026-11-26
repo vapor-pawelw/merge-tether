@@ -15,8 +15,21 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
         let projectID: Int
         let iid: Int?
 
-        var repository: Self {
+        // Retain the spelling used by existing on-disk keys and authorization checks.
+        static func mergeRequest(host: String, username: String, projectID: Int, iid: Int) -> Self {
+            .init(host: host, username: username, projectID: projectID, iid: iid)
+        }
+
+        static func repository(host: String, username: String, projectID: Int) -> Self {
             .init(host: host, username: username, projectID: projectID, iid: nil)
+        }
+
+        var mergeRequestID: GitLabMergeRequestID? {
+            iid.map { .init(projectID: projectID, iid: $0) }
+        }
+
+        var repository: Self {
+            .repository(host: host, username: username, projectID: projectID)
         }
     }
 
@@ -115,19 +128,19 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
     /// A transient revocation view for legacy cancellation consumers; never persist it as user policy.
     func cancellationScope(for requests: [GitLabMergeRequest], host: String, username: String) -> Self {
         var result = self
-        for request in requests where (request.draft == nil || request.draft == true || request.detailedMergeStatus == "draft_status"
-            || request.state == "merged" || request.state == "closed")
+        for request in requests where (request.draft == nil || request.isDraft
+            || request.state == .merged || request.state == .closed)
             && request.webURL.isGitLabMergeRequest(host: host, iid: request.iid)
             && !permits(request, host: host, username: username) {
-            result[.init(host: host, username: username, projectID: request.projectID, iid: request.iid)] = .paused
+            result[.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)] = .paused
         }
         return result
     }
 
     func permits(_ request: GitLabMergeRequest, host: String, username: String) -> Bool {
-        guard request.state == "opened", let draft = request.draft else { return false }
-        let target = Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
-        return resolve(target, isDraft: draft || request.detailedMergeStatus == "draft_status").active
+        guard request.isOpen, request.draft != nil else { return false }
+        let target = Target.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
+        return resolve(target, isDraft: request.isDraft).active
     }
 
     func individualOverrides(host: String, username: String) -> [Target] {

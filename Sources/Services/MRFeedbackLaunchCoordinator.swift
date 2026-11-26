@@ -124,7 +124,7 @@ final class MRFeedbackLaunchCoordinator {
     }
     func automaticallyHandlesFeedback(_ item: Item) -> Bool {
         guard settings.automaticWritesAllowed, let account, let request = item.authoredRequest,
-              request.state == "opened", request.author.username == account.username,
+              request.isOpen, request.author.username == account.username,
               item.url.isGitLabMergeRequest(host: account.host, iid: item.id.iid),
               settings.effectiveAutomationScope.permits(request, host: account.host, username: account.username) else { return false }
         let rule = settings.automation.workflowRules[.newDiscussion], feedback = settings.automation.authorFeedback

@@ -32,19 +32,19 @@ struct MergeWorkflowEvent: Codable, Sendable {
     var blockerExplanation: LocalizedStringResource? {
         guard kind == .blockerChange, leftMergeTrain != true else { return nil }
         switch mergeRequest.detailedMergeStatus {
-        case "ci_must_pass": return .MergeActions.mergeActionsPipeline
-        case "commits_status": return .Menu.menuWorkflowBlockerCommits
-        case "conflict": return .MergeActions.mergeActionsConflicts
-        case "discussions_not_resolved": return .MergeActions.mergeActionsDiscussions
-        case "draft_status": return .MergeActions.mergeActionsDraft
-        case "jira_association_missing": return .Menu.menuWorkflowBlockerJira
-        case "mergeable": return .Menu.menuWorkflowBlockerMergeable
-        case "merge_time": return .Menu.menuWorkflowBlockerMergeTime
-        case "need_rebase": return .Menu.menuWorkflowBlockerRebase
-        case "not_approved": return .MergeActions.mergeActionsApprovals
-        case "requested_changes": return .MergeActions.mergeActionsChangesRequested
-        case "status_checks_must_pass": return .Menu.menuWorkflowBlockerStatusChecks
-        case "title_regex": return .Menu.menuWorkflowBlockerTitle
+        case .ciMustPass: return .MergeActions.mergeActionsPipeline
+        case .commitsStatus: return .Menu.menuWorkflowBlockerCommits
+        case .conflict: return .MergeActions.mergeActionsConflicts
+        case .discussionsNotResolved: return .MergeActions.mergeActionsDiscussions
+        case .draftStatus: return .MergeActions.mergeActionsDraft
+        case .jiraAssociationMissing: return .Menu.menuWorkflowBlockerJira
+        case .mergeable: return .Menu.menuWorkflowBlockerMergeable
+        case .mergeTime: return .Menu.menuWorkflowBlockerMergeTime
+        case .needRebase: return .Menu.menuWorkflowBlockerRebase
+        case .notApproved: return .MergeActions.mergeActionsApprovals
+        case .requestedChanges: return .MergeActions.mergeActionsChangesRequested
+        case .statusChecksMustPass: return .Menu.menuWorkflowBlockerStatusChecks
+        case .titleRegex: return .Menu.menuWorkflowBlockerTitle
         default: return nil
         }
     }
@@ -54,14 +54,14 @@ struct MergeWorkflowEvent: Codable, Sendable {
 struct MergeBlockerDiagnosis: Codable, Equatable, Sendable {
     struct Superseded: Error {}
 
-    private static let diagnosticStatuses: Set<String> = [
-        "blocked_status", "external_status_checks", "merge_request_blocked",
-        "security_policy_violations", "locked_paths", "locked_lfs_files"
+    private static let diagnosticStatuses: Set<GitLabDetailedMergeStatus> = [
+        .blockedStatus, .externalStatusChecks, .mergeRequestBlocked,
+        .securityPolicyViolations, .lockedPaths, .lockedLfsFiles
     ]
-    private static let checkingStatuses: Set<String> = ["approvals_syncing", "checking", "preparing", "unchecked"]
+    private static let checkingStatuses: Set<GitLabDetailedMergeStatus> = [.approvalsSyncing, .checking, .preparing, .unchecked]
 
     let leftMergeTrain: Bool
-    private let status: String?
+    private let status: GitLabDetailedMergeStatus?
     private let head: String
     private let sourceProjectID: Int?
     private let sourceBranch: String
@@ -88,7 +88,7 @@ struct MergeBlockerDiagnosis: Codable, Equatable, Sendable {
     }
 
     func validate(_ request: GitLabMergeRequest) throws {
-        guard request.state == "opened", head == request.sha, sourceBranch == request.sourceBranch,
+        guard request.isOpen, head == request.sha, sourceBranch == request.sourceBranch,
               targetBranch == request.targetBranch,
               Self.compatible(sourceProjectID, request.sourceProjectID),
               Self.compatible(targetProjectID, request.targetProjectID),
@@ -133,7 +133,7 @@ struct MergeBlockerDiagnosis: Codable, Equatable, Sendable {
 
 struct GitLabMergeRequestReviewer: Decodable, Sendable {
     let user: GitLabWorkflowUser
-    let state: String
+    let state: GitLabReviewerState
     let createdAt: String?
 
     enum CodingKeys: String, CodingKey {
@@ -260,7 +260,7 @@ struct MergeRequestReviewHistory: Equatable, Sendable {
     init(reviewers: [GitLabMergeRequestReviewer] = [], discussions: [GitLabMergeRequestDiscussion] = [], authorID: Int = 0) {
         for reviewer in reviewers where reviewer.user.id > 0 && reviewer.user.id != authorID {
             activities[reviewer.user.id] = Activity(author: reviewer.user.author,
-                previouslyApproved: reviewer.state == "unapproved" || reviewer.state == "approved",
+                previouslyApproved: reviewer.state == .unapproved || reviewer.state == .approved,
                 changedAt: Self.date(reviewer.createdAt))
         }
         let notes = discussions.flatMap(\.notes)
@@ -321,18 +321,19 @@ struct ReReviewReceipt: Codable {
 
     func covers(noteID: Int, headSHA: String) -> Bool {
         // Older uncertain writes have no recorded head; keep their existing replay fence.
-        (self.headSHA == headSHA || (self.headSHA == nil && unconfirmed)) && self.noteID >= noteID
+        EvidenceContext(head: self.headSHA).binds(to: .init(head: headSHA),
+            policy: unconfirmed ? .uncertainReReviewReceipt : .head) && self.noteID >= noteID
     }
 }
 
 struct GitLabPipelineJob: Decodable, Sendable {
     let id: Int
-    let status: String
+    let status: GitLabPipelineStatus
     let allowFailure: Bool?
     let failureReason: String?
 
     static func blockingFailureIDs(_ jobs: [Self]) -> [Int] {
-        Set(jobs.lazy.filter { $0.status == "failed" && $0.id > 0 && $0.allowFailure != true }.map(\.id)).sorted()
+        Set(jobs.lazy.filter { $0.status == .failed && $0.id > 0 && $0.allowFailure != true }.map(\.id)).sorted()
     }
 
     enum CodingKeys: String, CodingKey {

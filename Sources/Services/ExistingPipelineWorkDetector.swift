@@ -307,7 +307,7 @@ struct ExistingPipelineWorkDetector: Sendable {
     /// An external task may create this directory exclusively before beginning
     /// work and remove it with rmdir after finishing. It covers the whole MR.
     func externalRegistrationURL(for key: Key) throws -> URL {
-        let host = key.host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let host = GitLabAccountIdentity.normalize(key.host.trimmingCharacters(in: .whitespacesAndNewlines))
         let filenameCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789.-")
         guard !host.isEmpty, key.projectID > 0, key.mergeRequestIID > 0, key.pipelineID > 0,
               let escapedHost = host.addingPercentEncoding(withAllowedCharacters: filenameCharacters) else {

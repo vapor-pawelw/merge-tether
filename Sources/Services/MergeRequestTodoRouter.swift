@@ -71,7 +71,7 @@ final class MergeRequestTodoRouter {
         for todo in todos {
             guard !Task.isCancelled, isCurrentPass(), todo.targetType == .mergeRequest, let iid = todo.target.iid,
                   todo.targetURL.gitLabTodoMergeRequestURL(host: host, iid: iid) != nil else { continue }
-            let target = MRAutomationScope.Target(host: host, username: username, projectID: todo.project.id, iid: iid)
+            let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: todo.project.id, iid: iid)
             guard !settings.intakeFilterHolds(target) else { continue }
             let priorReceipt = settings.routedMRTodoReceipts.first { $0.target == target && $0.event == todo.feedbackIdentity }
             let persistedIntent = settings.mrActionIntents.first { $0.target == target && $0.sourceEvents.contains(todo.feedbackIdentity) }
@@ -349,7 +349,7 @@ final class MergeRequestTodoRouter {
                 return
             }
             guard invocationConfiguration.preservingScope(from: settings.automation) == settings.automation,
-                  isCurrentRun(), request.state == "opened",
+                  isCurrentRun(), request.isOpen,
                   request.projectID == original.target.projectID, request.iid == iid,
                   request.webURL.isGitLabMergeRequest(host: original.target.host, iid: iid),
                   let head = request.sha, !settings.ignoredMergeRequests.contains(original.target),
@@ -449,13 +449,13 @@ final class MergeRequestTodoRouter {
         switch todo.actionName {
         case .reviewRequested, .approvalRequired:
             guard !owned else { return nil }
-            return (request.state == "opened" ? .review : .refresh, [])
+            return (request.isOpen ? .review : .refresh, [])
         case .buildFailed:
             guard let pipelineSHA = request.headPipeline?.sha, !pipelineSHA.isEmpty,
-                  let status = request.headPipeline?.status, !status.isEmpty else { return nil }
+                  let status = request.headPipeline?.status, !status.rawValue.isEmpty else { return nil }
             // A known stale/merged-result pipeline updates the MR card but must
             // never authorize a fix against a different source revision.
-            guard status == "failed" else { return (.refresh, []) }
+            guard status == .failed else { return (.refresh, []) }
             do { _ = try await glab.verifiedFailedPipeline(for: request, host: host, expectedUser: user) }
             catch GitLabPipelineEvidenceError.staleTarget(_) {
                 return (owned ? .pipeline : .refresh, [])
@@ -466,7 +466,7 @@ final class MergeRequestTodoRouter {
             guard let conflicts = request.hasConflicts else { return nil }
             return (conflicts ? .conflict : .refresh, [])
         case .reviewSubmitted:
-            guard owned, request.state == "opened" else { return (.refresh, []) }
+            guard owned, request.isOpen else { return (.refresh, []) }
             let discussions = try await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
             // General review comments are assessed by AuthorFeedbackCoordinator
             // before it dispatches warranted work. Do not race that verifier
@@ -476,7 +476,7 @@ final class MergeRequestTodoRouter {
             let ids = Set(notes.compactMap(\.id))
             return ids.isEmpty ? (.refresh, []) : (.followUp, ids)
         case .mentioned, .directlyAddressed:
-            guard request.state == "opened", let noteID = todo.linkedNoteID else { return nil }
+            guard request.isOpen, let noteID = todo.linkedNoteID else { return nil }
             let accountRevision = glab.accountRevision
             let discussions = try await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
             if !owned {
@@ -591,7 +591,7 @@ final class MergeRequestTodoRouter {
                                           target: MRAutomationScope.Target) -> Bool {
         guard settings.automaticWritesAllowed,
               !settings.ignoredMergeRequests.contains(target),
-              settings.automation.scope.resolve(target).active, request.state == "opened" else { return false }
+              settings.automation.scope.resolve(target).active, request.isOpen else { return false }
         let project = request.webURL.gitLabProjectPath
         switch kind {
         case .review:
@@ -603,7 +603,7 @@ final class MergeRequestTodoRouter {
         case .pipeline:
             let rule = settings.automation.workflowRules[.pipelineFailure]
             return request.author.username == target.username && settings.automation.autoClaimPipelineFailures
-                && request.headPipeline?.status == "failed" && rule.mode == .assistant && rule.includes(request)
+                && request.headPipeline?.status == .failed && rule.mode == .assistant && rule.includes(request)
         case .conflict, .refresh:
             // Conflict handoff confirmation and its separate push permission remain explicit.
             return false
@@ -620,7 +620,7 @@ final class MergeRequestTodoRouter {
         for job in settings.assistantHandoffs where job.execution?.state == .queued
             && job.key.work.host == host && job.key.username == username && !job.selectedFollowUpNotes.isEmpty {
             let work = job.key.work
-            let jobTarget = MRAutomationScope.Target(host: host, username: username, projectID: work.projectID, iid: work.iid)
+            let jobTarget = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: work.projectID, iid: work.iid)
             guard target == nil || target == jobTarget else { continue }
             guard !Task.isCancelled, isCurrent(host, username), glab.accountRevision == revision else { return }
             if requests[jobTarget] == nil {
@@ -673,12 +673,12 @@ final class MergeRequestTodoRouter {
                 update(original.id) { $0.request = request }
             }
             var successfulPipeline = false
-            if original.kind == .pipeline, request.headPipeline?.status == "success" {
+            if original.kind == .pipeline, request.headPipeline?.status == .success {
                 successfulPipeline = (try? await glab.verifiedSuccessfulPipeline(for: request, host: host)) != nil
                 guard !Task.isCancelled, isCurrent(host, username), glab.accountRevision == revision,
                       matchesCompletionSnapshot(original, job: job) else { continue }
             }
-            let resolvedByState = request.state != "opened"
+            let resolvedByState = !request.isOpen
                 || successfulPipeline
                 || (original.kind == .conflict && request.hasConflicts == false)
             if resolvedByState { update(original.id) { $0.state = .completed; $0.error = nil }; continue }
@@ -854,7 +854,7 @@ final class MergeRequestTodoRouter {
               settings.feedbackSuggestionDecisions.revision(for: intent.target) == decisionRevision,
               settings.reviewParticipationPreferences.revision(host: intent.target.host, username: intent.target.username) == participationRevision,
               live.projectID == request.projectID, live.iid == request.iid, live.webURL == request.webURL,
-              live.author == request.author, live.state == "opened", live.draft == request.draft, live.sha == head,
+              live.author == request.author, live.isOpen, live.draft == request.draft, live.sha == head,
               live.semanticContextFingerprint == request.semanticContextFingerprint,
               ReviewVerdict.fingerprint(liveDiscussions) == fingerprint else { return .unverified }
         if let stoppedJob, stoppedJob.execution?.state == .blocked {
@@ -931,7 +931,7 @@ final class MergeRequestTodoRouter {
                                 detector: ExistingPipelineWorkDetector = ExistingPipelineWorkDetector()) throws -> ExistingPipelineWorkDetector.Key? {
         guard intent.kind == .pipeline, intent.request.author.username == intent.target.username else { return nil }
         guard let iid = intent.target.iid, let pipeline = intent.request.headPipeline,
-              let pipelineID = pipeline.id, pipelineID > 0, pipeline.status == "failed" else { throw CancellationError() }
+              let pipelineID = pipeline.id, pipelineID > 0, pipeline.status == .failed else { throw CancellationError() }
         let key = ExistingPipelineWorkDetector.Key(host: intent.target.host, projectID: intent.target.projectID,
                                                    mergeRequestIID: iid, pipelineID: pipelineID)
         let explicitRetry = manual && (intent.state == .failed || intent.jobID != nil)
