@@ -207,6 +207,7 @@ enum AssistantAutomationRunner {
         var pipelineHandoffConfirmation: PipelineHandoffConfirmation? = nil
         var readOnlyReview: Bool? = nil
         var blockerDiagnosis: MergeBlockerDiagnosis? = nil
+        var estimatedRepositoryBytes: Int64? = nil
 
         var deliveredFeedbackTodos: [Todo.FeedbackIdentity] {
             if let execution { return execution.state == .succeeded ? feedbackTodos ?? [] : [] }
@@ -275,6 +276,10 @@ enum AssistantAutomationRunner {
     }
 
     static func resumePendingJobs() { coordinator.resumePendingJobs() }
+
+    static func canRetryAfterDiskFailure(_ execution: AssistantJobExecution?) -> Bool {
+        coordinator.canRetryAfterDiskFailure(execution)
+    }
 
     static func finishQueuedResolvedFeedback(_ id: UUID, settings: SettingsManager) -> Bool {
         coordinator.finishQueuedResolvedFeedback(id, settings: settings)
@@ -434,6 +439,7 @@ enum AssistantAutomationRunner {
         var semanticContextFingerprint: String?
         var reviewer: GitLabAuthenticatedUser?
         var pipelineDiagnosis: ForeignPipelineDiagnosis?
+        var estimatedRepositoryBytes: Int64?
         if foreignDiagnosis || jobCoordinator == nil || configurationSnapshot != nil || blockerDiagnosis != nil
             || (reviewRetry != nil && glab != nil) {
             let service = glab ?? GlabService()
@@ -484,6 +490,11 @@ enum AssistantAutomationRunner {
                 }
                 guard let pipelineDiagnosis else { throw AssistantJobExecutor.ExecutionError.contextUnavailable }
                 try await pipelineDiagnosis.verify(request: snapshot.request, user: snapshot.user, host: work.host, glab: service)
+            }
+            if ApplicationLaunchMode.resolve(environment: ProcessInfo.processInfo.environment) == .application {
+                estimatedRepositoryBytes = await executionCoordinator.repositorySize(
+                    projectID: snapshot.request.sourceProjectID ?? snapshot.request.projectID,
+                    account: .init(host: work.host, username: username), glab: service)
             }
         } else { headSHA = expectedHeadSHA }
         try validateLaunchPolicy()
@@ -617,7 +628,7 @@ enum AssistantAutomationRunner {
             workflowEventKind: workflowEventKind, workflowOriginKnown: true,
             pipelineHandoffConfirmation: pipelineHandoffConfirmation,
             readOnlyReview: usesReadOnlyReview ? true : nil,
-            blockerDiagnosis: blockerDiagnosis
+            blockerDiagnosis: blockerDiagnosis, estimatedRepositoryBytes: estimatedRepositoryBytes
         )
         for (noteID, revision) in verifiedFeedbackNotes ?? [:] {
             settings.authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision,
@@ -636,7 +647,7 @@ enum AssistantAutomationRunner {
         try validateLaunchPolicy()
         if mrWorkflow == .followUp { FollowUpVerificationStore.register(handoff, settings: settings) }
         guard executionCoordinator.schedule(handoff, settings: settings) else { throw HandoffError.executionUnavailable }
-        return handoff
+        return settings.assistantHandoffs.first(where: { $0.id == id }) ?? handoff
     }
 
     static func synchronizeInterruptedRuns(settings: SettingsManager) {

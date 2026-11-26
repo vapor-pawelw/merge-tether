@@ -10,26 +10,113 @@ final class AssistantJobCoordinator {
         let output: String
     }
     typealias Executor = @MainActor (Handoff, SettingsManager) async throws -> Outcome
+    typealias SuccessCleanup = @MainActor (Handoff, SettingsManager) async -> Void
+    typealias CapacityProbe = @MainActor () -> Int64?
 
-    private var tasks: [UUID: Task<Void, Never>] = [:]
+    private struct Repository: Hashable {
+        let account: GitLabAccountIdentity
+        let projectID: Int
+    }
+    private struct RepositorySize {
+        let expiresAt: ContinuousClock.Instant
+        let bytes: Task<Int64?, Never>
+    }
+    private struct RunningJob {
+        let task: Task<Void, Never>
+        let reservedBytes: Int64
+    }
+    private struct PendingJob {
+        let handoff: Handoff
+        let settings: SettingsManager
+        var waitsForDiskRelease = false
+    }
+
+    private var tasks: [UUID: RunningJob] = [:]
     private var work: [UUID: AssistantAutomationRunner.MergeRequestWork] = [:]
     private var settingsByJob: [UUID: SettingsManager] = [:]
+    private var repositorySizes: [Repository: RepositorySize] = [:]
     private let execute: Executor
+    private let cleanupAfterSuccess: SuccessCleanup
+    private let availableDiskBytes: CapacityProbe
+    private let pipelineWorkDetector: ExistingPipelineWorkDetector
     private let maximumConcurrentJobs: Int
     private let healthStore: AssistantCLIHealthStore
-    private var pending: [(handoff: Handoff, settings: SettingsManager)] = []
+    private var pending: [PendingJob] = []
     var onFinished: ((Handoff) -> Void)?
     private var terminating = false
     private var restoringCheckpointKey = false
 
     init(maximumConcurrentJobs: Int = 4, healthStore: AssistantCLIHealthStore? = nil,
+         availableDiskBytes: CapacityProbe? = nil,
+         pipelineWorkDetector: ExistingPipelineWorkDetector = .init(),
+         cleanupAfterSuccess: @escaping SuccessCleanup = { _, _ in },
          execute: @escaping Executor = AssistantJobExecutor.execute) {
-        self.maximumConcurrentJobs = max(1, maximumConcurrentJobs)
+        self.maximumConcurrentJobs = min(4, max(1, maximumConcurrentJobs))
         self.healthStore = healthStore ?? .shared
+        if let availableDiskBytes {
+            self.availableDiskBytes = availableDiskBytes
+        } else if ApplicationLaunchMode.resolve(environment: ProcessInfo.processInfo.environment) == .testHost {
+            self.availableDiskBytes = { .max }
+        } else {
+            self.availableDiskBytes = Self.workspaceVolumeFreeBytes
+        }
+        self.pipelineWorkDetector = pipelineWorkDetector
+        self.cleanupAfterSuccess = cleanupAfterSuccess
         self.execute = execute
         observeHealth()
     }
 
+    private static func workspaceVolumeFreeBytes() -> Int64? {
+        let directory = InstallationStorage.current.runs
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
+            return try directory.resolvingSymlinksInPath().resourceValues(forKeys: [.volumeAvailableCapacityKey])
+                .volumeAvailableCapacity.map(Int64.init)
+        } catch { return nil }
+    }
+
+    func repositorySize(projectID: Int, account: GitLabAccountIdentity, glab: GlabService) async -> Int64? {
+        struct Project: Decodable {
+            struct Statistics: Decodable {
+                let repository_size: Int64?
+            }
+            let id: Int
+            let statistics: Statistics?
+        }
+
+        guard projectID > 0, glab.resolvedHost == account.host, glab.currentUsername == account.username else { return nil }
+        let key = Repository(account: account, projectID: projectID)
+        let now = ContinuousClock.now
+        let revision = glab.accountRevision
+        if let cached = repositorySizes[key], cached.expiresAt > now {
+            let bytes = await cached.bytes.value
+            return glab.accountRevision == revision ? bytes : nil
+        }
+        let lookup = Task { @MainActor () -> Int64? in
+            // The source project's repository size excludes unrelated project storage such as CI artifacts.
+            guard let project: Project = try? await glab.mergeRequestAPI("/projects/\(projectID)?statistics=true",
+                      host: account.host, timeout: 5),
+                  glab.accountRevision == revision, project.id == projectID,
+                  let bytes = project.statistics?.repository_size, bytes > 0 else { return nil }
+            return bytes
+        }
+        repositorySizes[key] = .init(expiresAt: now.advanced(by: .seconds(600)), bytes: lookup)
+        if repositorySizes.count > 128, let oldest = repositorySizes.min(by: { $0.value.expiresAt < $1.value.expiresAt })?.key {
+            repositorySizes.removeValue(forKey: oldest)
+        }
+        return await lookup.value
+    }
+
+    private func effectiveAvailableDiskBytes(_ measuredBytes: Int64?) -> Int64? {
+        guard let bytes = measuredBytes, bytes >= 0 else { return nil }
+        return tasks.values.reduce(bytes) { max(0, $0 - $1.reservedBytes) }
+    }
+
+    func canRetryAfterDiskFailure(_ execution: AssistantJobExecution?) -> Bool {
+        guard let issue = execution?.prelaunchDiskFailure else { return true }
+        return effectiveAvailableDiskBytes(availableDiskBytes()).map { $0 >= issue.requiredBytes } ?? false
+    }
 
     private func observeHealth() {
         withObservationTracking {
@@ -55,7 +142,7 @@ final class AssistantJobCoordinator {
               !isWorking(on: handoff.key.work), tasks[handoff.id] == nil else { return false }
         work[handoff.id] = handoff.key.work
         settingsByJob[handoff.id] = settings
-        pending.append((handoff, settings))
+        pending.append(.init(handoff: handoff, settings: settings))
         startPendingJobs()
         return true
     }
@@ -68,22 +155,85 @@ final class AssistantJobCoordinator {
         guard !terminating else { return }
         let revoked = pending.filter { !permitsExecution($0.handoff, settings: $0.settings) }
         for entry in revoked { cancel(entry.handoff.id, origin: .policy) }
-        while !terminating, tasks.count < maximumConcurrentJobs, !pending.isEmpty {
-            guard let index = pending.firstIndex(where: {
-                permitsExecution($0.handoff, settings: $0.settings) && $0.settings.automation.selectedAssistant != nil
-                    && healthStore.hold(for: $0.handoff.key.assistant) == nil
-            }) else { break }
-            let next = pending.remove(at: index)
-            start(next.handoff, settings: next.settings)
+        let ready = pending.filter {
+            !$0.waitsForDiskRelease && permitsExecution($0.handoff, settings: $0.settings)
+                && $0.settings.automation.selectedAssistant != nil
+                && healthStore.hold(for: $0.handoff.key.assistant) == nil
+        }
+        guard !ready.isEmpty else { return }
+        let measured = availableDiskBytes()
+        for entry in ready {
+            guard !terminating else { break }
+            let (handoff, settings) = (entry.handoff, entry.settings)
+            guard let index = pending.firstIndex(where: { $0.handoff.id == handoff.id }),
+                  !pending[index].waitsForDiskRelease, permitsExecution(handoff, settings: settings) else { continue }
+            let required = Self.requiredDiskBytes(repositoryBytes: handoff.estimatedRepositoryBytes)
+            let available = effectiveAvailableDiskBytes(measured)
+            if let bytes = available, bytes >= required {
+                guard tasks.count < maximumConcurrentJobs else {
+                    updateDiskWait(nil, for: handoff.id, settings: settings)
+                    continue
+                }
+                pending.remove(at: index)
+                start(handoff, settings: settings, reservedBytes: required)
+            } else {
+                let issue = AssistantJobExecution.DiskAdmissionIssue(
+                    cause: available == nil ? .capacityUnavailable : .insufficientCapacity, requiredBytes: required)
+                if tasks.isEmpty {
+                    pending.remove(at: index)
+                    failDiskAdmission(handoff, settings: settings, issue: issue)
+                } else {
+                    pending[index].waitsForDiskRelease = true
+                    updateDiskWait(issue, for: handoff.id, settings: settings)
+                }
+            }
         }
     }
 
-    private func start(_ handoff: Handoff, settings: SettingsManager) {
-        tasks[handoff.id] = Task { [weak self] in
+    private func updateDiskWait(_ issue: AssistantJobExecution.DiskAdmissionIssue?, for id: UUID,
+                                settings: SettingsManager) {
+        guard settings.assistantHandoffs.first(where: { $0.id == id })?.execution?.diskAdmissionIssue != issue else { return }
+        update(id, settings: settings) { $0.diskAdmissionIssue = issue }
+    }
+
+    private static func requiredDiskBytes(repositoryBytes: Int64?) -> Int64 {
+        let minimum: Int64 = 1_000_000_000
+        guard let repositoryBytes, repositoryBytes > minimum / 2 else { return minimum }
+        let (doubled, overflow) = repositoryBytes.multipliedReportingOverflow(by: 2)
+        return overflow ? .max : doubled
+    }
+
+    private func failDiskAdmission(_ handoff: Handoff, settings: SettingsManager,
+                                   issue: AssistantJobExecution.DiskAdmissionIssue) {
+        work[handoff.id] = nil
+        settingsByJob[handoff.id] = nil
+        let finishedAt = Date()
+        AssistantAutomaticRetryCoordinator.recordDiskDeferredAttempt(for: handoff, at: finishedAt, settings: settings)
+        update(handoff.id, settings: settings) {
+            $0.state = .failed
+            $0.startedAt = nil
+            $0.finishedAt = finishedAt
+            $0.diskAdmissionIssue = issue
+            $0.error = String(localized: issue.errorTitle)
+        }
+        if let reservation = handoff.pipelineReservation, reservation.reservationID != nil {
+            try? pipelineWorkDetector.finishHandoff(for: reservation)
+        }
+        if let finished = settings.assistantHandoffs.first(where: { $0.id == handoff.id }) {
+            Task { [weak self] in
+                guard let self, !terminating else { return }
+                onFinished?(finished)
+            }
+        }
+    }
+
+    private func start(_ handoff: Handoff, settings: SettingsManager, reservedBytes: Int64) {
+        let task = Task { [weak self] in
             guard let self else { return }
             self.update(handoff.id, settings: settings) {
                 $0.state = .running
                 $0.startedAt = Date()
+                $0.diskAdmissionIssue = nil
             }
             do {
                 try Task.checkCancellation()
@@ -106,8 +256,8 @@ final class AssistantJobCoordinator {
             } catch AssistantUsageRunner.AccessError.temporarilyUnavailable {
                 if !terminating && !Task.isCancelled {
                     self.update(handoff.id, settings: settings) { $0.state = .queued; $0.startedAt = nil }
-                    pending.append((handoff, settings))
-                    tasks[handoff.id] = nil
+                    pending.append(.init(handoff: handoff, settings: settings))
+                    releaseRunningJob(handoff.id)
                     startPendingJobs()
                     return
                 }
@@ -129,12 +279,23 @@ final class AssistantJobCoordinator {
                     settings.save()
                 }
             }
-            tasks[handoff.id] = nil
+            if !terminating, !Task.isCancelled,
+               let finished = settings.assistantHandoffs.first(where: { $0.id == handoff.id }),
+               finished.execution?.state == .succeeded {
+                await cleanupAfterSuccess(finished, settings)
+            }
+            releaseRunningJob(handoff.id)
             work[handoff.id] = nil
             settingsByJob[handoff.id] = nil
             if !terminating, let finished = settings.assistantHandoffs.first(where: { $0.id == handoff.id }) { onFinished?(finished) }
             startPendingJobs()
         }
+        tasks[handoff.id] = .init(task: task, reservedBytes: reservedBytes)
+    }
+
+    private func releaseRunningJob(_ id: UUID) {
+        tasks[id] = nil
+        for index in pending.indices { pending[index].waitsForDiskRelease = false }
     }
 
     func finishQueuedResolvedFeedback(_ id: UUID, settings: SettingsManager) -> Bool {
@@ -172,6 +333,7 @@ final class AssistantJobCoordinator {
         update(id, settings: settings) {
             $0.state = .feedbackResolved
             $0.startedAt = nil
+            $0.diskAdmissionIssue = nil
             $0.summary = String(localized: .AssistantJobs.assistantJobsFeedbackResolved)
             $0.finishedAt = .now
         }
@@ -187,9 +349,13 @@ final class AssistantJobCoordinator {
             let removed = pending.remove(at: index)
             work[id] = nil
             settingsByJob[id] = nil
-            update(id, settings: removed.settings) { $0.state = .cancelled; $0.finishedAt = Date() }
+            update(id, settings: removed.settings) {
+                $0.state = .cancelled
+                $0.finishedAt = Date()
+                $0.diskAdmissionIssue = nil
+            }
             if let finished = removed.settings.assistantHandoffs.first(where: { $0.id == id }) { onFinished?(finished) }
-        } else { tasks[id]?.cancel() }
+        } else { tasks[id]?.task.cancel() }
     }
 
     func prepareForTermination(settings: SettingsManager) {
@@ -199,7 +365,7 @@ final class AssistantJobCoordinator {
         }
         settings.save()
         pending.removeAll()
-        tasks.values.forEach { $0.cancel() }
+        tasks.values.forEach { $0.task.cancel() }
         for handoff in settings.assistantHandoffs where work[handoff.id] != nil {
             if let reservation = handoff.pipelineReservation, reservation.reservationID != nil {
                 try? ExistingPipelineWorkDetector().finishHandoff(for: reservation)

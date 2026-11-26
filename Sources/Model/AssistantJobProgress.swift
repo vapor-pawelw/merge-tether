@@ -15,7 +15,9 @@ extension AssistantAutomationRunner.Handoff {
         let conflict = conflictReceipts.contains {
             $0.jobID == id && $0.host == key.work.host && $0.projectID == key.work.projectID && $0.iid == key.work.iid
         }
-        if operationalExecution?.state == .queued { return .AutomationProgress.progressQueued }
+        if let execution = operationalExecution, execution.state == .queued {
+            return execution.diskAdmissionIssue?.waitingTitle ?? .AutomationProgress.progressQueued
+        }
         if pipelineReservation != nil || intentKind == .pipeline || AssistantAutomationRunner.isForeignPipelineDiagnosis(for: self) {
             return .AutomationProgress.progressPipeline
         }

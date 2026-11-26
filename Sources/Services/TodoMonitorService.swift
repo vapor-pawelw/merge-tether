@@ -1771,6 +1771,12 @@ final class TodoMonitorService {
             let replacement = try await AssistantAutomationRunner.retry(id, settings: settings)
             mrTodoRouter.rebindJob(oldID: id, replacement: replacement)
             authoredMergeRequests.workflow.synchronizeAssistantJobs()
+            if let execution = replacement.execution, execution.prelaunchDiskFailure != nil {
+                assistantJobActionError = execution.errorExplanation
+                settings.recordAutomationEvent(target: target, action: .retry, origin: .manual, state: .failed,
+                    message: execution.errorExplanation, jobID: replacement.id, relatedJobID: id)
+                return .failed
+            }
             settings.recordAutomationEvent(target: target, action: .retry, origin: .manual, state: .queued,
                 jobID: replacement.id, relatedJobID: id)
             return .queued(replacement.id)

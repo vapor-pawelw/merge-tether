@@ -175,16 +175,6 @@ struct AssistantJobRow: View {
     }
 
     private var stateLabel: LocalizedStringResource {
-        guard let execution = handoff.execution else { return .AssistantJobs.assistantJobsStatusUnavailable }
-        switch execution.state {
-        case .queued: return .AssistantJobs.assistantJobsQueued
-        case .running: return .AssistantJobs.assistantJobsRunning
-        case .succeeded: return .AssistantJobs.assistantJobsSucceeded
-        case .blocked: return .AssistantJobs.assistantJobsBlocked
-        case .failed: return .AssistantJobs.assistantJobsFailed
-        case .cancelled: return .AssistantJobs.assistantJobsCancelled
-        case .interrupted: return .AssistantJobs.assistantJobsInterrupted
-        case .feedbackResolved: return .AssistantJobs.assistantJobsFeedbackResolved
-        }
+        handoff.execution?.statusTitle ?? .AssistantJobs.assistantJobsStatusUnavailable
     }
 }
