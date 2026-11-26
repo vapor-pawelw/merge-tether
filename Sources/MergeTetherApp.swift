@@ -60,6 +60,7 @@ private final class MergeTetherTestHostDelegate: NSObject, NSApplicationDelegate
 @MainActor
 final class MergeTetherAppDelegate: NSObject, NSApplicationDelegate {
     let monitor = TodoMonitorService()
+    let agentQuestion = AgentQuestionConversation()
     let avatarCache = AvatarCache()
     let updates = UpdateService()
     let updater = AppUpdater()
@@ -88,11 +89,13 @@ final class MergeTetherAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func finishTermination(_ sender: NSApplication) {
+        let question = agentQuestion.prepareForTermination()
         let draftRegeneration = monitor.draftRegeneration.prepareForTermination()
         monitor.prepareForTermination()
         Task { @MainActor in
             await AssistantAutomationRunner.waitForTermination()
             await draftRegeneration?.value
+            await question?.value
             sender.reply(toApplicationShouldTerminate: true)
         }
     }
@@ -112,7 +115,8 @@ struct MergeTetherApp: App {
 
     var body: some Scene {
         Window(String(localized: .CommandCenter.commandCenterTitle), id: "main") {
-            CommandCenterView(monitor: appDelegate.monitor, updates: appDelegate.updates, updater: appDelegate.updater)
+            CommandCenterView(monitor: appDelegate.monitor, updates: appDelegate.updates, updater: appDelegate.updater,
+                              agentQuestion: appDelegate.agentQuestion)
                 .environment(\.avatarCache, appDelegate.avatarCache)
                 .environment(\.codingProviderGlyph, appDelegate.monitor.settings.automation.selectedAssistant?.glyph)
                 .background(MainWindowFrameReader())

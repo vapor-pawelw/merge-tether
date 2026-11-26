@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Ask the configured agent about merge request status, automation decisions and how MergeTether works from the Mac toolbar. The read-only conversation can use the event log and public source for context.
+
 - Show Play for active automation and Pause for suspended automation on the Mac and companion app.
 
 - Keep hidden merge requests across restarts, closure and merge while you remain assigned as a reviewer. Restore open reviews at any time or leave the review in GitLab.

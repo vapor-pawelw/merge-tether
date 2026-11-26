@@ -186,6 +186,14 @@ Retirement requires a successful single-MR read that confirms the terminal state
 
 The app bundles `evidence.py` and `author_follow_up.py` under `Contents/Resources/Automation`. Workers use these helpers to read GitLab state and store local evidence.
 
+## Ask the agent
+
+Click the question mark in the Mac toolbar when your selected CLI is ready. Questions and answers stay in one conversation in this installation. Clear it from the popover or start a fresh conversation by switching the GitLab account or agent provider. The CLI may retain its own session history.
+
+The app sends a bounded board snapshot with each question. For a specific MR it can include recent activity, job summaries and saved reasons from the Event log. It retrieves public MergeTether source on GitHub for questions about app behavior using the installed release version when available. Development and unmatched builds use `main`, with a notice in the answer. Source and MR context go to the selected CLI provider.
+
+The Q&A CLI uses its own restricted launch configuration. The app passes fresh evidence as text, keeps credentials and raw worker transcripts out of the snapshot, and disables the shell, MCP, and tool approvals for questions.
+
 ## Optional manual agent actions
 
 An MR’s right-click menu and bottom-right **Actions** button offer the same actions. **Start conversation in…** opens the default app configured under **Settings → Agent → Agent settings → Open conversations in**, independently of the automation provider. Hold **Option** to show **Start conversation with…** and choose an installed desktop app or CLI for one conversation; this does not change the default. The chooser also offers **Copy MR link**. If the default is unavailable, the chooser opens instead.
