@@ -1617,10 +1617,12 @@ final class MergeRequestAttentionMonitor {
     private nonisolated static func latestReviewMetadataChange(in discussions: [GitLabMergeRequestDiscussion]) -> Date {
         // A retarget between branches at the same commit can leave all three diff SHAs unchanged.
         discussions.lazy.flatMap(\.notes).compactMap { note in
-            guard note.system == true, let body = note.body else { return nil }
+            guard note.system == true, let raw = note.body else { return nil }
+            // GitLab returns system notes as Markdown; tolerate an HTML paragraph wrapper as well.
+            let body = raw.hasPrefix("<p>") ? String(raw.dropFirst(3)) : raw
             let retargeted = body.hasPrefix("changed target branch from ")
                 || (body.hasPrefix("deleted the `") && body.contains("This merge request now targets"))
-            let editedText = body == "changed the description" || body.hasPrefix("<p>changed title from ")
+            let editedText = body == "changed the description" || body.hasPrefix("changed title from ")
             guard retargeted || editedText else { return nil }
             return MergeRequestReviewHistory.date(note.createdAt)
         }.max() ?? .distantPast

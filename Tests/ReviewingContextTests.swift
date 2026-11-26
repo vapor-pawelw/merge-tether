@@ -44,7 +44,7 @@ struct ReviewingContextTests {
         #expect(fixture.gitlab.requests.allSatisfy { $0.method == "GET" })
     }
 
-    @Test(arguments: ["head", "target", "base", "title"])
+    @Test(arguments: ["head", "target", "base", "title", "markdownTitle"])
     func persistedApprovalBecomesStaleAfterDiffChanges(_ change: String) async throws {
         let fixture = try ApprovalFixture()
         defer { fixture.close() }
@@ -65,6 +65,9 @@ struct ReviewingContextTests {
         case "title":
             fixture.title = "Edited title"
             fixture.metadataChange = "<p>changed title from Example to Edited title</p>"
+        case "markdownTitle":
+            fixture.title = "Edited title"
+            fixture.metadataChange = "changed title from **{-Example-}** to **{+Edited title+}**"
         default: fixture.base = "new-base"
         }
         fixture.diffReadFails = false
