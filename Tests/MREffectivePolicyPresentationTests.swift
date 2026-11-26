@@ -348,8 +348,7 @@ struct MREffectivePolicyPresentationTests {
         rule.projects = "group/repository"
         let before = rule
         let view = NSHostingView(rootView: Form {
-            AutomationRuleTemplateSettings(rule: Binding(get: { rule }, set: { rule = $0 }),
-                title: .Settings.settingsAutomationAuthorFeedback)
+            AutomationRuleTemplateSettings(rule: Binding(get: { rule }, set: { rule = $0 }))
         }.frame(width: 650))
         #expect(view.fittingSize.height > 0)
         #expect(rule == before)
@@ -367,6 +366,7 @@ struct MREffectivePolicyPresentationTests {
             settings.automation.allowFollowUpPush = followUpPush
             settings.automation.assistantToolProjects = "group/repository"
             settings.automation.conflictPushProjects = "group/repository"
+            try #require(settings.save())
             let before = settings.automation
             let stored = (defaults.persistentDomain(forName: domain) ?? [:]) as NSDictionary
             let gitlab = InMemoryGitLab()
@@ -375,7 +375,7 @@ struct MREffectivePolicyPresentationTests {
             defer { monitor.stopTimer() }
 
             // When the reorganized settings form displays inactive saved controls.
-            let view = NSHostingView(rootView: AutomationSettingsTab(monitor: monitor).frame(width: 850))
+            let view = NSHostingView(rootView: AutomationSettingsTab(monitor: monitor, initialPage: .workflow).frame(width: 850))
             #expect(view.fittingSize.height > 0)
 
             // Then rendering grants nothing; each existing permission still controls its own action.
@@ -390,6 +390,7 @@ struct MREffectivePolicyPresentationTests {
     private func renderSettingsProof(_ settings: SettingsManager, path: String) throws {
         let original = settings.automation
         defer { settings.automation = original }
+        try #require(settings.save())
         let gitlab = InMemoryGitLab()
         let glab = gitlab.service(host: target.host, username: target.username)
         let monitor = TodoMonitorService(settings: settings, glab: glab)
@@ -413,17 +414,18 @@ struct MREffectivePolicyPresentationTests {
         settings.automation.authorFeedback.runner = .shell
         settings.automation.authorFeedback.isEnabled = false
         settings.automation.authorFeedback.command = "saved-feedback-handler {url}"
-        let advanced = NSHostingView(rootView: AutomationSettingsTab(monitor: monitor, initialPage: .advanced)
+        try #require(settings.save())
+        let reviews = NSHostingView(rootView: AutomationSettingsTab(monitor: monitor, initialPage: .todos)
             .frame(width: 1040, height: 980))
-        advanced.appearance = NSAppearance(named: .aqua)
-        advanced.frame = .init(x: 0, y: 0, width: 1040, height: 980)
+        reviews.appearance = NSAppearance(named: .aqua)
+        reviews.frame = .init(x: 0, y: 0, width: 1040, height: 980)
         window.setContentSize(.init(width: 1040, height: 980))
-        window.contentView = advanced
-        advanced.layoutSubtreeIfNeeded()
-        let advancedBitmap = try #require(advanced.bitmapImageRepForCachingDisplay(in: advanced.bounds))
-        advanced.cacheDisplay(in: advanced.bounds, to: advancedBitmap)
-        let advancedPNG = try #require(advancedBitmap.representation(using: .png, properties: [:]))
-        try advancedPNG.write(to: URL(fileURLWithPath: path.replacingOccurrences(of: ".png", with: "-advanced.png")))
+        window.contentView = reviews
+        reviews.layoutSubtreeIfNeeded()
+        let reviewsBitmap = try #require(reviews.bitmapImageRepForCachingDisplay(in: reviews.bounds))
+        reviews.cacheDisplay(in: reviews.bounds, to: reviewsBitmap)
+        let reviewsPNG = try #require(reviewsBitmap.representation(using: .png, properties: [:]))
+        try reviewsPNG.write(to: URL(fileURLWithPath: path.replacingOccurrences(of: ".png", with: "-reviews.png")))
         #expect(gitlab.requests.isEmpty)
     }
 

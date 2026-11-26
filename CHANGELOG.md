@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Organize Mac automation settings by task, with checkboxes, visible pause and permission states, and a clear distinction between immediate and pending changes.
+
 - Ask the configured agent about merge request status, automation decisions and how MergeTether works from the Mac toolbar. The read-only conversation can use the event log and public source for context.
 
 - Use verifier prompts for automatic approval and merge. The Event log records each decision and its reason.
