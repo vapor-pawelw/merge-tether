@@ -147,7 +147,7 @@ struct AutomationRule: Codable, Equatable, Sendable {
 enum AutomationPreset: String, CaseIterable, Codable, Hashable, Sendable {
     case full, checkpoints, manual, safe, trusted
 
-    static let allCases: [Self] = [.manual, .safe, .trusted, .full]
+    static let allCases: [Self] = [.safe, .trusted, .full]
 
     var defaultPublicationMode: AutomationPublicationMode {
         switch self {
@@ -155,10 +155,6 @@ enum AutomationPreset: String, CaseIterable, Codable, Hashable, Sendable {
         case .checkpoints, .trusted: .aiReplies
         case .manual, .safe: .manual
         }
-    }
-
-    static func onboardingDefault(for decision: AutomationPackageDecision) -> Self? {
-        decision == .undecided ? .safe : nil
     }
 }
 
@@ -619,6 +615,11 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         baselinePreset = preset
         publicationRestrictions.requireAI = AutomaticPublicationRestrictions.defaults(for: preset).requireAI
         publicationRestrictions.allowBotReplies = AutomaticPublicationRestrictions.defaults(for: preset).allowBotReplies
+    }
+
+    mutating func completeOnboardingAutomation(with preset: AutomationPreset?, assistant: AutomationAssistant?) {
+        guard packageDecision == .undecided else { return }
+        applyPreset(preset ?? .manual, for: assistant)
     }
 
     var matchingPreset: AutomationPreset? {

@@ -1,9 +1,6 @@
 import SwiftUI
 
-typealias AutomationPackageChoice = AutomationPreset
-
 extension AutomationPreset {
-    var requiresCLI: Bool { self != .manual }
     var title: LocalizedStringResource {
         switch self {
         case .full: .AutomationProfiles.maxTitle
@@ -21,9 +18,6 @@ extension AutomationPreset {
         case .safe: .AutomationProfiles.safeHelp
         case .trusted: .AutomationProfiles.trustedHelp
         }
-    }
-    func apply(to settings: inout AutomationSettings, assistant: AutomationAssistant?) {
-        settings.applyPreset(self, for: assistant)
     }
 }
 
@@ -161,17 +155,12 @@ extension AutomationPublicationMode {
 }
 
 struct AutomationPackagePicker: View {
-    @Binding var selection: AutomationPackageChoice?
-    let canUseAutomatic: Bool
+    @Binding var selection: AutomationPreset
 
     var body: some View {
         Picker(selection: $selection) {
-            Text(.Settings.settingsAutomationPackageChoose)
-                .tag(nil as AutomationPackageChoice?)
-                .disabled(true)
             ForEach(AutomationPreset.allCases, id: \.self) { choice in
-                Text(choice.title).tag(choice as AutomationPackageChoice?)
-                    .disabled(choice.requiresCLI && !canUseAutomatic)
+                Text(choice.title).tag(choice)
             }
         } label: {
             Text(.Settings.settingsAutomationPackageTitle)
@@ -183,18 +172,21 @@ struct AutomationSettingsProfilePicker: View {
     enum Selection: Hashable { case preset(AutomationPreset), custom }
     @Binding var draft: AutomationSettings
     @Binding var lastCustom: AutomationProfileSnapshot?
-    let canUseAutomatic: Bool
-    var hasCustomOption: Bool { lastCustom != nil || AutomationProfileSnapshot.custom(from: draft) != nil }
+    var hasCustomOption: Bool {
+        draft.packageDecision == .enabled && (lastCustom != nil || AutomationProfileSnapshot.custom(from: draft) != nil)
+    }
 
     static func selection(for draft: Binding<AutomationSettings>, lastCustom: Binding<AutomationProfileSnapshot?>) -> Binding<Selection?> {
         Binding(get: {
+            guard draft.wrappedValue.packageDecision == .enabled else { return nil }
             if let preset = draft.wrappedValue.matchingPreset { return .preset(preset) }
             return AutomationProfileSnapshot.custom(from: draft.wrappedValue) == nil ? nil : .custom
         }, set: { selection in
-            guard let selection else { return }
+            guard let selection, draft.wrappedValue.packageDecision == .enabled else { return }
             var updated = draft.wrappedValue
             switch selection {
             case .preset(let preset):
+                guard AutomationPreset.allCases.contains(preset) else { return }
                 lastCustom.wrappedValue = AutomationProfileSnapshot.custom(from: updated) ?? lastCustom.wrappedValue
                 updated.applyPreset(preset, for: updated.selectedAssistant)
             case .custom:
@@ -210,7 +202,6 @@ struct AutomationSettingsProfilePicker: View {
             Text(.Settings.settingsAutomationPackageChoose).tag(nil as Selection?).disabled(true)
             ForEach(AutomationPreset.allCases, id: \.self) { preset in
                 Text(preset.title).tag(Selection.preset(preset) as Selection?)
-                    .disabled(preset.requiresCLI && !canUseAutomatic)
             }
             if hasCustomOption {
                 Text(.AutomationProfiles.customizedTitle).tag(Selection.custom as Selection?)

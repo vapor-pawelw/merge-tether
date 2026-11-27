@@ -49,11 +49,10 @@ The board works with `glab` alone. To run agent actions or automation, select **
 - **When you’re reviewing**, the agent can review the diff, save findings as private GitLab drafts, and revisit them when new commits or replies arrive. Open the drafts alongside the original discussion and publish the comments you choose.
 - **When it’s your MR**, the agent can implement and test a fix in an isolated Git worktree. If push is enabled, it checks that the expected code is on the remote branch before drafting a reply that says the fix is in. Failed pipelines and merge conflicts can also become agent tasks.
 
-Choose a profile as a starting point, then set the scope for your repositories and individual MRs.
+Turn on **Enable merge request automation** in Settings, choose a profile as a starting point, then set the scope for your repositories and individual MRs. You can start reviews and GitLab actions yourself with automation off.
 
 | Profile | What it handles |
 | --- | --- |
-| **Manual** | Start reviews and GitLab actions yourself. |
 | **Safe** | Automate analysis and preparation, including private drafts. Public GitLab actions stay manual. |
 | **Trusted** | Allow verified follow-ups and delivery, including pushes, approvals, and publication of eligible replies to AI or bot feedback. You decide when to merge. |
 | **Max** | Allow eligible automatic publication and merging. Auto-merge checks the current source commit, pipeline, approvals, discussions, and dependencies. |

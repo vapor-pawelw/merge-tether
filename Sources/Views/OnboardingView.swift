@@ -7,7 +7,8 @@ struct OnboardingView: View {
     @Environment(\.dismissWindow) private var dismissWindow
     @State private var steps: [Step]
     @State private var step: Step = .glabInstall
-    @State private var automationChoice: AutomationPackageChoice?
+    @State private var automationEnabled = false
+    @State private var automationChoice = AutomationPreset.safe
     @State private var assistant: AutomationAssistant?
     @State private var assistantSetup: AutomationAssistant?
 
@@ -17,7 +18,6 @@ struct OnboardingView: View {
         _steps = State(initialValue: Step.allCases.filter { $0 != .crashReporting || crashReporting.needsConsent })
         let automation = monitor.settings.automation
         _assistant = State(initialValue: automation.selectedAssistant)
-        _automationChoice = State(initialValue: AutomationPreset.onboardingDefault(for: automation.packageDecision))
         _step = State(initialValue: Self.startingStep(hasCompletedSetup: monitor.settings.onboardingCompleted,
             cliAvailable: monitor.glab.glabPath != nil))
     }
@@ -66,7 +66,7 @@ struct OnboardingView: View {
                 CrashReportingExplanation()
             case .automation:
                 AutomationPackageStep(
-                    monitor: monitor, assistant: $assistant, selection: $automationChoice
+                    monitor: monitor, enabled: $automationEnabled, assistant: $assistant, selection: $automationChoice
                 )
             case .done:
                 OnboardingDoneStep()
@@ -85,14 +85,10 @@ struct OnboardingView: View {
         case .glabInstall: monitor.glab.glabPath != nil
         case .glabAuth: monitor.glab.currentUsername != nil
         case .automation:
-            monitor.settings.automation.packageDecision != .undecided || effectiveAutomationChoice == .manual
-                || (effectiveAutomationChoice?.requiresCLI == true && assistant.map(monitor.availableAssistants.contains) == true)
+            monitor.settings.automation.packageDecision != .undecided || !automationEnabled
+                || assistant.map(monitor.availableAssistants.contains) == true
         case .notifications, .launchAtLogin, .crashReporting, .done: true
         }
-    }
-
-    private var effectiveAutomationChoice: AutomationPackageChoice? {
-        assistant == nil && automationChoice != nil ? .manual : automationChoice
     }
 
     private func goBack() {
@@ -118,8 +114,7 @@ struct OnboardingView: View {
         case .crashReporting:
             crashReporting.setEnabled(true)
             advance()
-        case .automation where monitor.settings.automation.packageDecision == .undecided
-            && effectiveAutomationChoice?.requiresCLI == true:
+        case .automation where monitor.settings.automation.packageDecision == .undecided && automationEnabled:
             assistantSetup = assistant
         default:
             advance()
@@ -128,9 +123,7 @@ struct OnboardingView: View {
 
     private func finish() {
         var updated = monitor.settings.automation
-        if updated.packageDecision == .undecided, let automationChoice = effectiveAutomationChoice {
-            automationChoice.apply(to: &updated, assistant: assistant)
-        }
+        updated.completeOnboardingAutomation(with: automationEnabled ? automationChoice : nil, assistant: assistant)
         monitor.settings.automation = updated
         monitor.settings.onboardingCompleted = true
         monitor.applySettings()

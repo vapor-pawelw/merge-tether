@@ -30,8 +30,23 @@ final class SettingsPolicyEditor {
         saveState = .init(accepted: accepted, runtimeSavePending: accepted != settings.automation.ignoringGlobalSuspension)
     }
 
+    var automationEnabled: Bool {
+        get { draft.packageDecision == .enabled }
+        set {
+            guard newValue != automationEnabled else { return }
+            var updated = draft
+            updated.packageDecision = newValue ? .enabled : .disabled
+            let usedManualDefaults = updated.baselinePreset == .manual
+                && !updated.hasEnabledAutomation && !updated.allowAutomaticPublicActions
+            if newValue && (draft.packageDecision == .undecided || usedManualDefaults) {
+                updated.applyPreset(.safe, for: updated.selectedAssistant)
+            }
+            draft = updated
+        }
+    }
+
     var hasIncompleteRule: Bool {
-        [draft.reviewRequested, draft.authorFeedback].contains { $0.isEnabled && !$0.isConfigured }
+        automationEnabled && [draft.reviewRequested, draft.authorFeedback].contains { $0.isEnabled && !$0.isConfigured }
     }
 
     enum AutomaticWriteBlock: Equatable {
@@ -175,19 +190,39 @@ struct AutomationSettingsTab: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            List(selection: $page) {
-                ForEach(Page.allCases, id: \.self) { page in
-                    Label { Text(page.title) } icon: { Image(systemName: page.symbol) }
-                        .tag(page)
+        VStack(spacing: 0) {
+            automationToggle
+            PersistenceDegradedBanner(settings: settings)
+            if editor.automationEnabled {
+                if !settings.automationGloballyEnabled {
+                    Label(.AutomationProfiles.globallyPaused, systemImage: "pause.fill")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 10)
+                        .background(Color.orange.opacity(0.1))
                 }
+                Divider()
+                HStack(spacing: 0) {
+                    List(selection: $page) {
+                        ForEach(Page.allCases, id: \.self) { page in
+                            Label { Text(page.title) } icon: { Image(systemName: page.symbol) }
+                                .tag(page)
+                        }
+                    }
+                    .listStyle(.sidebar)
+                    .frame(width: 190)
+
+                    Divider()
+
+                    pageContent
+                }
+            } else {
+                Spacer(minLength: 0)
             }
-            .listStyle(.sidebar)
-            .frame(width: 190)
-
-            Divider()
-
-            pageContent
+            SettingsPolicyFooter(monitor: monitor, editor: editor)
+        }
+        .onChange(of: editor.automationEnabled) { _, enabled in
+            if enabled { page = .checkpoints }
         }
         .sheet(isPresented: $needsVerificationSetup) {
             let assistant = editor.draft.assistant
@@ -198,70 +233,49 @@ struct AutomationSettingsTab: View {
         }
     }
 
+    private var automationToggle: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: $editor.automationEnabled) {
+                Text(.AutomationProfiles.automationEnabled).font(.headline)
+            }
+            .toggleStyle(.switch)
+            Text(.AutomationProfiles.automationEnabledHelp).font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+    }
+
     @ViewBuilder
     private var pageContent: some View {
-        VStack(spacing: 0) {
-            globalStatus
-            if page == .scope {
-                AutomationScopeSettingsView(monitor: monitor)
-            } else {
-                Form {
-                    switch page {
-                    case .checkpoints:
-                        packageFields
-                    case .todos:
-                        reviewFields
-                        feedbackFields
-                    case .workflow:
-                        MergeWorkflowSettingsSection(settings: $editor.draft, writeBlock: automaticWriteBlock)
-                        conflictFields
-                    case .publication:
-                        publicationFields
-                        mergeFields
-                    case .advanced:
-                        advancedFields
-                    case .scope:
-                        EmptyView()
-                    }
+        if page == .scope {
+            AutomationScopeSettingsView(monitor: monitor)
+        } else {
+            Form {
+                switch page {
+                case .checkpoints:
+                    packageFields
+                case .todos:
+                    reviewFields
+                    feedbackFields
+                case .workflow:
+                    MergeWorkflowSettingsSection(settings: $editor.draft, writeBlock: automaticWriteBlock)
+                    conflictFields
+                case .publication:
+                    publicationFields
+                    mergeFields
+                case .advanced:
+                    advancedFields
+                case .scope:
+                    EmptyView()
                 }
-                .formStyle(.grouped)
-
-                SettingsPolicyFooter(monitor: monitor, editor: editor)
             }
+            .formStyle(.grouped)
         }
     }
 
     private var automaticWriteBlock: SettingsPolicyEditor.AutomaticWriteBlock? {
         editor.automaticWriteBlock(settings: settings)
-    }
-
-    @ViewBuilder
-    private var globalStatus: some View {
-        let paused = !settings.automationGloballyEnabled
-        if paused || (page == .checkpoints && settings.configuredAutomationAvailable && settings.automaticActionsAllowed) {
-            HStack(spacing: 12) {
-                Label {
-                    Text(paused ? .AutomationProfiles.globallyPaused : .AutomationProfiles.globallyEnabled)
-                } icon: {
-                    Image(systemName: paused ? "pause.fill" : "play.fill")
-                }
-                .fontWeight(.medium)
-                Spacer()
-                if settings.configuredAutomationAvailable {
-                    Button {
-                        monitor.requestGlobalAutomationToggle(confirm: confirmGlobalAutomationChange)
-                    } label: {
-                        Text(paused ? .CommandCenter.commandCenterAutomationSuspendedResume
-                            : .CommandCenter.commandCenterAutomationConfirmPauseAction)
-                    }
-                    .controlSize(.small)
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 10)
-            .background(paused ? Color.orange.opacity(0.1) : Color.secondary.opacity(0.06))
-        }
-        PersistenceDegradedBanner(settings: settings)
     }
 
     @ViewBuilder
@@ -516,13 +530,10 @@ struct AutomationSettingsTab: View {
     private var packageFields: some View {
         Section {
             VStack(alignment: .leading, spacing: 12) {
-                AutomationSettingsProfilePicker(draft: $editor.draft, lastCustom: $editor.sessionCustom,
-                    canUseAutomatic: editor.draft.selectedAssistant.map(monitor.availableAssistants.contains) ?? true)
+                AutomationSettingsProfilePicker(draft: $editor.draft, lastCustom: $editor.sessionCustom)
                     .controlSize(.large)
                 if let preset = editor.draft.matchingPreset {
                     AutomationPresetDescription(preset: preset)
-                } else if editor.draft.packageDecision == .undecided {
-                    Text(.AutomationProfiles.chooseHelp).font(.caption).foregroundStyle(.secondary)
                 } else {
                     Text(.AutomationProfiles.customizedTitle).font(.caption.weight(.semibold))
                     AutomationCustomProfileDescription(configuration: editor.draft)
@@ -535,13 +546,6 @@ struct AutomationSettingsTab: View {
             }
             .padding(12).frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-            Toggle(isOn: Binding(get: { editor.draft.packageDecision == .enabled }, set: { editor.draft.packageDecision = $0 ? .enabled : .disabled })) {
-                Text(.AutomationProfiles.enableProfileRules)
-            }
-            .toggleStyle(.checkbox)
-            if !editor.draft.hasAutomaticActionConsent {
-                Text(.AutomationProfiles.enableFirst).font(.caption).foregroundStyle(.secondary)
-            }
             Toggle(isOn: Binding(get: { !editor.draft.allowAutomaticPublicActions }, set: { editor.draft.allowAutomaticPublicActions = !$0 })) {
                 Text(.AutomationProfiles.privateToggle)
             }

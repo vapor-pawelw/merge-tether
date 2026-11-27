@@ -136,7 +136,7 @@ struct AssistantDependenciesTests {
             from: Data(#"{"verificationThinking":"low"}"#.utf8))
         configured.applyRecommended(for: assistant)
         #expect(try thinking(configured) == "high")
-        for preset in AutomationPreset.allCases + [.checkpoints] {
+        for preset in AutomationPreset.allCases + [.manual, .checkpoints] {
             configured = try JSONDecoder().decode(AutomationSettings.self,
                 from: Data(#"{"verificationThinking":"low"}"#.utf8))
             configured.applyPreset(preset, for: assistant)

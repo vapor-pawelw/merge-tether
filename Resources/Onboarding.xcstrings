@@ -19,10 +19,10 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Choose whether MergeTether should automate MR work through a signed-in Codex or Claude CLI. You can also continue with manual actions only."
+            "value" : "Automation uses a signed-in Codex or Claude CLI. You can manage merge requests yourself with automation off."
           }
         },
-        "pl": {"stringUnit": {"state": "translated", "value": "Wybierz, czy MergeTether ma automatyzować pracę nad merge requestami przez zalogowane Codex CLI lub Claude CLI. Możesz też korzystać wyłącznie z ręcznych działań."}}
+        "pl": {"stringUnit": {"state": "translated", "value": "Automatyzacja korzysta z zalogowanego Codex CLI lub Claude CLI. Przy wyłączonej automatyzacji możesz samodzielnie obsługiwać merge requesty."}}
       }
     },
     "onboarding.automation.title" : {

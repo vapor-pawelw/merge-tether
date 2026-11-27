@@ -331,7 +331,7 @@ struct AutomaticPublicationPolicyTests {
     }
 
     @Test func presetDefaultsSelectAllForFullAIForCheckpointsAndManualForManual() {
-        for preset in AutomationPreset.allCases {
+        for preset in AutomationPreset.allCases + [.manual] {
             var settings = AutomationSettings()
             settings.applyPreset(preset, for: .codex)
             #expect(settings.publishesAllComments == (preset == .full))

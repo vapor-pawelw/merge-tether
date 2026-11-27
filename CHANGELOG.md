@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Turn merge request automation on or off with one switch in Mac Settings and onboarding. Choose Safe, Trusted or Max when it is on. Turning it off keeps your configuration for next time.
+
 - Show auto-merge, auto-approve, and auto-publish defaults first in Mac automation preset summaries, with a note on customizing them.
 
 - Show when MergeTether is checking a claim and when the assignment was confirmed. Refresh the assigned MR's feedback immediately when the current automation rules allow it.

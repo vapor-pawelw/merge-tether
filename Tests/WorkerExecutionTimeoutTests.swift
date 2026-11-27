@@ -113,7 +113,7 @@ struct WorkerExecutionTimeoutTests {
         #expect(restored.automation.workerExecutionTimeout == extendedPolicy)
     }
 
-    @Test(arguments: AutomationPreset.allCases)
+    @Test(arguments: AutomationPreset.allCases + [.manual])
     func profilePermissionsNeverReplaceTheTaskTimeout(_ preset: AutomationPreset) throws {
         var settings = AutomationSettings()
         settings.applyPreset(.trusted, for: .codex)

@@ -4,7 +4,7 @@ import Testing
 @testable import MergeTether
 
 struct AutomationPresetProfilesTests {
-    @MainActor @Test(arguments: AutomationPreset.allCases + [.checkpoints])
+    @MainActor @Test(arguments: AutomationPreset.allCases + [.manual, .checkpoints])
     func presetSummaryListsKeyActionDefaultsFirst(_ preset: AutomationPreset) {
         let expected: [AutomationPresetDescription.KeyActionDefault] = switch preset {
         case .manual, .safe: [.merge(false), .approve(false), .publish(.manual, allowsBotReplies: false)]
@@ -69,7 +69,7 @@ struct AutomationPresetProfilesTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let live = SettingsManager(defaults: defaults)
-        live.automation.applyPreset(.manual, for: .codex)
+        live.automation.applyPreset(.safe, for: .codex)
         live.automation.codexReviewModel = .terra
         live.automation.authorFeedback.promptTemplate = "Keep custom instructions"
         live.automation.scope.mode = .selected
@@ -130,7 +130,7 @@ struct AutomationPresetProfilesTests {
     @MainActor @Test func freshSettingsAndPublicProfilesDoNotInventACustomOption() {
         var draft = AutomationSettings()
         let binding = Binding(get: { draft }, set: { draft = $0 })
-        let settings = AutomationSettingsProfilePicker(draft: binding, lastCustom: .constant(nil), canUseAutomatic: true)
+        let settings = AutomationSettingsProfilePicker(draft: binding, lastCustom: .constant(nil))
         #expect(!settings.hasCustomOption)
         for preset in AutomationPreset.allCases {
             draft.applyPreset(preset, for: .codex)
@@ -139,7 +139,66 @@ struct AutomationPresetProfilesTests {
         draft.applyPreset(.trusted, for: .codex)
         draft.allowFollowUpPush = false
         #expect(settings.hasCustomOption)
-        #expect(AutomationPreset.allCases.count == 4)
+        draft.packageDecision = .disabled
+        #expect(!settings.hasCustomOption)
+    }
+
+    @MainActor @Test func profilesCannotBeSelectedWhileAutomationIsOff() {
+        var draft = AutomationSettings()
+        draft.applyPreset(.manual, for: .codex)
+        let before = draft
+        let selection = AutomationSettingsProfilePicker.selection(
+            for: Binding(get: { draft }, set: { draft = $0 }), lastCustom: .constant(nil))
+        #expect(selection.wrappedValue == nil)
+        selection.wrappedValue = .preset(.full)
+        #expect(draft == before)
+    }
+
+    @MainActor @Test(arguments: [false, true])
+    func enablingAutomationFromAnUnconfiguredOrManualSetupPreparesSafe(_ usedManualPreset: Bool) throws {
+        let name = "EnableAutomation.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let settings = SettingsManager(defaults: defaults)
+        if usedManualPreset { settings.automation.applyPreset(.manual, for: .codex) }
+        settings.automation.scope.mode = .selected
+        #expect(settings.save())
+        let editor = SettingsPolicyEditor(settings: settings)
+
+        #expect(!editor.automationEnabled)
+        editor.automationEnabled = true
+
+        #expect(editor.draft.matchingPreset == .safe)
+        #expect(editor.draft.hasAutomaticActionConsent && !editor.draft.hasAutomaticPublicActionConsent)
+        #expect(editor.draft.scope.mode == .selected)
+        #expect(!settings.automation.hasAutomaticActionConsent)
+    }
+
+    @MainActor @Test func turningAutomationOffAndBackOnAfterRestartRestoresTheConfiguredRules() throws {
+        let name = "RestoreAutomation.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.trusted, for: .codex)
+        settings.automation.baselinePreset = .manual
+        settings.automation.autoMergeEnabled = true
+        settings.automation.authorFeedback.promptTemplate = ""
+        #expect(settings.save())
+        let editor = SettingsPolicyEditor(settings: settings)
+        let configured = editor.draft
+        #expect(editor.hasIncompleteRule && configured.matchingPreset == nil)
+
+        editor.automationEnabled = false
+        #expect(!editor.hasIncompleteRule)
+        #expect(!editor.draft.hasAutomaticActionConsent)
+        #expect(!editor.draft.hasAutomaticPublicActionConsent)
+        settings.automation = editor.draft
+        #expect(settings.save())
+
+        let reopened = SettingsPolicyEditor(settings: SettingsManager(defaults: defaults))
+        #expect(!reopened.automationEnabled)
+        reopened.automationEnabled = true
+        #expect(reopened.draft == configured)
     }
 
     @MainActor @Test func customSummaryDoesNotDescribeDormantPublicFlagsAsAutomaticPermissions() {
@@ -166,8 +225,8 @@ struct AutomationPresetProfilesTests {
         let expected = String(localized: .AutomationProfiles.customPublicSummary(automatic, automatic, conflict, automatic))
         #expect(String(localized: summary) == expected)
     }
-    @Test func fourPublicChoicesKeepTheLegacyProfileOutOfThePicker() {
-        #expect(AutomationPreset.allCases == [.manual, .safe, .trusted, .full])
+    @Test func onlyAutomaticPresetsAreSelectable() {
+        #expect(AutomationPreset.allCases == [.safe, .trusted, .full])
     }
 
     @Test(arguments: [AutomationPreset.manual, .safe, .trusted, .full])

@@ -690,10 +690,16 @@ struct AutomationPackageTests {
         #expect(settings.authorFeedback.promptTemplate == "My custom task")
     }
 
-    @Test func onboardingOffersSafeByDefaultOnlyBeforeTheUserHasChosen() {
-        #expect(AutomationPreset.onboardingDefault(for: .undecided) == .safe)
-        #expect(AutomationPreset.onboardingDefault(for: .enabled) == nil)
-        #expect(AutomationPreset.onboardingDefault(for: .disabled) == nil)
+    @Test(arguments: [false, true])
+    func onboardingOnlyEnablesAnExplicitlyChosenProfile(_ optedIn: Bool) {
+        var settings = AutomationSettings()
+        settings.completeOnboardingAutomation(with: optedIn ? .safe : nil, assistant: .codex)
+        #expect(settings.hasAutomaticActionConsent == optedIn)
+        #expect(!settings.hasAutomaticPublicActionConsent)
+
+        let configured = settings
+        settings.completeOnboardingAutomation(with: .full, assistant: .claude)
+        #expect(settings == configured)
     }
 
     @Test func publicationModesAreExclusiveAndKeepLegacyBooleanPersistence() throws {
