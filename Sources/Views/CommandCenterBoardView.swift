@@ -9,6 +9,9 @@ struct CommandCenterBoardView: View {
     @Binding var questionMergeRequest: URL?
     private var dimUnverifiedContent: Bool { refreshState != .current }
     private var usesManualOrder: Bool { monitor.settings.boardOrderingMethod == .manual }
+    private static let boardLeadingInset: CGFloat = 10
+    private static let laneScrollerGutter: CGFloat = 18
+
     private enum Lane: Hashable {
         case own, reviewing
 
@@ -71,16 +74,19 @@ struct CommandCenterBoardView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            HStack(alignment: .top, spacing: 18) {
-                if geometry.size.width < 900 {
-                    lane(compactLane, compact: true)
+            let compact = geometry.size.width < 900
+            let laneCount: CGFloat = compact ? 1 : 2
+            let contentWidth = max(320, (geometry.size.width - Self.boardLeadingInset) / laneCount - Self.laneScrollerGutter)
+            HStack(alignment: .top, spacing: 0) {
+                if compact {
+                    lane(compactLane, contentWidth: contentWidth, leadingInset: Self.boardLeadingInset, compact: true)
                 } else {
-                    lane(.own)
-                    lane(.reviewing)
+                    lane(.own, contentWidth: contentWidth, leadingInset: Self.boardLeadingInset)
+                    lane(.reviewing, contentWidth: contentWidth, leadingInset: 0)
                 }
             }
             .id(account)
-            .padding(14)
+            .padding(.vertical, 14)
             .sheet(item: $selected) { selection in
                 detailSheet(selection, availableWidth: max(1, geometry.size.width - 24))
             }
@@ -315,7 +321,7 @@ struct CommandCenterBoardView: View {
         }
     }
 
-    private func lane(_ lane: Lane, compact: Bool = false) -> some View {
+    private func lane(_ lane: Lane, contentWidth: CGFloat, leadingInset: CGFloat, compact: Bool = false) -> some View {
         let reviewing = lane == .reviewing
         let filter = Binding(get: { laneFilters[lane] ?? .init() }, set: { laneFilters[lane] = $0 })
         let selection = filter.wrappedValue
@@ -333,57 +339,68 @@ struct CommandCenterBoardView: View {
         )
         let animation: Animation? = reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12)
         return VStack(spacing: 0) {
-            HStack {
-                if compact {
-                    Picker(selection: $compactLane) {
-                        ForEach([Lane.own, .reviewing], id: \.self) { candidate in
-                            let count = candidate == lane ? rows.count
-                                : visibleRows(in: candidate, matching: laneFilters[candidate] ?? .init()).count
-                            Text(candidate.title(count: count)).tag(candidate)
-                        }
-                    } label: { Text(.Board.boardTitle) }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
-                    .accessibilityIdentifier("command-center.board-lane")
-                } else {
-                    Label { Text(lane.title(count: rows.count)).monospacedDigit() } icon: { Image(systemName: lane.symbol) }
-                        .font(.subheadline.weight(.semibold))
+            VStack(spacing: 0) {
+                HStack {
+                    if compact {
+                        Picker(selection: $compactLane) {
+                            ForEach([Lane.own, .reviewing], id: \.self) { candidate in
+                                let count = candidate == lane ? rows.count
+                                    : visibleRows(in: candidate, matching: laneFilters[candidate] ?? .init()).count
+                                Text(candidate.title(count: count)).tag(candidate)
+                            }
+                        } label: { Text(.Board.boardTitle) }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .fixedSize()
+                        .accessibilityIdentifier("command-center.board-lane")
+                    } else {
+                        Label { Text(lane.title(count: rows.count)).monospacedDigit() } icon: { Image(systemName: lane.symbol) }
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    Spacer()
+                    BoardLaneFilterButton(selection: filter, cardChoices: lane.cardFilters)
                 }
-                Spacer()
-                BoardLaneFilterButton(selection: filter, cardChoices: lane.cardFilters)
+                .padding(.horizontal, 6).padding(.vertical, 10)
+                Divider()
             }
-            .padding(.horizontal, 6).padding(.vertical, 10)
-            Divider()
+            .frame(width: contentWidth)
+            .padding(.leading, leadingInset)
+            .frame(maxWidth: .infinity, alignment: .leading)
             GeometryReader { viewport in
                 ScrollView {
-                    if rows.isEmpty && (hiddenReviews.isEmpty || selection.isActive || refreshState != .current) {
-                        if selection.isActive, refreshState == .current {
-                            Text(.Board.boardFiltersEmpty).foregroundStyle(.secondary).padding()
-                        } else {
-                            empty(reviewing ? .Board.boardEmptyReviewingTitle : .Board.boardEmptyOwnTitle,
-                                  message: reviewing ? .Board.boardLaneReviewingEmpty : .Board.boardLaneOwnEmpty,
-                                  symbol: lane.symbol)
+                    VStack {
+                        if rows.isEmpty && (hiddenReviews.isEmpty || selection.isActive || refreshState != .current) {
+                            if selection.isActive, refreshState == .current {
+                                Text(.Board.boardFiltersEmpty).foregroundStyle(.secondary).padding()
+                            } else {
+                                empty(reviewing ? .Board.boardEmptyReviewingTitle : .Board.boardEmptyOwnTitle,
+                                      message: reviewing ? .Board.boardLaneReviewingEmpty : .Board.boardLaneOwnEmpty,
+                                      symbol: lane.symbol)
+                            }
+                        }
+                        if !rows.isEmpty || !hiddenReviews.isEmpty {
+                            laneCards(rows, removable: reviewing,
+                                automationOffExpanded: selection.isActive ? nil : automationOffExpanded,
+                                hiddenReviews: hiddenReviews,
+                                viewportHeight: rows.isEmpty ? 0 : max(0, viewport.size.height - 10))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 5).padding(.horizontal, 1)
+                                .opacity(dimUnverifiedContent ? 0.55 : 1)
+                                .animation(animation, value: cardIDs)
+                                .animation(animation, value: rows.map { $0.item.dependencies })
+                                .animation(animation, value: automationOffExpanded.wrappedValue)
+                                .animation(animation, value: hiddenExpanded)
                         }
                     }
-                    if !rows.isEmpty || !hiddenReviews.isEmpty {
-                        laneCards(rows, removable: reviewing,
-                            automationOffExpanded: selection.isActive ? nil : automationOffExpanded,
-                            hiddenReviews: hiddenReviews,
-                            viewportHeight: rows.isEmpty ? 0 : max(0, viewport.size.height - 10))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 5).padding(.horizontal, 1)
-                            .opacity(dimUnverifiedContent ? 0.55 : 1)
-                            .animation(animation, value: cardIDs)
-                            .animation(animation, value: rows.map { $0.item.dependencies })
-                            .animation(animation, value: automationOffExpanded.wrappedValue)
-                            .animation(animation, value: hiddenExpanded)
-                    }
+                    .frame(width: contentWidth)
+                    .padding(.leading, leadingInset)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .id(lane)
         }
-        .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
+        .frame(width: contentWidth + leadingInset + Self.laneScrollerGutter)
+        .frame(maxHeight: .infinity)
     }
 
     private func empty(_ title: LocalizedStringResource, message: LocalizedStringResource, symbol: String) -> some View {

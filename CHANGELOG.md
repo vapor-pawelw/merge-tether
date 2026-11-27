@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Align cards with lane headers and keep scroll bars beside them on the Mac board.
+
 - Use the installed automation guide to answer questions about MergeTether controls available in the current build.
 
 - Open agent chat in a larger sheet with the active verification model and reasoning level. Show timeouts separately and retry the original question when a reply fails.
