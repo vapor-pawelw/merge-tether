@@ -18,8 +18,8 @@ extension AutomationPreset {
         case .full: .AutomationProfiles.maxHelp
         case .checkpoints: .Settings.settingsAutomationPackageCheckpointsHelp
         case .manual: .AutomationProfiles.manualHelp
-        case .safe: .AutomationProfiles.safeDoes
-        case .trusted: .AutomationProfiles.trustedDoes
+        case .safe: .AutomationProfiles.safeHelp
+        case .trusted: .AutomationProfiles.trustedHelp
         }
     }
     func apply(to settings: inout AutomationSettings, assistant: AutomationAssistant?) {
@@ -30,19 +30,79 @@ extension AutomationPreset {
 struct AutomationPresetDescription: View {
     let preset: AutomationPreset
 
+    enum KeyActionDefault: Hashable {
+        case merge(Bool)
+        case approve(Bool)
+        case publish(AutomationPublicationMode, allowsBotReplies: Bool)
+
+        var title: LocalizedStringResource {
+            switch self {
+            case .merge: .AutomationProfiles.presetAutoMerge
+            case .approve: .AutomationProfiles.presetAutoApprove
+            case .publish: .AutomationProfiles.presetAutoPublish
+            }
+        }
+
+        var isEnabled: Bool {
+            switch self {
+            case .merge(let enabled), .approve(let enabled): enabled
+            case .publish(let mode, _): mode != .manual
+            }
+        }
+
+        var status: LocalizedStringResource {
+            switch self {
+            case .publish(.aiReplies, let allowsBotReplies):
+                allowsBotReplies ? .AutomationProfiles.presetPublishAiAndBotReplies : .AutomationProfiles.presetPublishAiReplies
+            case .publish(.all, _): .AutomationProfiles.presetPublishAll
+            default: isEnabled ? .AutomationProfiles.presetOnByDefault : .AutomationProfiles.presetOffByDefault
+            }
+        }
+    }
+
+    var keyActionDefaults: [KeyActionDefault] {
+        var defaults = AutomationSettings()
+        defaults.applyPreset(preset, for: nil)
+        return [
+            .merge(defaults.autoMergeEnabled),
+            .approve(defaults.autoApproveEnabled),
+            .publish(defaults.publicationMode, allowsBotReplies: defaults.publicationRestrictions.allowBotReplies)
+        ]
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(preset.explanation)
+            keyActions
+            Text(.AutomationProfiles.presetCustomizationHelp)
             if preset == .safe || preset == .trusted {
                 Label { Text(preset == .safe ? .AutomationProfiles.safeDoes : .AutomationProfiles.trustedDoes) }
                     icon: { Image(systemName: "checkmark") }
                 Label { Text(preset == .safe ? .AutomationProfiles.safeDoesNot : .AutomationProfiles.trustedDoesNot) }
                     icon: { Image(systemName: "hand.raised") }
-            } else {
-                Text(preset.explanation)
             }
         }
         .font(.caption).foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var keyActions: some View {
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+            ForEach(keyActionDefaults, id: \.self) { action in
+                GridRow(alignment: .firstTextBaseline) {
+                    Text(action.title)
+                        .fontWeight(.semibold)
+                        .accessibilityValue(Text(action.status))
+                    Label { Text(action.status) } icon: {
+                        Image(systemName: action.isEnabled ? "checkmark.circle.fill" : "minus.circle")
+                            .foregroundStyle(action.isEnabled ? Color.green : Color.secondary)
+                    }
+                    .accessibilityHidden(true)
+                }
+            }
+        }
+        .font(.callout)
+        .foregroundStyle(.primary)
     }
 }
 

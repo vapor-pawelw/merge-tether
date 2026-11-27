@@ -23,17 +23,21 @@ struct AutomationPackageStep: View {
             if monitor.settings.automation.packageDecision == .undecided {
                 Text(.Onboarding.onboardingAutomationBody)
                     .foregroundStyle(.secondary)
-                if let preset = presetSelection.wrappedValue { AutomationPresetDescription(preset: preset) }
-                else { Text(.Settings.settingsAutomationPackageHelp).foregroundStyle(.secondary) }
                 AutomationAssistantPicker(
                     assistant: $assistant, available: monitor.availableAssistants,
                     onRefresh: monitor.refreshAvailableAssistants,
                     statuses: monitor.assistantDependencies.statuses
                 )
-                AutomationPackagePicker(
-                    selection: presetSelection, canUseAutomatic: assistant.map(monitor.availableAssistants.contains) == true
-                )
-
+                VStack(alignment: .leading, spacing: 8) {
+                    AutomationPackagePicker(
+                        selection: presetSelection, canUseAutomatic: assistant.map(monitor.availableAssistants.contains) == true
+                    )
+                    if let preset = presetSelection.wrappedValue {
+                        AutomationPresetDescription(preset: preset)
+                    } else {
+                        Text(.Settings.settingsAutomationPackageHelp).foregroundStyle(.secondary)
+                    }
+                }
             } else {
                 Text(.Onboarding.onboardingAutomationAlreadyConfigured)
                     .foregroundStyle(.secondary)

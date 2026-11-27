@@ -4,6 +4,18 @@ import Testing
 @testable import MergeTether
 
 struct AutomationPresetProfilesTests {
+    @MainActor @Test(arguments: AutomationPreset.allCases + [.checkpoints])
+    func presetSummaryListsKeyActionDefaultsFirst(_ preset: AutomationPreset) {
+        let expected: [AutomationPresetDescription.KeyActionDefault] = switch preset {
+        case .manual, .safe: [.merge(false), .approve(false), .publish(.manual, allowsBotReplies: false)]
+        case .trusted: [.merge(false), .approve(true), .publish(.aiReplies, allowsBotReplies: true)]
+        case .full: [.merge(true), .approve(true), .publish(.all, allowsBotReplies: true)]
+        case .checkpoints: [.merge(false), .approve(false), .publish(.aiReplies, allowsBotReplies: false)]
+        }
+
+        #expect(AutomationPresetDescription(preset: preset).keyActionDefaults == expected)
+    }
+
     @Test(arguments: [AutomationPreset.manual, .safe, .trusted, .full], [false, true])
     func missingNewPermissionUsesTheActiveProfileAfterRestart(_ preset: AutomationPreset, _ legacy: Bool) throws {
         var configuration = AutomationSettings()

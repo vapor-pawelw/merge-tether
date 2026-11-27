@@ -6,11 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Show auto-merge, auto-approve, and auto-publish defaults first in Mac automation preset summaries, with a note on customizing them.
+
 - Show when MergeTether is checking a claim and when the assignment was confirmed. Refresh the assigned MR's feedback immediately when the current automation rules allow it.
 
-- Group draft regeneration with agent chat and phone pairing in the Mac toolbar, and enlarge its icon.
-
 - Remove **Start conversation with…** from merge request menus on iPhone and iPad.
+
+- Group draft regeneration with agent chat and phone pairing in the Mac toolbar, and enlarge its icon.
 
 - Place the merge request description label above its box on Mac, iPhone and iPad.
 
@@ -20,9 +22,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Align cards with lane headers and keep scroll bars beside them on the Mac board.
 
-- Use the installed automation guide to answer questions about MergeTether controls available in the current build.
-
 - Make **Claim merge request** the primary card action on Mac, iPhone and iPad when a claim is required. Stack and center groups of card actions on iPhone and iPad, and align the automation and Actions icons with the repository row.
+
+- Use the installed automation guide to answer questions about MergeTether controls available in the current build.
 
 - Open agent chat in a larger sheet with the active verification model and reasoning level. Show timeouts separately and retry the original question when a reply fails.
 
