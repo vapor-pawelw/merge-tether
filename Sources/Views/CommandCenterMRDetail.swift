@@ -171,6 +171,11 @@ private struct CommandCenterMRDetailContent: View {
               item.url.isGitLabMergeRequest(host: host, iid: item.id.iid) else { return nil }
         return .init(host: host, username: username, projectID: item.id.projectID, iid: item.id.iid, url: item.url)
     }
+    private var isLoadingDiscussions: Bool {
+        guard let discussionTarget else { return false }
+        return !initialDiscussionAttemptFinished || isManuallyRefreshingDiscussions
+            || (discussionStore.isLoading && discussionStore.hasCurrentTarget(discussionTarget, accountRevision: monitor.glab.accountRevision))
+    }
 
     private var discussionCodeContext: MRDiscussionCodeContext? {
         guard let discussionTarget else { return nil }
@@ -257,17 +262,6 @@ private struct CommandCenterMRDetailContent: View {
                 if finishedState == nil { selectedPublicationActions }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                if discussionTarget != nil, !initialDiscussionAttemptFinished || isManuallyRefreshingDiscussions {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small).accessibilityHidden(true)
-                        Text(.MRDiscussions.mrDiscussionsLoading)
-                    }
-                    .font(.callout).foregroundStyle(.secondary)
-                    .padding(.horizontal, 16).padding(.vertical, 6)
-                    .frame(maxWidth: .infinity, minHeight: 40)
-                    .background(.bar)
-                    .overlay(alignment: .bottom) { Divider() }
-                }
                 if let target = originTarget, let change = monitor.commentOrigins.pending(for: target) {
                     CommentOriginResumeBanner(change: change, onUndo: {
                         do { try monitor.commentOrigins.undo(change.id) } catch { originChangeFailed = true }
@@ -920,7 +914,7 @@ private struct CommandCenterMRDetailContent: View {
     private func feedbackCheck(citationContext: MRCommentCitation.Context?) -> some View {
         DisclosureGroup(isExpanded: $feedbackExpanded) {
             AuthorFeedbackView(item: presentationItem, monitor: monitor, embedded: true,
-                citationContext: citationContext, sourceLoading: feedbackSourceLoading,
+                citationContext: citationContext, sourceLoading: isLoadingDiscussions,
                 decisionUpdating: isUpdatingFeedbackDecision, onIgnoreSuggestion: presentIgnoreSuggestion).padding(.top, 6)
         } label: { Text(.CommandCenter.commandCenterFeedbackCheck).font(.callout.weight(.medium)) }
     }
@@ -1156,12 +1150,8 @@ private struct CommandCenterMRDetailContent: View {
         return components.url
     }
 
-    private var feedbackSourceLoading: Bool {
-        discussionTarget != nil && (!initialDiscussionAttemptFinished || discussionStore.isLoading)
-    }
-
     private var sourceUnavailable: some View {
-        Text(feedbackSourceLoading ? .FeedbackSuggestions.feedbackSuggestionsSourceLoading : .FeedbackSuggestions.feedbackSuggestionsSourceUnavailable)
+        Text(isLoadingDiscussions ? .FeedbackSuggestions.feedbackSuggestionsSourceLoading : .FeedbackSuggestions.feedbackSuggestionsSourceUnavailable)
             .font(.caption).foregroundStyle(.secondary)
     }
 
@@ -1233,8 +1223,9 @@ private struct CommandCenterMRDetailContent: View {
     private func publicationThreads(_ snapshot: MRDiscussionSnapshot) -> some View {
         let current = discussionStore.hasCurrentTarget(discussionTarget, accountRevision: monitor.glab.accountRevision)
         return MRDiscussionThreadsView(snapshot: snapshot.pendingPublication, mergeRequestURL: item.url,
-            currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,
+            currentUsername: monitor.glab.currentUsername, isLoading: isLoadingDiscussions,
             hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
+            isManuallyRefreshing: isManuallyRefreshingDiscussions,
             expandPendingDrafts: true, selection: $publicationSession.selection,
             selectionDisabled: discussionTarget == nil || isDecidingAIReply
                 || monitor.attention.confirmationStates[item.id]?.isBusy == true,
@@ -1273,8 +1264,7 @@ private struct CommandCenterMRDetailContent: View {
     private var eventDiscussions: MREventLogView.Discussions {
         let current = discussionStore.hasCurrentTarget(discussionTarget, accountRevision: monitor.glab.accountRevision)
         return .init(entries: current ? discussionStore.activity : [],
-            isLoading: discussionTarget != nil && (!initialDiscussionAttemptFinished || discussionStore.isLoading),
-            hasError: current && discussionStore.hasError)
+            isLoading: isLoadingDiscussions, hasError: current && discussionStore.hasError)
     }
 
     private func openDiscussion(noteID: Int, discussionID: String?, in snapshot: MRDiscussionSnapshot) -> Bool {
@@ -1330,8 +1320,9 @@ private struct CommandCenterMRDetailContent: View {
         let snapshot = showsPublication ? discussions.remainingDiscussions : discussions
         if !showsPublication || !snapshot.threads.isEmpty {
             MRDiscussionThreadsView(snapshot: snapshot, mergeRequestURL: item.url,
-            currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,
+            currentUsername: monitor.glab.currentUsername, isLoading: isLoadingDiscussions,
             hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
+            isManuallyRefreshing: isManuallyRefreshingDiscussions,
             codeContext: discussionCodeContext, onSetOrigin: originAction,
             threadPublicationPreferences: threadPublicationPreferences, onSetThreadPublication: threadPublicationAction,
             extraContexts: current ? discussionStore.extraContexts : .empty,

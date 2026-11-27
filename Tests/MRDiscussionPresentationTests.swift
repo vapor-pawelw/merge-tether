@@ -7,6 +7,25 @@ import Testing
 
 @MainActor
 struct MRDiscussionPresentationTests {
+    @Test func discussionLoadingProgressAppearsOnlyInsideTheExpandedSection() {
+        let draft = GitLabDraftNote(id: 10, authorID: 9, note: "Private comment", discussionID: nil, position: nil)
+        let snapshot = MRDiscussionSnapshot(discussions: [], drafts: [draft], origins: [:])
+
+        func height(isExpanded: Bool, isLoading: Bool, hasLoaded: Bool, isManuallyRefreshing: Bool = false) -> CGFloat {
+            let view = MRDiscussionThreadsView(snapshot: snapshot, mergeRequestURL: target.url, currentUsername: target.username,
+                isLoading: isLoading, hasError: false, hasLoaded: hasLoaded, isManuallyRefreshing: isManuallyRefreshing,
+                expansion: .constant(isExpanded), onRefresh: {})
+            return NSHostingView(rootView: view.frame(width: 410)).fittingSize.height
+        }
+
+        let ready = height(isExpanded: true, isLoading: false, hasLoaded: true)
+        #expect(height(isExpanded: true, isLoading: true, hasLoaded: false) > ready)
+        #expect(height(isExpanded: true, isLoading: true, hasLoaded: true, isManuallyRefreshing: true) > ready)
+        #expect(height(isExpanded: true, isLoading: true, hasLoaded: true) == ready)
+        #expect(height(isExpanded: false, isLoading: true, hasLoaded: false)
+                == height(isExpanded: false, isLoading: false, hasLoaded: true))
+    }
+
     @Test func scrollingDraftDiscussionsKeepsTheDocumentHeightStable() async throws {
         let discussions = (0..<48).map { index in
             GitLabMergeRequestDiscussion(id: "thread-\(index)", notes: [

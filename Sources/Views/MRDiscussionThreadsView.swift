@@ -16,6 +16,7 @@ struct MRDiscussionThreadsView: View {
     let isLoading: Bool
     let hasError: Bool
     let hasLoaded: Bool
+    var isManuallyRefreshing = false
     var expandPendingDrafts = false
     var selection: Binding<DraftPublicationSelection>? = nil
     var selectionDisabled = false
@@ -69,7 +70,14 @@ struct MRDiscussionThreadsView: View {
 
     @ViewBuilder
     private func discussionContent(currentUser: PersonIdentity?) -> some View {
-        if hasError {
+        let showsLoadingProgress = isLoading && (!hasLoaded || isManuallyRefreshing)
+        if showsLoadingProgress {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small).accessibilityHidden(true)
+                Text(.MRDiscussions.mrDiscussionsLoading)
+            }
+            .font(.callout).foregroundStyle(.secondary)
+        } else if hasError {
             Label { Text(.MRDiscussions.mrDiscussionsFailed) } icon: { Image(systemName: "exclamationmark.triangle") }
                 .font(.callout).foregroundStyle(.orange)
         } else if !hasLoaded && !isLoading {
@@ -108,7 +116,7 @@ struct MRDiscussionThreadsView: View {
                     .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Color.secondary.opacity(0.1), lineWidth: 0.5) }
             }
         }
-        if hasLoaded && !isLoading && snapshot.threads.isEmpty && snapshot.standaloneDrafts.isEmpty {
+        if hasLoaded && !showsLoadingProgress && snapshot.threads.isEmpty && snapshot.standaloneDrafts.isEmpty {
             Text(.MRDiscussions.mrDiscussionsEmpty).font(.callout).foregroundStyle(.secondary)
         }
     }
