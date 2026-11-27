@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Remove **Start conversation with…** from merge request menus on iPhone and iPad.
 
-- Group draft regeneration with agent chat and phone pairing in the Mac toolbar, and enlarge its icon.
+- Find phone pairing and **Regenerate all drafts** in the Mac toolbar’s **More Actions** menu. A badge on the menu marks drafts ready to review.
 
 - Place the merge request description label above its box on Mac, iPhone and iPad.
 

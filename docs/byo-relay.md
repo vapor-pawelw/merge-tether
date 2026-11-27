@@ -83,7 +83,7 @@ GitHub Releases and Homebrew ship the Mac app with an empty relay origin. For pa
 
 ## Pair and confirm ownership
 
-On the Mac, open phone access. The app shows the configured origin and explains that its operator controls the address. Confirm it is your instance, enter the matching operator invitation in the secure field if needed, then choose **Enable phone access**. Interactive setup and the manual `remote-relay/operator.json` and `origin.txt` prefill both require an origin that matches the build.
+On the Mac, choose **More Actions (⋯) → Pair with iPhone** in the toolbar. The app shows the configured origin and explains that its operator controls the address. Confirm it is your instance, enter the matching operator invitation in the secure field if needed, then choose **Enable phone access**. Interactive setup and the manual `remote-relay/operator.json` and `origin.txt` prefill both require an origin that matches the build.
 
 Build the iOS app for the same origin, scan the Mac QR, and confirm the displayed address. The runtime QR contains the invitation and temporary pairing material; treat the QR and copied link as secrets. Both devices keep their established pairing in Keychain. The existing protocol, device-key pinning, encrypted frames and action guards remain in use. The public origin alone grants no pairing or GitLab access.
 

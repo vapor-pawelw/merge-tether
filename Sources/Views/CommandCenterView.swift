@@ -16,14 +16,12 @@ struct CommandCenterView: View {
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
 
-    @ViewBuilder private var agentQuestionButton: some View {
-        if monitor.agentQuestionOwner != nil, monitor.selectedAssistantReady {
-            Button { showingAgentQuestion = true } label: {
-                Image(systemName: "questionmark.bubble.fill")
-            }
-            .help(Text(.AgentQuestion.agentQuestionTitle))
-            .accessibilityLabel(Text(.AgentQuestion.agentQuestionTitle))
+    private var agentQuestionButton: some View {
+        Button { showingAgentQuestion = true } label: {
+            Image(systemName: "questionmark.bubble.fill")
         }
+        .help(Text(.AgentQuestion.agentQuestionTitle))
+        .accessibilityLabel(Text(.AgentQuestion.agentQuestionTitle))
     }
 
     @ViewBuilder private var agentQuestionSheet: some View {
@@ -88,15 +86,13 @@ struct CommandCenterView: View {
         }
         .navigationTitle(Text(.Board.boardTitle))
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button { openWindow(id: "remote-access") } label: {
-                    Label { Text(.Remote.remoteMacPairPhone) } icon: { Image(systemName: "iphone") }
+            if monitor.agentQuestionOwner != nil, monitor.selectedAssistantReady {
+                ToolbarItem(placement: .primaryAction) {
+                    agentQuestionButton
                 }
-                agentQuestionButton
-                draftRegenerationButton
-            }
-            if #available(macOS 26.0, *) {
-                ToolbarSpacer(.fixed, placement: .primaryAction)
+                if #available(macOS 26.0, *) {
+                    ToolbarSpacer(.fixed, placement: .primaryAction)
+                }
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 globalAutomationToggle
@@ -147,6 +143,7 @@ struct CommandCenterView: View {
                 Button { openSettings() } label: {
                     Label { Text(.CommandCenter.commandCenterSettings) } icon: { Image(systemName: "gearshape") }
                 }
+                appActionsMenu
             }
             if AppUpdateControls.showsInToolbar(updater.presentation.phase) {
                 ToolbarItem(placement: .primaryAction) {
@@ -196,13 +193,27 @@ struct CommandCenterView: View {
         .onDisappear { monitor.authoredMergeRequests.setVisible(false) }
     }
 
-    @ViewBuilder
-    private var draftRegenerationButton: some View {
+    private var appActionsMenu: some View {
         let regeneration = monitor.draftRegeneration
-        let icon = CodingProviderIcon(size: 16)
-        if let phase = regeneration.batch?.phase {
-            Button { regenerationPresentation = .init(scope: nil) } label: {
-                Label { Text(phase.regenerationTitle) } icon: { icon }
+        let phase = regeneration.batch?.phase
+        return Menu {
+            Button { openWindow(id: "remote-access") } label: {
+                Label(.Remote.remoteMacPairPhone, systemImage: "iphone")
+            }
+            if let phase {
+                Button(phase.regenerationTitle) { regenerationPresentation = .init(scope: nil) }
+                    .accessibilityIdentifier("draft-regeneration.resume")
+            } else {
+                Button(.DraftRegeneration.draftRegenerationAllAction) {
+                    guard requireCodingAssistant(monitor) else { return }
+                    regenerationPresentation = .init(scope: .all)
+                }
+                .disabled(!regeneration.isAvailable || regeneration.count(for: .all) == 0)
+                .accessibilityIdentifier("draft-regeneration.all")
+            }
+        } label: {
+            Label { Text(.CommandCenter.commandCenterMoreActions) } icon: {
+                Image(systemName: "ellipsis")
                     .overlay(alignment: .topTrailing) {
                         if phase == .ready {
                             Circle().fill(Color.accentColor).frame(width: 7, height: 7)
@@ -210,19 +221,11 @@ struct CommandCenterView: View {
                         }
                     }
             }
-            .help(Text(phase.regenerationTitle))
-            .accessibilityIdentifier("draft-regeneration.resume")
-        } else if regeneration.count(for: .all) > 0 {
-            Button {
-                guard requireCodingAssistant(monitor) else { return }
-                regenerationPresentation = .init(scope: .all)
-            } label: {
-                Label { Text(.DraftRegeneration.draftRegenerationAllAction) } icon: { icon }
-            }
-            .disabled(!regeneration.isAvailable)
-            .help(Text(.DraftRegeneration.draftRegenerationAllAction))
-            .accessibilityIdentifier("draft-regeneration.all")
         }
+        .menuIndicator(.hidden)
+        .help(Text(.CommandCenter.commandCenterMoreActions))
+        .accessibilityLabel(Text(.CommandCenter.commandCenterMoreActions))
+        .accessibilityValue(phase.map { Text($0.regenerationTitle) } ?? Text(verbatim: ""))
     }
 
     /// App-wide killswitch: off overrides presets and per-MR choices without changing them.

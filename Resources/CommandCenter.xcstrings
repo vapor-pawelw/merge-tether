@@ -223,6 +223,13 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Ustawienia…"}}
       }
     },
+    "commandCenter.moreActions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "More Actions" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Więcej działań" } }
+      }
+    },
     "commandCenter.actions": {
       "extractionState": "manual",
       "localizations": {
