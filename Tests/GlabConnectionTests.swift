@@ -64,6 +64,11 @@ struct GlabConnectionTests {
         #expect(opened == .integration)
     }
 
+    @Test func onboardingExplainsCommentAuthorshipAfterAutomation() {
+        let lastSteps = Array(OnboardingView.Step.allCases.suffix(3))
+        #expect(lastSteps == [.automation, .commentAuthorship, .done])
+    }
+
     @Test func aLongDiagnosticDoesNotExpandTheCollapsedBannerOrPerformAnAction() {
         var actions = 0
         let long = Array(repeating: "dial tcp lookup \(host): i/o timeout", count: 80).joined(separator: "\n")

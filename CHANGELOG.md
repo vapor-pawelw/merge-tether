@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Show merge request counts on a separate line in the iPhone board switcher to keep the buttons steady when switching lanes.
 
+- See the comment authorship controls in Mac setup in light or dark appearance and learn how saved verdicts and thread auto-publishing work.
+
 - See the shares of comments you marked AI or human for each author over 30 and 90 days. The comment assessor shares that history and available labeled examples across each author's batch, and reuses saved verdicts for unchanged comments. A human label reduces the AI share used for automatic replies.
 
 - Bring review reasons closer to **Review required** on merge request cards on Mac, iPhone, and iPad.

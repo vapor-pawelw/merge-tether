@@ -33,6 +33,7 @@ struct OnboardingView: View {
         case launchAtLogin
         case crashReporting
         case automation
+        case commentAuthorship
         case done
 
         var isSkippable: Bool {
@@ -68,15 +69,15 @@ struct OnboardingView: View {
                 AutomationPackageStep(
                     monitor: monitor, enabled: $automationEnabled, assistant: $assistant, selection: $automationChoice
                 )
+            case .commentAuthorship:
+                CommentAuthorshipStep()
             case .done:
                 OnboardingDoneStep()
             }
         }
         .frame(minWidth: 560, minHeight: 440)
         .sheet(item: $assistantSetup) { candidate in
-            AssistantSetupView(assistant: candidate) {
-                step = .done
-            }
+            AssistantSetupView(assistant: candidate, onReady: advance)
         }
     }
 
@@ -87,7 +88,7 @@ struct OnboardingView: View {
         case .automation:
             monitor.settings.automation.packageDecision != .undecided || !automationEnabled
                 || assistant.map(monitor.availableAssistants.contains) == true
-        case .notifications, .launchAtLogin, .crashReporting, .done: true
+        case .notifications, .launchAtLogin, .crashReporting, .commentAuthorship, .done: true
         }
     }
 

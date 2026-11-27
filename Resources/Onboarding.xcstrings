@@ -157,6 +157,74 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Wstecz"}}
       }
     },
+    "onboarding.commentAuthorship.context": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "For new assessments, the agent considers the author’s labels from the last 30 and 90 days and available examples from the same MR. See the breakdown in Settings → Automation → Publish & merge."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przy nowych ocenach agent uwzględnia oznaczenia autora z ostatnich 30 i 90 dni oraz dostępne przykłady z tego samego MR-a. Proporcje znajdziesz w Ustawienia → Automatyzacja → Publikacja i scalanie."
+          }
+        }
+      }
+    },
+    "onboarding.commentAuthorship.reuse": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An unchanged comment keeps its saved assessment. Editing the text can trigger a new assessment."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Niezmieniony komentarz zachowuje zapisaną ocenę. Edycja tekstu może uruchomić nową ocenę."
+          }
+        }
+      }
+    },
+    "onboarding.commentAuthorship.screenshot": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Example comment. Below the text, Written with AI? offers Yes, No and Uncertain. Yes is selected."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przykładowy komentarz. Pod tekstem pytanie „Napisano z pomocą AI?” ma opcje „Tak”, „Nie” i „Niepewne”. Zaznaczono „Tak”."
+          }
+        }
+      }
+    },
+    "onboarding.commentAuthorship.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comment authorship"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autorstwo komentarzy"
+          }
+        }
+      }
+    },
     "onboarding.continue" : {
       "extractionState" : "manual",
       "localizations" : {
