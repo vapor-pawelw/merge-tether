@@ -9,6 +9,8 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
 
     enum Source: Sendable { case global, repository, mergeRequest, draft }
 
+    enum AssignmentClaimState: Equatable, Sendable { case awaitingConfirmation, confirmed }
+
     struct Target: Codable, Hashable, Sendable {
         let host: String
         let username: String
@@ -210,10 +212,15 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
     }
 
     func awaitsAssignmentClaim(_ request: GitLabMergeRequest, target: Target) -> Bool {
-        assignmentClaimRequired(for: target) && request.isOpen
-            && request.author.username != target.username && request.isOwned(by: target.username, includingAssignee: true)
-            && request.projectID == target.projectID && request.iid == target.iid
-            && request.webURL.isGitLabMergeRequest(host: target.host, iid: request.iid)
+        assignmentClaimState(for: request, target: target) == .awaitingConfirmation
+    }
+
+    func assignmentClaimState(for request: GitLabMergeRequest, target: Target) -> AssignmentClaimState? {
+        guard treatsAssignedRequestsAsOwn, requiresAssignmentClaim, request.isOpen,
+              request.author.username != target.username, request.isOwned(by: target.username, includingAssignee: true),
+              request.projectID == target.projectID, request.iid == target.iid,
+              request.webURL.isGitLabMergeRequest(host: target.host, iid: request.iid) else { return nil }
+        return assignmentClaimRequired(for: target) ? .awaitingConfirmation : .confirmed
     }
 
     mutating func claimAssignment(for target: Target) {

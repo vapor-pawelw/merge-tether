@@ -327,6 +327,11 @@ struct MRCardPresentation {
         return request
     }
 
+    var assignmentClaimConfirmation: Chip? {
+        guard row.assignmentClaimState == .confirmed else { return nil }
+        return .init(title: .Board.boardAssignmentClaimConfirmed, symbol: "person.crop.circle.badge.checkmark")
+    }
+
     var showsAdditionalCommentReview: Bool {
         finishedState == nil && item.requiresCommentReview && item.drafts.isEmpty
             && (humanAction?.kind != .commentReview || assignmentClaimRequest != nil)
@@ -476,6 +481,8 @@ struct MRCardPresentation {
         if humanAction == nil, !busy, !allowsRemoval, item.draftCount > 0 {
             result.append(.init(title: .Board.boardCompactDrafts(item.draftCount), symbol: "text.bubble"))
         }
-        return Array(result.prefix(2))
+        var visible = Array(result.prefix(2))
+        if let assignmentClaimConfirmation { visible.append(assignmentClaimConfirmation) }
+        return visible
     }
 }

@@ -26,6 +26,7 @@ struct MRActionLabel: View {
 
 struct MRActionProgressLabel<Title: View>: View {
     let working: Bool
+    var workingTitle: LocalizedStringResource = .Remote.remoteRunning
     @ViewBuilder var title: () -> Title
 
     var body: some View {
@@ -34,7 +35,7 @@ struct MRActionProgressLabel<Title: View>: View {
             if working {
                 HStack(spacing: 5) {
                     ProgressView().controlSize(.mini).accessibilityHidden(true)
-                    Text(.Remote.remoteRunning)
+                    Text(workingTitle)
                 }
             }
         }

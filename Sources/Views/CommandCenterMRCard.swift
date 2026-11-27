@@ -819,7 +819,9 @@ struct AssignedMergeRequestClaimButton: View {
                     confirming = false
                 }
             } label: {
-                MRActionProgressLabel(working: confirming) { Text(.Board.boardAssignmentClaim) }
+                MRActionProgressLabel(working: confirming, workingTitle: .Board.boardAssignmentClaimChecking) {
+                    Text(.Board.boardAssignmentClaim)
+                }
             }
             .buttonStyle(.borderedProminent)
             .disabled(confirming)

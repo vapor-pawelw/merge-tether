@@ -12,7 +12,7 @@ struct MRProgressPresentationTests {
             commentReviewSnapshot: .init(request: request, discussions: []), mergeRequest: request, isAuthored: true)
         let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [],
             attentionPresentation: .init(evidence: item, humanActionRequired: true),
-            waitsForAssignmentClaim: awaitsClaim)
+            assignmentClaimState: awaitsClaim ? .awaitingConfirmation : nil)
         let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
             allowsRemoval: false, assistantReady: true)
 

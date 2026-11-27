@@ -36,6 +36,20 @@
         }
       }
     },
+    "board.assignment.claimChecking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Checking assignment…"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Sprawdzanie przypisania…"}}
+      }
+    },
+    "board.assignment.claimConfirmed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Assignment confirmed"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Przejęcie potwierdzone"}}
+      }
+    },
     "board.assignment.claimFailed": {
       "extractionState": "manual",
       "localizations": {

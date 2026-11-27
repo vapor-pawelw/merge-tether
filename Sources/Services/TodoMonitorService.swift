@@ -1694,6 +1694,12 @@ final class TodoMonitorService {
               settings.confirmAssignedOwnership(live, target: target) else { return false }
         boardAttentionPresenter.updateAttention(pendingUserAttention)
         authoredMergeRequests.refreshIfNeeded()
+        if settings.automaticWritesAllowed, !settings.ignoredMergeRequests.contains(target),
+           settings.effectiveAutomationScope.permits(live, host: target.host, username: target.username),
+           AuthorFeedbackCoordinator.permitsBackgroundCheck(for: live, configuration: settings.automation,
+               host: target.host, username: target.username, mergeOptedIn: settings.autoMergePreference(for: target) == .on) {
+            await refreshFeedbackDecisions(for: target, revision: revision)
+        }
         await routeMRTodos(host: target.host, username: target.username)
         return true
     }

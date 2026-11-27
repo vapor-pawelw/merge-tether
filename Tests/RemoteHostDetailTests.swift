@@ -142,6 +142,7 @@ import MergeTetherRemote
         let card = try #require(displayed.cards.first { $0.id == "mr:1:2" })
         let action = try #require(card.actions.first { $0.kind == .claimAssignment })
         #expect(card.primaryCTA?.actionID == action.id)
+        #expect(card.presentation?.chips.contains { $0.symbol == "person.crop.circle.badge.checkmark" } == false)
         if reassigned {
             f.gitlab.write("request", f.gitlab.text("request").replacingOccurrences(
                 of: #""assignees":[{"id":3,"username":"me","name":"Me"}]"#,
@@ -157,6 +158,22 @@ import MergeTetherRemote
         let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2)
         #expect(settings.automation.scope.awaitsAssignmentClaim(f.source, target: target) == reassigned)
         #expect(f.gitlab.requests.allSatisfy { $0.method != "POST" && $0.method != "PUT" })
+        let refreshed = try await f.board(mrBoardActions: true)
+        let updated = try #require(refreshed.cards.first { $0.id == card.id })
+        #expect(updated.presentation?.chips.contains { $0.symbol == "person.crop.circle.badge.checkmark" } == !reassigned)
+    }
+
+    @Test(arguments: [false, true])
+    func claimingStartsAFeedbackRefreshWhenAutomationIsEnabled(_ automationEnabled: Bool) async throws {
+        let f = try Fixture(assigned: true, automationEnabled: automationEnabled); defer { f.clean() }
+        _ = try await f.board(mrBoardActions: true)
+        let discussions = "/projects/1/merge_requests/2/discussions?per_page=100"
+        let previousReads = f.gitlab.requests.filter { $0.endpoint == discussions }.count
+
+        #expect(await f.monitor.confirmAssignedOwnership(of: f.source))
+
+        let currentReads = f.gitlab.requests.filter { $0.endpoint == discussions }.count
+        #expect((currentReads > previousReads) == automationEnabled)
     }
 
     @Test func phonePinSurvivesAutomaticSortingAndRejectsAnOlderPinState() async throws {
@@ -910,7 +927,7 @@ import MergeTetherRemote
                     threads: detailNotes.isEmpty ? nil : [.init(id: "thread", state: .open, notes: detailNotes)], truncated: detailsTruncated))
             }, readAvatarThumbnail: readAvatarThumbnail, makeConnection: { [transport] _ in transport })
 
-        init(draft: Bool = false, assigned: Bool = false, avatar: URL? = nil,
+        init(draft: Bool = false, assigned: Bool = false, automationEnabled: Bool = false, avatar: URL? = nil,
              readAvatarThumbnail: @escaping @Sendable (URL) async -> Data? = { _ in nil }) throws {
             self.readAvatarThumbnail = readAvatarThumbnail
             defaults = try #require(UserDefaults(suiteName: suite))
@@ -925,7 +942,7 @@ import MergeTetherRemote
                 settings.automation.applyPreset(.safe, for: .codex)
                 settings.treatAssignedMergeRequestsAsOwn = true
                 settings.automation.requiresAssignmentClaim = true
-                settings.setAutomationGloballyEnabled(false)
+                settings.setAutomationGloballyEnabled(automationEnabled)
                 initial = initial.replacingOccurrences(of: #""author":{"id":3,"username":"me","name":"Me"}"#,
                     with: #""author":{"id":4,"username":"other","name":"Other"},"assignees":[{"id":3,"username":"me","name":"Me"}]"#)
             }

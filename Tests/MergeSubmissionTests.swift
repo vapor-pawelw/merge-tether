@@ -1206,7 +1206,11 @@ import Testing
             let restored = SettingsManager(defaults: defaults)
             #expect(!restored.automation.scope.awaitsAssignmentClaim(beforeClaim.request, target: target))
             boardInput.automation = restored.configuredAutomation
-            #expect(MRBoardProjector(input: boardInput).board().own.first?.waitsForAssignmentClaim == false)
+            let claimed = try #require(MRBoardProjector(input: boardInput).board().own.first)
+            #expect(!claimed.waitsForAssignmentClaim)
+            let presentation = MRCardPresentation(row: claimed, reviewingContext: ReviewingContext(row: claimed),
+                allowsRemoval: false, assistantReady: true)
+            #expect(presentation.chips.contains { $0.symbol == "person.crop.circle.badge.checkmark" })
 
             monitor.refreshIfNeeded()
             while monitor.isLoading { await Task.yield() }

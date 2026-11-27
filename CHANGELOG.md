@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Show when MergeTether is checking a claim and when the assignment was confirmed. Refresh the assigned MR's feedback immediately when the current automation rules allow it.
+
 - Group draft regeneration with agent chat and phone pairing in the Mac toolbar, and enlarge its icon.
 
 - Place the merge request description label above its box on Mac, iPhone and iPad.

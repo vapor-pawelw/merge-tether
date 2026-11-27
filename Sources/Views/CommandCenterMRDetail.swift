@@ -189,6 +189,8 @@ private struct CommandCenterMRDetailContent: View {
                             Text(.Board.boardAssignmentAwaitingClaim)
                             AssignedMergeRequestClaimButton(request: request, monitor: monitor)
                         }
+                    } else if let confirmation = presentation.assignmentClaimConfirmation {
+                        BoardStatusChip(title: confirmation.title, symbol: confirmation.symbol)
                     }
                     // The decision the user has to make leads; merge state and automation rules support it.
                     if showsDecisions {
