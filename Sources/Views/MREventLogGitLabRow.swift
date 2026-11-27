@@ -17,9 +17,28 @@ struct MREventLogGitLabRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
+                if let publication = appEvent?.publication, let original = publication.body,
+                   original != event.body.map(GlabService.redactWorkflowEvidence) {
+                    MREventLogPublishedText(publication: publication)
+                }
+                if let location = event.location ?? appEvent?.publication?.location {
+                    Text(verbatim: location).monospaced().textSelection(.enabled)
+                }
                 Text(event.createdAt, format: .dateTime.year().month().day().hour().minute().second())
                     .foregroundStyle(.secondary)
-                if let noteID = event.noteID, let url = noteURL(noteID) {
+                if let updatedAt = event.updatedAt {
+                    HStack {
+                        Text(.AutomationHistory.automationHistoryUpdatedAt)
+                        Text(updatedAt, format: .dateTime.year().month().day().hour().minute().second())
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                if let appEvent {
+                    Text(appEvent.origin == .automatic ? .AutomationHistory.automationHistoryOriginAutomatic
+                        : .AutomationHistory.automationHistoryOriginManual)
+                        .foregroundStyle(.secondary)
+                }
+                if let noteID = event.noteID, let url = mergeRequestURL.gitLabNoteURL(noteID) {
                     if case .comment = event.kind, let openDiscussion {
                         Button {
                             if !openDiscussion(noteID, event.discussionID) { openURL(url) }
@@ -33,32 +52,40 @@ struct MREventLogGitLabRow: View {
             .padding(.vertical, 5)
         } label: {
             MREventLogRowHeader(title: title, context: context, createdAt: event.createdAt,
-                source: appEvent == nil ? .gitLab : .mergeTether, isAutomatic: appEvent?.origin == .automatic)
+                source: appEvent == nil ? .gitLab : .mergeTether, isAutomatic: appEvent?.origin == .automatic,
+                person: event.person, personFirst: event.systemHeadline != nil)
         }
+        .environment(\.gitLabPersonSourceURL, mergeRequestURL)
         .padding(.vertical, 3)
     }
 
     private var title: Text {
         if let appEvent, appEvent.publicationBasedOnAuthorTrust == true { Text(appEvent.title) }
-        else if let headline = event.systemHeadline { Text(verbatim: headline) }
+        else if case .systemNote = event.kind, let summary = event.summary { Text(verbatim: summary) }
         else { Text(event.title) }
     }
 
     private var context: Text? {
-        let parts: [String?]
-        switch event.kind {
-        case .comment: parts = [event.actor, event.summary]
-        case .systemNote where event.systemHeadline != nil: parts = []
-        default: parts = [event.actor]
-        }
-        let context = parts.compactMap { $0 }.joined(separator: " · ")
-        return context.isEmpty ? nil : Text(verbatim: context)
+        guard case .comment = event.kind, let summary = event.summary else { return nil }
+        return Text(verbatim: summary)
     }
+}
 
-    private func noteURL(_ id: Int) -> URL? {
-        var components = URLComponents(url: mergeRequestURL, resolvingAgainstBaseURL: false)
-        components?.fragment = "note_\(id)"
-        return components?.url
+struct MREventLogPublishedText: View {
+    let publication: MRAutomationEvent.Publication
+
+    var body: some View {
+        if let body = publication.body, !body.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(.AutomationHistory.automationHistoryPublishedText).fontWeight(.medium)
+                Text(SafeInlineMarkdown.render(body) ?? AttributedString(body))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                if publication.bodyTruncated == true {
+                    Text(.AutomationHistory.automationHistoryPublishedTextTruncated).foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 }
 
@@ -69,12 +96,16 @@ struct MREventLogRowHeader: View {
     let createdAt: Date
     let source: Source
     let isAutomatic: Bool
+    var person: PersonIdentity? = nil
+    var personFirst = false
 
     var body: some View {
         HStack(spacing: 6) {
             HStack(spacing: 5) {
+                if personFirst { personLabel }
                 title.fontWeight(.medium).lineLimit(1)
-                    .layoutPriority(1)
+                    .layoutPriority(personFirst ? 0 : 1)
+                if !personFirst { personLabel }
                 if let context {
                     context.foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -90,7 +121,14 @@ struct MREventLogRowHeader: View {
                 .help(Text(createdAt, format: .dateTime.year().month().day().hour().minute().second()))
         }
         .font(.caption)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: person == nil ? .combine : .contain)
+    }
+
+    @ViewBuilder private var personLabel: some View {
+        if let person {
+            PersonLabel(person: person, showsAvatar: false, showsHandleWhenUnnamed: true)
+                .layoutPriority(1)
+        }
     }
 
     private func badge(_ title: LocalizedStringResource, color: Color) -> some View {

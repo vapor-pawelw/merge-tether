@@ -950,6 +950,13 @@ struct TodoAutomationContext {
 }
 
 extension URL {
+    func gitLabNoteURL(_ id: Int) -> URL? {
+        guard id > 0, var components = URLComponents(url: self, resolvingAgainstBaseURL: false) else { return nil }
+        components.query = nil
+        components.fragment = "note_\(id)"
+        return components.url
+    }
+
     var gitLabProjectPath: String {
         path.components(separatedBy: "/-/merge_requests/").first?
             .trimmingCharacters(in: CharacterSet(charactersIn: "/")) ?? ""

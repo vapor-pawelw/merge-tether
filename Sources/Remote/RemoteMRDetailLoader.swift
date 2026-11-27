@@ -177,8 +177,9 @@ struct RemoteMRGitLabHistory: Sendable {
                 return false
             }
             return (Array(events.prefix(retainedCount)) + relatedNotes).map { event in
-                .init(id: event.id, createdAt: event.createdAt, actor: event.actor, kind: event.kind,
-                    body: event.body.map { String($0.prefix(4_000)) })
+                let body = event.body.map { String($0.prefix(4_000)) }
+                return MRGitLabActivity(id: event.id, createdAt: event.createdAt, person: event.person,
+                    kind: event.kind, body: body, updatedAt: event.updatedAt, location: event.location, resolved: event.resolved)
             }
         }
         return history

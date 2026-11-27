@@ -6,6 +6,7 @@ struct MRAutomationEventLogRow: View {
     let monitor: TodoMonitorService
     let initiallyExpandedJobID: UUID?
     let readOnly: Bool
+    @Environment(\.gitLabPersonSourceURL) private var sourceURL
     @State private var detailsExpanded: Bool
 
     init(entry: MRAutomationHistory.Entry, runs: [AssistantAutomationRunner.Handoff], monitor: TodoMonitorService,
@@ -25,7 +26,7 @@ struct MRAutomationEventLogRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 MREventLogRowHeader(title: Text(title),
                     context: Text(stateLabel).foregroundColor(needsAttention ? .orange : .secondary), createdAt: entry.createdAt,
-                    source: .mergeTether, isAutomatic: entry.isAutomatic)
+                    source: .mergeTether, isAutomatic: entry.isAutomatic, person: publicationAuthor)
                 if let reason = reviewReason {
                     Text(verbatim: reason).foregroundStyle(.secondary)
                 }
@@ -36,6 +37,11 @@ struct MRAutomationEventLogRow: View {
         .onChange(of: initiallyExpandedJobID) { _, id in
             if case .job(let job, _) = entry.source, job.id == id { detailsExpanded = true }
         }
+    }
+
+    private var publicationAuthor: PersonIdentity? {
+        guard case .event(let event) = entry.source, event.action == .publication else { return nil }
+        return .init(name: nil, username: event.target.username)
     }
 
     private var reviewReason: String? {
@@ -148,10 +154,19 @@ struct MRAutomationEventLogRow: View {
                 raw(.AutomationHistory.automationHistoryRunID, workflow.assistantJobID?.uuidString)
             case .event(let event):
                 raw(.AutomationHistory.automationHistoryEventID, event.id.uuidString)
-                if event.action.isActionPrompt {
+                timestamp(.AutomationHistory.automationHistoryEventTime, event.createdAt)
+                if let publication = event.publication {
+                    MREventLogPublishedText(publication: publication)
+                    raw(.AutomationHistory.automationHistoryDraftID, publication.draftID.map(String.init))
+                    raw(.AutomationHistory.automationHistoryDiscussionID, publication.discussionID)
+                    raw(.AutomationHistory.automationHistoryLocation, publication.location)
+                } else if event.action.isActionPrompt {
                     raw(.AutomationHistory.automationHistorySummary, event.message)
                 } else {
                     raw(.AutomationHistory.automationHistoryError, event.message.map(AssistantJobExecutor.ExecutionError.displayMessage))
+                }
+                if let note = event.publishedNoteID, let url = sourceURL?.gitLabNoteURL(note) {
+                    Link(destination: url) { Text(.CommandCenter.commandCenterOpenGitLab) }
                 }
                 raw(.AutomationHistory.automationHistoryIntentID, event.intentID?.uuidString)
                 raw(.AutomationHistory.automationHistoryRunID, event.jobID?.uuidString)

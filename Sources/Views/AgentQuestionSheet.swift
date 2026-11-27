@@ -93,8 +93,11 @@ struct AgentQuestionSheet: View {
                             case .user: Text(verbatim: message.text).textSelection(.enabled)
                             case .refusal: Text(.AgentQuestion.agentQuestionReadOnly)
                             case .agent:
-                                ExtraContextMarkdown(source: message.text)
-                                    .environment(\.openURL, OpenURLAction(handler: openLink))
+                                ExtraContextMarkdown(source: message.text, people: message.people ?? [:])
+                                    .environment(\.openURL, OpenURLAction { url in
+                                        if message.people?[url] != nil || message.noteLinks?.contains(url) == true { return .systemAction }
+                                        return openLink(url)
+                                    })
                                 if let notice = message.sourceNotice {
                                     Text(notice == .mainFallback ? .AgentQuestion.agentQuestionSourceMain
                                          : .AgentQuestion.agentQuestionSourceUnavailable)

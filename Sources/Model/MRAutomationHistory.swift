@@ -11,6 +11,25 @@ struct MRAutomationEvent: Codable, Identifiable, Equatable, Sendable {
     }
     enum Origin: String, Codable, Sendable { case manual, automatic }
     enum State: String, Codable, Sendable { case requested, queued, failed, completed, blocked }
+
+    struct Publication: Codable, Equatable, Sendable {
+        let draftID: Int?
+        let discussionID: String?
+        let location: String?
+        let body: String?
+        let bodyTruncated: Bool?
+
+        init(_ draft: GitLabDraftNote) {
+            draftID = draft.id
+            discussionID = draft.discussionID
+            location = draft.position?.location
+            let clean = draft.note.map(GlabService.redactWorkflowEvidence)
+            let limit = 32_768
+            body = clean.map { String(decoding: $0.utf8.prefix(limit), as: UTF8.self) }
+            bodyTruncated = clean.map { $0.utf8.count > limit }
+        }
+    }
+
     let id: UUID
     var target: MRAutomationScope.Target
     let createdAt: Date
@@ -24,6 +43,7 @@ struct MRAutomationEvent: Codable, Identifiable, Equatable, Sendable {
     var approvedHeadSHA: String? = nil
     var publishedNoteID: Int? = nil
     var publicationBasedOnAuthorTrust: Bool? = nil
+    var publication: Publication? = nil
 
     var title: LocalizedStringResource {
         switch action {
@@ -181,12 +201,14 @@ extension SettingsManager {
                                origin: MRAutomationEvent.Origin, state: MRAutomationEvent.State,
                                message: String? = nil, intentID: UUID? = nil, jobID: UUID? = nil,
                                relatedJobID: UUID? = nil, approvedHeadSHA: String? = nil,
-                               publishedNoteID: Int? = nil, publicationBasedOnAuthorTrust: Bool? = nil, now: Date = Date()) {
+                               publishedNoteID: Int? = nil, publicationBasedOnAuthorTrust: Bool? = nil,
+                               publication: MRAutomationEvent.Publication? = nil, id: UUID = UUID(), now: Date = Date()) {
         guard target.iid != nil else { return }
-        let event = MRAutomationEvent(id: UUID(), target: target, createdAt: now, action: action,
+        let event = MRAutomationEvent(id: id, target: target, createdAt: now, action: action,
             origin: origin, state: state, message: message.map(GlabService.redactWorkflowEvidence),
             intentID: intentID, jobID: jobID, relatedJobID: relatedJobID, approvedHeadSHA: approvedHeadSHA,
-            publishedNoteID: publishedNoteID, publicationBasedOnAuthorTrust: publicationBasedOnAuthorTrust)
+            publishedNoteID: publishedNoteID, publicationBasedOnAuthorTrust: publicationBasedOnAuthorTrust,
+            publication: publication)
         var counts: [MRAutomationScope.Target: Int] = [:]
         automationEvents = ([event] + automationEvents).sorted {
             $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt > $1.createdAt
@@ -195,6 +217,13 @@ extension SettingsManager {
             return counts[$0.target, default: 0] <= 100
         }
         automationEvents = Array(automationEvents.prefix(1_000))
+        save()
+    }
+
+    func linkAutomationPublication(_ id: UUID, noteID: Int) {
+        guard let index = automationEvents.firstIndex(where: { $0.id == id && $0.action == .publication }),
+              noteID > 0, automationEvents[index].publishedNoteID == nil else { return }
+        automationEvents[index].publishedNoteID = noteID
         save()
     }
 }

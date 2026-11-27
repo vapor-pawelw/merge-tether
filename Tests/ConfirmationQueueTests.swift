@@ -1210,7 +1210,7 @@ import MergeTetherRemote
     }
 
 
-    @Test(arguments: ["selected", "all", "remote"], ["current", "captureFailure", "postFailure"])
+    @Test(arguments: ["selected", "all", "remote"], ["current", "captureFailure", "postFailure", "plain"])
     func publicationRecordsOnlyCertainAppOriginsAndDisplayFailuresNeverChangePublication(flow: String, evidence: String) async throws {
         // given
         let harness = try makeHarness(assistantWorked: false)
@@ -1223,8 +1223,10 @@ import MergeTetherRemote
         let draft = try #require(item.drafts.first)
         let context = AICommentProvenanceStore.Context(host: host, username: "me", userID: 3, projectID: 1, iid: 2)
         let directory = harness.folder.appending(path: "comment-origins")
-        try AICommentProvenanceStore.recordGenerated([.init(id: 11, bodySHA256: AICommentAssessmentStore.digest(body))],
-            baseline: [], current: [draft], context: context, runID: UUID(), headSHA: head, in: directory)
+        if evidence != "plain" {
+            try AICommentProvenanceStore.recordGenerated([.init(id: 11, bodySHA256: AICommentAssessmentStore.digest(body))],
+                baseline: [], current: [draft], context: context, runID: UUID(), headSHA: head, in: directory)
+        }
         let after = #"[{"id":"thread","notes":[{"id":30,"author":{"id":8,"username":"reviewer"},"body":"Feedback","system":false},{"id":40,"author":{"id":3,"username":"me"},"body":"App generated reply","system":false}]}]"#
         try harness.write("published-discussions.json", after)
         let handler = try #require(harness.gitlab.handler)
@@ -1259,8 +1261,12 @@ import MergeTetherRemote
         #expect(AICommentProvenanceStore.isGenerated(published, discussionID: "thread", context: context, in: directory) == (evidence == "current"))
         let event = try #require(harness.settings.automationEvents.first { $0.action == .publication })
         #expect(event.origin == .manual && event.state == .completed)
-        #expect(event.publishedNoteID == (evidence == "current" ? 40 : nil))
-        #expect(failedRead == (evidence != "current"))
+        #expect(event.publishedNoteID == (["current", "plain"].contains(evidence) ? 40 : nil))
+        let receipt = String(decoding: try JSONEncoder().encode(event), as: UTF8.self)
+        #expect(receipt.contains("App generated reply"))
+        #expect(receipt.contains(#""draftID":11"#))
+        #expect(receipt.contains(#""discussionID":"thread""#))
+        #expect(failedRead == (["captureFailure", "postFailure"].contains(evidence)))
     }
 
     @Test(arguments: ["selected", "all", "remote"], ["open", "closedAfterPreview", "closedBeforePreview"])

@@ -371,6 +371,10 @@ struct GitLabDraftNote: Codable, Equatable, Sendable {
         }
 
         var isAnchored: Bool { newPath != nil || oldPath != nil || newLine != nil || oldLine != nil }
+        var location: String? {
+            guard let path = newPath ?? oldPath else { return nil }
+            return (newLine ?? oldLine).map { "\(path):\($0)" } ?? path
+        }
 
         // The saved publication and provenance records compare line locations and may predate these preview fields.
         static func == (lhs: Self, rhs: Self) -> Bool {
@@ -386,10 +390,7 @@ struct GitLabDraftNote: Codable, Equatable, Sendable {
     }
 
     var kind: Kind {
-        if let path = position?.newPath ?? position?.oldPath {
-            let line = position?.newLine ?? position?.oldLine
-            return .line(line.map { "\(path):\($0)" } ?? path)
-        }
+        if let location = position?.location { return .line(location) }
         return discussionID == nil ? .general : .reply
     }
 

@@ -229,13 +229,13 @@ enum AICommentProvenanceStore {
                 if let run = generation(for: draft, context: context, in: directory) { generated[id] = run }
             }
         }
-        guard !generated.isEmpty else { return nil }
         return .init(context: context, drafts: drafts, generated: generated)
     }
 
     nonisolated static func capturePublication(_ drafts: [GitLabDraftNote], context: Context,
         before: [GitLabMergeRequestDiscussion], in directory: URL = directory) -> Publication? {
-        guard let prepared = preparePublication(drafts, context: context, in: directory) else { return nil }
+        guard let prepared = preparePublication(drafts, context: context, in: directory),
+              !prepared.generated.isEmpty else { return nil }
         return capturePublication(prepared, before: before)
     }
 

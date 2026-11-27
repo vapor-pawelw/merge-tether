@@ -562,14 +562,14 @@ extension GlabService {
     }
 
     func fetchMergeRequestDiscussions(
-        projectID: Int, iid: Int, host: String, timeout: TimeInterval = 45
+        projectID: Int, iid: Int, host: String, timeout: TimeInterval = 45, cacheResult: Bool = true
     ) async throws -> [GitLabMergeRequestDiscussion] {
         let revision = accountRevision, executable = glabPath, readAt = Date()
         let discussions: [GitLabMergeRequestDiscussion] = try await fetchMergeRequestPages(
             "/projects/\(projectID)/merge_requests/\(iid)/discussions?per_page=100",
             host: host, timeout: timeout
         )
-        if !Task.isCancelled, EvidenceContext.sameAccountRevision(revision, accountRevision), executable == glabPath, host == resolvedHost, currentUsername != nil {
+        if cacheResult, !Task.isCancelled, EvidenceContext.sameAccountRevision(revision, accountRevision), executable == glabPath, host == resolvedHost, currentUsername != nil {
             rememberDiscussions(discussions, projectID: projectID, iid: iid, readAt: readAt)
         }
         return discussions

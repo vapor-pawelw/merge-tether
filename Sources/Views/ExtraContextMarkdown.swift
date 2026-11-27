@@ -1,9 +1,11 @@
+import MergeTetherRemote
 import SwiftUI
 
 /// Block-level Markdown for app-only agent explanations, shared by the Mac and iOS apps.
 /// Only http(s) links stay active; images and HTML are never loaded.
 struct ExtraContextMarkdown: View {
     let source: String
+    var people: [URL: RemotePerson] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -41,8 +43,75 @@ struct ExtraContextMarkdown: View {
     }
 
     private func inline(_ text: String) -> some View {
-        Text(ExtraContextMarkdownBlock.inline(text)).fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        let rendered = ExtraContextMarkdownBlock.inline(text)
+        return Group {
+            if rendered.runs.contains(where: { $0.link.map { people[$0] != nil } == true }) {
+                ExtraContextPeopleText(text: rendered, people: people)
+            } else {
+                Text(rendered)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct ExtraContextPeopleText: View {
+    enum Part {
+        case text(AttributedString)
+        case person(URL, RemotePerson)
+    }
+
+    let text: AttributedString
+    let people: [URL: RemotePerson]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                StatusFlowLayout(spacing: 3) {
+                    ForEach(Array(line.enumerated()), id: \.offset) { _, word in
+                        HStack(alignment: .firstTextBaseline, spacing: 0) {
+                            ForEach(Array(word.enumerated()), id: \.offset) { _, part in
+                                switch part {
+                                case .text(let value): Text(value)
+                                case .person(let url, let person):
+                                    PersonLabel(person: .init(person), showsAvatar: false, showsHandleWhenUnnamed: true)
+                                        .environment(\.gitLabPersonSourceURL, url)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var lines: [[[Part]]] {
+        var lines: [[[Part]]] = []
+        var line: [[Part]] = []
+        var word: [Part] = []
+        func finishWord() {
+            if !word.isEmpty { line.append(word); word = [] }
+        }
+        for (link, range) in text.runs[\.link] {
+            if let link, let person = people[link] {
+                word.append(.person(link, person))
+                continue
+            }
+            let characters = text[range].characters
+            var start = characters.startIndex
+            for index in characters.indices where characters[index].isWhitespace {
+                if index > start { word.append(.text(AttributedString(text[start..<index]))) }
+                finishWord()
+                if characters[index].isNewline, !line.isEmpty { lines.append(line); line = [] }
+                start = characters.index(after: index)
+            }
+            if start < characters.endIndex { word.append(.text(AttributedString(text[start..<characters.endIndex]))) }
+        }
+        finishWord()
+        if !line.isEmpty { lines.append(line) }
+        return lines
     }
 }
 

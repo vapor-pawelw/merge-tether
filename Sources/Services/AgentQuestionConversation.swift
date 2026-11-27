@@ -1,4 +1,5 @@
 import Foundation
+import MergeTetherRemote
 import Observation
 import OSLog
 
@@ -16,6 +17,8 @@ final class AgentQuestionConversation {
         let role: Role
         let text: String
         var sourceNotice: AgentQuestionSource.Notice?
+        var people: [URL: RemotePerson]?
+        var noteLinks: Set<URL>?
     }
 
     private struct Transcript: Codable {
@@ -59,6 +62,11 @@ final class AgentQuestionConversation {
     private static let log = Logger(subsystem: "com.vaporpw.MergeTether", category: "agent-question")
     private enum AnswerStage: String { case question, requestedEvidence }
 
+    private struct Answer {
+        let turn: AgentQuestionCLI.Turn
+        var notice: AgentQuestionSource.Notice? = nil
+        let details: [AgentQuestionContext.Detail]
+    }
 
     @ObservationIgnored private let root: URL
     @ObservationIgnored private let source: AgentQuestionSource
@@ -146,15 +154,15 @@ final class AgentQuestionConversation {
                                           configuration: configuration, directory: directory)
                 guard current(id, owner: owner, revision: revision, monitor: monitor) else { return }
                 if first.reply.requestsEvidence { stage = .requestedEvidence }
-                let (turn, notice) = try await complete(first, question: question, installedHelp: installedHelp,
+                let response = try await complete(first, question: question, details: details, installedHelp: installedHelp,
                     owner: owner, executable: executable, configuration: configuration, directory: directory, monitor: monitor,
                     isCurrent: { self.current(id, owner: owner, revision: revision, monitor: monitor) })
                 guard current(id, owner: owner, revision: revision, monitor: monitor) else { return }
-                guard let answer = turn.reply.answer?.trimmingCharacters(in: .whitespacesAndNewlines), !answer.isEmpty else {
+                guard let answer = response.turn.reply.answer?.trimmingCharacters(in: .whitespacesAndNewlines), !answer.isEmpty else {
                     throw AgentQuestionCLI.Failure.invalidResponse
                 }
-                transcript?.session = turn.session
-                append(.init(role: .agent, text: String(GlabService.redactWorkflowEvidence(answer).prefix(16_000)), sourceNotice: notice))
+                transcript?.session = response.turn.session
+                append(answerMessage(answer, response: response))
             } catch {
                 guard current(id, owner: owner, revision: revision, monitor: monitor) else { return }
                 let cause = Failure(answerError: error)
@@ -165,47 +173,73 @@ final class AgentQuestionConversation {
         }
     }
 
-    private func complete(_ first: AgentQuestionCLI.Turn, question: AgentQuestionInput, installedHelp: [String],
+    private func complete(_ first: AgentQuestionCLI.Turn, question: AgentQuestionInput, details: [AgentQuestionContext.Detail],
+                          installedHelp: [String],
                           owner: Owner, executable: URL,
                           configuration: AgentQuestionCLI.Configuration, directory: URL,
                           monitor: TodoMonitorService, isCurrent: () -> Bool)
-        async throws -> (AgentQuestionCLI.Turn, AgentQuestionSource.Notice?) {
-        guard first.reply.requestsEvidence else { return (first, nil) }
+        async throws -> Answer {
+        guard first.reply.requestsEvidence else { return .init(turn: first, details: details) }
         guard isCurrent() else { throw CancellationError() }
 
         var request = first
         var help = installedHelp
         var iids = Self.mentionedIIDs(in: question.text) + (first.reply.mergeRequestIIDs ?? [])
+        var history = await monitor.freshAgentQuestionDetails(for: iids)
+        guard isCurrent() else { throw CancellationError() }
         let additionalHelp = AgentQuestionSource.installedHelp(for: first.reply.sourceTerms ?? [], matching: .topics)
             .filter { !installedHelp.contains($0) }
         if !additionalHelp.isEmpty {
             help += additionalHelp
-            let guide = Prompt(question: question.text, snapshot: nil, mergeRequestDetails: monitor.agentQuestionDetails(for: iids),
+            let guide = Prompt(question: question.text, snapshot: nil, mergeRequestDetails: history,
                                installedHelp: help, source: nil, evidenceResponse: false)
             request = try await ask(guide, owner: owner, executable: executable, session: request.session,
                                     configuration: configuration, directory: directory)
             guard isCurrent() else { throw CancellationError() }
-            guard request.reply.requestsEvidence else { return (request, nil) }
-            iids += request.reply.mergeRequestIIDs ?? []
+            guard request.reply.requestsEvidence else { return .init(turn: request, details: history) }
+            let additionalIIDs = (request.reply.mergeRequestIIDs ?? []).filter { !iids.contains($0) }
+            if !additionalIIDs.isEmpty {
+                iids += additionalIIDs
+                history = await monitor.freshAgentQuestionDetails(for: iids)
+            }
         }
 
-        let details = monitor.agentQuestionDetails(for: iids)
         let evidence: AgentQuestionSource.Evidence?
         if let terms = request.reply.sourceTerms, !terms.isEmpty {
             evidence = try await source.evidence(for: terms, build: .installed)
         } else { evidence = nil }
         guard isCurrent() else { throw CancellationError() }
-        let prompt = Prompt(question: question.text, snapshot: nil, mergeRequestDetails: details,
+        let prompt = Prompt(question: question.text, snapshot: nil, mergeRequestDetails: history,
                             installedHelp: help, source: evidence, evidenceResponse: true)
         let turn = try await ask(prompt, owner: owner, executable: executable, session: request.session,
                                  configuration: configuration, directory: directory)
-        return (turn, evidence?.notice)
+        return .init(turn: turn, notice: evidence?.notice, details: history)
+    }
+
+    private func answerMessage(_ answer: String, response: Answer) -> Message {
+        let text = String(GlabService.redactWorkflowEvidence(answer).prefix(16_000))
+        var people: [URL: RemotePerson] = [:]
+        var noteLinks = Set<URL>()
+        for message in messages {
+            people.merge((message.people ?? [:]).filter { text.contains($0.key.absoluteString) },
+                         uniquingKeysWith: { _, latest in latest })
+            noteLinks.formUnion((message.noteLinks ?? []).filter { text.contains($0.absoluteString) })
+        }
+        for detail in response.details {
+            for link in detail.people where text.contains(link.url.absoluteString) {
+                if people[link.url]?.avatarURL == nil || link.person.avatarURL != nil { people[link.url] = link.person }
+            }
+            noteLinks.formUnion(detail.eventLog.compactMap(\.noteURL).filter { text.contains($0.absoluteString) })
+        }
+        return .init(role: .agent, text: text, sourceNotice: response.notice,
+                     people: people.isEmpty ? nil : people, noteLinks: noteLinks.isEmpty ? nil : noteLinks)
     }
 
     private func ask(_ prompt: Prompt, owner: Owner, executable: URL, session: UUID?,
                      configuration: AgentQuestionCLI.Configuration, directory: URL) async throws -> AgentQuestionCLI.Turn {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.withoutEscapingSlashes]
         return try await AgentQuestionCLI.run(owner.assistant, executable: executable, session: session,
                                              configuration: configuration, directory: directory, input: encoder.encode(prompt))
     }

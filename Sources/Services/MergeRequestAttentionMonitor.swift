@@ -2044,19 +2044,20 @@ final class MergeRequestAttentionMonitor {
         return .init(draft: draft, discussions: discussions, sourceNoteID: sourceID, appReceipt: nil)
     }
 
-    private func recordPublication(_ publication: PublicationEvidence?, id: Item.ID,
+    private func recordPublication(_ publication: PublicationEvidence?, draft: GitLabDraftNote, id: Item.ID,
         account: Account, user: GitLabAuthenticatedUser, origin: MRAutomationEvent.Origin,
         basedOnAuthorTrust: Bool = false) async {
         let generation = accountGeneration, revision = glab.accountRevision
+        let eventID = UUID()
+        settings?.recordAutomationEvent(target: commentReviewTarget(id, account: account),
+            action: .publication, origin: origin, state: .completed, publicationBasedOnAuthorTrust: basedOnAuthorTrust ? true : nil,
+            publication: .init(draft), id: eventID)
         var noteID: Int?
         func current() -> Bool {
             !Task.isCancelled && generation == accountGeneration && isCurrent(account, revision: revision)
         }
         defer {
-            // The write already succeeded, even if its note could not be matched for display.
-            settings?.recordAutomationEvent(target: commentReviewTarget(id, account: account),
-                action: .publication, origin: origin, state: .completed, publishedNoteID: noteID,
-                publicationBasedOnAuthorTrust: basedOnAuthorTrust ? true : nil)
+            if let noteID, current() { settings?.linkAutomationPublication(eventID, noteID: noteID) }
         }
         guard let publication, current() else { return }
         do {
@@ -2272,7 +2273,7 @@ final class MergeRequestAttentionMonitor {
                     $0.drafts.removeAll { $0 == draft }
 
                 }
-                await recordPublication(origin, id: id, account: account, user: user, origin: publicationOrigin,
+                await recordPublication(origin, draft: draft, id: id, account: account, user: user, origin: publicationOrigin,
                     basedOnAuthorTrust: publicationOrigin == .automatic && admitted.basis == .authorTrust)
             }
             publicationChecked = true
@@ -2572,7 +2573,7 @@ final class MergeRequestAttentionMonitor {
                 publishedDrafts[id, default: []].append(draft)
                 display(current)
                 rememberManuallyConfirmedAIReply(draft, discussions: discussions, id: id, account: account, user: user)
-                await recordPublication(origin, id: id, account: account, user: user, origin: .manual)
+                await recordPublication(origin, draft: draft, id: id, account: account, user: user, origin: .manual)
             }
         } catch {
             if currentContext() {
@@ -2619,7 +2620,12 @@ final class MergeRequestAttentionMonitor {
                         guard let position = uncertainDraft.position else { return true }
                         return position == note.position
                     }
-                    if matches.count == 1 { rememberPublicDraft(uncertainDraft) }
+                    if matches.count == 1 {
+                        rememberPublicDraft(uncertainDraft)
+                        settings?.recordAutomationEvent(target: commentReviewTarget(id, account: account),
+                            action: .publication, origin: .manual, state: .completed, publishedNoteID: matches.first?.id,
+                            publication: .init(uncertainDraft))
+                    }
                 }
             }
             display(current)
@@ -2720,7 +2726,7 @@ final class MergeRequestAttentionMonitor {
                 publishedNow.append(draft)
                 settings.recordAutomaticCommentPublication([draft], for: reviewTarget, revision: reviewRevision, evidence: completion)
                 updateItem(id) { $0.drafts.removeAll { $0 == draft } }
-                await recordPublication(origin, id: id, account: account, user: user, origin: publicationOrigin,
+                await recordPublication(origin, draft: draft, id: id, account: account, user: user, origin: publicationOrigin,
                     basedOnAuthorTrust: publicationOrigin == .automatic && admitted.basis == .authorTrust)
             }
             let remaining = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
@@ -3376,7 +3382,7 @@ final class MergeRequestAttentionMonitor {
                     $0.rememberPublishedReply(draft)
                 }
                 rememberManuallyConfirmedAIReply(draft, discussions: discussions, id: id, account: account, user: user)
-                await recordPublication(origin, id: id, account: account, user: user, origin: .manual)
+                await recordPublication(origin, draft: draft, id: id, account: account, user: user, origin: .manual)
             }
             previousDrafts[id] = nil
             if remaining.isEmpty {

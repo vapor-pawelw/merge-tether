@@ -108,9 +108,45 @@ extension AgentQuestionTests {
         defer { defaults.removePersistentDomain(forName: defaultsName) }
         let settings = SettingsManager(defaults: defaults)
         settings.automation.selectedAssistant = .codex
-        let glab = GlabService()
-        glab.resolvedHost = "gitlab.example.test"
-        glab.currentUsername = "reviewer"
+        let gitLab = InMemoryGitLab()
+        defer { gitLab.close() }
+        let publishedText = "Published inline feedback to check the timeout. " + String(repeating: "Long comment. ", count: 40)
+            + "Last sentence.\npassword=hidden-example"
+        var labelsUnavailable = false
+        gitLab.handler = { request in
+            #expect(request.method == "GET")
+            let prefix = "/projects/7/merge_requests/42/"
+            switch request.endpoint {
+            case "get": return InMemoryGitLab.output("gitlab.example.test")
+            case "status": return InMemoryGitLab.output("Logged in to gitlab.example.test as reviewer")
+            case "/user": return InMemoryGitLab.output(#"{"id":1,"username":"reviewer"}"#)
+            case prefix + "discussions?per_page=100":
+                return try InMemoryGitLab.json([["id": "thread", "notes": [
+                    ["id": 17, "body": publishedText, "created_at": "2026-11-19T10:01:00Z", "system": false,
+                     "author": ["id": 1, "username": "reviewer", "name": "The Reviewer",
+                                "avatar_url": "https://gitlab.example.test/uploads/avatar.png"]]
+                ]]])
+            case prefix + "resource_state_events?per_page=100":
+                return InMemoryGitLab.output(#"[{"id":1,"state":"opened","created_at":"2026-11-19T10:00:00Z"}]"#)
+            case prefix + "resource_label_events?per_page=100" where labelsUnavailable:
+                return InMemoryGitLab.output(error: "HTTP 503", code: 1)
+            case prefix + "resource_label_events?per_page=100", prefix + "resource_milestone_events?per_page=100":
+                return InMemoryGitLab.output("[]")
+            default: return try gitLab.unexpected(request)
+            }
+        }
+        let glab = gitLab.service(host: "gitlab.example.test", username: "reviewer")
+        settings.glabPath = glab.glabPath
+        settings.resolvedHost = glab.resolvedHost
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data("""
+            {"project_id":7,"iid":42,"author":{"id":1,"username":"reviewer","name":"The Reviewer"},
+             "title":"Sample","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/42",
+             "state":"opened","draft":false,"source_branch":"feature","target_branch":"main","sha":"head","labels":[]}
+            """.utf8))
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "reviewer", projectID: 7, iid: 42)
+        settings.mrLifecycleLedger.record(request, for: target)
+        settings.recordAutomationEvent(target: target, action: .publication, origin: .manual, state: .completed,
+                                       publishedNoteID: 17)
         let monitor = TodoMonitorService(settings: settings, glab: glab)
         let owner = try #require(monitor.agentQuestionOwner)
         let configuration = monitor.agentQuestionConfiguration
@@ -123,6 +159,9 @@ extension AgentQuestionTests {
         }
         let evidenceRequest = #"{"type":"item.completed","item":{"type":"agent_message","text":"{\"answer\":\"Provisional\",\"mergeRequestIIDs\":[42]}"}}"#
         let guideRequest = #"{"type":"item.completed","item":{"type":"agent_message","text":"{\"sourceTerms\":[\"claim assignment\"]}"}}"#
+        let profile = try #require(URL(string: "https://gitlab.example.test/reviewer"))
+        let note = try #require(URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/42#note_17"))
+        let historyAnswer = "[Comment](\(note.absoluteString)) by [The Reviewer](\(profile.absoluteString))"
         let fixture = """
             #!/bin/sh
             input=$(/bin/cat)
@@ -144,6 +183,25 @@ extension AgentQuestionTests {
                 case "$input" in
                     *'"evidenceResponse":true'*) printf '%s\\n' '\(try event(answer: "Grounded answer"))' ;;
                     *) printf '%s\\n' '\(evidenceRequest)' ;;
+                esac
+                printf '%s\\n' '{"type":"turn.completed"}'
+                exit 0
+            fi
+            if printf '%s' "$input" | /usr/bin/grep -Fq '"question":"What happened earlier in repo?"'; then
+                printf '%s\\n' '{"type":"thread.started","thread_id":"\(session)"}'
+                case "$input" in
+                    *'"evidenceResponse":false'*) printf '%s\\n' '\(evidenceRequest)' ;;
+                    *'"evidenceResponse":true'*)
+                        printf '%s' "$input" | /usr/bin/grep -Fq 'Last sentence.' &&
+                        printf '%s' "$input" | /usr/bin/grep -Fq 'The Reviewer' &&
+                        printf '%s' "$input" | /usr/bin/grep -Fq 'note_17' &&
+                        printf '%s' "$input" | /usr/bin/grep -Fq '"origin":"manual"' &&
+                        printf '%s' "$input" | /usr/bin/grep -Fq '"activityRead":"live"' &&
+                        printf '%s' "$input" | /usr/bin/grep -Fq '"id":"state/1"' || exit 1
+                        if printf '%s' "$input" | /usr/bin/grep -Eq 'hidden-example|avatar.png|event/'; then exit 1; fi
+                        printf '%s\\n' '\(try event(answer: historyAnswer))'
+                        ;;
+                    *) exit 1 ;;
                 esac
                 printf '%s\\n' '{"type":"turn.completed"}'
                 exit 0
@@ -195,6 +253,23 @@ extension AgentQuestionTests {
         #expect(restored.failure == nil)
         #expect(restored.messages.last?.text == "Grounded answer")
 
+        restored.submit("What happened earlier in repo?", owner: owner, executable: executable,
+                        configuration: configuration, monitor: monitor)
+        try await waitForQuestion(restored)
+        #expect(restored.failure == nil)
+        #expect(restored.messages.last?.text == historyAnswer)
+        #expect(restored.messages.last?.people?[profile]?.avatarURL?.lastPathComponent == "avatar.png")
+        #expect(restored.messages.last?.noteLinks == [note])
+        let restoredHistory = AgentQuestionConversation(root: storage, source: source)
+        restoredHistory.activate(owner)
+        #expect(restoredHistory.messages == restored.messages)
+        labelsUnavailable = true
+        let partial = try #require(await monitor.freshAgentQuestionDetails(for: [42, 42]).first)
+        #expect(partial.activityRead == .partial)
+        #expect(partial.missingActivitySources == ["label"])
+        #expect(partial.eventLog.first?.body?.contains("Last sentence.") == true)
+        #expect(partial.eventLog.first?.body?.contains("hidden-example") == false)
+
         restored.submit("When does an assignment count?", owner: owner, executable: executable,
                         configuration: configuration, monitor: monitor)
         try await waitForQuestion(restored)
@@ -210,6 +285,14 @@ extension AgentQuestionTests {
         try await waitForQuestion(clean)
         #expect(clean.failure == nil)
         #expect(clean.messages.last?.text == "Started")
+
+        let beforeSwitch = try #require(gitLab.handler)
+        gitLab.handler = { request in
+            if request.endpoint.contains("/discussions?") { glab.currentUsername = "other-user" }
+            return try await beforeSwitch(request)
+        }
+        let switched = await monitor.freshAgentQuestionDetails(for: [42])
+        #expect(switched.isEmpty)
 
         clean.activate(.init(assistant: .codex, host: owner.host, username: "other-user"))
         #expect(clean.messages.isEmpty)

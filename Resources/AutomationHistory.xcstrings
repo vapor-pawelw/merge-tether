@@ -1,6 +1,125 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "automationHistory.publishedText": {
+        "extractionState": "manual",
+        "localizations": {
+            "en": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "Text at publication"
+                }
+            },
+            "pl": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "Treść w chwili publikacji"
+                }
+            }
+        }
+    },
+    "automationHistory.publishedTextTruncated": {
+        "extractionState": "manual",
+        "localizations": {
+            "en": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "The saved text is shortened."
+                }
+            },
+            "pl": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "Zapisana treść została skrócona."
+                }
+            }
+        }
+    },
+    "automationHistory.updatedAt": {
+        "extractionState": "manual",
+        "localizations": {
+            "en": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "Updated"
+                }
+            },
+            "pl": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "Zaktualizowano"
+                }
+            }
+        }
+    },
+    "automationHistory.draftID": {
+        "extractionState": "manual",
+        "localizations": {
+            "en": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "Draft ID"
+                }
+            },
+            "pl": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "ID szkicu"
+                }
+            }
+        }
+    },
+    "automationHistory.discussionID": {
+        "extractionState": "manual",
+        "localizations": {
+            "en": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "Discussion ID"
+                }
+            },
+            "pl": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "ID dyskusji"
+                }
+            }
+        }
+    },
+    "automationHistory.location": {
+        "extractionState": "manual",
+        "localizations": {
+            "en": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "File location"
+                }
+            },
+            "pl": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "Miejsce w pliku"
+                }
+            }
+        }
+    },
+    "automationHistory.eventTime": {
+        "extractionState": "manual",
+        "localizations": {
+            "en": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "Recorded at"
+                }
+            },
+            "pl": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "Czas zdarzenia"
+                }
+            }
+        }
+    },
     "automationHistory.publicationAuthorTrust": {
       "extractionState": "manual",
       "localizations": {

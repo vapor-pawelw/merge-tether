@@ -112,6 +112,7 @@ struct MREventLogView: View {
         case .job, .event, .workflow:
             MRAutomationEventLogRow(entry: entry, runs: history?.associatedRuns(for: entry) ?? [],
                 monitor: monitor, initiallyExpandedJobID: initiallyExpandedJobID, readOnly: readOnly)
+                .environment(\.gitLabPersonSourceURL, discussionTarget?.url)
         }
     }
 }

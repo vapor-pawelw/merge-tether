@@ -16,9 +16,14 @@ struct MRGitLabActivity: Identifiable, Sendable {
 
     let id: String
     let createdAt: Date
-    let actor: String?
+    let person: PersonIdentity?
     let kind: Kind
     let body: String?
+    var updatedAt: Date? = nil
+    var location: String? = nil
+    var resolved: Bool? = nil
+
+    var actor: String? { person?.displayName }
 
     var noteID: Int? {
         switch kind {
@@ -68,7 +73,9 @@ struct MRGitLabActivity: Identifiable, Sendable {
                       seen.insert(id).inserted else { return nil }
                 let kind: Kind = note.system == true ? .systemNote(noteID: id)
                     : .comment(noteID: id, discussionID: discussion.id)
-                return Self(id: "note/\(id)", createdAt: date, actor: actorName(note.author), kind: kind, body: note.body)
+                let updated = activityDate(note.updatedAt).flatMap { $0 > date ? $0 : nil }
+                return Self(id: "note/\(id)", createdAt: date, person: note.author?.person, kind: kind, body: note.body,
+                            updatedAt: updated, location: note.position?.location, resolved: note.resolved)
             }
         }
     }
@@ -100,13 +107,8 @@ struct MRGitLabActivity: Identifiable, Sendable {
             case .label: kind = .label(action: action, name: label?.name)
             case .milestone: kind = .milestone(action: action, title: milestone?.title)
             }
-            return .init(id: "\(resource.rawValue)/\(id)", createdAt: date, actor: actorName(user), kind: kind, body: nil)
+            return .init(id: "\(resource.rawValue)/\(id)", createdAt: date, person: user?.person, kind: kind, body: nil)
         }
-    }
-
-    private static func actorName(_ user: GitLabWorkflowUser?) -> String? {
-        guard let user else { return nil }
-        return user.person.displayName
     }
 
     private static func activityDate(_ value: String?) -> Date? {
