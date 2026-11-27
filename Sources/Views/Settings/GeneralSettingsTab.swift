@@ -5,23 +5,31 @@ struct GeneralSettingsTab: View {
     let updates: UpdateService
     let updater: AppUpdater
     @Environment(\.openWindow) private var openWindow
-    @State private var launchAtLogin: Bool = LaunchAtLoginService.isEnabled
+    @State private var launchAtLogin: LaunchAtLoginToggle
+
+    init(monitor: TodoMonitorService, updates: UpdateService, updater: AppUpdater) {
+        self.monitor = monitor
+        self.updates = updates
+        self.updater = updater
+        _launchAtLogin = State(initialValue: LaunchAtLoginToggle { enabled in
+            monitor.settings.launchAtLoginPreference = enabled
+            monitor.settings.save()
+        })
+    }
 
     var body: some View {
         Form {
             Section {
-                Toggle(isOn: $launchAtLogin) {
+                Toggle(isOn: Binding(
+                    get: { launchAtLogin.isEnabled },
+                    set: { launchAtLogin.requestChange($0) }
+                )) {
                     Text(.Settings.settingsGeneralStartupLaunchAtLogin)
                 }
-                .onChange(of: launchAtLogin) { _, newValue in
-                    do {
-                        try LaunchAtLoginService.setEnabled(newValue)
-                        monitor.settings.launchAtLoginPreference = newValue
-                        monitor.settings.save()
-                    } catch {
-                        Log.settings.error("Launch-at-login toggle failed: \(error.localizedDescription, privacy: .public)")
-                        launchAtLogin = !newValue
-                    }
+                if launchAtLogin.lastFailure != nil {
+                    Text(.Onboarding.onboardingLaunchAtLoginFailed)
+                        .font(.caption)
+                        .foregroundStyle(.red)
                 }
 
                 LabeledContent {
@@ -54,8 +62,9 @@ struct GeneralSettingsTab: View {
             CrashReportingSettingsSection()
         }
         .formStyle(.grouped)
-        .task {
-            launchAtLogin = LaunchAtLoginService.isEnabled
+        .task { launchAtLogin.resync() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            launchAtLogin.resync()
         }
     }
 }
