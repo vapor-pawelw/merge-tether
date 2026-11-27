@@ -79,7 +79,8 @@ struct MRDiscussionThreadsView: View {
                 if thread.id != snapshot.threads.first?.id { Divider() }
                 threadView(thread, currentUser: currentUser)
             }
-            ForEach(Array(snapshot.standaloneDrafts.enumerated()), id: \.offset) { index, draft in
+            ForEach(StableRowKey.rows(snapshot.standaloneDrafts, id: \.id)) { row in
+                let index = row.index, draft = row.element
                 if index > 0 || !snapshot.threads.isEmpty { Divider() }
                 VStack(alignment: .leading, spacing: 9) {
                     Text(draft.discussionID == nil
@@ -195,7 +196,8 @@ private struct MRDiscussionThreadView: View {
                         if let first = comments.first {
                             MRDiscussionNoteContent(note: first, threadLocation: thread.location, markdownCache: markdownCache)
                         }
-                        ForEach(Array(comments.dropFirst().enumerated()), id: \.offset) { _, note in
+                        ForEach(StableRowKey.rows(Array(comments.dropFirst()), id: \.id)) { row in
+                            let note = row.element
                             Divider().padding(.vertical, 2)
                             MRDiscussionNoteView(note: note, origin: note.id.flatMap { thread.origins[$0] },
                                                  authorKind: (note.author?.id).flatMap { thread.authorKinds[$0] },
@@ -312,7 +314,8 @@ private struct MRDiscussionThreadView: View {
     }
 
     private var draftRows: some View {
-        ForEach(Array(thread.drafts.enumerated()), id: \.offset) { _, draft in
+        ForEach(StableRowKey.rows(thread.drafts, id: \.id)) { row in
+            let draft = row.element
             MRDiscussionDraftView(draft: draft, author: currentUser, markdownCache: markdownCache,
                                   replyTo: replyTo, threadLocation: thread.location,
                 extraContext: extraContexts.forDraft(draft),
