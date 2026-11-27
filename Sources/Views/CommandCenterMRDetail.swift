@@ -13,6 +13,15 @@ enum CommandCenterMRDetailSection: Hashable {
         case .feedback: .CommandCenter.commandCenterFeedback
         }
     }
+
+    @MainActor
+    func showsNextStep(for presentation: MRCardPresentation, needsHumanAttention: Bool, isRecheckingFeedback: Bool) -> Bool {
+        let row = presentation.row
+        guard MergeRequestFinishedState(row.displayRequest) == nil else { return false }
+        if !row.item.drafts.isEmpty || isRecheckingFeedback { return true }
+        if presentation.working && !row.item.needsConfirmation && presentation.humanAction == nil { return false }
+        return needsHumanAttention || self == .drafts
+    }
 }
 
 struct CommandCenterMRDetail: View {
@@ -139,9 +148,6 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     private var showsPublication: Bool { finishedState == nil && !item.drafts.isEmpty }
-    private var showsDecisions: Bool {
-        finishedState == nil && (needsHumanAttention || initialSection == .drafts || showsPublication || activeFeedbackRecheck != nil)
-    }
     private var activeFeedbackRecheck: MRFeedbackRecheckProgress? {
         guard let feedbackRecheck, finishedState == nil,
               feedbackRecheck.isActive(for: target, revision: monitor.glab.accountRevision, refreshing: monitor.attention.isLoading,
@@ -152,7 +158,7 @@ private struct CommandCenterMRDetailContent: View {
     private var showsFeedbackDetails: Bool {
         finishedState == nil && presentationItem.authorFeedbackStatus?.hasVisibleDetails == true
     }
-    private var initialDestinationIsReady: Bool {
+    private func initialDestinationIsReady(showsDecisions: Bool) -> Bool {
         guard let anchor = pendingInitialAnchor else { return false }
         // Decisions precede comments, so their position does not depend on the discussion load.
         return anchor == .drafts || (anchor == .feedbackStatus && showsDecisions)
@@ -178,11 +184,13 @@ private struct CommandCenterMRDetailContent: View {
         let presentation = MRCardPresentation(row: row, monitor: monitor, allowsRemoval: isReviewed)
         let humanAction = presentation.humanAction
         let feedbackRecheck = activeFeedbackRecheck
+        let showsDecisions = initialSection.showsNextStep(for: presentation, needsHumanAttention: needsHumanAttention,
+            isRecheckingFeedback: feedbackRecheck != nil)
         let failedFollowUp = showsDecisions ? humanAction?.failedFollowUp(in: row, jobs: jobs) : nil
         ScrollViewReader { proxy in
             let scrollView = ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    header(presentation, showsFeedbackRecheck: failedFollowUp == nil && feedbackRecheck == nil,
+                    header(presentation, showsDecisions: showsDecisions, showsFeedbackRecheck: failedFollowUp == nil && feedbackRecheck == nil,
                         isRecheckingFeedback: feedbackRecheck != nil).id(Anchor.overview)
                     if row.waitsForAssignmentClaim, let request = row.displayRequest {
                         VStack(alignment: .leading, spacing: 6) {
@@ -216,7 +224,8 @@ private struct CommandCenterMRDetailContent: View {
                                         excluding: [presentation.humanAction?.explanation ?? "",
                                             presentation.mergeStage.map { String(localized: $0.title) } ?? ""], holdsOnly: true)
                                 }, additionalActions: { _ in EmptyView() })
-                            supplementaryActions(citationContext: citationContext, reviewing: presentation.reviewingContext)
+                            supplementaryActions(citationContext: citationContext, reviewing: presentation.reviewingContext,
+                                showsDecisions: showsDecisions)
                         }
                         .id(Anchor.actions)
                     }
@@ -270,7 +279,7 @@ private struct CommandCenterMRDetailContent: View {
                 switch initialSection {
                 case .overview: return
                 case .drafts:
-                    pendingInitialAnchor = .drafts
+                    pendingInitialAnchor = showsDecisions ? .drafts : nil
                 case .assistantRuns:
                     historyExpanded = true
                     focusedJobID = jobs.first?.id
@@ -288,8 +297,8 @@ private struct CommandCenterMRDetailContent: View {
                     }
                 }
             }
-            .task(id: initialDestinationIsReady) {
-                guard initialDestinationIsReady, let anchor = pendingInitialAnchor else { return }
+            .task(id: initialDestinationIsReady(showsDecisions: showsDecisions)) {
+                guard initialDestinationIsReady(showsDecisions: showsDecisions), let anchor = pendingInitialAnchor else { return }
                 await scroll(to: anchor, proxy: proxy)
                 guard !Task.isCancelled else { return }
                 pendingInitialAnchor = nil
@@ -452,7 +461,8 @@ private struct CommandCenterMRDetailContent: View {
         return hasDependencyBlocker ? status.dependencyReadiness.holdReason : nil
     }
 
-    private func header(_ progress: MRCardPresentation, showsFeedbackRecheck: Bool, isRecheckingFeedback: Bool) -> some View {
+    private func header(_ progress: MRCardPresentation, showsDecisions: Bool,
+                        showsFeedbackRecheck: Bool, isRecheckingFeedback: Bool) -> some View {
         let mergeActivity = progress.mergeActivity
         let feedback = showsFeedbackRecheck ? presentationItem.authorFeedbackStatus : nil
         return VStack(alignment: .leading, spacing: 12) {
@@ -493,17 +503,17 @@ private struct CommandCenterMRDetailContent: View {
                         Text(finishedState.status).font(.callout).foregroundStyle(.secondary)
                     } else {
                         // The Next step box below already states what needs attention.
-                        let genericAttention = needsHumanAttention && (progress.working || progress.status == nil)
+                        let genericAttention = needsHumanAttention && progress.status == nil
                         if let waiting = shownRequirements(progress) {
                             VStack(alignment: .leading, spacing: 5) { BoardWaitingRequirements(waiting: waiting) }
                                 .font(.callout)
                                 .modifier(MRDetailStatusCard())
-                        } else if (needsHumanAttention || !progress.working && progress.mergeStage == nil)
+                        } else if !progress.working && (needsHumanAttention || progress.mergeStage == nil)
                                     && !(genericAttention && showsDecisions) {
                             Label {
                                 if let message = progress.statusPeopleMessage {
                                     PeopleMessageLabel(message: message)
-                                } else if let status = progress.status, !progress.working {
+                                } else if let status = progress.status {
                                     Text(verbatim: status)
                                 } else { Text(.CommandCenter.commandCenterStatusAttention) }
                             } icon: { Image(systemName: needsHumanAttention ? "exclamationmark.circle" : "arrow.triangle.pull") }
@@ -656,13 +666,7 @@ private struct CommandCenterMRDetailContent: View {
                 } else if !needsHumanAttention && !item.needsConfirmation && !showsPublication {
                     Text(.CommandCenter.commandCenterNoPendingDecision).foregroundStyle(.secondary)
                 }
-                if let job = jobs.first { AssistantJobPreflightNotice(jobID: job.id, monitor: monitor) }
-                if let retryError {
-                    Text(verbatim: retryError).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
-                }
-                if let feedbackDecisionError {
-                    Text(verbatim: feedbackDecisionError).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-                }
+                decisionNotices
                 if item.needsConfirmation || showsPublication { confirmationControls }
                 if showsPublication {
                     if discussionTarget == nil {
@@ -694,6 +698,17 @@ private struct CommandCenterMRDetailContent: View {
                         .frame(width: 3).padding(.vertical, 12)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var decisionNotices: some View {
+        if let job = jobs.first { AssistantJobPreflightNotice(jobID: job.id, monitor: monitor) }
+        if let retryError {
+            Text(verbatim: retryError).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+        }
+        if let feedbackDecisionError {
+            Text(verbatim: feedbackDecisionError).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -990,8 +1005,10 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     @ViewBuilder
-    private func supplementaryActions(citationContext: MRCommentCitation.Context?, reviewing: ReviewingContext) -> some View {
+    private func supplementaryActions(citationContext: MRCommentCitation.Context?, reviewing: ReviewingContext,
+                                      showsDecisions: Bool) -> some View {
         if !showsDecisions {
+            if needsHumanAttention || initialSection == .drafts { decisionNotices }
             if item.needsConfirmation { confirmationControls }
             // Flattened: an empty wrapper would still take the parent's spacing.
             decisionActions()

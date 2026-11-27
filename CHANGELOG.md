@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Hide the empty **Next step** panel in Mac merge request Details while automation is running and no decision is available.
+
 - The macOS 2.0.0 build is signed ad hoc. If macOS blocks the first launch, open **System Settings → Privacy & Security** and choose **Open Anyway** for MergeTether. [Apple's first-launch instructions](https://support.apple.com/en-us/102445)
 
 - Prevent merge request Details from freezing while scrolling through discussions on Mac.

@@ -4,6 +4,29 @@ import Testing
 
 @MainActor
 struct MRProgressPresentationTests {
+    @Test(arguments: [CommandCenterMRDetailSection.overview, .drafts])
+    func runningReviewWithoutADecisionHidesNextStep(_ section: CommandCenterMRDetailSection) throws {
+        let running = presentation("review", state: .running)
+        let failed = presentation("review", state: .failed)
+        func activeReview(with item: MergeRequestAttentionMonitor.Item) -> MRCardPresentation {
+            let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: running.row.latestJob, intents: [],
+                attentionPresentation: .init(evidence: item, humanActionRequired: true))
+            return .init(row: row, reviewingContext: ReviewingContext(row: row), allowsRemoval: true, assistantReady: true)
+        }
+
+        var item = running.row.item
+        let model = activeReview(with: item)
+
+        try #require(model.working && model.humanAction == nil)
+        #expect(!section.showsNextStep(for: model, needsHumanAttention: true, isRecheckingFeedback: false))
+        #expect(section.showsNextStep(for: failed, needsHumanAttention: true, isRecheckingFeedback: false))
+        #expect(section.showsNextStep(for: model, needsHumanAttention: true, isRecheckingFeedback: true))
+
+        item.drafts = attentionFixtureDrafts(1)
+        let withDrafts = activeReview(with: item)
+        #expect(section.showsNextStep(for: withDrafts, needsHumanAttention: true, isRecheckingFeedback: false))
+    }
+
     @Test(arguments: [false, true])
     func claimLeavesCommentReviewAvailableAsASecondaryAction(_ awaitsClaim: Bool) throws {
         let request = try mergeRequestWithAutoMerge(head: String(repeating: "a", count: 40))
