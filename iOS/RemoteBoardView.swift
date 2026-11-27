@@ -3,11 +3,13 @@ import MergeTetherRemote
 
 struct RemoteBoardView: View {
     @Bindable var model: RemotePhoneModel
+    @Environment(CrashReporting.self) private var crashReporting
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var pairingSheet = false
     @State private var selected: RemoteCardSelection?
     @State private var showingInbox = false
-    @State private var showingSettings = false
+    @State private var settingsRoute: RemoteSettingsRoute?
+    @State private var pendingSettingsAction: RemoteSettingsAction?
     @State private var pendingInboxCard: RemoteCardSelection?
     @State private var regenerationPresentation: DraftRegenerationPresentation?
 
@@ -61,46 +63,27 @@ struct RemoteBoardView: View {
                 }
             }
             .background(Color(uiColor: .systemGroupedBackground))
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if crashReporting.needsConsent {
+                    RemoteCrashReportingPrompt(
+                        onReview: { settingsRoute = .crashReporting },
+                        onDecline: { crashReporting.setEnabled(false) }
+                    )
+                }
+            }
             .safeAreaInset(edge: .bottom) {
                 if model.error && !model.paired { Text(.Remote.remoteError).font(.caption).foregroundStyle(.red).padding() }
             }
             .navigationTitle(Text(.Remote.remoteTitle)).navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { showingSettings = true } label: { Image(systemName: "gearshape") }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if model.paired {
+                        inboxButton
+                        RemoteBoardRefreshButton(model: model)
+                    }
+                    Button { settingsRoute = .general } label: { Image(systemName: "gearshape") }
                         .accessibilityLabel(Text(.CrashReporting.crashReportingSettings))
                         .accessibilityIdentifier("remote.settings")
-                }
-                if model.paired {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        HStack(spacing: 16) {
-                            Button { showingInbox = true } label: {
-                                Image(systemName: "tray")
-                                    .overlay(alignment: .topTrailing) {
-                                        if let cards = model.state.inboxCards, !cards.isEmpty {
-                                            Text(cards.count, format: .number)
-                                                .font(.system(size: 9, weight: .bold))
-                                                .foregroundStyle(.white)
-                                                .padding(.horizontal, 4)
-                                                .frame(minWidth: 16, minHeight: 16)
-                                                .background(.red, in: Capsule())
-                                                .offset(x: 9, y: -8)
-                                        }
-                                    }
-                            }
-                            .accessibilityLabel(Text(.Board.boardInboxButton))
-                            .accessibilityValue(model.state.inboxCards.map {
-                                Text(.Board.boardInboxAccessibilityCount($0.count))
-                            } ?? Text(verbatim: ""))
-                            .accessibilityIdentifier("remote.inbox")
-                            RemoteConnectionToolbar(model: model, onRegenerateDrafts: {
-                                regenerationPresentation = .init(scope: .all)
-                            })
-                        }
-                    }
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button { pairingSheet = true } label: { Image(systemName: "qrcode.viewfinder") }.accessibilityLabel(Text(.Remote.remoteReplace))
-                    }
                 }
             }
             .alert(Text(.Remote.remotePair), isPresented: Binding(
@@ -118,7 +101,9 @@ struct RemoteBoardView: View {
                     .presentationDragIndicator(.visible)
             }
             .sheet(item: $regenerationPresentation) { model.draftRegenerationSheet($0) }
-            .sheet(isPresented: $showingSettings) { RemoteCrashReportingSettingsView() }
+            .sheet(item: $settingsRoute, onDismiss: handleSettingsAction) { route in
+                RemoteSettingsView(model: model, route: route, onAction: { pendingSettingsAction = $0 })
+            }
             .onChange(of: model.pairingRevision) {
                 pairingSheet = false; selected = nil; showingInbox = false; pendingInboxCard = nil
                 regenerationPresentation = nil
@@ -167,6 +152,37 @@ struct RemoteBoardView: View {
             }
         }
         .environment(\.gitLabViewerUsername, viewerUsername)
+    }
+
+    private var inboxButton: some View {
+        Button { showingInbox = true } label: {
+            Image(systemName: "tray")
+                .overlay(alignment: .topTrailing) {
+                    if let cards = model.state.inboxCards, !cards.isEmpty {
+                        Text(cards.count, format: .number)
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .frame(minWidth: 16, minHeight: 16)
+                            .background(.red, in: Capsule())
+                            .offset(x: 9, y: -8)
+                    }
+                }
+        }
+        .accessibilityLabel(Text(.Board.boardInboxButton))
+        .accessibilityValue(model.state.inboxCards.map {
+            Text(.Board.boardInboxAccessibilityCount($0.count))
+        } ?? Text(verbatim: ""))
+        .accessibilityIdentifier("remote.inbox")
+    }
+
+    private func handleSettingsAction() {
+        defer { pendingSettingsAction = nil }
+        switch pendingSettingsAction {
+        case .pair: pairingSheet = true
+        case .regenerateDrafts: regenerationPresentation = .init(scope: .all)
+        case nil: break
+        }
     }
 
     private func draftRegenerationStatus(_ batch: DraftRegenerationBatch) -> some View {
@@ -258,45 +274,17 @@ private struct RemoteCardCTAButton: View {
 }
 
 // TimelineView inside ToolbarItem causes a continuous toolbar preference-update loop.
-private struct RemoteConnectionToolbar: View {
+private struct RemoteBoardRefreshButton: View {
     let model: RemotePhoneModel
-    let onRegenerateDrafts: () -> Void
     @State private var now = Date()
 
     var body: some View {
-        let status = model.connectionStatus(now: now)
-        HStack(spacing: 16) {
-            Button { Task { await model.refreshContent(fromGitLab: true) } } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .accessibilityLabel(Text(.Remote.remoteRefreshGitLabBoard))
-            .accessibilityIdentifier("remote.refresh")
-            .disabled(status != .connected || model.isManuallyRefreshingContent)
-            Menu {
-                if model.supportsDraftRegeneration, model.draftRegenerationBatch == nil,
-                   model.draftRegenerationCount(for: .all) > 0 {
-                    Button(action: onRegenerateDrafts) {
-                        Label { Text(.DraftRegeneration.draftRegenerationAllAction) } icon: { CodingProviderIcon() }
-                    }
-                    .disabled(!model.draftRegenerationIsAvailable || !model.state.canAct(now: now))
-                    .accessibilityIdentifier("draft-regeneration.all")
-                    Divider()
-                }
-                if let origin = model.relayConfiguration.origin {
-                    Text(.Remote.remoteRelayConfigured)
-                    Text(verbatim: origin.absoluteString)
-                    Text(.Remote.remoteRelayOwnership)
-                    Divider()
-                }
-                Button { model.reconnect() } label: {
-                    Label(.Remote.remoteReconnect, systemImage: "arrow.triangle.2.circlepath")
-                }
-                .accessibilityIdentifier("remote.reconnect")
-                .disabled(status == .connecting)
-            } label: { Image(systemName: "ellipsis.circle") }
-            .accessibilityLabel(Text(.DraftRegeneration.draftRegenerationBoardMenu))
-            .accessibilityIdentifier("remote.connection.menu")
+        Button { Task { await model.refreshContent(fromGitLab: true) } } label: {
+            Image(systemName: "arrow.clockwise")
         }
+        .accessibilityLabel(Text(.Remote.remoteRefreshGitLabBoard))
+        .accessibilityIdentifier("remote.refresh")
+        .disabled(model.connectionStatus(now: now) != .connected || model.isManuallyRefreshingContent)
         .task {
             while !Task.isCancelled {
                 now = Date()

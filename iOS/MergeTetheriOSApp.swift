@@ -16,13 +16,7 @@ import SwiftUI
     }
     var body: some Scene {
         WindowGroup {
-            Group {
-                if crashReporting.needsConsent {
-                    RemoteCrashReportingConsentView(reporting: crashReporting)
-                } else {
-                    RemoteBoardView(model: model)
-                }
-            }
+            RemoteBoardView(model: model)
                 .environment(crashReporting)
                 .environment(\.remoteAvatarThumbnails, model.avatarThumbnails)
                 .environment(\.codingProviderGlyph, model.state.board?.codingProvider.flatMap(CodingProviderGlyph.init(rawValue:)))

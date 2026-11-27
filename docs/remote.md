@@ -60,8 +60,11 @@ the current Mac app starts its saved phone connection on launch. The Mac must be
 and MergeTether running; Keychain authorization or a blocked relay can still prevent connection.
 
 The circular toolbar arrow is **Refresh board**: it asks the Mac to read GitLab before
-answering (the additive `refresh` hello field) and coalesces outstanding refreshes. **… → Reconnect** deliberately replaces
+answering (the additive `refresh` hello field) and coalesces outstanding refreshes. **Settings → Reconnect** deliberately replaces
 the phone transport, including its retry backoff, while keeping the saved pairing.
+Open Settings from the gear at the top-right of the companion board. It shows the
+relay address for the installed build and lets you pair another Mac or change
+whether to send crash reports.
 Reconnect is also offered directly when the Mac is unavailable, and repeated taps
 coalesce while connecting. Returning from the background creates a fresh connection.
 The last board for the same pairing remains visible with an offline notice, but actions

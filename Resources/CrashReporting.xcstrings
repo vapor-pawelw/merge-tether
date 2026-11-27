@@ -29,6 +29,13 @@
         "pl" : {"stringUnit" : {"state" : "translated", "value" : "Prywatność raportów o awariach"}}
       }
     },
+    "crashReporting.reviewOptions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {"stringUnit" : {"state" : "translated", "value" : "Review options"}},
+        "pl" : {"stringUnit" : {"state" : "translated", "value" : "Zobacz opcje"}}
+      }
+    },
     "crashReporting.settings" : {
       "extractionState" : "manual",
       "localizations" : {

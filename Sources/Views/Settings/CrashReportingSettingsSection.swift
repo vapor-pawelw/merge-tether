@@ -36,7 +36,7 @@ private struct CrashReportingDetails: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(.CrashReporting.crashReportingDetails)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.secondary)
             if let url = URL(string: "https://github.com/vapor-pawelw/merge-tether/blob/main/docs/building.md#crash-reporting-privacy") {
                 Link(destination: url) { Text(.CrashReporting.crashReportingPrivacy) }
             }
