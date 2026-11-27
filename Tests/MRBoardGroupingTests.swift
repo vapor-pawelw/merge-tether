@@ -98,6 +98,21 @@ struct MRBoardGroupingTests {
         """.utf8))
     }
 
+    @Test func separatedActiveSectionsHaveDistinctIdentitiesWhenInactiveCardsAreCollapsed() throws {
+        let rows = try (1...3).map { iid in
+            let request = try request(iid, draft: false)
+            let item = MergeRequestAttentionMonitor.Item(id: request.mergeRequestID, title: request.title,
+                url: request.webURL, mergeRequest: request)
+            return MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        }
+        let entries = CommandCenterBoardView.laneEntries(rows, automationOffExpanded: false,
+            showsAutomationOn: true, activity: { $0.id.iid == 2 ? .inactive : .regular },
+            hasHumanAction: { _ in false })
+
+        #expect(entries.count == 5)
+        #expect(Set(entries.map(\.id)).count == entries.count)
+    }
+
     @Test(arguments: [true, false])
     func automationOffHeaderCountsAllInactiveRowsWhileOnlyShowingThemWhenExpanded(_ expanded: Bool) throws {
         let rows = try (1...4).map { iid in

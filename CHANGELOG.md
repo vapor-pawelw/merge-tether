@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Reduce SwiftUI layout work while scrolling the Mac and iOS boards, and give Mac automation headings distinct identities.
+
 - Align cards with lane headers and keep scroll bars beside them on the Mac board.
 
 - Use the installed automation guide to answer questions about MergeTether controls available in the current build.

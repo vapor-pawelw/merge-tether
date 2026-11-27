@@ -111,7 +111,7 @@ struct MRBoardManualOrderTests {
             showsAutomationOn: true,
             activity: { $0.manualOrderEntry?.group.automationEnabled == true ? .regular : .inactive },
             hasHumanAction: { $0.needsAttention })
-        #expect(headers.map(\.id) == [.automationOn, .card(own[0].id), .automationOff])
+        #expect(headers.map(\.id) == [.automationOn(startingAt: own[0].id), .card(own[0].id), .automationOff])
     }
 
     @Test func phoneAcceptsTheMacOrderAgainWhenAttentionOrDragChangesIt() throws {

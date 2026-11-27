@@ -39,11 +39,12 @@ struct CommandCenterBoardView: View {
         enum ID: Hashable {
             case card(MergeRequestAttentionMonitor.Item.ID)
             case hiddenCard(MRAutomationScope.Target, hideID: UUID?)
-            case automationOn, automationOff, hidden
+            case automationOn(startingAt: MergeRequestAttentionMonitor.Item.ID)
+            case automationOff, hidden
         }
 
         case card(MergeRequestBoardSnapshot.Row, startsDrafts: Bool)
-        case automationOn
+        case automationOn(startingAt: MergeRequestAttentionMonitor.Item.ID)
         case automationOff(count: Int, attentionCount: Int)
         case hidden(count: Int)
         case hiddenCard(HiddenReview)
@@ -51,7 +52,7 @@ struct CommandCenterBoardView: View {
         var id: ID {
             switch self {
             case let .card(row, _): .card(row.id)
-            case .automationOn: .automationOn
+            case let .automationOn(firstCardID): .automationOn(startingAt: firstCardID)
             case .automationOff: .automationOff
             case .hidden: .hidden
             case let .hiddenCard(review): .hiddenCard(review.target, hideID: review.hideID)
@@ -182,7 +183,7 @@ struct CommandCenterBoardView: View {
         for (row, group) in groupedRows {
             defer { previousGroup = group }
             if showsAutomationOn, group == .regular, previousGroup != .regular {
-                entries.append(.automationOn)
+                entries.append(.automationOn(startingAt: row.id))
             }
             if group == .inactive, !addedAutomationOffHeader {
                 let attentionCount = inactiveRows.count { $0.needsAttention && hasHumanAction($0) }
@@ -227,8 +228,11 @@ struct CommandCenterBoardView: View {
     }
 
     private func laneEntries(_ entries: [LaneEntry], removable: Bool, automationOffExpanded: Binding<Bool>?) -> some View {
-        ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-            switch entry {
+        // Keep SwiftUI's identity lookups from copying the full row payload during layout.
+        let positions = entries.indices.map { (index: $0, id: entries[$0].id) }
+        return ForEach(positions, id: \.id) { position in
+            let index = position.index
+            switch entries[index] {
             case let .card(row, startsDrafts):
                 VStack(spacing: 10) {
                     if startsDrafts {

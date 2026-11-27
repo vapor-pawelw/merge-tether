@@ -155,19 +155,24 @@ private struct RemoteLaneView: View {
     private func laneCards(_ cards: [RemoteCard]) -> some View {
         let inactiveCount = cards.count(where: isInactive)
         let firstInactive = cards.firstIndex(where: isInactive)
+        let cardPositions = positions(in: cards)
         return LazyVStack(spacing: 0) {
             if cards.isEmpty && (hiddenReviews.isEmpty || filter.isActive) {
                 Text(filter.isActive ? .Board.boardFiltersEmpty : .Remote.remoteEmpty)
                     .foregroundStyle(.secondary).padding(.top, 30)
             }
-            ForEach(Array(cards.enumerated()), id: \.element.id) { index, card in
-                if index == firstInactive {
-                    sectionHeading(.BoardActivity.inactiveSection(inactiveCount), anchor: card)
-                } else if card.orderGroup?.automationEnabled == true,
-                          index == 0 || cards[index - 1].orderGroup?.automationEnabled != true {
-                    sectionHeading(.Remote.remoteBoardAutomationOn, anchor: card)
+            ForEach(cardPositions, id: \.id) { position in
+                let index = position.index
+                let card = cards[index]
+                VStack(spacing: 0) {
+                    if index == firstInactive {
+                        sectionHeading(.BoardActivity.inactiveSection(inactiveCount), anchor: card)
+                    } else if card.orderGroup?.automationEnabled == true,
+                              index == 0 || cards[index - 1].orderGroup?.automationEnabled != true {
+                        sectionHeading(.Remote.remoteBoardAutomationOn, anchor: card)
+                    }
+                    boardCard(card)
                 }
-                boardCard(card)
             }
             if let last = cards.last, last.orderGroup != nil {
                 Spacer(minLength: 16)
@@ -195,13 +200,17 @@ private struct RemoteLaneView: View {
                     : .RemoteCardActions.remoteCardActionsSectionCollapsed))
                 .accessibilityIdentifier("remote.reviewed.hidden")
                 if hiddenExpanded {
-                    ForEach(hiddenReviews) { card in
-                        RemoteHiddenReviewCard(card: card, model: model)
+                    ForEach(positions(in: hiddenReviews), id: \.id) { position in
+                        RemoteHiddenReviewCard(card: hiddenReviews[position.index], model: model)
                             .padding(.vertical, 6)
                     }
                 }
             }
         }
+    }
+
+    private func positions(in cards: [RemoteCard]) -> [(index: Int, id: RemoteCard.ID)] {
+        cards.indices.map { (index: $0, id: cards[$0].id) }
     }
 
     private func isInactive(_ card: RemoteCard) -> Bool {
