@@ -18,13 +18,18 @@ struct MRProgressPresentationTests {
         let model = activeReview(with: item)
 
         try #require(model.working && model.humanAction == nil)
-        #expect(!section.showsNextStep(for: model, needsHumanAttention: true, isRecheckingFeedback: false))
-        #expect(section.showsNextStep(for: failed, needsHumanAttention: true, isRecheckingFeedback: false))
-        #expect(section.showsNextStep(for: model, needsHumanAttention: true, isRecheckingFeedback: true))
+        #expect(!section.showsNextStep(for: model, isRecheckingFeedback: false))
+        #expect(section.showsNextStep(for: failed, isRecheckingFeedback: false))
+        #expect(section.showsNextStep(for: model, isRecheckingFeedback: true))
+
+        var pendingConfirmation = item
+        pendingConfirmation.requiresCommentReview = true
+        let withConfirmation = activeReview(with: pendingConfirmation)
+        #expect(section.showsNextStep(for: withConfirmation, isRecheckingFeedback: false))
 
         item.drafts = attentionFixtureDrafts(1)
         let withDrafts = activeReview(with: item)
-        #expect(section.showsNextStep(for: withDrafts, needsHumanAttention: true, isRecheckingFeedback: false))
+        #expect(section.showsNextStep(for: withDrafts, isRecheckingFeedback: false))
     }
 
     @Test(arguments: [false, true])

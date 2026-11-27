@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Ask Agent checks GitLab status and discussions before answering a question that names an MR number. Select and copy text across paragraphs and links in chat messages.
 
-- Hide the empty **Next step** panel in Mac merge request Details while automation is running and no decision is available.
+- Hide the empty **Next step** panel in Mac merge request Details when no decision is available, including while waiting on open review threads.
 
 - Trace MR activity from the Mac Event log and ask the agent about earlier events. See comment text, the people involved and links to the GitLab notes. Hover over a person's name for their profile.
 

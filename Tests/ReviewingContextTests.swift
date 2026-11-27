@@ -623,6 +623,22 @@ struct ReviewingContextTests {
         #expect(context.actionLabel == nil)
     }
 
+    @Test func openReviewThreadsWithoutADecisionStayInTheStatus() throws {
+        var item = try item()
+        item.reviewingProgress = .current
+        item.reviewingActivity = .init(discussions: [.init(id: "open", notes: [note(1, user: 3)])],
+            reviewerID: 3, authorID: 7)
+        let snapshot = row(item, humanAttention: true)
+        let context = ReviewingContext(row: snapshot, viewerUsername: "user3")
+        let model = MRCardPresentation(row: snapshot, reviewingContext: context, allowsRemoval: true, assistantReady: true)
+
+        #expect(context.status == .openThreads(1))
+        #expect(model.actionLabel.map { String(localized: $0) } == "View discussions")
+        try #require(!model.working && model.humanAction == nil && !item.needsConfirmation)
+        #expect(!CommandCenterMRDetailSection.overview.showsNextStep(for: model, isRecheckingFeedback: false))
+        #expect(CommandCenterMRDetailSection.drafts.showsNextStep(for: model, isRecheckingFeedback: false))
+    }
+
     @Test(arguments: [false, true])
     func completedReviewKeepsItsSummaryInDetailsWithoutACardAction(_ openThread: Bool) throws {
         var item = try item()

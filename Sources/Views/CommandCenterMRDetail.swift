@@ -15,12 +15,13 @@ enum CommandCenterMRDetailSection: Hashable {
     }
 
     @MainActor
-    func showsNextStep(for presentation: MRCardPresentation, needsHumanAttention: Bool, isRecheckingFeedback: Bool) -> Bool {
+    func showsNextStep(for presentation: MRCardPresentation, isRecheckingFeedback: Bool) -> Bool {
         let row = presentation.row
         guard MergeRequestFinishedState(row.displayRequest) == nil else { return false }
-        if !row.item.drafts.isEmpty || isRecheckingFeedback { return true }
-        if presentation.working && !row.item.needsConfirmation && presentation.humanAction == nil { return false }
-        return needsHumanAttention || self == .drafts
+        let item = row.item
+        if isRecheckingFeedback || !item.drafts.isEmpty || presentation.humanAction != nil { return true }
+        if item.needsConfirmation && (item.requiresCommentReview || item.canApprove || !presentation.working) { return true }
+        return self == .drafts && !presentation.working
     }
 }
 
@@ -184,8 +185,7 @@ private struct CommandCenterMRDetailContent: View {
         let presentation = MRCardPresentation(row: row, monitor: monitor, allowsRemoval: isReviewed)
         let humanAction = presentation.humanAction
         let feedbackRecheck = activeFeedbackRecheck
-        let showsDecisions = initialSection.showsNextStep(for: presentation, needsHumanAttention: needsHumanAttention,
-            isRecheckingFeedback: feedbackRecheck != nil)
+        let showsDecisions = initialSection.showsNextStep(for: presentation, isRecheckingFeedback: feedbackRecheck != nil)
         let failedFollowUp = showsDecisions ? humanAction?.failedFollowUp(in: row, jobs: jobs) : nil
         ScrollViewReader { proxy in
             let scrollView = ScrollView {
@@ -605,7 +605,8 @@ private struct CommandCenterMRDetailContent: View {
     private func nextStep(proxy: ScrollViewProxy, citationContext: MRCommentCitation.Context?,
                           discussions: MRDiscussionSnapshot, humanAction: MRHumanAction?,
                           failedFollowUp: MRHumanAction.FailedFollowUp?, feedbackRecheck: MRFeedbackRecheckProgress?) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let highlightsAttention = needsHumanAttention && (humanAction != nil || item.needsConfirmation)
+        return VStack(alignment: .leading, spacing: 12) {
             Text(.CommandCenter.commandCenterNextStep).font(.headline)
             VStack(alignment: .leading, spacing: 12) {
                 if let feedbackRecheck {
@@ -663,7 +664,7 @@ private struct CommandCenterMRDetailContent: View {
                             Text(action.actionLabel)
                         }
                     }
-                } else if !needsHumanAttention && !item.needsConfirmation && !showsPublication {
+                } else if !item.needsConfirmation && !showsPublication {
                     Text(.CommandCenter.commandCenterNoPendingDecision).foregroundStyle(.secondary)
                 }
                 decisionNotices
@@ -686,14 +687,14 @@ private struct CommandCenterMRDetailContent: View {
                 }
             }
             .font(.body).padding(14).frame(maxWidth: .infinity, alignment: .leading)
-            .background((needsHumanAttention ? Color.orange.opacity(0.06) : Color.secondary.opacity(0.06)),
+            .background((highlightsAttention ? Color.orange.opacity(0.06) : Color.secondary.opacity(0.06)),
                 in: RoundedRectangle(cornerRadius: 10))
             .overlay {
                 RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder((needsHumanAttention ? Color.orange : Color.secondary).opacity(0.2), lineWidth: 0.5)
+                    .strokeBorder((highlightsAttention ? Color.orange : Color.secondary).opacity(0.2), lineWidth: 0.5)
             }
             .overlay(alignment: .leading) {
-                if needsHumanAttention {
+                if highlightsAttention {
                     RoundedRectangle(cornerRadius: 2).fill(Color.orange.opacity(0.7))
                         .frame(width: 3).padding(.vertical, 12)
                 }
