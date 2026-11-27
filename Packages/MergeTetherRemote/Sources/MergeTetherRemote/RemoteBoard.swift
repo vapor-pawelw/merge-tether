@@ -158,6 +158,7 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
     /// Optional so older paired installations keep decoding snapshots.
     public var authorUsername: String?
     public var authorAvatarURL: URL?
+    public var assignees: [RemotePerson]?
     public var repository: String
     public var draftBadge: String?
     public var isDraft: Bool?
@@ -198,12 +199,13 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
                 requirements: [String]? = nil, steps: [String]? = nil, currentStep: Int? = nil,
                 pendingDrafts: String? = nil, statusSymbol: String? = nil,
                 approvalPeople: [RemoteApprovalPerson]? = nil, viewerApprovalID: Int? = nil,
-                assignedReviewerCount: Int? = nil) {
+                assignedReviewerCount: Int? = nil, assignees: [RemotePerson]? = nil) {
         self.approvalPeople = approvalPeople; self.viewerApprovalID = viewerApprovalID
         self.assignedReviewerCount = assignedReviewerCount
         self.pendingDrafts = pendingDrafts
         self.requirements = requirements; self.steps = steps; self.currentStep = currentStep
         self.author = author; self.authorUsername = authorUsername; self.authorAvatarURL = authorAvatarURL
+        self.assignees = assignees
         self.repository = repository; self.draftBadge = draftBadge; self.isDraft = isDraft
         self.statusSymbol = statusSymbol
         self.status = status; self.nextStep = nextStep; self.working = working
@@ -371,7 +373,8 @@ public struct RemoteBoard: Codable, Equatable, Sendable {
             return messages.flatMap(\.people) + (presentation.threadResolutionPeople ?? [])
         }
         let recipients = cards.flatMap(\.drafts).flatMap { $0.replyRecipients ?? [] }
-        return RemoteAvatarThumbnail.eligibleURLs(authors + approvers + (people + recipients).compactMap(\.avatarURL))
+        let assignees = (presentations + (hiddenReviews ?? []).compactMap(\.presentation)).flatMap { $0.assignees ?? [] }
+        return RemoteAvatarThumbnail.eligibleURLs(authors + approvers + (people + recipients + assignees).compactMap(\.avatarURL))
     }
 }
 
@@ -519,14 +522,26 @@ public struct RemoteMessage: Codable, Sendable {
 
 extension RemoteMessage {
     /// Leave room for the board itself when optional metadata would exceed the transport limit.
-    public func fittingIssueTags() -> Self {
+    public func fittingSnapshotMetadata() -> Self {
         guard type == .snapshot, let board else { return self }
+        let hasAssignees = board.lanes.contains { $0.cards.contains { $0.presentation?.assignees != nil } }
+            || board.hiddenReviews?.contains { $0.presentation?.assignees != nil } == true
         let hasIssueTags = board.lanes.contains { $0.cards.contains { $0.issues != nil } }
         let hasReviewTraits = board.lanes.contains { $0.cards.contains { $0.boardTraits != nil } }
-        guard hasIssueTags || hasReviewTraits || board.hiddenReviews != nil,
+        guard hasAssignees || hasIssueTags || hasReviewTraits || board.hiddenReviews != nil,
               let size = try? JSONEncoder().encode(self).count, size > RemoteCipher.maximumPayloadBytes else { return self }
         var result = self
         var shortened = board
+        if hasAssignees {
+            for lane in shortened.lanes.indices {
+                for card in shortened.lanes[lane].cards.indices { shortened.lanes[lane].cards[card].presentation?.assignees = nil }
+            }
+            for card in shortened.hiddenReviews?.indices ?? 0..<0 {
+                shortened.hiddenReviews?[card].presentation?.assignees = nil
+            }
+            result.board = shortened
+            if let size = try? JSONEncoder().encode(result).count, size <= RemoteCipher.maximumPayloadBytes { return result }
+        }
         if shortened.hiddenReviews != nil {
             shortened.hiddenReviews = nil
             result.board = shortened

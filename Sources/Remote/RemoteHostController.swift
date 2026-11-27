@@ -345,12 +345,13 @@ extension RemoteConnection: RemoteHostTransport {}
             guard connection === active else { return }
             var board = snapshot()
             if !fresh { board.partial = true }
-            do { try await active.send(.init(type: .snapshot, challenge: challenge, board: board,
-                capabilities: Self.boardCapabilities).fittingIssueTags()) }
+            let messageToSend = RemoteMessage(type: .snapshot, challenge: challenge, board: board,
+                capabilities: Self.boardCapabilities).fittingSnapshotMetadata()
+            do { try await active.send(messageToSend) }
             catch { failed = true; try? await active.send(.init(type: .unavailable)); return }
-            if message.capabilities?.contains(RemoteMessage.boardAvatarsCapability) == true {
+            if message.capabilities?.contains(RemoteMessage.boardAvatarsCapability) == true, let delivered = messageToSend.board {
                 guard avatarChallenge == challenge else { return }
-                avatarTask = deliverAvatarThumbnails(board.avatarThumbnailURLs, challenge: challenge, session: board.hostSession,
+                avatarTask = deliverAvatarThumbnails(delivered.avatarThumbnailURLs, challenge: challenge, session: delivered.hostSession,
                     excluding: message.cachedAvatarURLs ?? [], over: active) { $0.avatarChallenge == challenge }
             }
         case .boardOrderRequest:
@@ -360,7 +361,7 @@ extension RemoteConnection: RemoteHostTransport {}
             let applied = board.permitsOrderMove(move) && applyBoardOrderMove(move)
             if applied { board = snapshot() }
             do { try await active.send(.init(type: .snapshot, challenge: challenge, board: board,
-                capabilities: Self.boardCapabilities, boardOrderApplied: applied).fittingIssueTags()) }
+                capabilities: Self.boardCapabilities, boardOrderApplied: applied).fittingSnapshotMetadata()) }
             catch { failed = true; try? await active.send(.init(type: .unavailable)) }
         case .receipt:
             guard let command = message.command, let challenge = message.challenge, let pairing else { return }

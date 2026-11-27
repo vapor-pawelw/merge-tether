@@ -75,7 +75,8 @@ import MergeTetherRemote
         if let request {
             card.presentation = .init(author: request.author.name, repository: card.project.split(separator: "/").last.map(String.init) ?? card.project,
                 authorUsername: request.author.username, authorAvatarURL: request.author.avatarURL,
-                assignedReviewerCount: MergeRequestApprovalProgress.assignedReviewerCount(request.reviewers))
+                assignedReviewerCount: MergeRequestApprovalProgress.assignedReviewerCount(request.reviewers),
+                assignees: displayAssignees(for: request))
         }
         card.approvals = display.approvals.flatMap {
             .init(completed: min($0.completed, $0.required), required: $0.required,
@@ -411,9 +412,13 @@ import MergeTetherRemote
                     card.needsAttention = false
                     card.actions = []
                     card.primaryCTA = nil
-                    card.presentation = .init(repository: todo.project.pathWithNamespace.split(separator: "/").last.map(String.init) ?? "",
-                        status: MRActivity.agentStatus(.AutomationProgress.progressNotice, assistant: monitor.settings.automation.assistant),
-                        working: true, statusSymbol: MRActionEffect.aiCheck.symbol)
+                    if card.presentation == nil {
+                        card.presentation = .init(repository: todo.project.pathWithNamespace.split(separator: "/").last.map(String.init) ?? "")
+                    }
+                    card.presentation?.status = MRActivity.agentStatus(.AutomationProgress.progressNotice,
+                        assistant: monitor.settings.automation.assistant)
+                    card.presentation?.working = true
+                    card.presentation?.statusSymbol = MRActionEffect.aiCheck.symbol
                 }
                 if let noticeTarget,
                    let notice = monitor.settings.reviewAssignments.incomingReviewFilter.notice(for: noticeTarget) {
@@ -849,8 +854,21 @@ import MergeTetherRemote
                         project: proposal.url.gitLabProjectPath, url: proposal.url)
                 card.actions = []
                 card.detail = String(localized: .Remote.remoteProposal)
-                return jobProgress(card, job: proposal.latestJob, intents: proposal.intents + intents, conflictReceipts: conflictReceipts)
-            case .todo(let todo): return card(todo, account: account)
+                card = jobProgress(card, job: proposal.latestJob, intents: proposal.intents + intents, conflictReceipts: conflictReceipts)
+                let request = board.displayRequest(projectID: proposal.target.projectID, iid: proposal.target.iid ?? 0, url: proposal.url)
+                    ?? proposal.item?.mergeRequest
+                if let request, ProposalMRContext.matches(request, proposal: proposal) {
+                    projectAssignedPeople(request, onto: &card)
+                }
+                return card
+            case .todo(let todo):
+                var card = self.card(todo, account: account)
+                if todo.targetType == .mergeRequest, let iid = todo.target.iid,
+                   let url = todo.targetURL.gitLabTodoMergeRequestURL(host: entry.id.host, iid: iid),
+                   let request = board.displayRequest(projectID: todo.project.id, iid: iid, url: url) {
+                    projectAssignedPeople(request, onto: &card)
+                }
+                return card
             case .job(let job):
                 let url = job.mergeRequestURL
                 var card = RemoteCard(id: "job:\(job.id)", title: job.title, project: url?.gitLabProjectPath ?? "", url: url,
@@ -868,6 +886,22 @@ import MergeTetherRemote
             .init(id: .reviewed, cards: board.reviewed.map { projectedRow($0, allowsRemoval: true) }),
             .init(id: .other, cards: others),
         ])
+    }
+
+    private static func displayAssignees(for request: GitLabMergeRequest?) -> [RemotePerson]? {
+        guard let assignees = request?.displayAssignees, !assignees.isEmpty else { return nil }
+        return assignees.map(\.remotePerson)
+    }
+
+    private static func projectAssignedPeople(_ request: GitLabMergeRequest, onto card: inout RemoteCard) {
+        guard let assignees = displayAssignees(for: request) else { return }
+        if card.presentation == nil {
+            card.presentation = .init(repository: request.webURL.gitLabProjectPath.split(separator: "/").last.map(String.init) ?? "")
+        }
+        card.presentation?.author = request.author.person.displayName
+        card.presentation?.authorUsername = request.author.username
+        card.presentation?.authorAvatarURL = request.author.avatarURL
+        card.presentation?.assignees = assignees
     }
 
     private static func jobProgress(_ original: RemoteCard, job: AssistantAutomationRunner.Handoff?,
@@ -979,7 +1013,8 @@ import MergeTetherRemote
             statusSymbol: refreshFailed ? "arrow.clockwise" : model.activityEffect?.symbol,
             approvalPeople: model.row.evidenceMatchesCatalogContext ? original.presentation?.approvalPeople : nil,
             viewerApprovalID: model.row.evidenceMatchesCatalogContext ? original.presentation?.viewerApprovalID : nil,
-            assignedReviewerCount: MergeRequestApprovalProgress.assignedReviewerCount(model.row.displayRequest?.reviewers))
+            assignedReviewerCount: MergeRequestApprovalProgress.assignedReviewerCount(model.row.displayRequest?.reviewers),
+            assignees: displayAssignees(for: model.row.displayRequest))
         card.presentation?.statusPeopleMessage = model.statusPeopleMessage
         card.presentation?.reviewCompletionInDetailsOnly = model.reviewCompletionInDetailsOnly ? true : nil
         card.presentation?.pendingDraftsPeopleMessage = pendingDrafts?.peopleMessage

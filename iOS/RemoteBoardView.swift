@@ -571,7 +571,12 @@ struct RemoteCardView: View {
     }
     @ViewBuilder private var people: some View {
         HStack(spacing: 0) {
-            author
+            HStack(spacing: 6) {
+                author
+                if let assignees = card.presentation?.assignees {
+                    BoardAssigneesBadge(assignees: assignees.map(PersonIdentity.init), contentOpacity: contentOpacity)
+                }
+            }
             Spacer(minLength: 16)
             approvalBadge
                 .font(.caption).foregroundStyle(.secondary)

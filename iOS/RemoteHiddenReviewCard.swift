@@ -66,13 +66,18 @@ struct RemoteHiddenReviewCard: View {
 
     private var people: some View {
         HStack(spacing: 0) {
-            if let author = card.presentation, author.author != nil {
-                PersonLabel(person: .init(name: author.author, username: author.authorUsername, avatarURL: author.authorAvatarURL))
-                    .font(.caption).foregroundStyle(.secondary).opacity(opacity)
-            } else {
-                PersonAvatar(url: nil, size: 16)
-                    .opacity(opacity)
-                    .accessibilityLabel(Text(.RemoteDetail.remoteDetailUnknownAuthor))
+            HStack(spacing: 6) {
+                if let author = card.presentation, author.author != nil {
+                    PersonLabel(person: .init(name: author.author, username: author.authorUsername, avatarURL: author.authorAvatarURL))
+                        .font(.caption).foregroundStyle(.secondary).opacity(opacity)
+                } else {
+                    PersonAvatar(url: nil, size: 16)
+                        .opacity(opacity)
+                        .accessibilityLabel(Text(.RemoteDetail.remoteDetailUnknownAuthor))
+                }
+                if let assignees = card.presentation?.assignees {
+                    BoardAssigneesBadge(assignees: assignees.map(PersonIdentity.init), contentOpacity: opacity)
+                }
             }
             Spacer(minLength: 12)
             RemoteApprovalProgressBadge(progress: card.approvals, assignedReviewerCount: card.presentation?.assignedReviewerCount,

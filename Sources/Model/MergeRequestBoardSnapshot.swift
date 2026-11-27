@@ -439,6 +439,11 @@ struct MergeRequestBoardSnapshot {
         }.map(\.element)
     }
 
+    func displayRequest(projectID: Int, iid: Int, url: URL) -> GitLabMergeRequest? {
+        guard let request = knownRequests[.init(projectID: projectID, iid: iid)], request.webURL == url else { return nil }
+        return request
+    }
+
     private func activityGroup(for content: OtherCard.Content, host: String, username: String) -> MRBoardActivity.Group {
         guard let automation else { return .regular }
         let target: MRAutomationScope.Target
@@ -448,8 +453,7 @@ struct MergeRequestBoardSnapshot {
         case .completion, .hiddenReview: return .regular
         case .proposal(let proposal):
             target = proposal.target
-            let request = knownRequests[.init(projectID: target.projectID, iid: target.iid ?? 0)]
-                .flatMap { $0.webURL == proposal.url ? $0 : nil }
+            let request = displayRequest(projectID: target.projectID, iid: target.iid ?? 0, url: proposal.url)
             isDraft = request?.draft ?? proposal.item.map { $0.section == .draftMergeRequests }
                 ?? proposal.todos.contains(where: \.isDraft)
             finished = MergeRequestFinishedState(request ?? proposal.item?.mergeRequest) != nil
@@ -457,8 +461,7 @@ struct MergeRequestBoardSnapshot {
             guard todo.targetType == .mergeRequest, let iid = todo.target.iid,
                   let url = todo.targetURL.gitLabTodoMergeRequestURL(host: host, iid: iid) else { return .regular }
             target = .mergeRequest(host: host, username: username, projectID: todo.project.id, iid: iid)
-            let request = knownRequests[.init(projectID: target.projectID, iid: iid)]
-                .flatMap { $0.webURL == url ? $0 : nil }
+            let request = displayRequest(projectID: target.projectID, iid: iid, url: url)
             isDraft = request?.draft ?? todo.isDraft
             finished = MergeRequestFinishedState(request) != nil
         case .job(let job):

@@ -102,7 +102,7 @@ let project = Project(
                 ])]),
             ]),
             sources: ["iOS/**/*.swift",
-                      "Sources/Views/StatusFlowLayout.swift", "Sources/Views/PersonLabel.swift",
+                      "Sources/Views/StatusFlowLayout.swift", "Sources/Views/PersonLabel.swift", "Sources/Views/BoardAssigneesBadge.swift",
                       "Sources/Views/CodingProviderIcon.swift",
                       "Sources/Views/ExtraContextMarkdown.swift", "Sources/Views/DraftRegenerationSheet.swift",
                       "Sources/Views/MergeRequestDescription.swift", "Sources/Views/MRDetailSection.swift",

@@ -8,7 +8,7 @@ struct MergeRequestBoardSnapshotTests {
     @Test(arguments: [(nil, []), ([], []), ([7], []), ([9], [9]), ([9, 7, 11], [9, 7, 11])] as [([Int]?, [Int])])
     func assigneeListAppearsOnlyWhenSomeoneBesidesTheAuthorIsAssigned(_ ids: [Int]?, _ expectedIDs: [Int]) throws {
         let assignees = ids.map { ids in
-            let people = ids.map { #"{"id":\#($0),"username":"user\#($0)","name":"User \#($0)"}"# }
+            let people = ids.map { #"{"id":\#($0),"username":"user\#($0)","name":"User \#($0)","avatar_url":"https://gitlab.example.org/avatars/\#($0).png"}"# }
             return ",\"assignees\":[\(people.joined(separator: ","))]"
         } ?? ""
         let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data("""
@@ -17,6 +17,39 @@ struct MergeRequestBoardSnapshotTests {
          "source_branch":"feature","target_branch":"main","labels":[]\(assignees)}
         """.utf8))
         #expect(request.displayAssignees.map(\.id) == expectedIDs)
+
+        var catalog = item(42)
+        catalog.mergeRequest = request
+        let board = RemoteBoardAdapter.project(board: snapshot(own: [catalog]), other: [], session: UUID(), account: "me@\(host)")
+        let card = try #require(board.cards.first)
+        let wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(card)) as? [String: Any])
+        let presentation = try #require(wire["presentation"] as? [String: Any])
+        let people = presentation["assignees"] as? [[String: String]]
+        if expectedIDs.isEmpty {
+            #expect(people == nil)
+        } else {
+            #expect(people == expectedIDs.map { ["name": "User \($0)", "username": "user\($0)",
+                "avatarURL": "https://\(host)/avatars/\($0).png"] })
+        }
+        #expect(board.avatarThumbnailURLs == expectedIDs.map { URL(string: "https://\(host)/avatars/\($0).png")! })
+    }
+
+    @Test(arguments: [ActionName.reviewRequested, .unknown("new_event")])
+    func otherLaneSendsAssigneesFromCurrentMergeRequestMetadata(_ action: ActionName) throws {
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data("""
+        {"project_id":1,"iid":42,"author":{"id":7,"username":"author","name":"Author"},"title":"MR",
+         "web_url":"https://\(host)/g/p/-/merge_requests/42","state":"opened",
+         "source_branch":"feature","target_branch":"main","labels":[],
+         "assignees":[{"id":9,"username":"assigned","name":"Assigned Person"}]}
+        """.utf8))
+        let board = MergeRequestBoardSnapshot(own: [], reviewed: [],
+            todos: [todo(1, action: action, suffix: "/pipelines")], attention: [], handoffs: [], host: host,
+            username: "me", displayRequests: [request])
+        let other = board.otherCards(jobs: [], host: host, username: "me", pinnedCards: [])
+        let remote = RemoteBoardAdapter.project(board: board, other: other, session: UUID(), account: "me@\(host)")
+        let card = try #require(remote.cards.first)
+        #expect(card.presentation?.author == "Author")
+        #expect(card.presentation?.assignees == [.init(name: "Assigned Person", username: "assigned")])
     }
 
     @Test func draftFlipDoesNotRebindThePrivateActionCheckpoint() throws {

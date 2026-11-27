@@ -72,7 +72,7 @@ struct BoardOrderTests {
             title: String(repeating: "a", count: RemoteCipher.maximumPayloadBytes), project: "group/repo", url: nil)]
         board.lanes[1].cards[0].boardTraits = .init(needsAttention: false, isNew: true, isInactive: false)
         board.lanes[1].cards[0].issues = [.init(reference: "#4", url: URL(string: "https://gitlab.example.test/g/p/-/issues/4")!)]
-        let fitted = RemoteMessage(type: .snapshot, challenge: UUID(), board: board).fittingIssueTags()
+        let fitted = RemoteMessage(type: .snapshot, challenge: UUID(), board: board).fittingSnapshotMetadata()
         #expect(fitted.board?.hiddenReviews == nil)
         #expect(fitted.board?.lanes == board.lanes)
         #expect(fitted.board?.issueTagsOmitted != true)

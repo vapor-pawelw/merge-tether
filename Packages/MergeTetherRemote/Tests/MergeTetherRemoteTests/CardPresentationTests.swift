@@ -47,6 +47,45 @@ import Testing
         #expect(request.matches(board.forClient(supportsCommentReview: true)))
     }
 
+    @Test func assigneesSurviveTheWireWithoutChangingDetailIdentity() throws {
+        let wire = Data(#"{"id":"mr:1:2","title":"MR","project":"g/p","detail":"","drafts":[],"actions":[],"presentation":{"repository":"p","chips":[],"working":false,"assignees":[{"name":"Sam Example","username":"sam"}]}}"#.utf8)
+        let card = try JSONDecoder().decode(RemoteCard.self, from: wire)
+        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(card)) as? [String: Any])
+        let presentation = try #require(encoded["presentation"] as? [String: Any])
+        #expect(presentation["assignees"] as? [[String: String]] == [["name": "Sam Example", "username": "sam"]])
+
+        let legacy = RemoteCard(id: card.id, title: card.title, project: card.project, url: nil,
+            presentation: .init(repository: "p"))
+        let legacyWire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(legacy)) as? [String: Any])
+        #expect((legacyWire["presentation"] as? [String: Any])?["assignees"] == nil)
+        #expect(card.detailContextDigest == legacy.detailContextDigest)
+        let board = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [.init(id: .own, cards: [card])])
+        #expect(try RemoteDetailRequest(card: legacy, board: board).matches(board))
+    }
+
+    @Test func assigneeMetadataCannotPushAnOtherwiseValidSnapshotOverTheRelayLimit() throws {
+        let wire = Data(#"{"repository":"p","chips":[],"working":false,"assignees":[{"name":"Sam Example","username":"sam"}]}"#.utf8)
+        let presentation = try JSONDecoder().decode(RemoteCardText.self, from: wire)
+        var card = RemoteCard(id: "mr:1:2", title: "MR", project: "g/p", url: nil,
+            actions: [.init(id: "review", kind: .runReview, token: "current")], presentation: .init(repository: "p"))
+        let session = UUID()
+        func snapshot(_ card: RemoteCard) -> RemoteMessage {
+            .init(type: .snapshot, board: .init(hostSession: session, account: "me@host", lanes: [.init(id: .own, cards: [card])]))
+        }
+        let encoder = JSONEncoder()
+        let overhead = try encoder.encode(snapshot(card)).count
+        card.detail = String(repeating: "x", count: RemoteCipher.maximumPayloadBytes - overhead)
+        let limitSized = snapshot(card)
+        card.presentation = presentation
+        let oversized = snapshot(card)
+
+        #expect(try encoder.encode(limitSized).count == RemoteCipher.maximumPayloadBytes)
+        #expect(try encoder.encode(oversized).count > RemoteCipher.maximumPayloadBytes)
+        let fitted = oversized.fittingSnapshotMetadata()
+        #expect(fitted.board == limitSized.board)
+        #expect(try encoder.encode(fitted).count <= RemoteCipher.maximumPayloadBytes)
+    }
+
     @Test func issueTagsSurviveTheWireWithoutChangingDetailIdentity() throws {
         let wire = Data(##"{"id":"mr:1:2","title":"Fix retries","project":"g/p","head":"head","detail":"","drafts":[],"actions":[],"issues":[{"reference":"#123","title":"Retry payments","url":"https://gitlab.example.test/g/p/-/issues/123"},{"reference":"PAY-73"}]}"##.utf8)
         let upgraded = try JSONDecoder().decode(RemoteCard.self, from: wire)
@@ -71,7 +110,7 @@ import Testing
         let board = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [.init(id: .own, cards: [card])])
         let message = RemoteMessage(type: .snapshot, board: board)
 
-        let fitted = message.fittingIssueTags()
+        let fitted = message.fittingSnapshotMetadata()
 
         #expect(try JSONEncoder().encode(message).count > RemoteCipher.maximumPayloadBytes)
         #expect(try JSONEncoder().encode(fitted).count <= RemoteCipher.maximumPayloadBytes)
