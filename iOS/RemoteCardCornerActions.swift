@@ -9,14 +9,9 @@ struct RemoteCardCornerActions: View {
     let onOpenAction: ((RemoteCardCTA) -> Void)?
     let onShowDetails: (() -> Void)?
 
-    @State private var panel: Panel?
+    @State private var showsAutomation = false
     @State private var reviewRemoval: ReviewRemoval?
     @State private var copyFeedback: UUID?
-
-    private enum Panel: String, Identifiable {
-        case automation, assistant
-        var id: Self { self }
-    }
 
     private enum ReviewRemoval {
         case hide, leave
@@ -41,7 +36,7 @@ struct RemoteCardCornerActions: View {
                 RemoteCardPinButton(card: card, model: model)
             }
             if let automation = card.automation {
-                Button { panel = .automation } label: {
+                Button { showsAutomation = true } label: {
                     icon(automation.active && !automation.globallySuspended ? "play.fill" : "pause.fill")
                         .foregroundStyle(automation.customized ? Color.orange : automation.active ? Color.accentColor : Color.secondary)
                 }
@@ -66,17 +61,13 @@ struct RemoteCardCornerActions: View {
                     ? .RemoteCardActions.remoteCardActionsHideReviewExplanation : .Board.boardReviewAssignmentHideExplanation)
             }
         }
-        .sheet(item: $panel) { panel in
+        .sheet(isPresented: $showsAutomation) {
             if let model {
-                switch panel {
-                case .automation: RemoteCardAutomationPanel(model: model, original: card)
-                case .assistant:
-                    if let url { RemoteCardAssistantPanel(model: model, card: card, url: url) }
-                }
+                RemoteCardAutomationPanel(model: model, original: card)
             }
         }
         .onChange(of: model?.state.board?.hostSession) {
-            panel = nil
+            showsAutomation = false
             reviewRemoval = nil
         }
     }
@@ -116,11 +107,6 @@ struct RemoteCardCornerActions: View {
                     }
                     .disabled(!model.state.canAct())
                     .accessibilityIdentifier("remote.review.seen.\(card.id)")
-                }
-                if model != nil {
-                    Button { panel = .assistant } label: {
-                        Label(.AssistantContext.assistantContextOpen, systemImage: "bubble.left.and.bubble.right")
-                    }
                 }
                 if card.canAcknowledgeFinished == true {
                     Button { submit(.acknowledge) } label: { Label(.Remote.remoteSeen, systemImage: "checkmark") }
@@ -352,64 +338,6 @@ private struct RemoteCardAutomationPanel: View {
     }
 }
 
-struct RemoteCardAssistantPanel: View {
-    let model: RemotePhoneModel
-    let card: RemoteCard
-    let url: URL
-    @Environment(\.dismiss) private var dismiss
-    @State private var destination: RemoteCardAssistant?
-    @State private var message = ""
-    @State private var copied = false
-
-    private var destinations: [RemoteCardAssistant] { model.state.board?.cardAssistants ?? [] }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Button {
-                        UIPasteboard.general.string = url.absoluteString
-                        copied = true
-                    } label: {
-                        Label(copied ? .RemoteCardActions.remoteCardActionsContextCopied : .AssistantContext.assistantContextCopy,
-                            systemImage: copied ? "checkmark" : "doc.on.doc")
-                    }
-                }
-                if !destinations.isEmpty {
-                    Section {
-                        Picker(selection: $destination) {
-                            ForEach(destinations) { option in Text(option.title).tag(Optional(option)) }
-                        } label: { Text(.RemoteCardActions.remoteCardActionsAssistantOnMac) }
-                        if destination?.requiresMessage == true {
-                            TextField(text: $message, axis: .vertical) {
-                                Text(.RemoteCardActions.remoteCardActionsAssistantMessage)
-                            }
-                        }
-                        Button(.RemoteCardActions.remoteCardActionsAssistantOnMac, action: launch)
-                            .disabled(!model.state.canAct() || change?.argument == nil
-                                || !card.actions.contains { $0.kind == .editCard })
-                    }
-                }
-            }
-            .onAppear { destination = destinations.first }
-            .navigationTitle(Text(.AssistantContext.assistantContextOpen))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button(.Remote.remoteClose) { dismiss() } } }
-        }
-    }
-
-    private var change: RemoteCardChange? {
-        guard let destination, destinations.contains(destination) else { return nil }
-        return .openAssistant(destination, message: destination.requiresMessage ? message : nil)
-    }
-
-    private func launch() {
-        guard let change else { return }
-        dismiss()
-        Task { await model.changeCard(change, card: card) }
-    }
-}
-
 private extension RemoteCardAutomation {
     var stateLabel: LocalizedStringResource {
         if globallySuspended { return .RemoteCardActions.remoteCardActionsSuspendedOnMac }
@@ -433,18 +361,6 @@ private extension RemoteCardAutomation.Rule.Kind {
         case .commentPublication: .RemoteCardActions.remoteCardActionsPublication
         case .merge: .RemoteCardActions.remoteCardActionsMerge
         case .approval: .RemoteCardActions.remoteCardActionsApproval
-        }
-    }
-}
-
-private extension RemoteCardAssistant {
-    var title: LocalizedStringResource {
-        switch self {
-        case .codexApp: .AssistantContext.assistantContextCodexApp
-        case .claudeDesktop: .AssistantContext.assistantContextClaudeDesktop
-        case .t3Code: .AssistantContext.assistantContextT3Code
-        case .codexCLI: .AssistantContext.assistantContextCodexCLI
-        case .claudeCLI: .AssistantContext.assistantContextClaudeCLI
         }
     }
 }

@@ -39,40 +39,6 @@
         }
       }
     },
-    "remoteCardActions.assistantMessage": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Message for the assistant"
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Wiadomość dla asystenta"
-          }
-        }
-      }
-    },
-    "remoteCardActions.assistantOnMac": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Open on Mac"
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Otwórz na Macu"
-          }
-        }
-      }
-    },
     "remoteCardActions.automation": {
       "extractionState": "manual",
       "localizations": {
@@ -137,23 +103,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Zastosuj to ustawienie do merge requestów w tym repozytorium, które dziedziczą ustawienia."
-          }
-        }
-      }
-    },
-    "remoteCardActions.contextCopied": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Link copied"
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Skopiowano link"
           }
         }
       }

@@ -7,7 +7,6 @@ struct RemoteHiddenReviewCard: View {
     let card: RemoteCard
     let model: RemotePhoneModel
 
-    @State private var assistantCard: RemoteCard?
     @State private var reviewToLeave: RemoteCard?
 
     private let opacity = RemoteCardView.dimmedOpacity
@@ -43,11 +42,6 @@ struct RemoteHiddenReviewCard: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("remote.card.\(card.id)")
         .environment(\.gitLabPersonSourceURL, nil)
-        .sheet(item: $assistantCard) { selected in
-            if let url = selected.gitLabActionURL {
-                RemoteCardAssistantPanel(model: model, card: selected, url: url)
-            }
-        }
         .confirmationDialog(Text(.Board.boardReviewAssignmentLeave), isPresented: Binding(
             get: { reviewToLeave != nil }, set: { if !$0 { reviewToLeave = nil } }
         ), titleVisibility: .visible, presenting: reviewToLeave) { selected in
@@ -132,11 +126,6 @@ struct RemoteHiddenReviewCard: View {
                 Label(.MRFreshness.mrFreshnessRefresh, systemImage: "arrow.clockwise")
             }
             .disabled(!canEdit)
-            Section {
-                Button { assistantCard = card } label: {
-                    Label(.AssistantContext.assistantContextOpen, systemImage: "bubble.left.and.bubble.right")
-                }
-            }
         }
         Section {
             if let action = restoreAction {
