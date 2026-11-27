@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Group draft regeneration with agent chat and phone pairing in the Mac toolbar, and enlarge its icon.
 
+- Place the merge request description label above its box on Mac, iPhone and iPad.
+
 - Reduce SwiftUI layout work while scrolling the Mac and iOS boards, and give Mac automation headings distinct identities.
 
 - Show Mac merge request statuses, blockers and next actions on paired iPhones and iPads, including claiming an assignment, stopping an agent run, publishing checked drafts, and merging.

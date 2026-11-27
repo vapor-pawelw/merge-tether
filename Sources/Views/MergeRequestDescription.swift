@@ -15,19 +15,21 @@ struct MergeRequestDescription: View {
             } label: {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(title).font(.body.weight(.semibold))
-                    Text(SafeMarkdown.render(source) ?? AttributedString(source))
-                        .font(.callout)
-                        .lineSpacing(3)
-                        .lineLimit(isExpanded ? nil : 3)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .allowsHitTesting(false)
-                    Text(isExpanded ? collapseHint : expandHint)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(SafeMarkdown.render(source) ?? AttributedString(source))
+                            .font(.callout)
+                            .lineSpacing(3)
+                            .lineLimit(isExpanded ? nil : 3)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .allowsHitTesting(false)
+                        Text(isExpanded ? collapseHint : expandHint)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
+                    .modifier(MRDetailStatusCard())
                 }
                 .multilineTextAlignment(.leading)
-                .modifier(MRDetailStatusCard())
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
