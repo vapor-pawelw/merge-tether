@@ -77,6 +77,13 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Brak uruchomień agentów dla tego wyboru."}}
       }
     },
+    "assistant.jobs.review.discussion.summary": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Open GitLab discussions at review completion (%1$lld total, %2$lld started by your account, %3$lld started by others)"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Otwarte dyskusje w GitLabie w chwili zakończenia przeglądu (łącznie %1$lld, z Twojego konta %2$lld, z pozostałych kont %3$lld)"}}
+      }
+    },
     "assistant.jobs.audit.heading": {
       "extractionState": "manual",
       "localizations": {

@@ -2785,6 +2785,52 @@ import MergeTetherRemote
         #expect(retargeted?.launchTarget == ReviewTargetBinding(launched))
     }
 
+    @Test(arguments: [false, true])
+    func reviewSummaryIncludesOtherReviewersOpenDiscussions(_ resolvedDuringReview: Bool) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        let discussions = #"""
+            [
+              {"id":"own","notes":[{"id":40,"author":{"id":3},"body":"My finding","resolvable":true,"resolved":false}]},
+              {"id":"other","notes":[
+                {"id":41,"author":{"id":8},"body":"Other reviewer's finding","resolvable":true,"resolved":false},
+                {"id":45,"author":{"id":3},"body":"My reply","resolvable":true,"resolved":false}
+              ]},
+              {"id":"second-other","notes":[{"id":42,"author":{"id":8},"body":"Another finding","resolvable":true,"resolved":false}]},
+              {"id":"general","notes":[{"id":43,"author":{"id":8},"body":"General comment","resolvable":false}]},
+              {"id":"system","notes":[{"id":44,"system":true,"body":"Left review comments"}]}
+            ]
+            """#
+        try harness.write("discussions.json", discussions)
+        try harness.recordVerdict("classified_findings", head: head,
+            findingLevels: ["40": "major", "41": "major", "42": "minor_code", "43": "none"])
+        if resolvedDuringReview {
+            try harness.write("discussions.json", discussions.replacingOccurrences(
+                of: #""Another finding","resolvable":true,"resolved":false"#,
+                with: #""Another finding","resolvable":true,"resolved":true"#))
+        }
+        let index = try #require(harness.settings.assistantHandoffs.indices.last)
+        harness.settings.assistantHandoffs[index].execution?.state = .running
+        harness.settings.assistantHandoffs[index].mergeRequestURL = URL(string: "https://gitlab.example.org/g/p/-/merge_requests/2")
+        let run = harness.settings.assistantHandoffs[index]
+        let outcome = AssistantJobCoordinator.Outcome(result: .init(status: .succeeded,
+            summary: "One finding from your account remains open."), output: "")
+
+        let captured = await AssistantJobExecutor.reviewVerdictForCompletion(outcome.result,
+            user: .init(id: 3, username: "me"), handoff: run, settings: harness.settings,
+            glab: harness.glab, directory: harness.folder.appending(path: "verdicts"))
+        let evidence = try #require(captured)
+        let reported = evidence.applyingDiscussionSummary(to: outcome)
+        try AssistantJobJournal.saveWithLoadedKey(reported, for: run, reviewVerdict: evidence.verdict)
+
+        let total = resolvedDuringReview ? 2 : 3
+        let others = resolvedDuringReview ? 1 : 2
+        let expected = "Open GitLab discussions at review completion (\(total) total, 1 started by your account, \(others) started by others)"
+            + "\n\n" + outcome.result.summary
+        #expect(reported.summary == expected)
+        #expect(AssistantJobJournal.recover(run)?.summary == expected)
+    }
+
     @Test func validatedReviewCompletionCapturesExactPendingDraftsAndFailsClosedWhenTheyCannotBeRead() async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }

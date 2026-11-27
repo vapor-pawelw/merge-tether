@@ -440,8 +440,9 @@ enum AssistantJobExecutor {
             if violation == .auditUnavailable, !Task.isCancelled {
                 let review = await reviewVerdictForCompletion(result, user: user, handoff: handoff,
                     settings: settings, glab: glab, reviewedRequest: authorization.request)
+                let reported = review?.applyingDiscussionSummary(to: outcome) ?? outcome
                 do {
-                    try await AssistantJobJournal.save(outcome, for: handoff, reviewVerdict: review?.verdict,
+                    try await AssistantJobJournal.save(reported, for: handoff, reviewVerdict: review?.verdict,
                         reviewDrafts: review?.drafts, reviewTarget: review?.target, reviewLaunchTarget: review?.launchTarget,
                         awaitingWorkerAudit: true)
                 } catch {
@@ -454,11 +455,12 @@ enum AssistantJobExecutor {
             handoff: handoff, settings: settings, glab: glab, assessmentPolicy: mayAssess ? assessmentPolicy : nil)
         let review = await reviewVerdictForCompletion(result, user: user, handoff: handoff, settings: settings, glab: glab,
             reviewedRequest: authorization.request)
-        do { try await AssistantJobJournal.save(outcome, for: handoff, reviewVerdict: review?.verdict, reviewDrafts: review?.drafts,
+        let reported = review?.applyingDiscussionSummary(to: outcome) ?? outcome
+        do { try await AssistantJobJournal.save(reported, for: handoff, reviewVerdict: review?.verdict, reviewDrafts: review?.drafts,
             reviewTarget: review?.target, reviewLaunchTarget: review?.launchTarget) }
         catch { Log.monitor.error("Could not checkpoint worker completion: \(String(describing: error), privacy: .private)") }
         try Task.checkCancellation()
-        return outcome
+        return reported
     }
 
     private static func interruptionError(_ interruption: ProcessRunner.WorkerInterruption,
@@ -480,10 +482,17 @@ enum AssistantJobExecutor {
     struct ReviewCompletionEvidence {
         let verdict: ReviewVerdict
         let drafts: [GitLabDraftNote]
+        let discussionSummary: String
         /// From the app's own read after the worker finished; never from the worker or its helper.
         var target: ReviewTargetBinding? = nil
         /// Kept for re-review when the target moved during the original run.
         var launchTarget: ReviewTargetBinding? = nil
+
+        func applyingDiscussionSummary(to outcome: AssistantJobCoordinator.Outcome) -> AssistantJobCoordinator.Outcome {
+            var reported = outcome
+            reported.reviewDiscussionSummary = discussionSummary
+            return reported
+        }
     }
 
     @MainActor
@@ -526,8 +535,12 @@ enum AssistantJobExecutor {
             // verdict still records the review, but automatic approval requires a fresh one.
             let target = ReviewTargetBinding(request)
             let launchTarget = reviewedRequest.flatMap(ReviewTargetBinding.init)
+            let openRoots = discussions.compactMap(\.reviewRoot).filter { $0.resolvable == true && $0.resolved == false }
+            let ownCount = openRoots.filter { $0.author?.id == user.id }.count
+            let discussionSummary = String(localized: .AssistantJobs.assistantJobsReviewDiscussionSummary(
+                openRoots.count, ownCount, openRoots.count - ownCount))
             try? ReviewVerdictStore.saveAuthenticatedVerdict(verdict, in: directory)
-            return .init(verdict: verdict, drafts: drafts,
+            return .init(verdict: verdict, drafts: drafts, discussionSummary: discussionSummary,
                 target: reviewedRequest == nil || launchTarget == target ? target : nil,
                 launchTarget: launchTarget != target ? launchTarget : nil)
         } catch {

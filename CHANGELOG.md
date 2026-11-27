@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Show all open GitLab discussions in completed review summaries, with separate counts for your account and other authors.
+
 - Keep replies to resolved GitLab threads private when publishing from MergeTether, and have review agents check whether later changes already address a comment before drafting a reply.
 
 - Add a separate automatic publication permission for corrections in other reviewers’ threads, enabled by default only in Max.

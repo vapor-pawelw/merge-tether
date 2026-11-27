@@ -8,6 +8,12 @@ final class AssistantJobCoordinator {
     struct Outcome: Sendable {
         let result: AssistantJobResult
         let output: String
+        var reviewDiscussionSummary: String? = nil
+
+        var summary: String {
+            guard let reviewDiscussionSummary else { return result.summary }
+            return reviewDiscussionSummary + "\n\n" + result.summary
+        }
     }
     typealias Executor = @MainActor (Handoff, SettingsManager) async throws -> Outcome
     typealias SuccessCleanup = @MainActor (Handoff, SettingsManager) async -> Void
@@ -245,7 +251,7 @@ final class AssistantJobCoordinator {
                 try Task.checkCancellation()
                 self.update(handoff.id, settings: settings) {
                     $0.state = outcome.result.status == .succeeded ? .succeeded : .blocked
-                    $0.summary = String(outcome.result.summary.prefix(32_000))
+                    $0.summary = String(outcome.summary.prefix(32_000))
                     $0.blocker = outcome.result.status == .blocked
                         ? outcome.result.blocker.map { String(GlabService.redactWorkflowEvidence($0).prefix(300)) } : nil
                     $0.output = String(outcome.output.prefix(262_144))

@@ -65,7 +65,7 @@ enum AssistantJobJournal {
         guard let bytes = keyLoader.cached else { throw KeyError(status: errSecInteractionNotAllowed) }
         let checkpoint = Checkpoint(runID: handoff.id, key: handoff.key, head: handoff.expectedHeadSHA,
             result: .init(status: outcome.result.status,
-                summary: String(GlabService.redactWorkflowEvidence(outcome.result.summary).prefix(32_000)),
+                summary: String(GlabService.redactWorkflowEvidence(outcome.summary).prefix(32_000)),
                 blocker: outcome.result.blocker.map { String(GlabService.redactWorkflowEvidence($0).prefix(300)) }),
             output: String(GlabService.redactWorkflowEvidence(outcome.output).prefix(262_144)), finishedAt: Date(),
             reviewVerdict: reviewVerdict, reviewDrafts: reviewDrafts,
