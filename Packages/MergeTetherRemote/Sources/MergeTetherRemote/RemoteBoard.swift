@@ -14,6 +14,7 @@ public enum RemoteActionKind: String, Codable, Sendable { case publish, approve,
     case personalApprove, removeApproval
     case editReviewers
     case editCard
+    case claimAssignment
     public var isPersonalApproval: Bool { self == .personalApprove || self == .removeApproval }
     public var requiresApprovalConfirmation: Bool { self == .approve || isPersonalApproval }
     // Sent only to clients that advertise draftRegenerationCapability.
@@ -23,6 +24,7 @@ public enum RemoteActionKind: String, Codable, Sendable { case publish, approve,
 public struct RemoteAction: Codable, Equatable, Identifiable, Sendable {
     public static let reviewSeenID = "reviewSeen"
     public static let restoreHiddenReviewID = "restoreHiddenReview"
+    public static let finishedSeenID = "acknowledgeFinished"
     public var id: String
     public var kind: RemoteActionKind
     public var token: String
@@ -87,7 +89,7 @@ public struct RemoteDraft: Codable, Equatable, Identifiable, Sendable {
 
 /// A destination, optionally bound to one of the card's host-authorized actions.
 public struct RemoteCardCTA: Codable, Equatable, Sendable {
-    public var duplicatesCardTap: Bool { destination == .overview && actionID == nil }
+    public var duplicatesCardTap: Bool { destination == .overview && actionID == nil && showsOnCard != true }
     public enum Destination: String, Codable, Sendable {
         case overview, drafts, feedback, assistantRuns, setup, actions, discussions
         public init(from decoder: Decoder) throws {
@@ -98,8 +100,10 @@ public struct RemoteCardCTA: Codable, Equatable, Sendable {
     public var title: String
     public var destination: Destination
     public var actionID: String?
-    public init(title: String, destination: Destination, actionID: String? = nil) {
+    public var showsOnCard: Bool?
+    public init(title: String, destination: Destination, actionID: String? = nil, showsOnCard: Bool? = nil) {
         self.title = title; self.destination = destination; self.actionID = actionID
+        self.showsOnCard = showsOnCard
     }
 }
 
@@ -107,6 +111,33 @@ public struct RemoteCardChip: Codable, Equatable, Sendable {
     public var title: String
     public var symbol: String
     public init(title: String, symbol: String) { self.title = title; self.symbol = symbol }
+}
+
+public struct RemoteCardStatusContext: Codable, Equatable, Sendable {
+    public enum Finished: String, Codable, Sendable { case merged, closed }
+    public struct MergeStage: Codable, Equatable, Sendable {
+        public enum Kind: String, Codable, Sendable { case merging, inTrain, queued }
+        public let kind: Kind
+        public let title: String
+        public let startedAt: Date?
+
+        public init(kind: Kind, title: String, startedAt: Date? = nil) {
+            self.kind = kind; self.title = title; self.startedAt = startedAt
+        }
+    }
+
+    public var finished: Finished?
+    public var mergeStage: MergeStage?
+    public var activityStartedAt: Date?
+    public var activityDetail: String?
+    public var refreshFailureHelp: String?
+    public var notices: [RemoteCardChip]?
+    public var checkGitLab: Bool?
+    public var trainConflictNoteURL: URL?
+
+    public init() {}
+
+    public var isEmpty: Bool { self == Self() }
 }
 
 /// The named people in a status line, plus the count of people omitted from the line.
@@ -140,6 +171,8 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
     public var working: Bool
     public var chips: [RemoteCardChip]
     public var secondaryCTA: RemoteCardCTA?
+    public var additionalCTAs: [RemoteCardCTA]?
+    public var statusContext: RemoteCardStatusContext?
     /// Merge requirements, one per line; `status` keeps the joined sentence for older phones.
     public var requirements: [String]?
     public var requirementPeopleMessage: RemotePeopleMessage?
@@ -423,6 +456,7 @@ public struct RemoteMessage: Codable, Sendable {
     public static let reviewerBatchCapability = "reviewer-batch-v1"
     public static let commentOriginCapability = "comment-origin-v1"
     public static let markReadyCapability = "mark-ready-v1"
+    public static let mrBoardActionsCapability = "mr-board-actions-v1"
     public static let draftRegenerationCapability = "draft-regeneration-v1"
     /// Host accepts `DraftRegenerationStyle` presets and rejects free-form remote instructions.
     public static let draftRegenerationStylesCapability = "draft-regeneration-styles-v1"
@@ -542,62 +576,47 @@ extension RemoteBoard {
                           supportsCommentOrigins: Bool = false, supportsMarkReady: Bool = false,
                           supportsDraftRegeneration: Bool = false, supportsPersonalApproval: Bool = false,
                           supportsReviewerEditing: Bool = false, supportsCardActions: Bool = false,
-                          supportsReviewBoard: Bool = false) -> Self {
+                          supportsReviewBoard: Bool = false, supportsMRBoardActions: Bool = false) -> Self {
         var compatible = self
         if !supportsDraftRegeneration { compatible.draftRegeneration = nil }
         if !supportsCardActions { compatible.cardAssistants = nil }
         if !supportsReviewBoard { compatible.removeReviewBoardTraits() }
         for lane in compatible.lanes.indices {
             for card in compatible.lanes[lane].cards.indices {
+                var projected = compatible.lanes[lane].cards[card]
                 if !supportsCardActions {
-                    compatible.lanes[lane].cards[card].actions.removeAll { $0.kind == .editCard }
-                    if !supportsReviewBoard { compatible.lanes[lane].cards[card].pinned = nil }
-                    compatible.lanes[lane].cards[card].automation = nil
-                    compatible.lanes[lane].cards[card].canRemoveFromBoard = nil
-                    compatible.lanes[lane].cards[card].canLeaveReview = nil
-                    compatible.lanes[lane].cards[card].canAcknowledgeFinished = nil
+                    if !supportsReviewBoard { projected.pinned = nil }
+                    projected.automation = nil
+                    projected.canRemoveFromBoard = nil
+                    projected.canLeaveReview = nil
+                    projected.canAcknowledgeFinished = nil
                 }
-                if !supportsReviewerEditing {
-                    compatible.lanes[lane].cards[card].actions.removeAll { $0.kind == .editReviewers }
+                if !supportsPersonalApproval { projected.presentation?.automaticApprovalOff = nil }
+                if !supportsCommentReview, projected.drafts.isEmpty, projected.primaryCTA?.destination == .drafts {
+                    projected.primaryCTA = nil
                 }
-                if !supportsPersonalApproval {
-                    compatible.lanes[lane].cards[card].actions.removeAll { $0.kind.isPersonalApproval }
-                    compatible.lanes[lane].cards[card].presentation?.automaticApprovalOff = nil
+                if !supportsMRBoardActions {
+                    projected.primaryCTA?.showsOnCard = nil
+                    projected.presentation?.secondaryCTA?.showsOnCard = nil
+                    projected.presentation?.additionalCTAs = nil
+                    projected.presentation?.statusContext = nil
                 }
-                if !supportsMarkReady {
-                    let actions = compatible.lanes[lane].cards[card].actions
-                    let markReadyActions = actions.filter { $0.kind == .markReady }
-                    let removed = Set(markReadyActions.map(\.id))
-                    compatible.lanes[lane].cards[card].actions.removeAll { $0.kind == .markReady }
-                    if let id = compatible.lanes[lane].cards[card].primaryCTA?.actionID, removed.contains(id) {
-                        compatible.lanes[lane].cards[card].primaryCTA = nil
-                    }
-                    if let id = compatible.lanes[lane].cards[card].presentation?.secondaryCTA?.actionID, removed.contains(id) {
-                        compatible.lanes[lane].cards[card].presentation?.secondaryCTA = nil
-                    }
-                }
-                if !supportsCommentOrigins {
-                    compatible.lanes[lane].cards[card].actions.removeAll { $0.kind == .setCommentOrigin }
-                }
-                if !supportsMRControls {
-                    // Older phones cannot decode these kinds; one unknown value would reject the whole board.
-                    compatible.lanes[lane].cards[card].actions.removeAll { RemoteActionKind.mrControls.contains($0.kind) }
-                }
-                if !supportsMergeActions {
-                    compatible.lanes[lane].cards[card].actions.removeAll { [.merge, .enqueueMerge, .resolveThreads, .checkThreads].contains($0.kind) }
-                }
-                if !supportsCommentReview, compatible.lanes[lane].cards[card].drafts.isEmpty,
-                   compatible.lanes[lane].cards[card].primaryCTA?.destination == .drafts {
-                    compatible.lanes[lane].cards[card].primaryCTA = nil
-                }
-                if !supportsCommentReview {
-                    compatible.lanes[lane].cards[card].actions.removeAll { action in
-                        switch action.kind {
-                        case .deleteDraft, .finishCommentReview: true
-                        default: false
-                        }
+                projected.removeActions { action in
+                    switch action.kind {
+                    case .editCard: !supportsCardActions
+                    case .editReviewers: !supportsReviewerEditing
+                    case .personalApprove, .removeApproval: !supportsPersonalApproval
+                    case .markReady: !supportsMarkReady
+                    case .setCommentOrigin: !supportsCommentOrigins
+                    case .publishDraft, .runReview, .stopJob, .ignoreSuggestion, .restoreSuggestion: !supportsMRControls
+                    case .merge, .enqueueMerge, .resolveThreads, .checkThreads: !supportsMergeActions
+                    case .deleteDraft, .finishCommentReview: !supportsCommentReview
+                    case .claimAssignment: !supportsMRBoardActions
+                    case .markDone where action.id == RemoteAction.finishedSeenID: !supportsMRBoardActions
+                    default: false
                     }
                 }
+                compatible.lanes[lane].cards[card] = projected
             }
         }
         return compatible

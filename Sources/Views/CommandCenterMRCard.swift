@@ -420,10 +420,7 @@ private struct CommandCenterMRCardContent: View {
             switch reviewingContext.nextStep {
             case .runReview:
                 primary(label, cta: .runReview, enabled: monitor.canRunReview(for: row.displayItem)) {
-                    let pending = row.waitsForReviewStart ? row.intents.first {
-                        $0.kind == .review && $0.state == .pending && $0.jobID == nil
-                    } : nil
-                    if let pending {
+                    if let pending = row.reviewIntentForManualStart {
                         guard let consent = confirmManualReview(for: monitor.reviewRequest(for: pending), monitor: monitor) else { return }
                         start { await monitor.runMRTodoIntent(id: pending.id, confirmedReview: consent) }
                     } else {

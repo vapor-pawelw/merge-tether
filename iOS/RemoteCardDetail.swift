@@ -148,7 +148,7 @@ struct RemoteCardDetail: View {
                 } label: {
                     switch confirmation?.kind {
                     case .deleteDraft: Text(.CommentReview.commentReviewDelete)
-                    case .reReview, .merge, .enqueueMerge: Text(confirmation?.kind.title ?? .Remote.remoteConfirm)
+                    case .reReview, .merge, .enqueueMerge, .claimAssignment: Text(confirmation?.kind.title ?? .Remote.remoteConfirm)
                     case .prepare, .retryJob, .verify:
                         if let label = confirmation?.label {
                             Text(verbatim: label)
@@ -405,6 +405,7 @@ struct RemoteCardDetail: View {
                     RemoteDetailActionButtons(actions: actions, runningActionID: runningActionID,
                         onAction: { action in
                             if action.id == RemoteAction.reviewSeenID
+                                || action.id == RemoteAction.finishedSeenID
                                 || (current.id.hasPrefix("completion:") && action.kind == .markDone) {
                                 Task { await model.perform(card: current, action: action) }
                             } else { showConfirmation(action) }

@@ -57,6 +57,7 @@ extension RemoteConnection: RemoteHostTransport {}
     @ObservationIgnored private var reviewerSearchTask: Task<Void, Never>?
     private var phoneSupportsCommentOrigins = false
     private var phoneSupportsMarkReady = false
+    private var phoneSupportsMRBoardActions = false
     private var phoneSupportsDraftRegeneration = false
     private var phoneSupportsBoardOrder = false
     private var phoneSupportsCardActions = false
@@ -67,7 +68,7 @@ extension RemoteConnection: RemoteHostTransport {}
         RemoteMessage.detailPreviewCapability, RemoteMessage.cachedDetailsCapability, RemoteMessage.draftRegenerationCapability,
         RemoteMessage.boardOrderCapability, RemoteMessage.personalApprovalCapability, RemoteMessage.reviewerEditingCapability,
         RemoteMessage.reviewerBatchCapability, RemoteMessage.cardActionsCapability,
-        RemoteMessage.draftRegenerationStylesCapability, RemoteMessage.reviewBoardCapability
+        RemoteMessage.draftRegenerationStylesCapability, RemoteMessage.reviewBoardCapability, RemoteMessage.mrBoardActionsCapability
     ]
     private let readAvatarThumbnail: @Sendable (URL) async -> Data?
     @ObservationIgnored private(set) var avatarTask: Task<Void, Never>?
@@ -218,6 +219,7 @@ extension RemoteConnection: RemoteHostTransport {}
         reviewerSearchTask?.cancel(); reviewerSearchTask = nil
         phoneSupportsCommentOrigins = false
         phoneSupportsMarkReady = false
+        phoneSupportsMRBoardActions = false
         phoneSupportsDraftRegeneration = false
         phoneSupportsBoardOrder = false
         phoneSupportsReviewBoard = false
@@ -322,6 +324,7 @@ extension RemoteConnection: RemoteHostTransport {}
             phoneSupportsReviewerEditing = message.capabilities?.contains(RemoteMessage.reviewerEditingCapability) == true
             phoneSupportsReviewerBatches = message.capabilities?.contains(RemoteMessage.reviewerBatchCapability) == true
             phoneSupportsMarkReady = message.capabilities?.contains(RemoteMessage.markReadyCapability) == true
+            phoneSupportsMRBoardActions = message.capabilities?.contains(RemoteMessage.mrBoardActionsCapability) == true
             phoneSupportsDraftRegeneration = message.capabilities?.contains(RemoteMessage.draftRegenerationCapability) == true
             phoneSupportsBoardOrder = message.capabilities?.contains(RemoteMessage.boardOrderCapability) == true
             phoneSupportsCardActions = message.capabilities?.contains(RemoteMessage.cardActionsCapability) == true
@@ -774,7 +777,8 @@ extension RemoteConnection: RemoteHostTransport {}
             supportsMRControls: phoneSupportsMRControls, supportsCommentOrigins: phoneSupportsCommentOrigins,
             supportsMarkReady: phoneSupportsMarkReady, supportsDraftRegeneration: phoneSupportsDraftRegeneration,
             supportsPersonalApproval: phoneSupportsPersonalApproval, supportsReviewerEditing: phoneSupportsReviewerEditing,
-            supportsCardActions: phoneSupportsCardActions, supportsReviewBoard: phoneSupportsReviewBoard)
+            supportsCardActions: phoneSupportsCardActions, supportsReviewBoard: phoneSupportsReviewBoard,
+            supportsMRBoardActions: phoneSupportsMRBoardActions)
     }
 
     private func applyBoardOrderMove(_ move: RemoteBoardOrderMove) -> Bool {
@@ -906,8 +910,21 @@ extension RemoteConnection: RemoteHostTransport {}
             return monitor.automationAction(for: todo) == .failed ? .failed : .completed
         }
         let board = monitor.boardSnapshot
-        guard let row = (board.own + board.reviewed).first(where: { "mr:\($0.id.projectID):\($0.id.iid)" == card.id }),
-              RemoteBoardAdapter.card(row.item, account: account).drafts == card.drafts,
+        guard let row = (board.own + board.reviewed).first(where: { "mr:\($0.id.projectID):\($0.id.iid)" == card.id })
+        else { return .changed }
+        if action.id == RemoteAction.finishedSeenID {
+            guard phoneSupportsMRBoardActions, argument == nil,
+                  RemoteBoardAdapter.finishedAcknowledgement(for: row, monitor: monitor, account: account) == action
+            else { return .changed }
+            return monitor.acknowledgeFinishedMergeRequest(row.displayItem) ? .completed : .failed
+        }
+        if action.kind == .claimAssignment {
+            guard phoneSupportsMRBoardActions, argument == nil,
+                  RemoteBoardAdapter.assignmentClaim(for: row, monitor: monitor, account: account) == action,
+                  let request = row.displayRequest else { return .changed }
+            return await monitor.confirmAssignedOwnership(of: request) ? .completed : .changed
+        }
+        guard RemoteBoardAdapter.card(row.item, account: account).drafts == card.drafts,
               row.item.mergeRequest?.sha == card.head else { return .changed }
         let item = row.item
         if action.kind == .confirmAIReply || action.kind == .markReplyHuman {

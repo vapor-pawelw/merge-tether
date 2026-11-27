@@ -1,6 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "remote.claimAssignmentHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claim this assigned merge request. MergeTether can then run the automation configured for it on your Mac."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przejmij przypisany Ci merge request. MergeTether będzie mógł uruchamiać na Macu skonfigurowaną dla niego automatyzację."
+          }
+        }
+      }
+    },
     "remote.setupActionOnMac": {
       "extractionState": "manual",
       "localizations": {

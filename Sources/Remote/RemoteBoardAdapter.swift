@@ -304,6 +304,7 @@ import MergeTetherRemote
                     card = self.card(item, account: account, extraActions: extras, context: context,
                         failedFollowUp: followUp, confirmations: presentation.confirmationOffers)
                     card = self.presentation(card, model: presentation)
+                    projectActivity(&card, presentation: presentation, monitor: monitor)
                     if includesReviewBoard {
                         card.boardTraits = .init(needsAttention: row.needsAttention,
                             isNew: reviewing && monitor.isNewReviewAssignment(row),
@@ -327,6 +328,13 @@ import MergeTetherRemote
                     }
                     if row.displayRequest?.state == .merged || row.displayRequest?.state == .closed {
                         card.actions = []
+                        if let action = finishedAcknowledgement(for: row, monitor: monitor, account: account) {
+                            card.actions.append(action)
+                            card.primaryCTA = .init(title: String(localized: .MRLifecycle.seen), destination: .actions, actionID: action.id)
+                        }
+                        if includesCardActions {
+                            RemoteCardActionContext(card: card, board: board, monitor: monitor)?.project(&card)
+                        }
                         result.lanes[lane].cards[index] = card
                         continue
                     }
@@ -352,25 +360,20 @@ import MergeTetherRemote
                             return (canRetry || canStart) && intent.id != workerRetryIntentID
                                 && (intent.kind != .followUp || !followUpInProgress)
                         }
-                        let intent = humanAction?.retryIntent.flatMap { selected in eligibleIntents.first { $0.id == selected.id } }
+                        let pendingReview = presentation.reviewingContext.nextStep == .runReview
+                            && humanAction == nil ? row.reviewIntentForManualStart : nil
+                        let primaryIntent = pendingReview
+                            ?? humanAction?.retryIntent.flatMap { selected in eligibleIntents.first { $0.id == selected.id } }
                             ?? eligibleIntents.first { $0.state == .failed }
                             ?? eligibleIntents.first
-                        if let intent,
-                           intent.kind == .refresh || monitor.selectedAssistantReady,
-                           let configuration = try? RemoteDigest.token(monitor.settings.automation) {
-                            let publication = monitor.manualReviewConsent(for: monitor.reviewRequest(for: intent)).publicationMode
-                            if let token = intentActionToken(intent, item: item, account: account, configuration: configuration,
-                                publication: publication.rawValue, failedFollowUp: followUp) {
-                                let label = String(localized: MRHumanAction.intentLabel(intent))
-                                let effect = MRActionCTA(intent: intent.kind) ?? .refreshFromGitLab
-                                let variant = intent.state == .failed ? "retry" : "start"
-                                let reviewMode = intent.kind == .review ? publication.rawValue : nil
-                                let confirmation = effect.help + (intent.kind == .review
-                                    ? "\n\n" + String(localized: publication.reviewConfirmation) : "")
-                                card.actions.append(.init(id: "intent:\(intent.id)", kind: .prepare, token: token,
-                                    confirmationText: confirmation, label: label,
-                                    confirmationID: effect.confirmationID(variant: [variant, reviewMode].compactMap { $0 }.joined(separator: ".")),
-                                    codingProvider: effect.requiresCodingAssistant ? result.codingProvider : nil))
+                        let visibleIntents = BoardMRIntentActions.visibleIntents(row.attentionIntents)
+                        let intents = [primaryIntent].compactMap { $0 } + visibleIntents.filter { visible in
+                            visible.kind != primaryIntent?.kind && eligibleIntents.contains { $0.id == visible.id }
+                        }
+                        if let configuration = try? RemoteDigest.token(monitor.settings.automation) {
+                            card.actions += intents.compactMap {
+                                intentAction($0, item: item, monitor: monitor, account: account,
+                                    configuration: configuration, failedFollowUp: followUp)
                             }
                         }
                         if let job = humanAction?.retryJob ?? row.latestJob, row.stoppedJobNeedsAttention,
@@ -393,7 +396,13 @@ import MergeTetherRemote
                     card.actions += mrControls(item: item, row: row, monitor: monitor, account: account, busy: busy)
                     if let control = commentOriginControl(item: item, monitor: monitor, account: account) { card.actions.append(control) }
                     card = bindingPrimaryAction(card, humanAction: humanAction?.action,
-                        actionID: humanAction?.executableActionID, nextStep: presentation.reviewingContext.nextStep)
+                        actionID: humanAction?.executableActionID, nextStep: presentation.reviewingContext.nextStep,
+                        pendingReviewID: row.reviewIntentForManualStart?.id)
+                    if let claim = assignmentClaim(for: row, monitor: monitor, account: account) {
+                        card.actions.append(claim)
+                    }
+                    projectBoardActions(&card, humanAction: humanAction?.action)
+                    projectPolicyHolds(&card, row: row, monitor: monitor)
                     if card.boardTraits?.isNew == true, let action = reviewAssignmentAction(for: row, monitor: monitor, account: account) {
                         card.actions.append(action)
                     }
@@ -423,7 +432,9 @@ import MergeTetherRemote
             || monitor.attention.hasError || monitor.authoredMergeRequests.hasError || monitor.isLoading
             || monitor.attention.isLoading || monitor.authoredMergeRequests.isLoading
         if result.partial {
-            for lane in result.lanes.indices { for card in result.lanes[lane].cards.indices { result.lanes[lane].cards[card].actions = [] } }
+            for lane in result.lanes.indices {
+                for card in result.lanes[lane].cards.indices { result.lanes[lane].cards[card].removeActions { _ in true } }
+            }
             result.hiddenReviews = result.hiddenReviews?.map { card in
                 var readOnly = card
                 readOnly.actions = []
@@ -433,6 +444,56 @@ import MergeTetherRemote
             result.inboxReadAction = RemoteInboxReadSelection(other)?.action(hostSession: session, account: account)
         }
         return result
+    }
+
+    private static func projectActivity(_ card: inout RemoteCard, presentation: MRCardPresentation, monitor: TodoMonitorService) {
+        guard let activity = presentation.activity else { return }
+        var state = card.presentation?.statusContext ?? .init()
+        let startedAt = monitor.activityStartedAt(for: presentation.row.item, activity: activity)
+        if presentation.mergeActivity != nil, let stage = state.mergeStage {
+            state.mergeStage = .init(kind: stage.kind, title: stage.title, startedAt: startedAt)
+        } else {
+            state.activityStartedAt = startedAt
+            state.activityDetail = presentation.reviewLaunchReason(workflows: monitor.settings.workflowActivity,
+                intents: monitor.settings.mrActionIntents)
+        }
+        card.presentation?.statusContext = state.isEmpty ? nil : state
+    }
+
+    private static func projectPolicyHolds(_ card: inout RemoteCard, row: MergeRequestBoardSnapshot.Row, monitor: TodoMonitorService) {
+        var state = card.presentation?.statusContext ?? .init()
+        var notices = state.notices ?? []
+        let policy = MREffectivePolicySummary.presentation(row: row, monitor: monitor).0.cardClauses
+        let displayed = Set(notices.map(\.title) + (card.presentation?.requirements ?? [])
+            + [card.detail, card.presentation?.status, card.presentation?.nextStep, state.mergeStage?.title].compactMap { $0 })
+        for clause in policy {
+            let title = String(localized: clause.message)
+            if !displayed.contains(title) { notices.append(.init(title: title, symbol: clause.symbol)) }
+        }
+        if let job = row.latestJob, let notice = monitor.assistantJobActionNotices[job.id] {
+            notices.append(.init(title: notice, symbol: "exclamationmark.triangle"))
+        }
+        state.notices = notices.isEmpty ? nil : notices
+        card.presentation?.statusContext = state.isEmpty ? nil : state
+    }
+
+    static func assignmentClaim(for row: MergeRequestBoardSnapshot.Row, monitor: TodoMonitorService, account: String) -> RemoteAction? {
+        guard row.waitsForAssignmentClaim, let request = row.displayRequest, request.isOpen,
+              let target = monitor.scopeTarget(projectID: row.id.projectID, iid: row.id.iid, url: row.displayURL),
+              account == "\(target.username)@\(target.host)", let context = contextRevision(request),
+              let token = try? RemoteDigest.token([account, context, RemoteActionKind.claimAssignment.rawValue]) else { return nil }
+        return .init(id: RemoteActionKind.claimAssignment.rawValue, kind: .claimAssignment, token: token,
+            confirmationText: String(localized: .Remote.remoteClaimAssignmentHelp),
+            label: String(localized: .Board.boardAssignmentClaim))
+    }
+
+    static func finishedAcknowledgement(for row: MergeRequestBoardSnapshot.Row, monitor: TodoMonitorService,
+                                        account: String) -> RemoteAction? {
+        let item = row.displayItem
+        guard monitor.canAcknowledgeFinishedMergeRequest(item), let id = item.lifecycleCompletionID,
+              let token = try? RemoteDigest.token([account, item.url.absoluteString, id.uuidString]) else { return nil }
+        return .init(id: RemoteAction.finishedSeenID, kind: .markDone,
+            token: token, label: String(localized: .MRLifecycle.seen))
     }
 
     static func failedFollowUp(in row: MergeRequestBoardSnapshot.Row, monitor: TodoMonitorService,
@@ -454,6 +515,23 @@ import MergeTetherRemote
         }
         guard let identity else { return nil }
         return try? RemoteDigest.token([account, identity, configuration, publication])
+    }
+
+    private static func intentAction(_ intent: MRTodoIntent, item: MergeRequestAttentionMonitor.Item,
+                                     monitor: TodoMonitorService, account: String, configuration: String,
+                                     failedFollowUp: MRHumanAction.FailedFollowUp?) -> RemoteAction? {
+        guard intent.kind == .refresh || monitor.selectedAssistantReady else { return nil }
+        let publication = monitor.manualReviewConsent(for: monitor.reviewRequest(for: intent)).publicationMode
+        guard let token = intentActionToken(intent, item: item, account: account, configuration: configuration,
+            publication: publication.rawValue, failedFollowUp: failedFollowUp) else { return nil }
+        let effect = MRActionCTA(intent: intent.kind) ?? .refreshFromGitLab
+        let variant = intent.state == .failed ? "retry" : "start"
+        let reviewMode = intent.kind == .review ? publication.rawValue : nil
+        let confirmation = effect.help + (intent.kind == .review ? "\n\n" + String(localized: publication.reviewConfirmation) : "")
+        return .init(id: "intent:\(intent.id)", kind: .prepare, token: token,
+            confirmationText: confirmation, label: String(localized: MRHumanAction.intentLabel(intent)),
+            confirmationID: effect.confirmationID(variant: [variant, reviewMode].compactMap { $0 }.joined(separator: ".")),
+            codingProvider: effect.requiresCodingAssistant ? monitor.settings.automation.selectedAssistant?.rawValue : nil)
     }
 
     private static func jobRetryToken(_ job: AssistantAutomationRunner.Handoff, item: MergeRequestAttentionMonitor.Item,
@@ -516,12 +594,23 @@ import MergeTetherRemote
                                           controls: MRManualMergePresentation, waitingStatus: MRWaitingStatus?) -> RemoteCard {
         guard item.isAuthored, let request = item.mergeRequest, request.isOpen else { return original }
         let checked = controls.status
+        var state = original.presentation?.statusContext ?? .init()
+        state.checkGitLab = checked.map {
+            let submission = $0.displayedSubmissionState
+            return submission == .uncertain || submission == .changed || $0.action == nil
+        } == true ? true : nil
+        var card = original
+        if card.presentation == nil {
+            card.presentation = .init(repository: String(request.webURL.gitLabProjectPath.split(separator: "/").last ?? ""))
+        }
+        card.presentation?.statusContext = state.isEmpty ? nil : state
         let title: LocalizedStringResource
         let detail: String?
         let blocker: ManualMergeBlocker
         if let conflict = checked?.request.mergeTrainConflict, conflict.matches(request) {
             title = .MergeActions.mergeActionsTrainRebaseConflict
             detail = conflict.noteURL.absoluteString
+            state.trainConflictNoteURL = conflict.noteURL
             blocker = .prerequisite(.conflicts)
         } else if checked?.request.mergeTrainEvidenceUnavailable == true {
             title = .MergeActions.mergeActionsTrainEvidenceUnavailable
@@ -532,20 +621,15 @@ import MergeTetherRemote
             detail = String(localized: .MergeActions.mergeActionsConfirmHelp)
             blocker = .submission
         } else {
-            guard let currentBlocker = controls.blocker else { return original }
-            if original.presentation?.working == true {
-                var busy = original
-                busy.actions.removeAll { [.merge, .enqueueMerge].contains($0.kind) }
-                return busy
-            }
+            guard let currentBlocker = controls.blocker else { return card }
             title = currentBlocker.title
             detail = nil
             blocker = currentBlocker
         }
-        var card = original
-        if card.presentation == nil {
-            let repository = request.webURL.gitLabProjectPath.split(separator: "/").last ?? ""
-            card.presentation = .init(repository: String(repository))
+        card.presentation?.statusContext = state.isEmpty ? nil : state
+        card.removeActions { [.merge, .enqueueMerge].contains($0.kind) }
+        if card.presentation?.working == true || state.refreshFailureHelp != nil {
+            return card
         }
         let dependencyHold = waitingStatus?.hasCurrentDependencyHold == true
             && checked?.request.detailedMergeStatus == .mergeRequestBlocked
@@ -568,7 +652,7 @@ import MergeTetherRemote
         let status = String(localized: showsWaiting ? waitingStatus?.title ?? title : title)
         card.presentation?.status = status
         card.presentation?.statusPeopleMessage = nil
-        if showsWaiting, let waitingStatus, !waitingStatus.requirements.isEmpty {
+        if let waitingStatus, !waitingStatus.requirements.isEmpty {
             // Like the Mac card: one requirement per line, with an uncovered blocker joining the list.
             var lines = waitingStatus.requirements.map { String(localized: $0) }
             let covered: Bool = if case .prerequisite(let reason) = blocker { waitingStatus.coveredBlockers.contains(reason) } else { false }
@@ -578,12 +662,11 @@ import MergeTetherRemote
             let people = waitingStatus.threadResolutionPeople
             card.presentation?.threadResolutionPeople = people.isEmpty ? nil : people.map(\.remotePerson)
         }
-        if let detail { card.detail = detail }
+        if let detail, card.detail.isEmpty { card.detail = detail }
         // The status line or requirement list already carries the blocker; the phone must not print it twice.
         else if card.presentation?.requirements == nil, card.detail.isEmpty, String(localized: title) != status {
             card.detail = String(localized: title)
         }
-        card.actions.removeAll { [.merge, .enqueueMerge].contains($0.kind) }
         if card.primaryCTA == nil {
             if case .feedback = blocker {
                 card.primaryCTA = .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewFeedback), destination: .feedback)
@@ -626,11 +709,13 @@ import MergeTetherRemote
             let kind: RemoteActionKind = action == .mergeNow ? .merge : .enqueueMerge
             card.actions.append(.init(id: kind.rawValue, kind: kind, token: token,
                 confirmationText: String(localized: .MergeActions.mergeActionsConfirmHelp) + "\n\n"
-                    + String(localized: monitor.settings.automation.assistant.manualMergeVerificationDisclosure)))
+                    + String(localized: monitor.settings.automation.assistant.manualMergeVerificationDisclosure),
+                label: String(localized: action.title)))
         }
         if controls.hasDiscussionBlock {
             card.actions.append(.init(id: "checkThreads", kind: .checkThreads, token: token,
-                confirmationText: String(localized: .MergeActions.mergeActionsResolveHelp)))
+                confirmationText: String(localized: .MergeActions.mergeActionsResolveHelp),
+                label: String(localized: .MergeActions.mergeActionsResolveAll)))
         }
         return card
     }
@@ -658,7 +743,8 @@ import MergeTetherRemote
         // Stopping stays available while the run makes the card busy; it never writes to GitLab.
         if let job = row.latestJob, job.execution?.state.isActive == true, let token = token(["stop", job.id.uuidString]) {
             actions.append(.init(id: "stopJob:\(job.id)", kind: .stopJob, token: token,
-                confirmationText: String(localized: .Remote.remoteStopJobHelp)))
+                confirmationText: String(localized: .Remote.remoteStopJobHelp),
+                label: String(localized: .AssistantJobs.assistantJobsStop)))
         }
         guard !busy, row.latestJob?.execution?.state.isActive != true else { return actions }
         if monitor.canMarkMergeRequestReady(item), let token = token(["markReady"]) {
@@ -848,7 +934,20 @@ import MergeTetherRemote
                 default: .feedback
                 }
             }
-            return .init(title: String(localized: destination == .setup ? .Remote.remoteSetupActionOnMac : label), destination: destination)
+            return .init(title: String(localized: destination == .setup ? .Remote.remoteSetupActionOnMac : label),
+                destination: destination, showsOnCard: human?.action == .reviewIssue ? true : nil)
+        }
+        if model.actionLabel != nil, human?.action == .reviewDrafts {
+            if human?.kind == .commentReview,
+               let finish = card.actions.first(where: { $0.kind == .finishCommentReview }) {
+                card.primaryCTA = .init(title: String(localized: .CommentReview.commentReviewFinish),
+                    destination: .actions, actionID: finish.id)
+            } else if model.draftPublicationShortcut == .review {
+                card.primaryCTA = .init(title: String(localized: .CommentReview.commentReviewReviewBeforePublishing), destination: .drafts)
+            } else if let publish = card.actions.first(where: { $0.kind == .publish }) {
+                card.primaryCTA = .init(title: String(localized: .CommentReview.commentReviewPublishAll),
+                    destination: .actions, actionID: publish.id)
+            }
         }
         let author: Todo.Author? = ReviewingContext(row: model.row).author
         let authorName: String? = author?.person.displayName
@@ -859,56 +958,88 @@ import MergeTetherRemote
             ?? (model.row.isDraft ? String(localized: .Menu.menuMrDraftBadge) : nil)
         let chips: [RemoteCardChip] = model.chips.map { .init(title: String(localized: $0.title), symbol: $0.symbol) }
         let steps = model.stepChain.map { $0.steps.map { String(localized: $0) } }
-        let pendingDrafts = model.working ? nil : MRPendingDraftsSummary(item: model.row.item)
+        let pendingDrafts = finished != nil || model.working ? nil : MRPendingDraftsSummary(item: model.row.item)
         let repository = card.project.split(separator: "/").last ?? Substring(card.project)
         let retryCTA: RemoteCardCTA? = human?.action == .retryRun
             ? .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewRun), destination: .assistantRuns) : nil
+        let refreshFailed = finished == nil && !model.working && model.refreshFailed
+        let status = refreshFailed
+            ? model.refreshFailureLabel ?? String(localized: .AutomationProgress.progressRefreshFailed) : model.status
+        let waiting = model.cardWaitingRequirements
         card.presentation = .init(author: authorName,
             repository: String(repository),
             draftBadge: draftBadge, isDraft: finished == nil && model.row.isDraft,
-            status: model.status, nextStep: model.nextStep, working: model.working,
+            status: status, nextStep: model.nextStep, working: model.working,
             chips: chips,
             secondaryCTA: retryCTA,
             authorUsername: authorUsername, authorAvatarURL: authorAvatarURL,
+            requirements: waiting?.requirements.map { String(localized: $0) },
             steps: steps, currentStep: model.stepChain?.current,
-            pendingDrafts: pendingDrafts.map { String(localized: $0.message) }, statusSymbol: model.activityEffect?.symbol,
+            pendingDrafts: pendingDrafts.map { String(localized: $0.message) },
+            statusSymbol: refreshFailed ? "arrow.clockwise" : model.activityEffect?.symbol,
             approvalPeople: model.row.evidenceMatchesCatalogContext ? original.presentation?.approvalPeople : nil,
             viewerApprovalID: model.row.evidenceMatchesCatalogContext ? original.presentation?.viewerApprovalID : nil,
             assignedReviewerCount: MergeRequestApprovalProgress.assignedReviewerCount(model.row.displayRequest?.reviewers))
         card.presentation?.statusPeopleMessage = model.statusPeopleMessage
         card.presentation?.reviewCompletionInDetailsOnly = model.reviewCompletionInDetailsOnly ? true : nil
         card.presentation?.pendingDraftsPeopleMessage = pendingDrafts?.peopleMessage
-        if model.actionsBlocked { card.actions = [] }
+        card.presentation?.requirementPeopleMessage = waiting?.reviewerPeopleMessage
+        var state = RemoteCardStatusContext()
+        state.finished = finished.flatMap { .init(rawValue: $0.rawValue) }
+        if let stage = model.mergeStage {
+            let kind: RemoteCardStatusContext.MergeStage.Kind = switch stage {
+            case .merging: .merging
+            case .queued: .queued
+            case .inTrain: .inTrain
+            }
+            state.mergeStage = .init(kind: kind, title: String(localized: stage.title))
+        }
+        state.refreshFailureHelp = refreshFailed ? model.refreshFailureHelp : nil
+        if finished == nil {
+            var notices: [RemoteCardChip] = []
+            if model.row.waitsForAssignmentClaim {
+                notices.append(.init(title: String(localized: .Board.boardAssignmentAwaitingClaim),
+                    symbol: "person.crop.circle.badge.exclamationmark"))
+            }
+            if let confirmation = model.confirmationState, confirmation == .failed || confirmation == .changed {
+                notices.append(.init(title: String(localized: confirmation == .failed ? .Menu.menuConfirmFailed : .Menu.menuConfirmChanged),
+                    symbol: "exclamationmark.triangle"))
+            }
+            state.notices = notices.isEmpty ? nil : notices
+        }
+        card.presentation?.statusContext = state.isEmpty ? nil : state
+        if model.actionsBlocked { card.removeActions { _ in true } }
         return card
     }
 
     static func bindingPrimaryAction(_ original: RemoteCard, humanAction: MRHumanAction.Action?,
-                                     actionID: String? = nil, nextStep: ReviewingContext.NextStep) -> RemoteCard {
-        var card = bindingExecutableAction(original, humanAction: humanAction, actionID: actionID, nextStep: nextStep)
+                                     actionID: String? = nil, nextStep: ReviewingContext.NextStep,
+                                     pendingReviewID: UUID? = nil) -> RemoteCard {
+        var card = bindingExecutableAction(original, humanAction: humanAction, actionID: actionID,
+            nextStep: nextStep, pendingReviewID: pendingReviewID)
         if let ready = card.actions.first(where: { $0.kind == .markReady }) {
             let cta = RemoteCardCTA(title: String(localized: .Remote.remoteMarkReady), destination: .actions, actionID: ready.id)
-            if card.primaryCTA == nil || card.primaryCTA?.destination == .overview { card.primaryCTA = cta }
-            else if card.presentation?.secondaryCTA == nil {
-                card.presentation = card.presentation ?? .init(repository: card.project)
-                card.presentation?.secondaryCTA = cta
-            }
+            if card.primaryCTA == nil || card.primaryCTA?.duplicatesCardTap == true { card.primaryCTA = cta }
+            else { addBoardCTA(cta, to: &card) }
         }
         return card
     }
 
     private static func bindingExecutableAction(_ original: RemoteCard, humanAction: MRHumanAction.Action?,
-                                                actionID: String?, nextStep: ReviewingContext.NextStep) -> RemoteCard {
+                                                actionID: String?, nextStep: ReviewingContext.NextStep,
+                                                pendingReviewID: UUID?) -> RemoteCard {
         guard let cta = original.primaryCTA, cta.destination != .setup else { return original }
         let kind: RemoteActionKind
         switch humanAction {
         case .retryRun: kind = .retryJob
         case .verifyFeedback, .retryDraftVerification, .retryReReview: kind = .verify
         case .handleFeedback, .retryIntent: kind = .prepare
-        case nil where nextStep == .runReview: kind = .runReview
+        case nil where nextStep == .runReview: kind = pendingReviewID == nil ? .runReview : .prepare
         default: return original
         }
         var card = original
-        let expectedID = actionID ?? (humanAction == nil && nextStep == .runReview ? "runReview" : nil)
+        let expectedID = actionID ?? (humanAction == nil && nextStep == .runReview
+            ? pendingReviewID.map { "intent:\($0)" } ?? "runReview" : nil)
         let matches = card.actions.filter { $0.kind == kind && $0.id == expectedID }
         card.primaryCTA?.destination = .actions
         if matches.count == 1 {
@@ -917,6 +1048,38 @@ import MergeTetherRemote
             card.primaryCTA?.title = String(localized: .Remote.remoteActionOnMac)
         }
         return card
+    }
+
+    static func projectBoardActions(_ card: inout RemoteCard, humanAction: MRHumanAction.Action?) {
+        if let action = card.actions.first(where: { $0.kind == .claimAssignment })
+            ?? card.actions.first(where: { $0.kind == .stopJob }), let title = action.label {
+            card.primaryCTA = .init(title: title, destination: .actions, actionID: action.id)
+        }
+        for action in card.actions {
+            guard let title = action.label else { continue }
+            let cta = RemoteCardCTA(title: title, destination: .actions, actionID: action.id)
+            switch action.kind {
+            case .merge, .enqueueMerge:
+                let replacesMergeReview = card.primaryCTA?.actionID == nil
+                    && (humanAction == .reviewMerge || humanAction == .reviewDecision)
+                if card.primaryCTA == nil || card.primaryCTA?.duplicatesCardTap == true || replacesMergeReview {
+                    card.primaryCTA = cta
+                } else { addBoardCTA(cta, to: &card) }
+            case .checkThreads:
+                addBoardCTA(cta, to: &card)
+            default: break
+            }
+        }
+    }
+
+    private static func addBoardCTA(_ cta: RemoteCardCTA, to card: inout RemoteCard) {
+        var presentation = card.presentation ?? .init(repository: card.project)
+        if presentation.secondaryCTA == nil {
+            presentation.secondaryCTA = cta
+        } else {
+            presentation.additionalCTAs = (presentation.additionalCTAs ?? []) + [cta]
+        }
+        card.presentation = presentation
     }
 
     static func contextRevision(_ request: GitLabMergeRequest) -> String? {

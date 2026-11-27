@@ -27,6 +27,67 @@ import MergeTetherRemote
         if mac.actionsBlocked { #expect(phone.actions.isEmpty) }
     }
 
+    @Test(arguments: [false, true])
+    func phoneOffersTheMacDraftShortcut(_ hasSideEffects: Bool) throws {
+        let request = try MRDependencyPresentationTests().request(2, project: 1)
+        var evidence = MergeRequestAttentionMonitor.Item(id: request.mergeRequestID, title: request.title,
+            url: request.webURL, drafts: attentionFixtureDrafts(1), mergeRequest: request, isAuthored: true)
+        if hasSideEffects { evidence.drafts[0] = evidence.drafts[0].replacingBody("/resolve") }
+        let row = MergeRequestBoardSnapshot.Row(item: evidence, latestJob: nil, intents: [],
+            attentionPresentation: .init(evidence: evidence, humanActionRequired: true))
+        let original = RemoteBoardAdapter.card(evidence, account: "me@host")
+        let phone = RemoteBoardAdapter.presentation(original, row: row)
+
+        #expect(phone.primaryCTA?.title == String(localized: hasSideEffects
+            ? .CommentReview.commentReviewReviewBeforePublishing : .CommentReview.commentReviewPublishAll))
+        #expect(phone.primaryCTA?.actionID == (hasSideEffects ? nil : "publish"))
+        #expect(phone.primaryCTA?.destination == (hasSideEffects ? .drafts : .actions))
+    }
+
+    @Test func startingAReceivedReviewBindsTheSamePendingIntentAsTheMac() {
+        let intentID = UUID()
+        let intent = RemoteAction(id: "intent:\(intentID)", kind: .prepare, token: "intent")
+        let review = RemoteAction(id: "runReview", kind: .runReview, token: "manual")
+        let card = RemoteCard(id: "mr:1:2", title: "MR", project: "repo", url: nil,
+            actions: [intent, review], primaryCTA: .init(title: "Start review", destination: .actions))
+        let phone = RemoteBoardAdapter.bindingPrimaryAction(card, humanAction: nil, nextStep: .runReview, pendingReviewID: intentID)
+        #expect(phone.primaryCTA?.actionID == intent.id)
+    }
+
+    @Test func mergeKeepsTheIndependentBoardActionAndTheMatchingToken() throws {
+        let merge = RemoteAction(id: "enqueueMerge", kind: .enqueueMerge, token: "enqueue", label: "Add to merge train")
+        let claim = RemoteAction(id: "claimAssignment", kind: .claimAssignment, token: "claim", label: "Claim")
+        let checkThreads = RemoteAction(id: "checkThreads", kind: .checkThreads, token: "threads", label: "Check threads")
+        var card = RemoteCard(id: "mr:1:2", title: "MR", project: "repo", url: nil, actions: [merge, claim])
+
+        RemoteBoardAdapter.projectBoardActions(&card, humanAction: .reviewMerge)
+
+        #expect(card.primaryCTA?.actionID == claim.id)
+        let mergeCTA = try #require(card.presentation?.secondaryCTA)
+        #expect(mergeCTA.title == merge.label)
+        #expect(RemoteCardSelection(card: card, cta: mergeCTA).action(in: card) == merge)
+        card.actions = [claim, checkThreads]
+        RemoteBoardAdapter.projectBoardActions(&card, humanAction: .reviewMerge)
+        #expect(card.presentation?.additionalCTAs?.map(\.actionID) == [checkThreads.id])
+        card.actions.append(merge)
+        card.removeActions { _ in true }
+        #expect(card.primaryCTA == nil && card.presentation?.secondaryCTA == nil && card.presentation?.additionalCTAs == nil)
+    }
+
+    @Test func phoneKeepsRefreshFailureVisibleBesidePreservedAttention() throws {
+        var evidence = try item()
+        evidence.isAuthored = true
+        let row = MergeRequestBoardSnapshot.Row(item: evidence, latestJob: nil, intents: [],
+            attentionPresentation: .init(evidence: evidence, humanActionRequired: true))
+        let mac = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
+            allowsRemoval: false, assistantReady: true,
+            preservedHumanAction: MRHumanAction(row: row, assistantReady: true), refreshFailures: [.init(check: .mergeRequests)])
+        let phone = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(evidence, account: "me@host"), model: mac)
+
+        #expect(phone.needsAttention == true)
+        #expect(phone.presentation?.status == mac.refreshFailureLabel)
+    }
+
     @Test(arguments: ["assigned", "none", "unavailable"])
     func phoneCardCountsAssignedReviewersSeparatelyFromApprovalParticipants(_ scenario: String) throws {
         var item = try item()

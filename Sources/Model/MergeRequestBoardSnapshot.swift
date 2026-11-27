@@ -20,6 +20,10 @@ struct MergeRequestBoardSnapshot {
         var newReviewAssignedAt: Date? = nil
         var waitsForReviewStart: Bool = false
         var waitsForAssignmentClaim: Bool = false
+        var reviewIntentForManualStart: MRTodoIntent? {
+            guard waitsForReviewStart else { return nil }
+            return intents.first { $0.kind == .review && $0.state == .pending && $0.jobID == nil }
+        }
         var displayRequest: GitLabMergeRequest? { catalog?.facts.request ?? item.mergeRequest }
         var displayTitle: String { catalog?.facts.title ?? item.title }
         var displayURL: URL { catalog?.facts.url ?? item.url }

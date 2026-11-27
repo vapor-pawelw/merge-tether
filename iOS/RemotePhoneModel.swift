@@ -370,7 +370,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                            RemoteMessage.draftRegenerationCapability, RemoteMessage.boardAvatarsCapability,
                            RemoteMessage.detailAvatarsCapability, RemoteMessage.boardOrderCapability,
                            RemoteMessage.reviewerEditingCapability, RemoteMessage.reviewerBatchCapability,
-                           RemoteMessage.cardActionsCapability, RemoteMessage.reviewBoardCapability],
+                           RemoteMessage.cardActionsCapability, RemoteMessage.reviewBoardCapability, RemoteMessage.mrBoardActionsCapability],
             refresh: fromGitLab, cachedAvatarURLs: Array((state.board?.avatarThumbnailURLs ?? [])
                 .filter { avatarThumbnails[$0] != nil }.prefix(64)))) }
         catch {

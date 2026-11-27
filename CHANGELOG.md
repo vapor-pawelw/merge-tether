@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Reduce SwiftUI layout work while scrolling the Mac and iOS boards, and give Mac automation headings distinct identities.
 
+- Show Mac merge request statuses, blockers and next actions on paired iPhones and iPads, including claiming an assignment, stopping an agent run, publishing checked drafts, and merging.
+
 - Align cards with lane headers and keep scroll bars beside them on the Mac board.
 
 - Use the installed automation guide to answer questions about MergeTether controls available in the current build.

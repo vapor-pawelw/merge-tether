@@ -6,6 +6,9 @@ pinned ordering, proposals and agent jobs. Managed MR cards use the Mac's shared
 presentation for author, repository, attention message, status, badges and primary CTA
 labels. Orange marks the same human-action state as the Mac. Read-only CTAs open card
 details even when remote writes are unavailable; writes still require confirmation.
+Cards show the Mac's merge stage, refresh failures and automation holds. The card can
+start or stop review work, publish checked drafts, claim an assignment, submit a
+ready merge, or acknowledge a finished MR when the Mac offers that action.
 It has pairing, card details and actions;
 GitLab credentials and automation settings remain on the Mac.
 
@@ -284,6 +287,11 @@ Within cryptographic protocol v2, `merge-actions-v1` names the independent actio
 The `draft-regeneration-v1` capability lets the phone start and review a batch for a draft, an MR, or all tracked MRs. The paired Mac runs the configured CLI with its current local skills. Progress remains available after closing the form. Starting and saving use the existing command receipts. The phone cannot send free-form instructions: with `draft-regeneration-styles-v1`, it may choose one of a fixed set of rewriting styles whose wording is defined on the Mac, and the Mac rejects any command carrying instruction text. Custom instructions remain available on the Mac. Proposal bodies travel in bounded pages tied to the host session, account and batch. Previews larger than 2 MiB are available on the Mac. Older clients continue to receive the existing board.
 
 `board-order-v1` lets the iPhone reorder the Mac's manual board. Touch and hold a card, then drag it above, between or below cards in the same column, automation section and pin group. The insertion line marks the valid position. Each move includes the source card, destination and the order of their group as seen when the drag started, identified by a digest. The Mac checks the current account, session and group before saving, then returns a snapshot for that request. If a Mac move, an attention promotion or a membership change has changed the group, the phone shows the current order and lets you try again. Moving cards uses local settings and the paired connection. Both apps need the capability and can use their existing pairing.
+
+`mr-board-actions-v1` adds the assigned-MR claim and finished-MR acknowledgement
+buttons and the extended status presentation. Claims recheck the signed-in account
+and current GitLab assignment using the Mac's ownership confirmation. Acknowledgement
+is tied to the Mac's saved completion record. Existing v2 pairing remains valid.
 
 ### Refresh and open Details
 

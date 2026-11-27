@@ -29,6 +29,17 @@ public struct RemoteCardSelection: Identifiable, Equatable, Sendable {
 /// The phone shows each sentence once, like the Mac card: a status or next step that repeats
 /// the card's explanation adds nothing, and older hosts may still send such repeats.
 public extension RemoteCard {
+    mutating func removeActions(where shouldRemove: (RemoteAction) -> Bool) {
+        let removed = Set(actions.filter(shouldRemove).map(\.id))
+        guard !removed.isEmpty else { return }
+        actions.removeAll { removed.contains($0.id) }
+        func isRemoved(_ cta: RemoteCardCTA) -> Bool { cta.actionID.map(removed.contains) == true }
+        if primaryCTA.map(isRemoved) == true { primaryCTA = nil }
+        if presentation?.secondaryCTA.map(isRemoved) == true { presentation?.secondaryCTA = nil }
+        presentation?.additionalCTAs?.removeAll(where: isRemoved)
+        if presentation?.additionalCTAs?.isEmpty == true { presentation?.additionalCTAs = nil }
+    }
+
     var commandActions: [RemoteAction] {
         actions + drafts.flatMap { ($0.aiReplyDecisions ?? []).flatMap { [$0.reply, $0.human] } }
     }

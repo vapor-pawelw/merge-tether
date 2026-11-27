@@ -231,6 +231,7 @@ private struct RemoteCardCTAButton: View {
     let cta: RemoteCardCTA
     let canAct: ((Date) -> Bool)?
     var action: RemoteAction? = nil
+    var running = false
     var labelHitArea: CardControlHitArea? = nil
     let onTap: () -> Void
 
@@ -243,8 +244,10 @@ private struct RemoteCardCTAButton: View {
     }
 
     private var button: some View {
-        Button(action: onTap) {
-            let label = RemoteActionLabel(action: action, title: Text(verbatim: cta.title))
+        Button(role: action?.kind == .stopJob ? .destructive : nil, action: onTap) {
+            let label = RemoteActionProgressLabel(running: running) {
+                RemoteActionLabel(action: action, title: Text(verbatim: cta.title))
+            }
             if let labelHitArea {
                 label.contentShape(.interaction, labelHitArea)
             } else {
@@ -336,6 +339,17 @@ struct RemoteCardView: View {
     var actionsModel: RemotePhoneModel? = nil
     private var primaryCTA: RemoteCardCTA? { card.primaryCTA.flatMap { $0.duplicatesCardTap ? nil : $0 } }
     private var secondaryCTA: RemoteCardCTA? { card.presentation?.secondaryCTA.flatMap { $0.duplicatesCardTap ? nil : $0 } }
+    private var additionalCTAs: [RemoteCardCTA] { (card.presentation?.additionalCTAs ?? []).filter { !$0.duplicatesCardTap } }
+    private var statusContext: RemoteCardStatusContext? { card.presentation?.statusContext }
+    private var gitLabCheckURL: URL? { statusContext?.checkGitLab == true ? card.url : nil }
+    private var trainConflictURL: URL? {
+        guard let url = statusContext?.trainConflictNoteURL,
+              var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let fragment = parts.fragment, fragment.hasPrefix("note_"),
+              let noteID = Int(fragment.dropFirst("note_".count)), noteID > 0 else { return nil }
+        parts.fragment = nil
+        return parts.url == card.url ? url : nil
+    }
     private var inboxUpdateDate: Date? { expanded ? nil : card.completionObservedAt }
     private var showsDraftStyle: Bool { !expanded && card.presentation?.showsDraftStyle == true }
     static let dimmedOpacity = 0.5
@@ -348,14 +362,16 @@ struct RemoteCardView: View {
     private var directAction: RemoteAction? {
         guard let actionsModel else { return nil }
         let actions = actionsModel.pendingActionCard.flatMap { $0.id == card.id ? $0.actions : nil } ?? card.actions
+        let boundIDs = [primaryCTA, secondaryCTA].compactMap { $0?.actionID } + additionalCTAs.compactMap(\.actionID)
         return actions.first {
-            $0.kind == .finishCommentReview || ($0.kind == .markDone
+            ($0.kind == .finishCommentReview && !boundIDs.contains($0.id)) || ($0.kind == .markDone
                 && ((card.id.hasPrefix("completion:") && $0.id == "seen")
                     || (card.id.hasPrefix("todo:") && $0.id == "markDone")))
         }
     }
     private var showsActions: Bool {
-        !expanded && onOpen != nil && (primaryCTA != nil || secondaryCTA != nil || directAction != nil)
+        !expanded && onOpen != nil && (primaryCTA != nil || secondaryCTA != nil || directAction != nil
+            || !additionalCTAs.isEmpty || gitLabCheckURL != nil)
     }
     private var activationTitle: LocalizedStringResource {
         actionsModel != nil && card.reviewSeenAction != nil ? .Board.boardReviewAssignmentSeen : .Board.boardDetails
@@ -378,7 +394,7 @@ struct RemoteCardView: View {
                 }
             } else {
                 compactContent
-                if showsActions { HStack { cardActions } }
+                if showsActions { StatusFlowLayout(spacing: 8) { cardActions } }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -420,7 +436,9 @@ struct RemoteCardView: View {
                     .accessibilityIdentifier("remote.secondary-cta.\(card.id)")
             }
         }
-        Spacer(minLength: 0)
+        if let cta = primaryCTA { boardCTA(cta) }
+        ForEach(Array(additionalCTAs.enumerated()), id: \.offset) { _, cta in boardCTA(cta) }
+        if let gitLabCheckURL { gitLabCheckLink(gitLabCheckURL) }
         if let action = directAction, let actionsModel {
             let pending = actionsModel.pendingActionCard?.id == card.id ? actionsModel.state.pending : nil
             let seen = action.kind == .markDone
@@ -447,13 +465,27 @@ struct RemoteCardView: View {
             .font(.subheadline.weight(.semibold)).controlSize(.large)
             .modifier(RemoteActionAvailability(state: actionsModel.state))
             .accessibilityIdentifier("remote.\(actionIdentifier).\(card.id)")
-        } else if let cta = primaryCTA {
-            RemoteCardCTAButton(cta: cta, canAct: { actionsModel?.state.canAct(now: $0) == true },
-                action: card.actions.first { $0.id == cta.actionID }) { onOpenCTA?(cta) }
-                .font(.subheadline.weight(.semibold)).buttonStyle(.bordered)
-                .controlSize(.large)
-                .accessibilityIdentifier("remote.cta.\(card.id)")
         }
+    }
+
+    private func boardCTA(_ cta: RemoteCardCTA) -> some View {
+        let pending = actionsModel?.pendingActionCard.flatMap { $0.id == card.id ? $0.actions : nil }
+        let action = (pending ?? card.actions).first { $0.id == cta.actionID }
+        return RemoteCardCTAButton(cta: cta, canAct: { actionsModel?.state.canAct(now: $0) == true },
+            action: action, running: action != nil && pending != nil && actionsModel?.state.pending?.actionID == action?.id) {
+                if let actionsModel, let action, action.id == RemoteAction.finishedSeenID {
+                    Task { await actionsModel.perform(card: card, action: action) }
+                } else { onOpenCTA?(cta) }
+            }
+            .font(.subheadline.weight(.semibold)).buttonStyle(.bordered)
+            .controlSize(.large)
+            .accessibilityIdentifier(action?.kind == .finishCommentReview
+                ? "remote.finish-comment-review.\(card.id)" : "remote.cta.\(card.id)")
+    }
+
+    private func gitLabCheckLink(_ url: URL) -> some View {
+        Link(destination: url) { Text(.MergeActions.mergeActionsCheckGitLab) }
+            .font(.subheadline).buttonStyle(.bordered).controlSize(.large)
     }
     private var compactContent: some View {
         MRCardMetadataLayout(referenceToTitleSpacing: 11, titleToPeopleSpacing: 6,
@@ -552,7 +584,7 @@ struct RemoteCardView: View {
     @ViewBuilder
     private var draftBadge: some View {
         if let badge = card.presentation?.draftBadge {
-            let tint = showsDraftStyle ? draftBadgeTint : Color.secondary
+            let tint = statusContext?.finished == .merged ? Color.green : (showsDraftStyle ? draftBadgeTint : .secondary)
             Text(verbatim: badge).fontWeight(.medium)
                 .foregroundStyle(tint)
                 .padding(.horizontal, 7).padding(.vertical, 3)
@@ -561,7 +593,7 @@ struct RemoteCardView: View {
     }
     @ViewBuilder
     private var approvalBadge: some View {
-        if card.id.hasPrefix("mr:") {
+        if card.id.hasPrefix("mr:"), statusContext?.finished == nil {
             RemoteApprovalProgressBadge(progress: card.approvals, people: card.presentation?.approvalPeople,
                 viewerApprovalID: card.presentation?.viewerApprovalID,
                 assignedReviewerCount: card.presentation?.assignedReviewerCount,
@@ -578,10 +610,15 @@ struct RemoteCardView: View {
             || card.presentation?.pendingDrafts != nil || (expanded && card.dependencies != nil)
             || card.presentation?.steps?.isEmpty == false || visibleNextStep != nil
             || !(card.presentation?.chips.isEmpty ?? card.drafts.isEmpty)
+            || statusContext?.mergeStage != nil || statusContext?.notices?.isEmpty == false
+            || (expanded && gitLabCheckURL != nil)
     }
     private var informationRows: some View {
         Group {
-            if !card.detail.isEmpty {
+            if let stage = statusContext?.mergeStage {
+                mergeStage(stage)
+            }
+            if !card.detail.isEmpty, card.detail != trainConflictURL?.absoluteString {
                 if card.needsAttention == true {
                     MergeRequestAttentionCallout(message: card.detail)
                         .font((expanded ? Font.callout : .subheadline).weight(.medium))
@@ -611,26 +648,15 @@ struct RemoteCardView: View {
                 }
                 .font(.subheadline)
                 .modifier(MRDetailStatusCard(isPresented: expanded))
-            } else if let status = visibleStatus {
-                HStack(spacing: 5) {
-                    if card.presentation?.working == true {
-                        ProgressView().controlSize(.mini)
-                        if let symbol = card.presentation?.statusSymbol {
-                            if symbol == "sparkles" || symbol == "sparkle.magnifyingglass" {
-                                CodingProviderIcon()
-                            } else {
-                                Image(systemName: symbol).accessibilityHidden(true)
-                            }
-                        }
-                    }
-                    if let message = card.presentation?.statusPeopleMessage {
-                        PeopleMessageLabel(message: message).font(.subheadline)
-                    } else {
-                        Text(verbatim: status).font(.subheadline)
-                    }
+            } else if let status = visibleStatus, status != statusContext?.mergeStage?.title,
+                      trainConflictURL == nil || card.presentation?.working == true || statusContext?.refreshFailureHelp != nil {
+                statusLine(status)
+            }
+            if let trainConflictURL {
+                Link(destination: trainConflictURL) {
+                    Label(.MergeActions.mergeActionsTrainRebaseConflict, systemImage: "arrow.triangle.branch")
                 }
-                .foregroundStyle(.secondary)
-                .modifier(MRDetailStatusCard(isPresented: expanded))
+                .font(.subheadline).foregroundStyle(.orange)
             }
             if let drafts = card.presentation?.pendingDrafts {
                 Label {
@@ -651,16 +677,84 @@ struct RemoteCardView: View {
                 Text(verbatim: nextStep).font(expanded ? .callout : .caption).foregroundStyle(.secondary)
             }
             if let chips = card.presentation?.chips {
-                ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
-                    Label { Text(verbatim: chip.title) } icon: { Image(systemName: chip.symbol) }
-                        .font(.caption).foregroundStyle(.secondary)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(.secondary.opacity(0.06), in: Capsule())
+                let notices = statusContext?.notices ?? []
+                if !chips.isEmpty || !notices.isEmpty {
+                    StatusFlowLayout(spacing: 5) {
+                        ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in statusChip(chip, tint: .secondary) }
+                        ForEach(Array(notices.enumerated()), id: \.offset) { _, chip in statusChip(chip, tint: .orange) }
+                    }
                 }
             } else if !card.drafts.isEmpty, card.presentation?.pendingDrafts == nil {
                 Label(.Remote.remoteComments, systemImage: "text.bubble").font(.caption).foregroundStyle(.tint)
             }
+            if expanded, let gitLabCheckURL { gitLabCheckLink(gitLabCheckURL) }
         }
+    }
+
+    private func statusLine(_ status: String) -> some View {
+        let working = card.presentation?.working == true
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                if working { ProgressView().controlSize(.mini) }
+                if let symbol = card.presentation?.statusSymbol {
+                    if symbol == "sparkles" || symbol == "sparkle.magnifyingglass" {
+                        CodingProviderIcon()
+                    } else {
+                        Image(systemName: symbol).accessibilityHidden(true)
+                    }
+                }
+                if let message = card.presentation?.statusPeopleMessage {
+                    PeopleMessageLabel(message: message)
+                } else {
+                    activityText(status, since: working ? statusContext?.activityStartedAt : nil)
+                }
+            }
+            if working, let detail = statusContext?.activityDetail {
+                Text(verbatim: detail).font(.caption)
+            }
+            if expanded, let help = statusContext?.refreshFailureHelp {
+                Text(verbatim: help).font(.caption).textSelection(.enabled)
+            }
+        }
+        .font(.subheadline).foregroundStyle(.secondary)
+        .modifier(MRDetailStatusCard(isPresented: expanded))
+    }
+
+    private func activityText(_ status: String, since startedAt: Date?) -> some View {
+        HStack(spacing: 5) {
+            Text(verbatim: status)
+            if let startedAt { Text(startedAt, style: .timer).monospacedDigit() }
+        }
+    }
+
+    private func mergeStage(_ stage: RemoteCardStatusContext.MergeStage) -> some View {
+        let tint: Color = switch stage.kind {
+        case .merging: .green
+        case .inTrain: .indigo
+        case .queued: .blue
+        }
+        return HStack(spacing: 6) {
+            if stage.kind == .merging {
+                ProgressView().controlSize(.mini)
+                activityText(stage.title, since: stage.startedAt)
+            } else {
+                Label { Text(verbatim: stage.title) } icon: {
+                    Image(systemName: stage.kind == .inTrain ? "tram.fill" : "clock").foregroundStyle(tint)
+                }
+            }
+        }
+        .font(.callout.weight(.semibold))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8).padding(.vertical, 6)
+        .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 6))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func statusChip(_ chip: RemoteCardChip, tint: Color) -> some View {
+        Label { Text(verbatim: chip.title) } icon: { Image(systemName: chip.symbol) }
+            .font(.caption).foregroundStyle(tint)
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(tint.opacity(0.08), in: Capsule())
     }
     private var requirementPeopleMessage: RemotePeopleMessage? {
         if let message = card.presentation?.requirementPeopleMessage { return message }

@@ -3,6 +3,22 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct CardPresentationTests {
+    @Test func compatibilityDropsUnsupportedActionsAndTheirButtons() {
+        let merge = RemoteAction(id: "merge", kind: .merge, token: "merge")
+        let stop = RemoteAction(id: "stopJob:1", kind: .stopJob, token: "stop")
+        let card = RemoteCard(id: "mr:1:2", title: "MR", project: "repo", url: nil, actions: [merge, stop],
+            primaryCTA: .init(title: "Merge", destination: .actions, actionID: merge.id),
+            presentation: .init(repository: "repo", secondaryCTA: .init(title: "Stop", destination: .actions, actionID: stop.id)))
+        let board = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [.init(id: .own, cards: [card])])
+
+        let legacy = board.forClient(supportsCommentReview: true).cards.first
+        #expect(legacy?.actions.isEmpty == true)
+        #expect(legacy?.primaryCTA == nil)
+        #expect(legacy?.presentation?.secondaryCTA == nil)
+        #expect(board.forClient(supportsCommentReview: true, supportsMergeActions: true, supportsMRControls: true)
+            .cards.first == card)
+    }
+
     @Test(arguments: ["codex", "claude", "future-provider"])
     func codingProviderSurvivesBoardRoundTrip(_ provider: String) throws {
         let legacy = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [])
@@ -297,3 +313,4 @@ import Testing
     let oldCompatible = try JSONSerialization.jsonObject(with: JSONEncoder().encode(board.forClient(supportsCommentReview: true)))
     #expect(!String(describing: oldCompatible).contains("enqueueMerge"))
 }
+import Foundation

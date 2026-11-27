@@ -133,6 +133,32 @@ import MergeTetherRemote
         #expect((json["presentation"] as? [String: Any])?["isDraft"] as? Bool == true)
     }
 
+    @Test(arguments: [false, true])
+    func claimingAnAssignedMRUsesTheCurrentAssignment(_ reassigned: Bool) async throws {
+        let f = try Fixture(assigned: true); defer { f.clean() }
+        let legacy = try await f.board()
+        #expect(legacy.cards.allSatisfy { !$0.actions.contains { $0.kind == .claimAssignment } })
+        let displayed = try await f.board(mrBoardActions: true)
+        let card = try #require(displayed.cards.first { $0.id == "mr:1:2" })
+        let action = try #require(card.actions.first { $0.kind == .claimAssignment })
+        #expect(card.primaryCTA?.actionID == action.id)
+        if reassigned {
+            f.gitlab.write("request", f.gitlab.text("request").replacingOccurrences(
+                of: #""assignees":[{"id":3,"username":"me","name":"Me"}]"#,
+                with: #""assignees":[{"id":4,"username":"other","name":"Other"}]"#))
+        }
+
+        await f.transport.onMessage?(.init(type: .command, command: .init(hostSession: displayed.hostSession,
+            account: displayed.account, cardID: card.id, actionID: action.id, token: action.token)))
+
+        #expect(f.transport.messages.last?.result?.status == (reassigned ? .changed : .completed))
+        let settings = SettingsManager(defaults: f.defaults)
+        #expect(settings.bindAuthenticatedAccount(.init(host: "gitlab.example.test", username: "me", userID: 3)))
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2)
+        #expect(settings.automation.scope.awaitsAssignmentClaim(f.source, target: target) == reassigned)
+        #expect(f.gitlab.requests.allSatisfy { $0.method != "POST" && $0.method != "PUT" })
+    }
+
     @Test func phonePinSurvivesAutomaticSortingAndRejectsAnOlderPinState() async throws {
         let f = try Fixture(); defer { f.clean() }
         let settings = f.monitor.settings
@@ -884,7 +910,8 @@ import MergeTetherRemote
                     threads: detailNotes.isEmpty ? nil : [.init(id: "thread", state: .open, notes: detailNotes)], truncated: detailsTruncated))
             }, readAvatarThumbnail: readAvatarThumbnail, makeConnection: { [transport] _ in transport })
 
-        init(draft: Bool = false, avatar: URL? = nil, readAvatarThumbnail: @escaping @Sendable (URL) async -> Data? = { _ in nil }) throws {
+        init(draft: Bool = false, assigned: Bool = false, avatar: URL? = nil,
+             readAvatarThumbnail: @escaping @Sendable (URL) async -> Data? = { _ in nil }) throws {
             self.readAvatarThumbnail = readAvatarThumbnail
             defaults = try #require(UserDefaults(suiteName: suite))
             let settings = SettingsManager(defaults: defaults)
@@ -894,6 +921,14 @@ import MergeTetherRemote
             settings.glabPath = glab.glabPath; settings.resolvedHost = glab.resolvedHost
             let raw = #"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Feature","description":"Context","labels":[],"web_url":"https://gitlab.example.test/g/p/-/merge_requests/2","state":"opened","draft":false,"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_branch":"feature","target_branch":"main","has_conflicts":false,"blocking_discussions_resolved":true,"detailed_merge_status":"mergeable","user":{"can_merge":false}}"#
             var initial = raw.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":\(draft)")
+            if assigned {
+                settings.automation.applyPreset(.safe, for: .codex)
+                settings.treatAssignedMergeRequestsAsOwn = true
+                settings.automation.requiresAssignmentClaim = true
+                settings.setAutomationGloballyEnabled(false)
+                initial = initial.replacingOccurrences(of: #""author":{"id":3,"username":"me","name":"Me"}"#,
+                    with: #""author":{"id":4,"username":"other","name":"Other"},"assignees":[{"id":3,"username":"me","name":"Me"}]"#)
+            }
             if let avatar {
                 initial = initial.replacingOccurrences(of: "\"name\":\"Me\"", with: "\"name\":\"Me\",\"avatar_url\":\"\(avatar.absoluteString)\"")
             }
@@ -938,7 +973,7 @@ import MergeTetherRemote
                 actionID: action.id, token: action.token)
         }
         func board(originUpdates: Bool = false, markReady: Bool = false, detailPreviews: Bool = false,
-                   detailAvatars: Bool = false, cardActions: Bool = false) async throws -> RemoteBoard {
+                   detailAvatars: Bool = false, cardActions: Bool = false, mrBoardActions: Bool = false) async throws -> RemoteBoard {
             await host.startupLoadTask?.value
             if monitor.lastRefresh == nil { await monitor.refreshNow() }
             let capabilities = [RemoteMessage.detailsCapability]
@@ -947,6 +982,7 @@ import MergeTetherRemote
                 + (detailPreviews ? [RemoteMessage.detailPreviewCapability] : [])
                 + (detailAvatars ? [RemoteMessage.detailAvatarsCapability] : [])
                 + (cardActions ? ["card-actions-v1"] : [])
+                + (mrBoardActions ? [RemoteMessage.mrBoardActionsCapability] : [])
             await transport.onMessage?(.init(type: .hello, challenge: UUID(), capabilities: capabilities))
             // Both background dependency reads can change the card digest after the catalog is idle.
             let deadline = ContinuousClock.now + .seconds(3)
