@@ -2,11 +2,13 @@
 set -euo pipefail
 
 identity="${EXPANDED_CODE_SIGN_IDENTITY:-}"
-[[ "${CODE_SIGNING_ALLOWED:-NO}" == YES && -n "$identity" && "$identity" != - ]] || exit 0
+[[ "${CODE_SIGNING_ALLOWED:-NO}" == YES && -n "$identity" ]] || exit 0
+[[ "$identity" != - || "${MERGETETHER_MACOS_AD_HOC_RELEASE:-NO}" == YES ]] || exit 0
 
 framework="$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/Sparkle.framework"
 version="$framework/Versions/Current"
-flags=(--force --sign "$identity" --options runtime)
+flags=(--force --sign "$identity")
+[[ "$identity" == - ]] || flags+=(--options runtime)
 if [[ "${EXPANDED_CODE_SIGN_IDENTITY_NAME:-}" == 'Developer ID Application: '* ]]; then
     flags+=(--timestamp)
 else

@@ -51,6 +51,7 @@ jobs:
 
       - name: Check distribution configuration
         env:
+          MACOS_AD_HOC: ${{ vars.MERGETETHER_MACOS_AD_HOC_TAG == github.ref_name }}
           APPLE_CERTIFICATES_P12_BASE64: ${{ secrets.APPLE_CERTIFICATES_P12_BASE64 }}
           APPLE_CERTIFICATES_PASSWORD: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
           NOTARY_API_PRIVATE_KEY: ${{ secrets.NOTARY_API_PRIVATE_KEY }}
@@ -61,14 +62,20 @@ jobs:
           MERGETETHER_SPARKLE_PUBLIC_KEY: ${{ vars.MERGETETHER_SPARKLE_PUBLIC_KEY }}
           MERGETETHER_SPARKLE_PRIVATE_KEY: ${{ secrets.MERGETETHER_SPARKLE_PRIVATE_KEY }}
         run: |
-          for name in APPLE_CERTIFICATES_P12_BASE64 APPLE_CERTIFICATES_PASSWORD NOTARY_API_PRIVATE_KEY NOTARY_KEY_ID NOTARY_ISSUER_ID APPLE_TEAM_ID MACOS_RELEASE_IDENTITY MERGETETHER_SPARKLE_PUBLIC_KEY MERGETETHER_SPARKLE_PRIVATE_KEY; do
+          required=(MERGETETHER_SPARKLE_PUBLIC_KEY MERGETETHER_SPARKLE_PRIVATE_KEY)
+          if [[ "${MACOS_AD_HOC:-false}" != true ]]; then
+            required+=(APPLE_CERTIFICATES_P12_BASE64 APPLE_CERTIFICATES_PASSWORD NOTARY_API_PRIVATE_KEY
+              NOTARY_KEY_ID NOTARY_ISSUER_ID APPLE_TEAM_ID MACOS_RELEASE_IDENTITY)
+          fi
+          for name in "${required[@]}"; do
             if [[ -z "${!name:-}" ]]; then
-              echo "::error::Missing distribution configuration: ${name}. Configure existing distribution credentials before publishing; Apple Development is insufficient."
+              echo "::error::Missing distribution configuration: ${name}."
               exit 1
             fi
           done
 
       - name: Prepare temporary macOS distribution keychain
+        if: vars.MERGETETHER_MACOS_AD_HOC_TAG != github.ref_name
         env:
           APPLE_CERTIFICATES_P12_BASE64: ${{ secrets.APPLE_CERTIFICATES_P12_BASE64 }}
           APPLE_CERTIFICATES_PASSWORD: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
@@ -96,6 +103,7 @@ jobs:
 
       - name: Build macOS distribution artifacts without a relay
         env:
+          MACOS_AD_HOC: ${{ vars.MERGETETHER_MACOS_AD_HOC_TAG == github.ref_name }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
           RELEASE_BUILD_NUMBER: ${{ github.run_number }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
@@ -105,9 +113,14 @@ jobs:
           TUIST_MERGETETHER_MACOS_CRASH_DSN: ${{ vars.MERGETETHER_MACOS_CRASH_DSN }}
           MERGETETHER_CRASH_SYMBOLS_DIR: ${{ vars.MERGETETHER_MACOS_CRASH_DSN != '' && format('{0}/mergetether-crash-symbols', runner.temp) || '' }}
         run: |
+          if [[ "${MACOS_AD_HOC:-false}" == true ]]; then
+            signing=(--macos-ad-hoc)
+          else
+            signing=(--signing-identity "$MACOS_RELEASE_IDENTITY" --team-id "$APPLE_TEAM_ID"
+              --notary-profile mergetether-release)
+          fi
           mise exec -- bash scripts/build-release.sh "$RELEASE_VERSION" --build-number "$RELEASE_BUILD_NUMBER" --platform macos --no-relay \
-            --signing-identity "$MACOS_RELEASE_IDENTITY" \
-            --team-id "$APPLE_TEAM_ID" --notary-profile mergetether-release
+            "${signing[@]}"
 
       - name: Install the Sentry CLI
         if: vars.MERGETETHER_MACOS_CRASH_DSN != ''
@@ -131,6 +144,7 @@ jobs:
       - name: Verify distribution inventory and retain stable macOS names
         id: inventory
         env:
+          MACOS_AD_HOC: ${{ vars.MERGETETHER_MACOS_AD_HOC_TAG == github.ref_name }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
           RELEASE_BUILD_NUMBER: ${{ github.run_number }}
         run: |
@@ -141,6 +155,7 @@ jobs:
           version = os.environ['RELEASE_VERSION']
           expected = {f'MergeTether-{version}.dmg': 'macos', f'MergeTether-{version}.zip': 'macos'}
           assert manifest['distributable'] is True
+          assert manifest['macos_notarized'] is (os.environ.get('MACOS_AD_HOC', 'false') != 'true')
           assert manifest['version'] == version and manifest['build'] == os.environ['RELEASE_BUILD_NUMBER']
           assert len(manifest['artifacts']) == len(expected)
           assert {item['name']: item['platform'] for item in manifest['artifacts']} == expected

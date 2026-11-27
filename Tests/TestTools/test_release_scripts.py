@@ -161,6 +161,26 @@ if os.environ.get('STAPLE_FAIL') and 'stapler' in sys.argv: sys.exit(1)
                                "--signing-identity", "Developer ID Application: Fixture (TEAM123)",
                                "--team-id", "TEAM123", "--notary-profile", "fixture-notary", *arguments)
 
+    def test_ad_hoc_release_builds_mac_archives_without_apple_credentials(self):
+        result = self.run_script("build-release.sh", "9.8.7", "--build-number", "456",
+                                 "--no-relay", "--macos-ad-hoc")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        manifest = json.loads((self.root / "release/release-manifest.json").read_text())
+        self.assertTrue(manifest["distributable"])
+        self.assertFalse(manifest["macos_notarized"])
+        self.assertEqual(self.packaged_info("9.8.7")["MergeTetherRelayOrigin"], "")
+        self.assertFalse((self.root / "notary-calls.jsonl").exists())
+        settings = json.loads((self.root / "build-calls.jsonl").read_text())
+        self.assertIn("CODE_SIGN_IDENTITY=-", settings)
+        self.assertIn("MERGETETHER_MACOS_AD_HOC_RELEASE=YES", settings)
+
+    def test_ad_hoc_release_rejects_an_embedded_relay(self):
+        result = self.run_script("build-release.sh", "9.8.7", "--macos-ad-hoc",
+                                 "--relay-config", str(self.relay_config))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires --no-relay", result.stderr)
+        self.assertFalse((self.root / "build-calls.jsonl").exists())
+
     def test_unsigned_is_explicit_and_segregated_with_shared_metadata(self):
         original = (self.root / "Project.swift").read_bytes()
         result = self.run_script("build-release.sh", "9.8.7", "--build-number", "456", "--unsigned")
@@ -820,6 +840,16 @@ class ReleaseWorkflowTests(ReleaseScriptFixture):
         result = self.run_step("Check distribution configuration")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_ci_ad_hoc_requires_sparkle_keys_without_apple_credentials(self):
+        self.env.update(MACOS_AD_HOC="true", MERGETETHER_SPARKLE_PUBLIC_KEY="fixture",
+                        MERGETETHER_SPARKLE_PRIVATE_KEY="fixture")
+        result = self.run_step("Check distribution configuration")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.env.pop("MERGETETHER_SPARKLE_PRIVATE_KEY")
+        result = self.run_step("Check distribution configuration")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("MERGETETHER_SPARKLE_PRIVATE_KEY", result.stdout)
+
     def test_ci_builds_only_mac_without_a_relay_and_preserves_source_metadata(self):
         self.executable("mise", """
 import json, pathlib, sys
@@ -843,6 +873,15 @@ pathlib.Path('mise-arguments.json').write_text(json.dumps(sys.argv[1:]))
         self.assertNotIn("--relay-config", args)
         self.assertEqual((self.root / "Project.swift").read_bytes(), original)
 
+        self.env["MACOS_AD_HOC"] = "true"
+        result = self.run_step("Build macOS distribution artifacts without a relay")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        args = json.loads((self.root / "mise-arguments.json").read_text())
+        self.assertIn("--no-relay", args)
+        self.assertIn("--macos-ad-hoc", args)
+        self.assertNotIn("--signing-identity", args)
+        self.assertNotIn("--notary-profile", args)
+
     def prepare_inventory(self):
         self.env.update(RELEASE_VERSION="9.8.7", RELEASE_BUILD_NUMBER="456", APP_NAME="MergeTether")
         release = self.root / "release"
@@ -853,7 +892,8 @@ pathlib.Path('mise-arguments.json').write_text(json.dumps(sys.argv[1:]))
             (release / name).write_bytes(content)
             artifacts.append({"name": name, "sha256": hashlib.sha256(content).hexdigest(),
                               "platform": "macos"})
-        manifest = {"version": "9.8.7", "build": "456", "distributable": True, "artifacts": artifacts}
+        manifest = {"version": "9.8.7", "build": "456", "distributable": True, "macos_notarized": True,
+                    "artifacts": artifacts}
         (release / "release-manifest.json").write_text(json.dumps(manifest))
         return release, manifest
 
@@ -875,6 +915,17 @@ pathlib.Path('mise-arguments.json').write_text(json.dumps(sys.argv[1:]))
         result = self.run_step("Verify distribution inventory and retain stable macOS names")
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.root / "MergeTether.dmg").exists())
+
+    def test_ci_requires_manifest_to_match_the_selected_notarization_mode(self):
+        release, manifest = self.prepare_inventory()
+        self.env["MACOS_AD_HOC"] = "true"
+        result = self.run_step("Verify distribution inventory and retain stable macOS names")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / "MergeTether.dmg").exists())
+        manifest["macos_notarized"] = False
+        (release / "release-manifest.json").write_text(json.dumps(manifest))
+        result = self.run_step("Verify distribution inventory and retain stable macOS names")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_ci_rejects_changed_artifact_digest(self):
         release, _ = self.prepare_inventory()

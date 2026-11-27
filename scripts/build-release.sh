@@ -11,6 +11,7 @@ Usage: scripts/build-release.sh [X.Y.Z] [options]
   --relay-config FILE         External origin-only JSON (required for iOS distribution)
   --no-relay                  Explicitly build macOS without a relay origin
   --signing-identity NAME|SHA  Developer ID Application identity for macOS
+  --macos-ad-hoc              Sign a macOS release ad hoc without Apple notarization
   --ios-signing-identity NAME|SHA  Apple Distribution identity for iOS
   --ios-sideload              Package a device IPA for signing before installation
   --team-id ID                Distribution team for the selected platforms
@@ -33,13 +34,14 @@ HELP
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
-VERSION="" BUILD_NUMBER="" PLATFORM="macos" UNSIGNED=0 IOS_SIDELOAD=0
+VERSION="" BUILD_NUMBER="" PLATFORM="macos" UNSIGNED=0 IOS_SIDELOAD=0 MACOS_AD_HOC=0
 SIGNING_IDENTITY="" IOS_SIGNING_IDENTITY="" TEAM_ID="" NOTARY_PROFILE="" IOS_EXPORT_OPTIONS=""
 RELAY_CONFIG="${TUIST_MERGETETHER_RELAY_CONFIG_FILE:-}" NO_RELAY=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --help|-h) usage; exit 0 ;;
         --unsigned) UNSIGNED=1; shift ;;
+        --macos-ad-hoc) MACOS_AD_HOC=1; shift ;;
         --ios-sideload) IOS_SIDELOAD=1; shift ;;
         --no-relay) NO_RELAY=1; shift ;;
         --build-number|--platform|--signing-identity|--ios-signing-identity|--team-id|--notary-profile|--ios-export-options|--relay-config)
@@ -68,6 +70,13 @@ BUILD_NUMBER="${BUILD_NUMBER:-$(project_setting CURRENT_PROJECT_VERSION)}"
 MACOS=0 IOS=0
 [[ "$PLATFORM" == ios ]] || MACOS=1
 [[ "$PLATFORM" == macos ]] || IOS=1
+if [[ "$MACOS_AD_HOC" -eq 1 ]]; then
+    [[ "$NO_RELAY" -eq 1 && "$PLATFORM" == macos && "$UNSIGNED" -eq 0 ]] ||
+        fail "--macos-ad-hoc requires --no-relay and a macOS-only release"
+    [[ -z "$SIGNING_IDENTITY$IOS_SIGNING_IDENTITY$TEAM_ID$NOTARY_PROFILE$IOS_EXPORT_OPTIONS" ]] ||
+        fail "--macos-ad-hoc cannot be combined with Apple signing credentials or export options"
+    command -v codesign >/dev/null 2>&1 || fail "missing codesign"
+fi
 if [[ "$IOS_SIDELOAD" -eq 1 ]]; then
     [[ "$IOS" -eq 1 && "$UNSIGNED" -eq 0 ]] || fail "--ios-sideload requires --platform ios or all and cannot be combined with --unsigned"
     [[ -z "$IOS_SIGNING_IDENTITY$IOS_EXPORT_OPTIONS" ]] || fail "--ios-sideload cannot be combined with iOS distribution credentials or export options"
@@ -142,7 +151,7 @@ fi
 if [[ "$IOS" -eq 1 && "$UNSIGNED" -eq 0 && -z "$RELAY_CONFIG" ]]; then
     fail "iOS distribution requires --relay-config with your own relay origin; use --unsigned only for explicit inspection"
 fi
-if [[ "$UNSIGNED" -eq 0 ]]; then
+if [[ "$UNSIGNED" -eq 0 && "$MACOS_AD_HOC" -eq 0 ]]; then
     if [[ "$MACOS" -eq 1 || "$IOS_SIDELOAD" -eq 0 ]]; then
         [[ -n "$TEAM_ID" ]] || fail "--team-id is required for distribution"
         command -v security >/dev/null 2>&1 || fail "missing security"
@@ -249,7 +258,9 @@ PY
 }
 if [[ "$MACOS" -eq 1 ]]; then
     SIGNING_SETTINGS=(CODE_SIGN_IDENTITY= CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO)
-    if [[ "$UNSIGNED" -eq 0 ]]; then
+    if [[ "$MACOS_AD_HOC" -eq 1 ]]; then
+        SIGNING_SETTINGS=(CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual ENABLE_HARDENED_RUNTIME=NO MERGETETHER_MACOS_AD_HOC_RELEASE=YES)
+    elif [[ "$UNSIGNED" -eq 0 ]]; then
         SIGNING_SETTINGS=("CODE_SIGN_IDENTITY=${SIGNING_IDENTITY}" "DEVELOPMENT_TEAM=${TEAM_ID}" CODE_SIGN_STYLE=Manual ENABLE_HARDENED_RUNTIME=YES OTHER_CODE_SIGN_FLAGS=--timestamp)
     fi
     xcodebuild -project MergeTether.xcodeproj -scheme MergeTether -configuration Release \
@@ -258,7 +269,7 @@ if [[ "$MACOS" -eq 1 ]]; then
     APP="$SCRATCH/macOS/Build/Products/Release/MergeTether.app"
     validate_bundle "$APP/Contents/Info.plist" com.vaporpw.MergeTether
     collect_debug_symbols "$APP.dSYM"
-    if [[ "$UNSIGNED" -eq 0 ]]; then
+    if [[ "$UNSIGNED" -eq 0 && "$MACOS_AD_HOC" -eq 0 ]]; then
         verify_signature "$APP" 'Developer ID Application: '
         ditto -c -k --keepParent "$APP" "$SCRATCH/notarization.zip"
         notarize "$SCRATCH/notarization.zip"
@@ -268,8 +279,13 @@ if [[ "$MACOS" -eq 1 ]]; then
     fi
     ZIP_NAME="MergeTether-${VERSION}.zip" DMG_NAME="MergeTether-${VERSION}.dmg"
     ditto -c -k --keepParent "$APP" "$SCRATCH/artifacts/$ZIP_NAME"
+    if [[ "$MACOS_AD_HOC" -eq 1 ]]; then
+        ditto -x -k "$SCRATCH/artifacts/$ZIP_NAME" "$SCRATCH/archive-check"
+        codesign --verify --deep --strict "$SCRATCH/archive-check/MergeTether.app" ||
+            fail "ad hoc signature verification failed after extracting the release ZIP"
+    fi
     hdiutil create -volname MergeTether -srcfolder "$APP" -ov -format UDZO "$SCRATCH/artifacts/$DMG_NAME" >/dev/null
-    if [[ "$UNSIGNED" -eq 0 ]]; then
+    if [[ "$UNSIGNED" -eq 0 && "$MACOS_AD_HOC" -eq 0 ]]; then
         codesign --sign "$SIGNING_IDENTITY" --timestamp "$SCRATCH/artifacts/$DMG_NAME"
         codesign --verify --strict "$SCRATCH/artifacts/$DMG_NAME" || fail "DMG signature verification failed"
         notarize "$SCRATCH/artifacts/$DMG_NAME"
@@ -319,11 +335,11 @@ if [[ "$IOS" -eq 1 ]]; then
     ARTIFACTS+=("$IOS_NAME")
 fi
 # Inventory is written only after every selected platform has passed its checks.
-python3 - "$SCRATCH/artifacts" "$VERSION" "$BUILD_NUMBER" "$PLATFORM" "$UNSIGNED" "${ARTIFACTS[@]}" <<'PY'
+python3 - "$SCRATCH/artifacts" "$VERSION" "$BUILD_NUMBER" "$PLATFORM" "$UNSIGNED" "$MACOS_AD_HOC" "${ARTIFACTS[@]}" <<'PY'
 import hashlib, json, pathlib, sys
 root = pathlib.Path(sys.argv[1])
-version, build, platform, unsigned = sys.argv[2:6]
-names = sys.argv[6:]
+version, build, platform, unsigned, ad_hoc = sys.argv[2:7]
+names = sys.argv[7:]
 expected_count = {'macos': 2, 'ios': 1, 'all': 3}[platform]
 if len(names) != expected_count or len(set(names)) != expected_count:
     sys.exit('error: unexpected release artifact count')
@@ -341,6 +357,7 @@ for name in names:
     artifacts.append({'name': name, 'sha256': digest, 'platform': 'ios' if name.startswith('MergeTetheriOS-') else 'macos'})
 (root / 'release-manifest.json').write_text(json.dumps({
     'version': version, 'build': build, 'distributable': unsigned == '0',
+    'macos_notarized': platform != 'ios' and unsigned == '0' and ad_hoc == '0',
     'artifacts': artifacts,
 }, indent=2) + '\n')
 PY

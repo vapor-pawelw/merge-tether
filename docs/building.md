@@ -396,11 +396,16 @@ These outputs go under `release/unsigned`, with `distributable=false` in their m
 
 ### Release workflow configuration
 
-Releases are tag-driven: pushing a `v*` tag triggers the Release workflow. Configure these GitHub secrets before an authorized publication:
+For an explicitly approved macOS release without Apple notarization, set the repository variable `MERGETETHER_MACOS_AD_HOC_TAG` to the exact release tag. The workflow signs that build ad hoc, records the notarization status in the manifest, and still requires the Sparkle keys. For a local build of this kind, pass `--platform macos --no-relay --macos-ad-hoc` to the release helper. macOS may require **Open Anyway** in **System Settings → Privacy & Security** on first launch. [Apple's first-launch instructions](https://support.apple.com/en-us/102445)
+
+Pushing a `v*` tag triggers the Release workflow. Configure these GitHub secrets for Developer ID signing and notarization:
 
 - `APPLE_CERTIFICATES_P12_BASE64`: an exported PKCS#12 containing the existing Developer ID Application identity and its private key.
 - `APPLE_CERTIFICATES_PASSWORD`: that PKCS#12 password.
 - `NOTARY_API_PRIVATE_KEY`, `NOTARY_KEY_ID`, `NOTARY_ISSUER_ID`: an eligible App Store Connect notarization API key and its identifiers.
+
+Both signing modes require Sparkle:
+
 - `MERGETETHER_SPARKLE_PRIVATE_KEY`: the Sparkle EdDSA private key. Generate a dedicated key once with Sparkle 2.10.1's `bin/generate_keys --account mergetether-release`. Save its public key as the `MERGETETHER_SPARKLE_PUBLIC_KEY` repository variable. Use `bin/generate_keys --account mergetether-release -x` with a private temporary file to transfer the private key to this secret. Remove the temporary file after the transfer and keep a protected backup of the key.
 
 Configure repository variables `APPLE_TEAM_ID` and `MACOS_RELEASE_IDENTITY` (the exact certificate name or SHA-1 fingerprint). The workflow fails with the missing configuration name without printing its value. It imports only into its temporary runner keychain, injects the tag version and workflow run number through build settings, verifies the two macOS archives and their hashes, and removes temporary credential files/keychain on exit. It publishes `MergeTether.dmg` and `MergeTether.zip` on GitHub with matching names in the manifest and checksums, alongside the signed `appcast.xml`. The public Mac app has an empty relay origin. Pairing uses local builds of both apps with your own relay. Before the build job touches any secret, the Release workflow runs the reusable Verify workflow (`.github/workflows/verify.yml`) on the tagged commit: it installs the pinned toolchain, Node.js from the relay package's `engines` field and the locked relay dependencies, generates the project without a relay origin, and runs `python3 scripts/run-tests.py --full`. The same workflow runs on pull requests and pushes to `main`.
@@ -409,7 +414,7 @@ The `update-cask` job of the Release workflow publishes the `mergetether` cask a
 
 ### Mac in-app updates
 
-The release build embeds the public Sparkle key and the repository's `releases/latest/download/appcast.xml` HTTPS URL. The workflow signs and verifies that feed and the final notarized ZIP. It attaches the feed alongside the archives in a draft release, then publishes the complete release as Latest. The feed links to the version-specific ZIP, and its internal version is the increasing Release workflow run number. Keep published feed and ZIP assets together.
+The release build embeds the public Sparkle key and the repository's `releases/latest/download/appcast.xml` HTTPS URL. The workflow signs and verifies the feed and the final release ZIP. It attaches the feed alongside the archives in a draft release, then publishes the complete release as Latest. The feed links to the version-specific ZIP, and its internal version is the increasing Release workflow run number. Keep published feed and ZIP assets together.
 
 The Mac app checks for updates in the background when enabled under **Settings → General**. A download and preparation happen with the app open. The restart action waits for active automation so it can finish and save its results. After relaunch, the app opens the bundled **What's New** for the installed version. A prepared update can also install on ordinary Quit.
 
