@@ -132,10 +132,6 @@ final class AgentQuestionConversation {
         let revision = monitor.glab.accountRevision
         let snapshot = monitor.agentQuestionContext()
         let iids = Self.mentionedIIDs(in: question.text)
-        let details = monitor.agentQuestionDetails(for: iids)
-        var helpTopics = [question.text]
-        if details.contains(where: \.assignmentClaimOffered) { helpTopics.append("Claim merge request") }
-        let installedHelp = AgentQuestionSource.installedHelp(for: helpTopics)
         let directory = root.appending(path: "Workspace", directoryHint: .isDirectory)
         let id = UUID()
         requestID = id
@@ -148,6 +144,11 @@ final class AgentQuestionConversation {
             do {
                 guard current(id, owner: owner, revision: revision, monitor: monitor) else { return }
                 try Self.createPrivateDirectory(directory)
+                let details = await monitor.freshAgentQuestionDetails(for: iids)
+                guard current(id, owner: owner, revision: revision, monitor: monitor) else { return }
+                var helpTopics = [question.text]
+                if details.contains(where: \.assignmentClaimOffered) { helpTopics.append("Claim merge request") }
+                let installedHelp = AgentQuestionSource.installedHelp(for: helpTopics)
                 let initial = Prompt(question: question.text, snapshot: snapshot, mergeRequestDetails: details,
                                      installedHelp: installedHelp, source: nil, evidenceResponse: false)
                 let first = try await ask(initial, owner: owner, executable: executable, session: session,
@@ -184,8 +185,13 @@ final class AgentQuestionConversation {
 
         var request = first
         var help = installedHelp
-        var iids = Self.mentionedIIDs(in: question.text) + (first.reply.mergeRequestIIDs ?? [])
-        var history = await monitor.freshAgentQuestionDetails(for: iids)
+        var iids = Self.mentionedIIDs(in: question.text)
+        var history = details
+        let requestedIIDs = (first.reply.mergeRequestIIDs ?? []).filter { !iids.contains($0) }
+        if !requestedIIDs.isEmpty {
+            iids += requestedIIDs
+            history = await monitor.freshAgentQuestionDetails(for: iids)
+        }
         guard isCurrent() else { throw CancellationError() }
         let additionalHelp = AgentQuestionSource.installedHelp(for: first.reply.sourceTerms ?? [], matching: .topics)
             .filter { !installedHelp.contains($0) }
@@ -230,6 +236,7 @@ final class AgentQuestionConversation {
                 if people[link.url]?.avatarURL == nil || link.person.avatarURL != nil { people[link.url] = link.person }
             }
             noteLinks.formUnion(detail.eventLog.compactMap(\.noteURL).filter { text.contains($0.absoluteString) })
+            noteLinks.formUnion((detail.openDiscussions ?? []).compactMap(\.noteURL).filter { text.contains($0.absoluteString) })
         }
         return .init(role: .agent, text: text, sourceNotice: response.notice,
                      people: people.isEmpty ? nil : people, noteLinks: noteLinks.isEmpty ? nil : noteLinks)

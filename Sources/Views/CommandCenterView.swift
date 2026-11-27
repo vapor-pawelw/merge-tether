@@ -31,19 +31,24 @@ struct CommandCenterView: View {
             AgentQuestionSheet(conversation: agentQuestion, configuration: configuration, submit: { text in
                 agentQuestion.submit(text, owner: owner, executable: executable,
                                      configuration: configuration, monitor: monitor)
-            }, openLink: openQuestionLink)
+            }, canOpenLink: { isQuestionMergeRequestLink($0) || AgentQuestionSource.isEvidenceLink($0) },
+               openLink: openQuestionLink)
         }
     }
 
     private func openQuestionLink(_ url: URL) -> OpenURLAction.Result {
-        let board = monitor.boardSnapshot
-        if (board.own + board.reviewed + board.otherMergeRequests).contains(where: { $0.displayURL == url }) {
+        if isQuestionMergeRequestLink(url) {
             pendingQuestionLink = url
             showingAgentQuestion = false
             return .handled
         }
         if AgentQuestionSource.isEvidenceLink(url) { return .systemAction }
         return .discarded
+    }
+
+    private func isQuestionMergeRequestLink(_ url: URL) -> Bool {
+        let board = monitor.boardSnapshot
+        return (board.own + board.reviewed + board.otherMergeRequests).contains { $0.displayURL == url }
     }
 
     var body: some View {

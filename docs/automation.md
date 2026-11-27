@@ -189,6 +189,8 @@ Before retrying a pipeline task, the app reads its current MR and pipeline. A pa
 
 MR menus and Details offer **Refresh from GitLab**. This refreshes tracked data through the normal monitoring path without clearing verification results or retry fences. Details share the card's MR actions and pin control. Automatic monitoring follows the selected refresh interval, with an hourly option available; forced refresh does not add a second periodic timer.
 
+When the GitLab list reports a discussion blocker on your MR and the discussion read confirms all threads are resolved, MergeTether checks the individual MR before clearing the warning. An unconfirmed recheck keeps the blocker in place.
+
 ### Local retention
 
 MergeTether groups MR settings and journals by GitLab host, project ID and MR number. Each entry keeps its original account binding. Explicit settings saves also write the older keys so older installations still have the preferences and safety receipts they use. On upgrade, the app reconciles changes made by an older installation and preserves unreadable journals for diagnosis. Successful transcripts are stored once in the compatible run history payload, which is rewritten when the run history changes.
@@ -212,7 +214,7 @@ The app bundles `evidence.py` and `author_follow_up.py` under `Contents/Resource
 
 Click the question mark in the Mac toolbar when your selected CLI is ready. Questions and answers stay in one conversation in this installation. The sheet shows the configured verification model and reasoning level. Each CLI call has two minutes to respond. If a question fails, retry it from the sheet. Clear the conversation from the sheet or start a fresh conversation by switching the GitLab account or agent provider. The CLI may retain its own session history.
 
-The app sends a bounded board snapshot with each question. When the agent asks for a specific MR's history, the app reads its GitLab discussions and state, label and milestone events, then combines them with saved decisions and agent runs. The evidence includes available comment text, authors, note links, timestamps and the recorded trigger or outcome of local actions. Answers can link to individual GitLab notes and people. Hover over a person's name for their GitLab identity. The agent can identify when a read was partial or the excerpt reached its size limit.
+The app sends a bounded board snapshot with each question. When you include an MR number such as `!142`, or the agent requests details about a specific MR, the app checks its current GitLab status and discussions and reads its state, label and milestone events. It combines these with saved decisions and agent runs. The evidence includes currently open threads even when they are older than the event excerpt, along with available comment text, authors, note links and timestamps. The agent can identify when a read was partial or an excerpt reached its size limit. Hover over a linked person's name for their GitLab handle. Drag to select any part of a message and copy it with **⌘C**.
 
 The Mac Event log keeps the redacted text and draft reference of newly published comments from MergeTether, including manual publications. The saved text is available when GitLab cannot supply the note or its text has changed. A matching public note links the receipt to that GitLab discussion.
 

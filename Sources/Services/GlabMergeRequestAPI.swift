@@ -426,11 +426,7 @@ extension GlabService {
 
     func mergeRequestDiscussionsAreResolved(projectID: Int, iid: Int, host: String) async throws -> Bool {
         let discussions = try await fetchMergeRequestDiscussions(projectID: projectID, iid: iid, host: host)
-        return discussions.allSatisfy { discussion in
-            !discussion.notes.isEmpty && discussion.notes.allSatisfy {
-                $0.resolvable == false || ($0.resolvable == true && $0.resolved == true)
-            }
-        }
+        return GitLabMergeRequestDiscussion.allConfirmedResolved(discussions)
     }
 
     func fetchOwnDraftNotes(projectID: Int, iid: Int, host: String, userID: Int) async throws -> [GitLabDraftNote] {

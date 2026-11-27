@@ -1262,7 +1262,7 @@ final class MergeRequestAttentionMonitor {
             item.requiresCommentReview = commentReviewPending(id, account: account)
             if item.isAuthored {
                 item.catalogIssues = CatalogIssue.observed(in: mr)
-                if mr.blockingDiscussionsResolved == false || mr.detailedMergeStatus == .discussionsNotResolved {
+                if Self.reportsDiscussionBlock(mr) {
                     item.discussionObservation = .unresolvedOther
                 }
             }
@@ -1389,6 +1389,23 @@ final class MergeRequestAttentionMonitor {
                                 projectID: item.id.projectID, iid: item.id.iid, host: host
                             )
                         } else { nil as [GitLabMergeRequestDiscussion]? }
+                        // The list endpoint can report a discussion blocker after the last thread is resolved.
+                        let rechecksDiscussionBlock = feedbackDecision == nil && item.isAuthored
+                            && item.mergeRequest.map(Self.reportsDiscussionBlock) == true
+                            && discussions.map(GitLabMergeRequestDiscussion.allConfirmedResolved) == true
+                        if hasDrafts || rechecksDiscussionBlock {
+                            let requestReadStartedAt = Date()
+                            let live = try? await glab.fetchMergeRequest(projectID: item.id.projectID, iid: item.id.iid, host: host)
+                            if let live, rechecksDiscussionBlock, live.blockingDiscussionsResolved == true,
+                               !Self.reportsDiscussionBlock(live), MRAttentionRecord.sameContext(item.mergeRequest, live) {
+                                updated.mergeRequest = live
+                                updated.catalogIssues = CatalogIssue.observed(in: live)
+                                recoveryRequest = live
+                            } else if hasDrafts {
+                                recoveryRequest = live
+                            }
+                            if recoveryRequest != nil { recoveryReadStartedAt = requestReadStartedAt }
+                        }
                         updated.observationSession = .init(host: account.host, username: account.username, revision: revision)
                         updated.discussionReadStartedAt = discussions.map { _ in discussionReadStartedAt }
                         updated.observedDiscussionFingerprint = discussions.flatMap { ReviewVerdict.fingerprint($0) }
@@ -1405,12 +1422,12 @@ final class MergeRequestAttentionMonitor {
                         updated.commentReviewSnapshot = CommentReviewSnapshot(request: item.mergeRequest, discussions: discussions)
                         updated.changeRequestReviewers = nil
                         updated.confirmedPendingReReviewers = []
-                        if item.isAuthored, item.needsChanges, let reviewers {
+                        if updated.isAuthored, updated.needsChanges, let reviewers {
                             let requests = reviewers.filter { $0.state == .requestedChanges }
                             if requests.allSatisfy({ $0.user.id > 0 && $0.user.username?.isEmpty == false }) {
                                 updated.changeRequestReviewers = Set(requests.compactMap(\.user.username))
                             }
-                            if requests.isEmpty, let reviewHistory, let request = item.mergeRequest {
+                            if requests.isEmpty, let reviewHistory, let request = updated.mergeRequest {
                                 updated.confirmedPendingReReviewers = await self.reReviewCoordinator?.confirmedPendingReviewers(
                                     for: request, reviewers: reviewers, history: reviewHistory,
                                     context: .init(host: host, username: account.username, revision: revision,
@@ -1423,17 +1440,13 @@ final class MergeRequestAttentionMonitor {
                             }
                         }
                         if hasDrafts {
-                            let requestReadStartedAt = Date()
-                            let live = try? await glab.fetchMergeRequest(projectID: item.id.projectID, iid: item.id.iid, host: host)
-                            recoveryRequest = live
-                            if live != nil { recoveryReadStartedAt = requestReadStartedAt }
                             updated.requiresDiscussionRecheck = !Self.draftContextIsCurrent(
-                                request: live, drafts: drafts, discussions: discussions, host: host, user: user,
+                                request: recoveryRequest, drafts: drafts, discussions: discussions, host: host, user: user,
                                 verdictDirectory: verdictDirectory, followUpReceipts: followUpReceipts,
                                 treatAssignedMergeRequestsAsOwn: treatAssignedMergeRequestsAsOwn
                             )
                             contextDraftIDs = Set((drafts ?? []).filter { draft in
-                                Self.draftContextIsCurrent(request: live, drafts: [draft], discussions: discussions,
+                                Self.draftContextIsCurrent(request: recoveryRequest, drafts: [draft], discussions: discussions,
                                     host: host, user: user, verdictDirectory: verdictDirectory, followUpReceipts: followUpReceipts,
                                     treatAssignedMergeRequestsAsOwn: treatAssignedMergeRequestsAsOwn)
                             }.compactMap(\.id))
@@ -1470,9 +1483,6 @@ final class MergeRequestAttentionMonitor {
                                     updated.replyRecipients[id] = recipients
                                 }
                             }
-                            if item.isAuthored {
-                                Self.applyDiscussionFeedback(to: &updated, discussions: discussions, userID: user.id)
-                            }
                         }
                         let feedback = discussions.map { ReReviewFeedback(discussions: $0, authorID: user.id) }
                         return (updated, drafts != nil && (!(item.isAuthored || hasDrafts) || discussions != nil),
@@ -1496,6 +1506,9 @@ final class MergeRequestAttentionMonitor {
                         guard latest.isOpen, latest.evidenceContext().binds(
                             to: item.observedEvidenceContext, policy: .requestText) else { continue }
                         item.mergeRequest = latest
+                    }
+                    if item.isAuthored, let discussions {
+                        Self.applyDiscussionFeedback(to: &item, discussions: discussions, userID: user.id)
                     }
                     if !item.isAuthored, let approvers = item.approvalProgress?.currentApproverIDs, let settings {
                         if !approvers.contains(user.id) {
@@ -1761,9 +1774,7 @@ final class MergeRequestAttentionMonitor {
     ) {
         item.observedActiveDiscussionFingerprint = ReviewVerdict.fingerprint(
             GitLabMergeRequestDiscussion.activeForReview(discussions))
-        let aggregateBlocker = item.mergeRequest.map {
-            $0.blockingDiscussionsResolved == false || $0.detailedMergeStatus == .discussionsNotResolved
-        } ?? item.needsDiscussion
+        let aggregateBlocker = item.mergeRequest.map(Self.reportsDiscussionBlock) ?? item.needsDiscussion
         item.feedback = GitLabMergeRequestDiscussion.unresolvedFeedback(in: discussions, excluding: userID)
         let feedbackIDs = Set(item.feedback.compactMap(\.id))
         let unresolved = discussions.filter { discussion in
@@ -1776,6 +1787,10 @@ final class MergeRequestAttentionMonitor {
             !discussion.notes.contains { $0.id.map(feedbackIDs.contains) == true }
         } || ((uncertain || unresolved.isEmpty) && aggregateBlocker)
         item.discussionObservation = .init(unresolved: !unresolved.isEmpty || aggregateBlocker, includesOther: includesOther)
+    }
+
+    private nonisolated static func reportsDiscussionBlock(_ request: GitLabMergeRequest) -> Bool {
+        request.blockingDiscussionsResolved == false || request.detailedMergeStatus == .discussionsNotResolved
     }
 
     /// The inbox is published before optional dependency reads. A cancelled predecessor

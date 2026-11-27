@@ -1,8 +1,62 @@
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import MergeTether
 
 struct AgentQuestionTests {
+    @MainActor @Test func copiesASelectionAcrossAnswerParagraphsAndLinks() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let owner = AgentQuestionConversation.Owner(assistant: .codex, host: "gitlab.example.test", username: "reviewer")
+        let note = try #require(URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/42#note_17"))
+        let answer = "First **paragraph** with a [comment](\(note)).\n\nSecond paragraph with `code`."
+        struct SavedConversation: Encodable {
+            let owner: AgentQuestionConversation.Owner
+            let messages: [AgentQuestionConversation.Message]
+        }
+        let saved = SavedConversation(owner: owner, messages: [
+            .init(role: .user, text: "Why is it blocked?"), .init(role: .agent, text: answer, noteLinks: [note])
+        ])
+        try JSONEncoder().encode(saved).write(to: root.appending(path: "conversation.json"))
+        let conversation = AgentQuestionConversation(root: root)
+        conversation.activate(owner)
+        let sheet = AgentQuestionSheet(conversation: conversation, configuration: .init(assistant: .codex, settings: .init()),
+                                       submit: { _ in }, openLink: { _ in .discarded })
+        let view = NSHostingView(rootView: sheet.frame(width: 600, height: 480))
+        let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 600, height: 480),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer { window.close() }
+        view.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(80))
+
+        func messageView(in view: NSView, containing text: String) -> NSTextView? {
+            if let candidate = view as? NSTextView, candidate.string.contains(text) { return candidate }
+            return view.subviews.lazy.compactMap { messageView(in: $0, containing: text) }.first
+        }
+        let questionView = try #require(messageView(in: view, containing: "Why is it blocked?"))
+        #expect(questionView.isSelectable && !questionView.isEditable)
+        let answerView = try #require(messageView(in: view, containing: "First paragraph"))
+        #expect(answerView.isSelectable && !answerView.isEditable)
+        #expect(answerView.frame.height > 30)
+        let rendered = answerView.string as NSString
+        let linkRange = rendered.range(of: "comment")
+        try #require(linkRange.location != NSNotFound)
+        #expect(answerView.textStorage?.attribute(.link, at: linkRange.location, effectiveRange: nil) as? URL == note)
+        let selection = rendered.range(of: "paragraph with a comment.\n\nSecond")
+        try #require(selection.location != NSNotFound)
+        try #require(window.makeFirstResponder(answerView))
+        answerView.setSelectedRange(selection)
+        #expect(answerView.selectedRange() == selection)
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        #expect(answerView.writeSelection(to: pasteboard, types: answerView.writablePasteboardTypes))
+        #expect(pasteboard.string(forType: .string) == "paragraph with a comment.\n\nSecond")
+    }
+
     @Test(arguments: [AutomationAssistant.codex, .claude])
     func resumesOnlyTheRequestedSessionWithRestrictedTooling(_ assistant: AutomationAssistant) throws {
         let session = UUID()
@@ -120,6 +174,8 @@ extension AgentQuestionTests {
             case "get": return InMemoryGitLab.output("gitlab.example.test")
             case "status": return InMemoryGitLab.output("Logged in to gitlab.example.test as reviewer")
             case "/user": return InMemoryGitLab.output(#"{"id":1,"username":"reviewer"}"#)
+            case "/projects/7/merge_requests/42":
+                return InMemoryGitLab.output(#"{"project_id":7,"iid":42,"author":{"id":1,"username":"reviewer","name":"The Reviewer"},"title":"Sample","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/42","state":"opened","source_branch":"feature","target_branch":"main","detailed_merge_status":"mergeable","blocking_discussions_resolved":true,"labels":[]}"#)
             case prefix + "discussions?per_page=100":
                 return try InMemoryGitLab.json([["id": "thread", "notes": [
                     ["id": 17, "body": publishedText, "created_at": "2026-11-19T10:01:00Z", "system": false,
@@ -141,7 +197,8 @@ extension AgentQuestionTests {
         let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data("""
             {"project_id":7,"iid":42,"author":{"id":1,"username":"reviewer","name":"The Reviewer"},
              "title":"Sample","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/42",
-             "state":"opened","draft":false,"source_branch":"feature","target_branch":"main","sha":"head","labels":[]}
+             "state":"opened","draft":false,"source_branch":"feature","target_branch":"main","sha":"head","labels":[],
+             "detailed_merge_status":"discussions_not_resolved","blocking_discussions_resolved":false}
             """.utf8))
         let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "reviewer", projectID: 7, iid: 42)
         settings.mrLifecycleLedger.record(request, for: target)
@@ -180,10 +237,11 @@ extension AgentQuestionTests {
             fi
             if printf '%s' "$input" | /usr/bin/grep -q '"question":"Why is !42 blocked?"'; then
                 printf '%s\\n' '{"type":"thread.started","thread_id":"\(session)"}'
-                case "$input" in
-                    *'"evidenceResponse":true'*) printf '%s\\n' '\(try event(answer: "Grounded answer"))' ;;
-                    *) printf '%s\\n' '\(evidenceRequest)' ;;
-                esac
+                printf '%s' "$input" | /usr/bin/grep -Fq '"evidenceResponse":false' &&
+                printf '%s' "$input" | /usr/bin/grep -Fq '"activityRead":"live"' &&
+                printf '%s' "$input" | /usr/bin/grep -Fq '"gitLabMergeStatus":"mergeable"' &&
+                printf '%s' "$input" | /usr/bin/grep -Fq '"openDiscussionCount":0' || exit 1
+                printf '%s\\n' '\(try event(answer: "Grounded answer"))'
                 printf '%s\\n' '{"type":"turn.completed"}'
                 exit 0
             fi

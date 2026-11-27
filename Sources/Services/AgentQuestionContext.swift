@@ -99,6 +99,31 @@ struct AgentQuestionContext: Encodable, Sendable {
             var pipelineID: Int? = nil
             var noteIDs: [Int]? = nil
         }
+        struct OpenDiscussion: Encodable, Sendable {
+            let noteURL: URL?
+            let actor: String?
+            let actorURL: URL?
+            let location: String?
+            let body: String?
+            let bodyTruncated: Bool?
+        }
+        struct GitLabStatus: Encodable, Sendable {
+            let gitLabStatusCheckedAt: Date?
+            let gitLabMergeStatus: String?
+            let hasConflicts: Bool?
+            let blockingDiscussionsResolved: Bool?
+            let state: String
+            let pipelineStatus: String?
+
+            init(request: GitLabMergeRequest, checkedAt: Date?) {
+                gitLabStatusCheckedAt = checkedAt
+                gitLabMergeStatus = request.detailedMergeStatus?.rawValue
+                hasConflicts = request.hasConflicts
+                blockingDiscussionsResolved = request.blockingDiscussionsResolved
+                state = request.state.rawValue
+                pipelineStatus = request.headPipeline?.status.rawValue
+            }
+        }
         let iid: Int
         let url: URL
         let author: String?
@@ -108,8 +133,7 @@ struct AgentQuestionContext: Encodable, Sendable {
         let visibleReason: String?
         let sourceBranch: String?
         let targetBranch: String?
-        let gitLabMergeStatus: String?
-        let gitLabHasConflicts: Bool?
+        let gitLabStatus: GitLabStatus?
         let recordedConflictWarning: Bool
         let assignmentClaimOffered: Bool
         let evidenceMatchesCurrentCatalog: Bool
@@ -117,6 +141,8 @@ struct AgentQuestionContext: Encodable, Sendable {
         let activityRead: ActivityRead
         let missingActivitySources: [String]
         let cachedDiscussionsReadAt: Date?
+        let openDiscussionCount: Int?
+        let openDiscussions: [OpenDiscussion]?
         let people: [PersonLink]
         let eventLog: [Event]
         let omittedEvents: Int
@@ -155,7 +181,9 @@ struct AgentQuestionContext: Encodable, Sendable {
     }
 
     private struct QuestionActivity: Sendable {
-        let notes: [MRGitLabActivity]?
+        let readStartedAt: Date
+        let request: GitLabMergeRequest?
+        let discussions: [GitLabMergeRequestDiscussion]?
         let resources: [MRGitLabActivity.Resource: [MRGitLabActivity]]
     }
 
@@ -168,11 +196,6 @@ struct AgentQuestionContext: Encodable, Sendable {
         return Array((board.own + board.reviewed + board.otherMergeRequests)
             .filter { selected.contains($0.id.iid) && seen.insert($0.displayURL).inserted }
             .prefix(8))
-    }
-
-    func agentQuestionDetails(for iids: [Int]) -> [AgentQuestionContext.Detail] {
-        let rows = agentQuestionRows(for: iids)
-        return rows.compactMap { agentQuestionDetail($0, bodyBudget: 48_000 / rows.count) }
     }
 
     func freshAgentQuestionDetails(for iids: [Int]) async -> [AgentQuestionContext.Detail] {
@@ -203,11 +226,13 @@ struct AgentQuestionContext: Encodable, Sendable {
         let activity = await withTaskGroup(of: (URL, QuestionActivity).self) { group in
             for target in targets {
                 group.addTask { [glab] in
+                    let startedAt = Date()
+                    async let status = try? glab.fetchMergeRequest(projectID: target.projectID, iid: target.iid, host: target.host)
                     async let discussions = try? glab.fetchMergeRequestDiscussions(projectID: target.projectID,
                         iid: target.iid, host: target.host, timeout: 15, cacheResult: false)
                     async let resources = MRGitLabActivityStore.readResources(for: target, glab: glab, timeout: 15)
-                    let (threads, events) = await (discussions, resources)
-                    return (target.url, .init(notes: threads.map(MRGitLabActivity.notes(in:)), resources: events))
+                    let (request, threads, events) = await (status, discussions, resources)
+                    return (target.url, .init(readStartedAt: startedAt, request: request, discussions: threads, resources: events))
                 }
             }
             var results: [URL: QuestionActivity] = [:]
@@ -228,17 +253,17 @@ struct AgentQuestionContext: Encodable, Sendable {
         let url = row.displayURL
         guard let target = scopeTarget(projectID: row.id.projectID, iid: row.id.iid, url: url),
               url.query == nil, url.fragment == nil else { return nil }
-        let request = row.displayRequest
-        let policyHold = request.flatMap {
+        let request = live?.request ?? row.displayRequest
+        let policyHold = row.displayRequest.flatMap {
             settings.configuredAutomation.followUpAutomationHold(for: $0, target: target,
                 ignored: settings.ignoredMergeRequests.contains(target),
                 requiresTodoRouting: row.attentionIntents.contains { $0.kind == .followUp })
         }
-        let cached = live?.notes == nil && permitsCachedActivity
+        let cached = live?.discussions == nil && permitsCachedActivity
             ? glab.cachedDiscussions(projectID: target.projectID, iid: row.id.iid) : nil
-        let notes = live?.notes ?? cached.map { MRGitLabActivity.notes(in: $0.discussions) }
+        let notes = (live?.discussions ?? cached?.discussions).map(MRGitLabActivity.notes(in:))
         var missing = MRGitLabActivity.Resource.allCases.filter { live?.resources[$0] == nil }.map(\.rawValue)
-        if live?.notes == nil { missing.append("discussions") }
+        if live?.discussions == nil { missing.append("discussions") }
         let read: AgentQuestionContext.Detail.ActivityRead
         if live != nil {
             read = missing.isEmpty ? .live : .partial
@@ -253,6 +278,20 @@ struct AgentQuestionContext: Encodable, Sendable {
         let events = excerpt.map { entry in
             agentQuestionEvent(entry, url: url, head: request?.sha, target: target, remaining: &remaining)
         }
+        let openNotes = live?.discussions.map { threads in
+            threads.compactMap { thread in
+                thread.notes.first { $0.system != true && $0.resolvable == true && $0.resolved == false }
+            }
+        }
+        let openExcerpt = openNotes?.prefix(12)
+        var discussionBudget = bodyBudget / 4
+        let openDiscussions = openExcerpt?.map { note -> AgentQuestionContext.Detail.OpenDiscussion in
+            let actor = note.author?.person
+            let (body, truncated) = questionBody(note.body, budget: &discussionBudget)
+            return .init(noteURL: note.id.flatMap(url.gitLabNoteURL), actor: actor?.displayName.map(cleanQuestionEvidence),
+                actorURL: actor.flatMap { AgentQuestionContext.Detail.PersonLink($0, on: url)?.url },
+                location: note.position?.location.map(cleanQuestionEvidence), body: body, bodyTruncated: truncated)
+        }
         var people: [PersonIdentity] = []
         if let request {
             people = ([request.author] + (request.assignees ?? []) + (request.reviewers ?? [])).prefix(40).map(\.person)
@@ -260,6 +299,7 @@ struct AgentQuestionContext: Encodable, Sendable {
         for entry in excerpt {
             if case .gitLab(let activity, _) = entry.source, let person = activity.person { people.append(person) }
         }
+        if let openExcerpt { people.append(contentsOf: openExcerpt.compactMap { $0.author?.person }) }
         people.append(.init(name: nil, username: target.username))
         let directory = PersonDirectory(people)
         var seen = Set<URL>()
@@ -271,6 +311,8 @@ struct AgentQuestionContext: Encodable, Sendable {
         }
         let explanation = confirmedHumanAction(for: row)?.explanation
             ?? row.latestJob?.operationalExecution?.attentionExplanation
+        let checkedAt = live?.request == nil ? nil : live?.readStartedAt
+        let status = request.map { AgentQuestionContext.Detail.GitLabStatus(request: $0, checkedAt: checkedAt) }
         return .init(iid: row.id.iid, url: url,
             author: request.map { cleanQuestionEvidence($0.author.username) },
             assignees: request?.assignees.map { $0.prefix(20).map { cleanQuestionEvidence($0.username) } },
@@ -279,12 +321,13 @@ struct AgentQuestionContext: Encodable, Sendable {
             visibleReason: explanation.map(cleanQuestionEvidence),
             sourceBranch: request.map { cleanQuestionEvidence($0.sourceBranch) },
             targetBranch: request.map { cleanQuestionEvidence($0.targetBranch) },
-            gitLabMergeStatus: request?.detailedMergeStatus?.rawValue, gitLabHasConflicts: request?.hasConflicts,
+            gitLabStatus: status,
             recordedConflictWarning: row.item.hasConflict || row.attentionIntents.contains { $0.kind == .conflict },
             assignmentClaimOffered: row.waitsForAssignmentClaim,
             evidenceMatchesCurrentCatalog: row.evidenceMatchesCatalogContext,
             followUpPolicyHold: policyHold.map { String(localized: $0.message) },
             activityRead: read, missingActivitySources: missing, cachedDiscussionsReadAt: cached?.readAt,
+            openDiscussionCount: openNotes?.count, openDiscussions: openDiscussions,
             people: links, eventLog: events, omittedEvents: history.entries.count - events.count)
     }
 

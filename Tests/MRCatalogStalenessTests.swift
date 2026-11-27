@@ -528,6 +528,45 @@ struct MRCatalogStalenessTests {
         #expect(h.monitor.currentOpenItems.isEmpty)
     }
 
+    @Test(arguments: ["cleared", "otherBlocker", "stillBlocked", "detailUnavailable", "openThread", "changedHead"])
+    func exactMergeStatusReconcilesAListDiscussionBlock(_ outcome: String) async throws {
+        let h = try harness()
+        defer { h.cleanUp() }
+        let clear = request(1, owned: true)
+        let blocked = clear.replacingOccurrences(of: "\"mergeable\"", with: "\"discussions_not_resolved\"")
+            .replacingOccurrences(of: "\"blocking_discussions_resolved\":true", with: "\"blocking_discussions_resolved\":false")
+        try h.write("owned.json", "[\(blocked)]")
+        switch outcome {
+        case "stillBlocked": try h.write("detail.json", blocked)
+        case "otherBlocker": try h.write("detail.json", clear.replacingOccurrences(of: "mergeable", with: "not_approved"))
+        case "changedHead":
+            try h.write("detail.json", clear.replacingOccurrences(of: String(repeating: "a", count: 40),
+                                                                  with: String(repeating: "b", count: 40)))
+        case "detailUnavailable": break
+        default: try h.write("detail.json", clear)
+        }
+        if outcome == "openThread" {
+            try h.write("discussions.json", #"[{"id":"open","notes":[{"id":10,"author":{"id":9,"username":"alice"},"system":false,"resolvable":true,"resolved":false}]}]"#)
+        }
+
+        try await h.poll()
+
+        let item = try #require(h.monitor.currentOpenItems.first { $0.id.iid == 1 })
+        let discussionCleared = outcome == "cleared" || outcome == "otherBlocker"
+        #expect(item.needsDiscussion == !discussionCleared)
+        #expect(item.mergeRequest?.blockingDiscussionsResolved == discussionCleared)
+        if outcome == "cleared" {
+            #expect(item.mergeRequest?.detailedMergeStatus == .mergeable)
+            #expect(h.monitor.currentItems.first { $0.id.iid == 1 }?.needsDiscussion != true)
+        }
+        if outcome == "openThread" {
+            #expect(item.feedback.compactMap(\.id) == [10])
+        }
+        if outcome == "otherBlocker" {
+            #expect(item.mergeRequest?.detailedMergeStatus == .notApproved)
+        }
+    }
+
     @Test func automationHidesReviewerThreadButPreservesIndependentAuthorThread() async throws {
         let h = try harness()
         defer { h.cleanUp() }

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Recheck apparent discussion blockers on your MRs against the individual GitLab merge request when the discussion read confirms all threads are resolved.
+
+- Ask Agent checks GitLab status and discussions before answering a question that names an MR number. Select and copy text across paragraphs and links in chat messages.
+
 - Hide the empty **Next step** panel in Mac merge request Details while automation is running and no decision is available.
 
 - Trace MR activity from the Mac Event log and ask the agent about earlier events. See comment text, the people involved and links to the GitLab notes. Hover over a person's name for their profile.

@@ -229,6 +229,14 @@ struct GitLabMergeRequestDiscussion: Codable, Sendable {
         discussions.filter { !$0.isResolvedForReview }
     }
 
+    static func allConfirmedResolved(_ discussions: [Self]) -> Bool {
+        discussions.allSatisfy { discussion in
+            !discussion.notes.isEmpty && discussion.notes.allSatisfy {
+                $0.resolvable == false || ($0.resolvable == true && $0.resolved == true)
+            }
+        }
+    }
+
     /// Other human-visible participants, in thread order, for showing who a reply answers.
     func replyRecipients(excluding userID: Int) -> [PersonIdentity] {
         var seen: Set<String> = []
