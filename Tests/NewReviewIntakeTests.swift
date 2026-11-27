@@ -270,6 +270,28 @@ struct NewReviewIntakeTests {
         }
     }
 
+    @Test func hiddenReviewAssignmentsCacheTracksSettingsAndAccountChanges() async throws {
+        try await fixture(preset: .manual) { monitor, settings in
+            await monitor.refreshNow()
+            let first = MRAutomationScope.Target(host: host, username: "alice", projectID: 2, iid: 5)
+            let second = target
+            func review(_ target: MRAutomationScope.Target, path: String) throws -> HiddenReview {
+                .init(target: target, title: "MR \(target.iid ?? 0)",
+                      url: try #require(URL(string: "https://\(host)/\(path)/-/merge_requests/\(target.iid ?? 0)")))
+            }
+            try #require(settings.hideReviewedMergeRequest(review(second, path: "group/repo")))
+            try #require(settings.hideReviewedMergeRequest(review(first, path: "group/alpha")))
+            #expect(monitor.hiddenReviewAssignments.map(\.target) == [first, second])
+            #expect(monitor.hiddenReviewAssignments.map(\.target) == [first, second])
+
+            #expect(settings.restoreHiddenReviews([first]))
+            #expect(monitor.hiddenReviewAssignments.map(\.target) == [second])
+
+            monitor.glab.currentUsername = "carol"
+            #expect(monitor.hiddenReviewAssignments.isEmpty)
+        }
+    }
+
     @Test func knownFinishedHiddenReviewsStayHiddenWithoutRestore() async throws {
         try await fixture(preset: .manual) { monitor, settings in
             await monitor.refreshNow()

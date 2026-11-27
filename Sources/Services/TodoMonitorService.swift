@@ -18,6 +18,7 @@ final class TodoMonitorService {
     @ObservationIgnored var issueDetailsRefreshes = 0
     private var boardDisplayMetadata = MRDisplayMetadataCache()
     @ObservationIgnored private let boardProjectorCache: ObservedPresentationCache<MRBoardProjector?>
+    @ObservationIgnored private let hiddenReviewAssignmentsCache: ObservedPresentationCache<[HiddenReview]>
     @ObservationIgnored let boardSnapshotCache: ObservedPresentationCache<MergeRequestBoardSnapshot>
     @ObservationIgnored let commandCenterDisplayFrameCache: ObservedPresentationCache<CommandCenterDisplayFrame>
     @ObservationIgnored private var liveBoardPresentationRead: Bool?
@@ -291,6 +292,7 @@ final class TodoMonitorService {
     ) {
         boardProjectorCache = .init(scheduleNotification: schedulePresentationNotification)
         boardSnapshotCache = .init(scheduleNotification: schedulePresentationNotification)
+        hiddenReviewAssignmentsCache = .init(scheduleNotification: schedulePresentationNotification)
         commandCenterDisplayFrameCache = .init(scheduleNotification: schedulePresentationNotification)
         self.settings = settings
         self.glab = glab
@@ -1115,7 +1117,12 @@ final class TodoMonitorService {
         return restoreReviewedMergeRequests([review])
     }
 
+    /// Cached through observation tracking: every input (settings, ledgers, glab account) is `@Observable` state.
     var hiddenReviewAssignments: [HiddenReview] {
+        hiddenReviewAssignmentsCache.value { computeHiddenReviewAssignments() }
+    }
+
+    private func computeHiddenReviewAssignments() -> [HiddenReview] {
         guard let account = boardDisplayAccount else { return [] }
         var hidden = settings.hiddenReviewDetails.filter {
             $0.key.account == .init(host: account.host, username: account.username)
