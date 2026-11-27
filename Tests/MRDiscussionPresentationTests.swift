@@ -1,10 +1,63 @@
+import AppKit
 import Foundation
 import MergeTetherRemote
+import SwiftUI
 import Testing
 @testable import MergeTether
 
 @MainActor
 struct MRDiscussionPresentationTests {
+    @Test func scrollingDraftDiscussionsKeepsTheDocumentHeightStable() async throws {
+        let discussions = (0..<48).map { index in
+            GitLabMergeRequestDiscussion(id: "thread-\(index)", notes: [
+                .init(id: index + 1, author: .init(id: 7, username: "reviewer", name: "Reviewer"), system: false,
+                      resolvable: true, resolved: false, resolvedBy: nil, body: "Review feedback \(index)")
+            ])
+        }
+        let drafts = discussions.enumerated().map { index, discussion in
+            GitLabDraftNote(id: index + 1, authorID: 9, note: String(repeating: "**Reply** with [details](https://example.test).\n\n",
+                count: index % 9 == 0 ? 24 : 1), discussionID: discussion.id, position: nil)
+        }
+        let snapshot = MRDiscussionSnapshot(discussions: discussions, drafts: drafts, origins: [:])
+        let bounds = CGRect(x: 0, y: 0, width: 410, height: 510)
+        let view = NSHostingView(rootView: ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Overview").frame(height: 320)
+                MRDiscussionThreadsView(snapshot: snapshot, mergeRequestURL: target.url, currentUsername: target.username,
+                    isLoading: false, hasError: false, hasLoaded: true, expandPendingDrafts: true,
+                    selection: .constant(.init()), onRefresh: {})
+                Text("History")
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }.frame(width: bounds.width, height: bounds.height))
+        let window = NSWindow(contentRect: bounds, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer { window.close() }
+        view.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(80))
+
+        let scroll = try #require(scrollView(in: view))
+        let document = try #require(scroll.documentView)
+        let initialHeight = document.frame.height
+        try #require(initialHeight > bounds.height * 4)
+        for step in Array(1...20) + Array((0..<20).reversed()) {
+            let travel = document.frame.height - scroll.contentView.bounds.height
+            scroll.contentView.scroll(to: CGPoint(x: 0, y: travel * CGFloat(step) / 20))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            try await Task.sleep(for: .milliseconds(15))
+            try #require(abs(document.frame.height - initialHeight) <= 1,
+                         "Scrolling changed the height of unchanged discussions")
+            if step == 20 { #expect(scroll.contentView.bounds.origin.y >= travel - 1) }
+        }
+        #expect(scroll.contentView.bounds.origin.y == 0)
+    }
+
+    private func scrollView(in view: NSView) -> NSScrollView? {
+        (view as? NSScrollView) ?? view.subviews.lazy.compactMap { scrollView(in: $0) }.first
+    }
+
     @Test func preparedFingerprintTracksLoadedTextAndReadableFailures() async throws {
         var live = try threads()
         var fails = false

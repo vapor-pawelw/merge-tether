@@ -74,7 +74,8 @@ struct MRDiscussionThreadsView: View {
             Text(.MRDiscussions.mrDiscussionsUnavailable)
                 .font(.callout).foregroundStyle(.secondary)
         }
-        LazyVStack(alignment: .leading, spacing: 0) {
+        // Lazy height estimates can keep the enclosing scroll view relaying out variable-height threads.
+        VStack(alignment: .leading, spacing: 0) {
             ForEach(snapshot.threads) { thread in
                 if thread.id != snapshot.threads.first?.id { Divider() }
                 threadView(thread, currentUser: currentUser)
