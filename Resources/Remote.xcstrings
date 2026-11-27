@@ -365,7 +365,7 @@
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Moje"
+            "value": "Moje merge requesty"
           }
         }
       }
@@ -382,7 +382,7 @@
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Przeglądane"
+            "value": "Do przeglądu"
           }
         }
       }

@@ -61,9 +61,19 @@ struct RemoteLaneBoard: View {
                 Button {
                     withAnimation(reduceMotion ? nil : .default) { visibleLane = lane.id }
                 } label: {
-                    lane.id.countedTitle(visibleCount)
-                        .font(.subheadline.weight(selected ? .bold : .medium))
-                        .monospacedDigit()
+                    let label = VStack(spacing: 2) {
+                        Text(lane.id.title)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                            .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 1 : 0.75)
+                        Text(verbatim: "(\(visibleCount.formatted()))")
+                            .monospacedDigit()
+                    }
+                    // Use the bold label to size the button in both selection states.
+                    label.font(.subheadline.weight(.bold))
+                        .hidden()
+                        .overlay {
+                            label.font(.subheadline.weight(selected ? .bold : .medium))
+                        }
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 8)
