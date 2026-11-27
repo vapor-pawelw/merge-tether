@@ -227,6 +227,59 @@ extension GlabService {
         return closingIssues + relatedIssues
     }
 
+    func resolveIssueLinks(_ issues: [RemoteMRIssue], for request: GitLabMergeRequest, host: String) async -> [RemoteMRIssue] {
+        guard issues.contains(where: { $0.linkURL == nil }), request.projectID > 0, request.iid > 0,
+              resolvedHost == host, request.webURL.isGitLabMergeRequest(host: host, iid: request.iid) else { return issues }
+        let revision = accountRevision
+        let source = MRIssueAssessor.Input(request: request)
+        let text = source.title + "\n" + source.description
+        let references = text.matches(of: /(?:^|[^\w.\/#\\%-])(((?:[\w.-]+\/)*[\w.-]*)#([1-9][0-9]*))(?![\w\/#-]|\.\w|\]\()/)
+        var resolved = issues
+        for (index, issue) in issues.enumerated() where issue.linkURL == nil {
+            guard !Task.isCancelled, revision == accountRevision else { return issues }
+            guard let match = references.first(where: { $0.output.1 == issue.reference })?.output,
+                  let iid = Int(match.3),
+                  let project = Self.issueProject(match.2, in: request) else { continue }
+            do {
+                let response: GitLabClosingIssue = try await mergeRequestAPI("/projects/\(project.id)/issues/\(iid)",
+                    host: host, timeout: 8)
+                guard !Task.isCancelled, revision == accountRevision else { return issues }
+                guard response.iid == iid, let projectID = response.projectID, projectID > 0,
+                      Int(project.id).map({ $0 == projectID }) ?? true,
+                      let url = response.displayIssue?.linkURL,
+                      Self.matchesIssueLink(url, projectPath: project.path, iid: iid, mergeRequest: request.webURL) else { continue }
+                resolved[index] = .init(reference: issue.reference, title: issue.title, url: url)
+            } catch let GlabError.nonZeroExit(_, diagnostic) where
+                GlabError.hasHTTPStatus(403, in: diagnostic) || GlabError.hasHTTPStatus(404, in: diagnostic) {
+                continue
+            } catch {
+                break
+            }
+        }
+        return !Task.isCancelled && revision == accountRevision ? resolved : issues
+    }
+
+    private static func issueProject(_ qualifier: Substring, in request: GitLabMergeRequest) -> (id: String, path: String)? {
+        let mergeRequestProject = request.webURL.gitLabProjectPath
+        guard !mergeRequestProject.isEmpty else { return nil }
+        if qualifier.isEmpty { return (String(request.projectID), mergeRequestProject) }
+        let path = qualifier.contains("/") ? String(qualifier)
+            : (mergeRequestProject.split(separator: "/").dropLast() + [qualifier]).joined(separator: "/")
+        guard path.split(separator: "/").allSatisfy({ $0 != "." && $0 != ".." }) else { return nil }
+        if path == mergeRequestProject { return (String(request.projectID), path) }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._"))
+        return path.addingPercentEncoding(withAllowedCharacters: allowed).map { ($0, path) }
+    }
+
+    private static func matchesIssueLink(_ url: URL, projectPath: String, iid: Int, mergeRequest: URL) -> Bool {
+        let defaultPort = mergeRequest.scheme == "https" ? 443 : 80
+        guard url.scheme == mergeRequest.scheme, url.host?.lowercased() == mergeRequest.host?.lowercased(),
+              (url.port ?? defaultPort) == (mergeRequest.port ?? defaultPort),
+              let issue = url.path.wholeMatch(of: /\/(.+?)\/(?:-\/)?(?:issues|work_items)\/([1-9][0-9]*)\/?/),
+              Int(issue.2) == iid else { return false }
+        return issue.1 == projectPath || issue.1.hasSuffix("/\(projectPath)")
+    }
+
     func fetchIssueReferencedMergeRequests(for request: GitLabMergeRequest, host: String) async throws -> [GitLabMergeRequest] {
         // A local !123 reference stays in the MR's project. Ignore qualified references and deduplicate before fetching.
         let text = String(request.title.prefix(300)) + "\n" + String((request.description ?? "").prefix(6_000))

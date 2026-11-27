@@ -264,6 +264,16 @@ public struct RemoteApprovalProgress: Codable, Equatable, Sendable {
 }
 
 public struct RemoteMRIssue: Codable, Equatable, Hashable, Sendable {
+    public struct DisplayReference: Equatable, Sendable {
+        public let label: String
+        public let projectPath: String?
+
+        fileprivate init(_ label: String, projectPath: String? = nil) {
+            self.label = label
+            self.projectPath = projectPath
+        }
+    }
+
     public let reference: String
     public let title: String?
     public let url: URL?
@@ -280,6 +290,35 @@ public struct RemoteMRIssue: Codable, Equatable, Hashable, Sendable {
               ["https", "http"].contains(parts.scheme?.lowercased() ?? ""),
               let host = parts.host, !host.isEmpty, parts.user == nil, parts.password == nil else { return nil }
         return url
+    }
+
+    public func displayReference(relativeTo mergeRequestURL: URL?) -> DisplayReference {
+        let mergeRequestProject = mergeRequestURL?.path.wholeMatch(of: /\/(.+)\/-\/merge_requests\/[1-9][0-9]*\/?/)?.1
+        if let url = linkURL {
+            guard let issue = url.path.wholeMatch(of: /\/(.+)\/-\/(?:issues|work_items)\/([1-9][0-9]*)\/?/)
+            else { return .init(reference) }
+            let sharesInstance = mergeRequestURL.map {
+                url.host?.lowercased() == $0.host?.lowercased() && Self.port(of: url) == Self.port(of: $0)
+            } ?? false
+            return Self.projectReference(issue.1, iid: issue.2, relativeTo: sharesInstance ? mergeRequestProject : nil)
+        }
+        if let qualified = reference.wholeMatch(of: /((?:[\w.-]+\/)*[\w.-]+)#([1-9][0-9]*)/) {
+            guard qualified.1.contains("/") else { return .init("\(qualified.1) #\(qualified.2)") }
+            return Self.projectReference(qualified.1, iid: qualified.2, relativeTo: mergeRequestProject)
+        }
+        return .init(reference)
+    }
+
+    private static func projectReference(_ project: Substring, iid: Substring,
+                                         relativeTo mergeRequestProject: Substring?) -> DisplayReference {
+        let number = "#\(iid)"
+        let repository = project.split(separator: "/").last ?? project
+        let label = project == mergeRequestProject ? number : "\(repository) \(number)"
+        return .init(label, projectPath: String(project))
+    }
+
+    private static func port(of url: URL) -> Int {
+        url.port ?? (url.scheme?.lowercased() == "https" ? 443 : 80)
     }
 }
 

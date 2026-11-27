@@ -24,6 +24,8 @@ import MergeTetherRemote
             try await glab.fetchIssueCandidates(for: request, host: target.host)
         }, readReferencedRequests: { [glab] request, target in
             try await glab.fetchIssueReferencedMergeRequests(for: request, host: target.host)
+        }, resolveLinks: { [glab] issues, request, target in
+            await glab.resolveIssueLinks(issues, for: request, host: target.host)
         }, assess: { [weak self] requests in
             guard let self else { return nil }
             let configuration = settings.automation, revision = glab.accountRevision

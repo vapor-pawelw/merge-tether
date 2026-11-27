@@ -404,7 +404,7 @@ private struct CommandCenterMRDetailContent: View {
                 BoardMRReferenceLine(iid: item.id.iid, projectID: item.id.projectID,
                     repositoryPath: presentationRow.displayURL.gitLabProjectPath)
                 let issues = monitor.issueTags(for: presentationRow.displayRequest)
-                if !issues.isEmpty { MRIssueTag(issues: issues) }
+                if !issues.isEmpty { MRIssueTag(issues: issues, mergeRequestURL: presentationRow.displayURL) }
                 if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
                 else if presentationRow.isDraft { BoardDraftBadge() }
             }

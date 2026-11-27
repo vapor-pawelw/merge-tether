@@ -9,6 +9,42 @@ struct MRIssueCoordinatorTests {
     private let secondTarget = MRAutomationScope.Target(host: "gitlab.example.test", username: "alice", projectID: 34, iid: 13)
     private let native = RemoteMRIssue(reference: "#42", title: "Prevent retries")
 
+    @Test func issueReferencesUseGitLabsURLsForTheirOwnProjects() async throws {
+        let mr = try request("Implements #42, frontend#43, another/team/backend#44 and frontend#45. Relates to other/frontend#46. PAY-73.")
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: target.host, username: target.username)
+        gitlab.handler = { command in
+            switch command.endpoint {
+            case "/projects/34/issues/42":
+                return InMemoryGitLab.output(#"{"iid":42,"project_id":34,"web_url":"https://gitlab.example.test/group/project/-/issues/42"}"#)
+            case "/projects/group%2Ffrontend/issues/43":
+                return InMemoryGitLab.output(#"{"iid":43,"project_id":35,"web_url":"https://gitlab.example.test/group/frontend/-/work_items/43"}"#)
+            case "/projects/another%2Fteam%2Fbackend/issues/44":
+                return InMemoryGitLab.output(#"{"iid":44,"project_id":36,"web_url":"https://gitlab.example.test/another/team/backend/-/issues/44"}"#)
+            case "/projects/group%2Ffrontend/issues/45":
+                return InMemoryGitLab.output(#"{"iid":45,"project_id":35,"web_url":"https://other.example.test/group/frontend/-/issues/45"}"#)
+            default:
+                return try gitlab.unexpected(command)
+            }
+        }
+        let externalURL = try #require(URL(string: "https://tracker.example.test/browse/PAY-73"))
+        let input = [native, .init(reference: "frontend#43"), .init(reference: "another/team/backend#44"),
+                     .init(reference: "frontend#45"), .init(reference: "frontend#46"), .init(reference: "#46"),
+                     .init(reference: "PAY-73", url: externalURL)]
+
+        let issues = await glab.resolveIssueLinks(input, for: mr, host: target.host)
+
+        #expect(issues.map { $0.linkURL?.absoluteString } == [
+            "https://gitlab.example.test/group/project/-/issues/42",
+            "https://gitlab.example.test/group/frontend/-/work_items/43",
+            "https://gitlab.example.test/another/team/backend/-/issues/44",
+            nil, nil, nil, externalURL.absoluteString,
+        ])
+        #expect(issues.map(\.title) == input.map(\.title))
+        #expect(gitlab.requests.count == 4 && gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
     @Test func nativeIssuesRequireAssessmentAndConfirmedResultsSurviveRestartAndReadFailure() async throws {
         let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -44,6 +80,37 @@ struct MRIssueCoordinatorTests {
         try await settle(restarted)
         #expect(reads == 3)
         #expect(restarted.issues(for: mr, target: target, revision: 1).isEmpty)
+    }
+
+    @Test func existingIssueCacheAddsTheLinkWithoutAnotherAssessment() async throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appending(path: "issues.json")
+        let mr = try request("Implements frontend#42")
+        let issue = RemoteMRIssue(reference: "frontend#42")
+        let url = try #require(URL(string: "https://gitlab.example.test/group/frontend/-/issues/42"))
+        let linked = RemoteMRIssue(reference: issue.reference, url: url)
+        let original = MRIssueCoordinator(file: file, isCurrentAccount: { _, _ in true },
+            readCandidates: { _, _ in [] }, assess: { _ in [target: [issue]] })
+        original.requestAssessment(for: mr, target: target, revision: 1)
+        try await settle(original)
+
+        let upgraded = MRIssueCoordinator(file: file, isCurrentAccount: { _, _ in true },
+            readCandidates: { _, _ in [] }, resolveLinks: { issues, request, currentTarget in
+                #expect(issues == [issue] && request.iid == mr.iid && currentTarget == target)
+                return [linked]
+            }, assess: { _ in
+                Issue.record("The unchanged issue scope should be reused")
+                return nil
+            })
+        upgraded.requestAssessment(for: mr, target: target, revision: 1)
+        try await settle(upgraded)
+        #expect(upgraded.issues(for: mr, target: target, revision: 1) == [linked])
+
+        let restarted = MRIssueCoordinator(file: file, isCurrentAccount: { _, _ in true },
+            readCandidates: { _, _ in [] }, assess: { _ in nil })
+        try await settle(restarted)
+        #expect(restarted.issues(for: mr, target: target, revision: 1) == [linked])
     }
 
     @Test func boardBatchesCandidatesOnceAndAForcedSingleRefreshOnlyAssessesItsMR() async throws {

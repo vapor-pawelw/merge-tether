@@ -555,7 +555,7 @@ struct RemoteCardView: View {
             }
             if let iid = card.mergeRequestIID {
                 Text(verbatim: "!\(iid)").monospacedDigit().fixedSize().opacity(contentOpacity)
-                if let issues = card.issues, !issues.isEmpty { MRIssueTag(issues: issues) }
+                if let issues = card.issues, !issues.isEmpty { MRIssueTag(issues: issues, mergeRequestURL: card.url) }
             }
         }
         .font(.caption).foregroundStyle(.secondary)

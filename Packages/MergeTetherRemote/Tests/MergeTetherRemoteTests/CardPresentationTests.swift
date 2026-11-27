@@ -102,6 +102,30 @@ import Testing
         #expect(upgraded.detailContextDigest == legacy.detailContextDigest)
     }
 
+    @Test(arguments: [
+        ("#42", "https://gitlab.example.test/group/team/backend/-/issues/42", "group/team/backend", "#42"),
+        ("#42", "https://gitlab.example.test/group/team/frontend/-/issues/42", "group/team/frontend", "frontend #42"),
+        ("#42", "https://gitlab.example.test/group/subgroup/frontend/-/work_items/42?view=full", "group/subgroup/frontend", "frontend #42"),
+        ("#42", "https://gitlab.example.test/group/teams/backend/-/issues/42", "group/teams/backend", "backend #42"),
+        ("#42", "https://gitlab.example.test/other/backend/-/issues/42", "other/backend", "backend #42"),
+        ("#42", "https://gitlab.other.test/group/team/backend/-/issues/42", "group/team/backend", "backend #42"),
+        ("#42", "https://gitlab.example.test:8443/group/team/backend/-/issues/42", "group/team/backend", "backend #42"),
+        ("#42", "https://GITLAB.example.test:443/group/team/backend/-/issues/42#note_1", "group/team/backend", "#42"),
+        ("group/team/backend#42", nil, "group/team/backend", "#42"),
+        ("group/team/frontend#42", nil, "group/team/frontend", "frontend #42"),
+        ("frontend#42", nil, nil, "frontend #42"),
+        ("PAY-42", "https://tracker.example.test/browse/PAY-42", nil, "PAY-42"),
+    ] as [(String, String?, String?, String)])
+    func issueReferencesSeparateTheShortLabelFromTheFullProjectPath(_ example: (reference: String, url: String?, projectPath: String?, label: String)) throws {
+        let mergeRequest = try #require(URL(string: "https://gitlab.example.test/group/team/backend/-/merge_requests/12"))
+        let issue = RemoteMRIssue(reference: example.reference, url: example.url.flatMap { URL(string: $0) })
+
+        let reference = issue.displayReference(relativeTo: mergeRequest)
+
+        #expect(reference.projectPath == example.projectPath)
+        #expect(reference.label == example.label)
+    }
+
     @Test func issueNamesCanBeTrimmedToFitWithoutLosingTheirLinksOrBoardActions() throws {
         var card = RemoteCard(id: "mr:1:2", title: "Fix retries", project: "g/p", url: nil,
             detail: String(repeating: "x", count: 130_200), actions: [.init(id: "review", kind: .runReview, token: "current")])

@@ -184,7 +184,7 @@ private struct CommandCenterMRCardContent: View {
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 reference
-                MRIssueTag(issues: issues)
+                MRIssueTag(issues: issues, mergeRequestURL: row.displayURL)
             }
         }
     }

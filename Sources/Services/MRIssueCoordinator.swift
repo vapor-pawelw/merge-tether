@@ -7,6 +7,7 @@ import Observation
 final class MRIssueCoordinator {
     typealias Target = MRAutomationScope.Target
     typealias CandidateRead = (GitLabMergeRequest, Target) async throws -> [MRIssueCandidate]
+    typealias LinkResolution = ([RemoteMRIssue], GitLabMergeRequest, Target) async -> [RemoteMRIssue]
     typealias Assessment = ([AssessmentInput]) async throws -> [Target: [RemoteMRIssue]]?
 
     struct AssessmentInput: Sendable {
@@ -21,7 +22,8 @@ final class MRIssueCoordinator {
         let context: String
         let evidence: String
         var checkedAt: Date
-        let issues: [RemoteMRIssue]
+        var issues: [RemoteMRIssue]
+        var linksChecked: Bool?
     }
 
     private struct ObservedRequest {
@@ -47,6 +49,7 @@ final class MRIssueCoordinator {
     private let isEligible: (GitLabMergeRequest, Target) -> Bool
     private let readCandidates: CandidateRead
     private let readReferencedRequests: (GitLabMergeRequest, Target) async throws -> [GitLabMergeRequest]
+    private let resolveLinks: LinkResolution?
     private let assess: Assessment
     private var records: [Target: Record] = [:]
     @ObservationIgnored private var observed: [Target: ObservedRequest] = [:]
@@ -63,6 +66,7 @@ final class MRIssueCoordinator {
          isEligible: @escaping (GitLabMergeRequest, Target) -> Bool = { _, _ in true },
          readCandidates: @escaping CandidateRead,
          readReferencedRequests: @escaping (GitLabMergeRequest, Target) async throws -> [GitLabMergeRequest] = { _, _ in [] },
+         resolveLinks: LinkResolution? = nil,
          assess: @escaping Assessment) {
         self.file = file
         self.now = now
@@ -70,6 +74,7 @@ final class MRIssueCoordinator {
         self.isEligible = isEligible
         self.readCandidates = readCandidates
         self.readReferencedRequests = readReferencedRequests
+        self.resolveLinks = resolveLinks
         self.assess = assess
         if let file {
             cacheLoad = Task(priority: .utility) { [weak self] in
@@ -149,6 +154,7 @@ final class MRIssueCoordinator {
             let timestamp = now()
             guard (retryAfter[target] ?? .distantPast) <= timestamp else { return nil }
             if let record = records[target], record.context == current.context,
+               !needsLinkUpgrade(record),
                timestamp.timeIntervalSince(record.checkedAt) < Self.refreshInterval { return nil }
         }
         return .init(target: target, generation: current.generation, force: force)
@@ -227,8 +233,33 @@ final class MRIssueCoordinator {
                     evidence: entry.digest, checkedAt: now(), issues: MRIssueAssessor.uniqueIssues(issues))))
             }
         }
-        guard !Task.isCancelled else { return }
-        await save(updatedRecords.compactMap { work, record in currentRequest(for: work) != nil ? record : nil })
+        await save(await resolveRecordLinks(updatedRecords))
+    }
+
+    private func needsLinkUpgrade(_ record: Record) -> Bool {
+        resolveLinks != nil && record.linksChecked == nil && record.issues.contains { $0.linkURL == nil }
+    }
+
+    private func resolveRecordLinks(_ updates: [(Work, Record)]) async -> [Record] {
+        var resolved: [(Work, Record)] = []
+        for (work, var record) in updates {
+            guard let current = currentRequest(for: work) else { continue }
+            if let resolveLinks, record.issues.contains(where: { $0.linkURL == nil }) {
+                let previous = records[work.target]
+                let confirmed = previous?.context == record.context && previous?.evidence == record.evidence
+                    ? previous?.issues ?? [] : []
+                let issues = await resolveLinks(record.issues, current.request, work.target)
+                record.issues = MRIssueAssessor.uniqueIssues(issues.map { issue in
+                    guard issue.linkURL == nil else { return issue }
+                    let matching = confirmed.filter { $0.reference == issue.reference && $0.linkURL != nil }
+                    guard matching.count == 1 else { return issue }
+                    return .init(reference: issue.reference, title: issue.title, url: matching.first?.linkURL)
+                })
+                record.linksChecked = true
+            }
+            resolved.append((work, record))
+        }
+        return resolved.compactMap { work, record in currentRequest(for: work) != nil ? record : nil }
     }
 
     private func currentRequest(for work: Work) -> ObservedRequest? {
