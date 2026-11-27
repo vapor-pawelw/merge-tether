@@ -156,6 +156,8 @@ enum AutomationPreset: String, CaseIterable, Codable, Hashable, Sendable {
         case .manual, .safe: .manual
         }
     }
+
+    var defaultPublishOtherReviewThreadReplies: Bool { self == .full }
 }
 
 enum AutomationPublicationMode: String, CaseIterable, Codable, Hashable, Sendable {
@@ -176,6 +178,7 @@ enum AutoApprovalThreshold: String, Codable, Sendable {
 
 struct AutomationSettings: Codable, Equatable, Sendable {
     var publicationRestrictions = AutomaticPublicationRestrictions()
+    var publishOtherReviewThreadReplies = false
     var baselinePreset: AutomationPreset?
     var autoVerifyReReview = true
     var codexVerificationModel: CodexReviewModel = .luna
@@ -480,6 +483,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         }
         // A new source condition must not reinterpret the legacy publish-all flag.
         let loadedPublicationMode = publicationMode
+        let storedOtherThreadPublication = try values.decodeIfPresent(Bool.self, forKey: .publishOtherReviewThreadReplies)
         let selectedPreset: AutomationPreset?
         if values.contains(.selectedPreset) {
             selectedPreset = try values.decodeIfPresent(AutomationPreset.self, forKey: .selectedPreset)
@@ -491,9 +495,11 @@ struct AutomationSettings: Codable, Equatable, Sendable {
                 candidate.autoMergeAuthorOnly = storedAuthorOnly ?? (preset != .full)
                 candidate.requiresAssignmentClaim = scope.assignedOwnershipConfirmation ?? (preset != .full)
                 candidate.publicationRestrictions.allowBotReplies = AutomaticPublicationRestrictions.defaults(for: preset).allowBotReplies
+                candidate.publishOtherReviewThreadReplies = storedOtherThreadPublication ?? preset.defaultPublishOtherReviewThreadReplies
                 return candidate.matchingPreset == preset
             }
         }
+        publishOtherReviewThreadReplies = storedOtherThreadPublication ?? selectedPreset?.defaultPublishOtherReviewThreadReplies ?? false
         let restrictionKeys = try values.decodeIfPresent(PublicationMigration.self, forKey: .publicationRestrictions)
         if restrictionKeys?.allowBotReplies == nil {
             let botReplies = AutomaticPublicationRestrictions.defaults(for: selectedPreset).allowBotReplies
@@ -549,6 +555,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         try values.encodeIfPresent(autoResolveAcceptedFeedback, forKey: .autoResolveAcceptedFeedback)
         try values.encodeIfPresent(publicationRestrictions, forKey: .publicationRestrictions)
         try values.encodeIfPresent(publicationPolicyMode, forKey: .publicationPolicyMode)
+        try values.encode(publishOtherReviewThreadReplies, forKey: .publishOtherReviewThreadReplies)
         try values.encodeIfPresent(baselinePreset, forKey: .baselinePreset)
         try values.encodeIfPresent(projectPermissionsVersion, forKey: .projectPermissionsVersion)
         try values.encodeIfPresent(autoClaimPipelineFailures, forKey: .autoClaimPipelineFailures)
@@ -568,6 +575,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         case workerExecutionTimeout
         case autoVerifyReReview, codexVerificationModel, claudeVerificationModel, verificationThinking, aiCommentCriteria
         case autoResolveAcceptedFeedback, publicationRestrictions, publicationPolicyMode, baselinePreset, projectPermissionsVersion, autoClaimPipelineFailures, startNewReviewsAutomatically, selectedPreset
+        case publishOtherReviewThreadReplies
     }
 
     private struct PublicationMigration: Decodable { let allowBotReplies: Bool? }
@@ -612,6 +620,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
             }
         }
         publicationMode = preset.defaultPublicationMode
+        publishOtherReviewThreadReplies = preset.defaultPublishOtherReviewThreadReplies
         baselinePreset = preset
         publicationRestrictions.requireAI = AutomaticPublicationRestrictions.defaults(for: preset).requireAI
         publicationRestrictions.allowBotReplies = AutomaticPublicationRestrictions.defaults(for: preset).allowBotReplies
@@ -650,6 +659,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
 
     private mutating func removePublicPermissions() {
         publicationMode = .manual
+        publishOtherReviewThreadReplies = false
         autoMergeMode = .off
         autoMergeWithOtherAssignees = false
         autoMergeAuthorOnly = true

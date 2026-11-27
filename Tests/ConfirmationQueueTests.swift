@@ -798,6 +798,7 @@ import MergeTetherRemote
             // Most scenarios exercise an explicitly enabled approval permission at the permissive threshold.
             settings.automation.autoApproveEnabled = true
             settings.automation.autoApprovalThreshold = .noMajorIssues
+            settings.automation.publishOtherReviewThreadReplies = true
         }
         // These tests isolate publication/re-review from the independent acceptance workflow.
         settings.automation.autoResolveAcceptedFeedback = false
@@ -1260,6 +1261,51 @@ import MergeTetherRemote
         #expect(event.origin == .manual && event.state == .completed)
         #expect(event.publishedNoteID == (evidence == "current" ? 40 : nil))
         #expect(failedRead == (evidence != "current"))
+    }
+
+    @Test(arguments: ["selected", "all", "remote"], ["open", "closedAfterPreview", "closedBeforePreview"])
+    func confirmedPublicationKeepsRepliesToResolvedThreadsPrivate(flow: String, threadState: String) async throws {
+        let harness = try makeHarness(assistantWorked: false)
+        defer { harness.cleanUp() }
+        let open = #"[{"id":"thread","notes":[{"id":30,"author":{"id":8,"username":"reviewer"},"body":"Feedback","system":false,"resolvable":true,"resolved":false}]}]"#
+        let closed = open.replacingOccurrences(of: #""resolved":false"#, with: #""resolved":true"#)
+        try harness.write("discussions.json", threadState == "closedBeforePreview" ? closed : open)
+        try harness.write("drafts.json", #"[{"id":11,"author_id":3,"note":"Correction already in the diff","discussion_id":"thread"}]"#)
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentItems.first)
+        let draft = try #require(item.drafts.first)
+        if threadState == "closedAfterPreview" { try harness.write("discussions.json", closed) }
+
+        if flow == "remote" {
+            let result = await harness.monitor.publishRemoteDrafts(of: item.id, head: head, expectedDrafts: [draft])
+            #expect(result == (threadState == "open" ? .completed : .changed))
+        } else if flow == "all" {
+            await harness.monitor.publishDrafts(of: item.id)
+        } else {
+            await harness.monitor.publishDrafts([draft], for: manualTarget)
+        }
+
+        let writes = harness.gitlab.requests.filter { $0.method != "GET" && $0.endpoint.contains("draft_notes") }
+        #expect(writes.count == (threadState == "open" ? 1 : 0))
+        #expect(harness.log("drafts.json").contains("Correction already in the diff") == (threadState != "open"))
+        #expect(harness.monitor.confirmationStates[item.id] == (threadState == "open" ? nil : .discussionResolved))
+    }
+
+    @Test(arguments: [AutomationPublicationMode.all, .aiReplies], [false, true])
+    func automaticPublicationRequiresPermissionForAnotherReviewersThread(_ mode: AutomationPublicationMode, optedIn: Bool) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.publicationMode = mode
+        harness.settings.automation.publishOtherReviewThreadReplies = optedIn
+        try harness.write("drafts.json", #"[{"id":11,"author_id":3,"note":"Verified correction","discussion_id":"abc"}]"#)
+        try harness.write("discussions.json", duoDiscussion)
+        try harness.recordVerdict("objections", head: head)
+
+        try await harness.poll()
+        #expect(harness.monitor.currentItems.first?.automaticDraftIDs == (optedIn ? [11] : []))
+        try await harness.poll()
+        #expect(harness.log("selected.log").contains("/draft_notes/11/publish") == optedIn)
+        #expect(harness.log("drafts.json").contains("Verified correction") == !optedIn)
     }
 
     @Test(arguments: ["all", "aiOnly"], ["current", "captureFailure", "postFailure", "ledgerWriteFailure"])
@@ -5482,13 +5528,14 @@ import MergeTetherRemote
         #expect(harness.monitor.currentItems.first?.awaitingRemoteVerification == true)
     }
 
-    @Test(arguments: [false, true])
-    func enablingAutomaticPublicationResumesOnlyEligibleAIRepliesWithoutAnotherPoll(overrideGlobal: Bool) async throws {
+    @Test(arguments: [false, true], [false, true])
+    func enablingAutomaticPublicationResumesOnlyEligibleAIRepliesWithoutAnotherPoll(overrideGlobal: Bool, otherThreadPermission: Bool) async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
         let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
         harness.settings.autoPublishOptOuts.insert(target)
         harness.settings.automation.publicationMode = overrideGlobal ? .manual : .aiReplies
+        harness.settings.automation.publishOtherReviewThreadReplies = otherThreadPermission
         try harness.write("drafts.json", draftJSON)
         try harness.write("discussions.json", duoDiscussion)
         try harness.recordVerdict("objections", head: head)
@@ -5500,10 +5547,10 @@ import MergeTetherRemote
         harness.settings.setActionPreference(overrideGlobal ? .on : .default, for: .commentPublication, target: target)
         harness.settings.save()
         await harness.monitor.resumeAutomaticAction(.commentPublication, for: target)
-        #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
+        #expect(harness.log("selected.log").contains("/draft_notes/12/publish") == otherThreadPermission)
         #expect(!harness.log("selected.log").contains("/draft_notes/11/publish"))
         #expect(harness.log("publish.log").isEmpty)
-        #expect(harness.monitor.currentItems.first?.drafts.map(\.id) == [11])
+        #expect(harness.monitor.currentItems.first?.drafts.map(\.id) == (otherThreadPermission ? [11] : [11, 12]))
     }
 
     @Test(arguments: [false, true])

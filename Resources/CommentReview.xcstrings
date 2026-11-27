@@ -211,6 +211,23 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Usuwanie szkicu…"}}
       }
     },
+    "commentReview.discussionResolved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A selected reply is for a resolved thread and stayed private."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wybrana odpowiedź dotyczy zamkniętego wątku i pozostała prywatna."
+          }
+        }
+      }
+    },
     "commentReview.finishing": {
       "extractionState": "manual",
       "localizations": {

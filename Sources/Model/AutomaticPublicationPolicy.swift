@@ -64,13 +64,18 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
     let restrictions: AutomaticPublicationRestrictions
     var aiCommentCriteriaOverride: String? = nil
     var treatAssignedMergeRequestsAsOwn = true
+    var allowsOtherReviewThreadReplies = false
 
     func allows(_ draft: GitLabDraftNote, request: GitLabMergeRequest,
                 discussions: [GitLabMergeRequestDiscussion]?, userID: Int, host: String,
                 aiNoteIDs: Set<Int>, botNoteIDs: Set<Int> = []) -> Bool {
         guard couldAllow(draft, request: request, userID: userID, host: host) else { return false }
-        if let discussionID = draft.discussionID,
-           let discussion = discussions?.first(where: { $0.id == discussionID }) {
+        let ownsRequest = request.isOwned(by: userID, includingAssignee: treatAssignedMergeRequestsAsOwn)
+        let targetDiscussion = draft.discussionID.flatMap { id in discussions?.first(where: { $0.id == id }) }
+        if draft.discussionID?.isEmpty == false, !ownsRequest, !allowsOtherReviewThreadReplies {
+            guard targetDiscussion?.reviewRoot?.author?.id == userID else { return false }
+        }
+        if let discussion = targetDiscussion {
             guard !discussion.isResolvedForReview else { return false }
             let coAssignees = Set((request.assignees ?? []).map(\.id)).subtracting([userID])
             let body = DuplicateReplyDrafts.normalized(draft.note)
@@ -79,7 +84,7 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
                     && DuplicateReplyDrafts.normalized(note.body) == body
             }) { return false }
         }
-        guard requiresSources || request.isOwned(by: userID, includingAssignee: treatAssignedMergeRequestsAsOwn) else { return true }
+        guard requiresSources || ownsRequest else { return true }
         guard let sources = Self.sourceNotes(for: draft, discussions: discussions, userID: userID),
               !sources.isEmpty else { return false }
         if mode == .all { return true }
@@ -165,8 +170,15 @@ enum AutomationCheckpoint: CaseIterable {
 
 extension AutomationSettings {
     var automaticPublicationPolicy: AutomaticPublicationPolicy {
-        .init(mode: publicationMode, restrictions: publicationRestrictions, aiCommentCriteriaOverride: aiCommentCriteriaOverride)
+        .init(mode: publicationMode, restrictions: publicationRestrictions, aiCommentCriteriaOverride: aiCommentCriteriaOverride,
+              allowsOtherReviewThreadReplies: publishOtherReviewThreadReplies)
     }
+
+    var canConfigureOtherReviewThreadPublication: Bool {
+        hasAutomaticPublicActionConsent && publicationMode != .manual
+            && (publicationMode != .filtered || publicationRestrictions.hasConditions)
+    }
+
     var needsAIAssessment: Bool { automaticPublicationPolicy.requiresAI }
     var publishesAllComments: Bool { publicationMode == .all }
     var automaticAIReplies: Bool {

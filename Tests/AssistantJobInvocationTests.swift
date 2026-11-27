@@ -120,6 +120,9 @@ struct AssistantJobInvocationTests {
         #expect(instructions.contains("only when direct evidence shows that a proposed solution, argument or factual claim is wrong") == !owned)
         #expect(instructions.contains("could materially affect a technical or review decision") == !owned)
         #expect(instructions.contains("Skip the reply if the thread already contains the correction") == !owned)
+        #expect(instructions.contains("reconstruct the MR revision that was live when the source comment was written") == !owned)
+        #expect(instructions.contains("an explanation added to the code") == !owned)
+        #expect(instructions.contains("give the independent verifier both revisions") == !owned)
         #expect(instructions.contains("Confirmations of fixes, acknowledgements, minor corrections and uncertain disagreements") == !owned)
         #expect(instructions.contains("This limit applies to human and bot threads") == !owned)
         if !owned { #expect(instructions.contains("save warranted private review findings")) }

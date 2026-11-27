@@ -2,6 +2,40 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "publication.otherReviewThreadReplies": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically publish corrections in other reviewers’ threads"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatycznie publikuj sprostowania w cudzych wątkach"
+          }
+        }
+      }
+    },
+    "publication.otherReviewThreadRepliesHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When you review someone else’s merge request, MergeTether can publish a reply that corrects a material factual error in an open thread started by another participant. The selected publication mode and its filters still apply."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gdy przeglądasz cudzy merge request, MergeTether może opublikować sprostowanie istotnego błędu rzeczowego w otwartym wątku innego uczestnika. Nadal obowiązuje wybrany tryb publikacji i jego filtry."
+          }
+        }
+      }
+    },
     "publication.aiReplyTrustHelp": {
       "extractionState": "manual",
       "localizations": {

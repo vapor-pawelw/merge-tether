@@ -195,15 +195,10 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
 
     @ViewBuilder
     private var statusLine: some View {
-        switch state {
-        case .deleting:
+        if state == .deleting {
             Text(.CommentReview.commentReviewDeleting).foregroundStyle(.secondary)
-        case .failed:
-            Text(.Menu.menuConfirmFailed).foregroundStyle(.orange)
-        case .changed:
-            Text(.Menu.menuConfirmChanged).foregroundStyle(.orange)
-        case .publishing, .approving, .removingApproval, .finishingCommentReview, nil:
-            EmptyView()
+        } else if let message = state?.failureMessage {
+            Text(message).foregroundStyle(.orange)
         }
     }
 

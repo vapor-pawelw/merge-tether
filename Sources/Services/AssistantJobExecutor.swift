@@ -194,6 +194,14 @@ enum AssistantJobExecutor {
             Draft a reply only when direct evidence shows that a proposed solution, argument or factual claim is wrong
             in a way that could materially affect a technical or review decision. Cite the decisive evidence and explain
             why the error matters. Skip the reply if the thread already contains the correction.
+            Before applying this exception, reconstruct the MR revision that was live when the source comment was written.
+            Use GitLab's diff version and commit history. GitLab can remap the inline position to a newer revision, and
+            resolution can change a comment's updated_at without changing its text. Compare what the comment asked for
+            with the current remote code and the changes in between. If a later change already addresses the concern,
+            including an explanation added to the code without a behavior change, skip the draft and cite that change
+            in the review result. If a material problem remains, give the independent verifier both revisions and the
+            intervening changes before drafting. If you cannot verify the chronology or remaining problem, keep the
+            uncertainty in the review result.
             Confirmations of fixes, acknowledgements, minor corrections and uncertain disagreements belong in the review
             verdict or run result. This limit applies to human and bot threads and overrides broader reply guidance.
             """

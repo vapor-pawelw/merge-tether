@@ -219,8 +219,8 @@ private struct CommandCenterMRCardContent: View {
                     .font(.subheadline).foregroundStyle(isMuted ? Color.secondary : Color.primary)
                     .fixedSize(horizontal: false, vertical: true)
                 }
-                if let state = monitor.attention.confirmationStates[item.id], state == .failed || state == .changed {
-                    Label { Text(state == .failed ? .Menu.menuConfirmFailed : .Menu.menuConfirmChanged) } icon: {
+                if let message = monitor.attention.confirmationStates[item.id]?.failureMessage {
+                    Label { Text(message) } icon: {
                         Image(systemName: "exclamationmark.triangle").foregroundStyle(isMuted ? Color.secondary : Color.orange)
                     }
                     .labelStyle(BoardCardStatusLabelStyle())

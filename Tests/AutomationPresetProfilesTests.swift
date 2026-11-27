@@ -47,6 +47,41 @@ struct AutomationPresetProfilesTests {
         #expect(loaded.publicationRestrictions.allowBotReplies)
     }
 
+    @Test(arguments: [AutomationPreset.manual, .safe, .trusted, .full], [false, true])
+    func foreignThreadPublicationMigratesFromTheActivePreset(_ preset: AutomationPreset, legacy: Bool) throws {
+        var settings = AutomationSettings()
+        settings.applyPreset(preset, for: .codex)
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any])
+        json.removeValue(forKey: "publishOtherReviewThreadReplies")
+        if legacy { json.removeValue(forKey: "selectedPreset") }
+
+        let migrated = try JSONDecoder().decode(AutomationSettings.self, from: JSONSerialization.data(withJSONObject: json))
+        let restarted = try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(migrated))
+        #expect(restarted.publishOtherReviewThreadReplies == (preset == .full))
+        #expect(restarted.matchingPreset == preset)
+    }
+
+    @Test func customForeignThreadPermissionSurvivesRestartAndProfileSwitching() throws {
+        var settings = AutomationSettings()
+        settings.applyPreset(.full, for: .codex)
+        settings.publishOtherReviewThreadReplies = false
+        let saved = try JSONEncoder().encode(settings)
+        let restarted = try JSONDecoder().decode(AutomationSettings.self, from: saved)
+        #expect(!restarted.publishOtherReviewThreadReplies && restarted.matchingPreset == nil)
+        var legacy = try #require(JSONSerialization.jsonObject(with: saved) as? [String: Any])
+        legacy.removeValue(forKey: "publishOtherReviewThreadReplies")
+        let migrated = try JSONDecoder().decode(AutomationSettings.self, from: JSONSerialization.data(withJSONObject: legacy))
+        #expect(!migrated.publishOtherReviewThreadReplies && migrated.matchingPreset == nil)
+
+        settings.applyPreset(.trusted, for: .codex)
+        settings.publishOtherReviewThreadReplies = true
+        let snapshot = try #require(AutomationProfileSnapshot.custom(from: settings))
+        let restored = try JSONDecoder().decode(AutomationProfileSnapshot.self, from: JSONEncoder().encode(snapshot))
+        settings.applyPreset(.safe, for: .codex)
+        restored.apply(to: &settings)
+        #expect(settings.publishOtherReviewThreadReplies && settings.publicationMode == .aiReplies && settings.matchingPreset == nil)
+    }
+
     @Test(arguments: [false, true])
     func customizedProfilesDoNotGainNewPublicationPermissionOnUpgrade(_ legacy: Bool) throws {
         var configuration = AutomationSettings()
@@ -94,6 +129,7 @@ struct AutomationPresetProfilesTests {
         draft.autoMergeWithOtherAssignees = true
         draft.autoMergeAuthorOnly = false
         draft.requiresAssignmentClaim = false
+        draft.publishOtherReviewThreadReplies = true
         #expect(selection.wrappedValue == .preset(.full) && draft.baselinePreset == .trusted)
         for _ in 0..<5 { _ = selection.wrappedValue }
         #expect(draftWrites == 1)

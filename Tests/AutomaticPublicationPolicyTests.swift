@@ -63,8 +63,12 @@ struct AutomaticPublicationPolicyTests {
     func allows(_ policy: AutomaticPublicationPolicy, reply: Bool = true,
                 notes: [GitLabMergeRequestDiscussion.Note]? = nil, ai: Set<Int> = [], bots: Set<Int> = [],
                 body: String = "Addressed", authorID: Int = 3) throws -> Bool {
-        policy.allows(try draft(reply: reply, body: body, authorID: authorID), request: try request(),
-                      discussions: notes.map { [.init(id: "thread", notes: $0)] }, userID: 3, host: host, aiNoteIDs: ai, botNoteIDs: bots)
+        // These fixtures exercise publication filters with the separate thread permission granted.
+        var optedIn = policy
+        optedIn.allowsOtherReviewThreadReplies = true
+        return optedIn.allows(try draft(reply: reply, body: body, authorID: authorID), request: try request(),
+                              discussions: notes.map { [.init(id: "thread", notes: $0)] },
+                              userID: 3, host: host, aiNoteIDs: ai, botNoteIDs: bots)
     }
 
     @Test(arguments: [AutomationPublicationMode.aiReplies, .filtered])
@@ -120,8 +124,46 @@ struct AutomaticPublicationPolicyTests {
             [{"id":"thread","notes":[{"id":40,"author":{"id":8},"body":"Earlier finding",
               "system":false,"resolvable":true,"resolved":true}]}]
             """.utf8))
-        let policy = AutomaticPublicationPolicy(mode: mode, restrictions: .init())
+        let policy = AutomaticPublicationPolicy(mode: mode, restrictions: .init(), allowsOtherReviewThreadReplies: true)
         #expect(try !policy.allows(draft(), request: request(), discussions: discussions, userID: 3, host: host, aiNoteIDs: [40]))
+    }
+
+    @Test(arguments: [AutomationPreset.manual, .safe, .trusted, .full])
+    func onlyMaxAutomaticallyPublishesRepliesInOtherReviewersThreadsByDefault(_ preset: AutomationPreset) throws {
+        var settings = AutomationSettings()
+        settings.applyPreset(preset, for: .codex)
+        let policy = settings.automaticPublicationPolicy
+        let request = try request()
+        let reply = try draft()
+        let foreignThread = GitLabMergeRequestDiscussion(id: "thread", notes: [note(40, author: 8), note(41, author: 3), note(42, author: 8)])
+        let ownThread = GitLabMergeRequestDiscussion(id: "thread", notes: [note(40, author: 3), note(42, author: 8)])
+
+        #expect(policy.allows(reply, request: request, discussions: [foreignThread], userID: 3, host: host, aiNoteIDs: [42]) == (preset == .full))
+        #expect(policy.allows(reply, request: request, discussions: [ownThread], userID: 3, host: host, aiNoteIDs: [42]) == (preset == .trusted || preset == .full))
+    }
+
+    @Test(arguments: [AutomationPublicationMode.all, .filtered, .aiReplies, .manual])
+    func foreignThreadPermissionIsIndependentOfPublicationModeAndFilters(_ mode: AutomationPublicationMode) throws {
+        var settings = AutomationSettings()
+        settings.applyPreset(.trusted, for: .codex)
+        settings.publicationMode = mode
+        settings.publicationRestrictions = .init(requireAI: true)
+        let mr = try request()
+        let reply = try draft()
+        let foreignThread = GitLabMergeRequestDiscussion(id: "thread", notes: [note(40, author: 8)])
+        #expect(!settings.automaticPublicationPolicy.allows(reply, request: mr, discussions: [foreignThread], userID: 3, host: host, aiNoteIDs: [40]))
+
+        settings.publishOtherReviewThreadReplies = true
+        let optedIn = settings.automaticPublicationPolicy
+        #expect(settings.canConfigureOtherReviewThreadPublication == (mode != .manual))
+        #expect(optedIn.allows(reply, request: mr, discussions: [foreignThread], userID: 3, host: host, aiNoteIDs: [40]) == (mode != .manual))
+        #expect(optedIn.allows(reply, request: mr, discussions: [foreignThread], userID: 3, host: host, aiNoteIDs: []) == (mode == .all))
+
+        settings.allowAutomaticPublicActions = false
+        #expect(!settings.canConfigureOtherReviewThreadPublication)
+        settings.allowAutomaticPublicActions = true
+        settings.publicationRestrictions = .init()
+        #expect(settings.canConfigureOtherReviewThreadPublication == (mode == .all || mode == .aiReplies))
     }
 
     @Test func unrestrictedAllModePreservesGeneralDraftsButManualNeverPublishes() throws {

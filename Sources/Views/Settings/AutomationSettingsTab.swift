@@ -386,6 +386,23 @@ struct AutomationSettingsTab: View {
                     Text(editor.draft.publicationMode == .all ? .PublicationPolicy.publicationAutomaticAllHelp : editor.draft.publicationMode.explanation)
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                if editor.draft.canConfigureOtherReviewThreadPublication {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Toggle(isOn: $editor.draft.publishOtherReviewThreadReplies) {
+                                Text(.PublicationPolicy.publicationOtherReviewThreadReplies)
+                            }
+                            .toggleStyle(.checkbox)
+                            Spacer()
+                            AutomationDefaultsResetButton(preset: editor.draft.baselinePreset) {
+                                editor.draft.publishOtherReviewThreadReplies = $0.defaultPublishOtherReviewThreadReplies
+                            }
+                        }
+                        Text(.PublicationPolicy.publicationOtherReviewThreadRepliesHelp)
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .disabled(automaticWriteBlock != nil)
+                }
             } header: { Text(.Settings.settingsAutomationPublicationTitle) }
             footer: { automaticWriteNote }
             PublicationRestrictionsSettingsView(restrictions: $editor.draft.publicationRestrictions,

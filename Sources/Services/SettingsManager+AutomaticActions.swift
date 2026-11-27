@@ -213,7 +213,9 @@ extension SettingsManager {
         case .off: .manual
         }
         return .init(mode: effectiveMode, restrictions: automation.publicationRestrictions,
-                     aiCommentCriteriaOverride: automation.aiCommentCriteriaOverride, treatAssignedMergeRequestsAsOwn: treatAssignedMergeRequestsAsOwn)
+                     aiCommentCriteriaOverride: automation.aiCommentCriteriaOverride,
+                     treatAssignedMergeRequestsAsOwn: treatAssignedMergeRequestsAsOwn,
+                     allowsOtherReviewThreadReplies: automation.publishOtherReviewThreadReplies)
     }
 
     func confirmAssignedOwnership(_ request: GitLabMergeRequest, target: MRAutomationScope.Target) -> Bool {

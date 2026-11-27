@@ -216,12 +216,21 @@ final class MergeRequestAttentionMonitor {
     }
 
     enum ConfirmationState: Equatable, Sendable {
-        case publishing, approving, removingApproval, deleting, finishingCommentReview, failed, changed
+        case publishing, approving, removingApproval, deleting, finishingCommentReview, failed, changed, discussionResolved
 
         var isBusy: Bool {
             switch self {
             case .publishing, .approving, .removingApproval, .deleting, .finishingCommentReview: true
-            case .failed, .changed: false
+            case .failed, .changed, .discussionResolved: false
+            }
+        }
+
+        var failureMessage: LocalizedStringResource? {
+            switch self {
+            case .failed: .Menu.menuConfirmFailed
+            case .changed: .Menu.menuConfirmChanged
+            case .discussionResolved: .CommentReview.commentReviewDiscussionResolved
+            case .publishing, .approving, .removingApproval, .deleting, .finishingCommentReview: nil
             }
         }
     }
@@ -2353,6 +2362,12 @@ final class MergeRequestAttentionMonitor {
     }
 
     /// Explicit consent binds the reviewed IDs and bodies, independently of automation policy.
+    private static func containsReplyToResolvedDiscussion(_ drafts: [GitLabDraftNote],
+                                                         in discussions: [GitLabMergeRequestDiscussion]) -> Bool {
+        let resolvedIDs = Set(discussions.filter(\.isResolvedForReview).compactMap(\.id))
+        return drafts.contains { $0.discussionID.map(resolvedIDs.contains) == true }
+    }
+
     func publishDrafts(_ selected: [GitLabDraftNote], for target: MRDiscussionTarget) async {
         let id = target.mergeRequestID
         guard let account, isCurrent(account), let user, user.id > 0,
@@ -2448,6 +2463,10 @@ final class MergeRequestAttentionMonitor {
                 guard admitted(), remaining.allSatisfy({ expected in current.filter { $0.id == expected.id } == [expected] }),
                       let draftID = draft.id else {
                     confirmationStates[id] = .changed
+                    break
+                }
+                guard !Self.containsReplyToResolvedDiscussion(remaining, in: discussions) else {
+                    confirmationStates[id] = .discussionResolved
                     break
                 }
                 try Task.checkCancellation()
@@ -3250,6 +3269,10 @@ final class MergeRequestAttentionMonitor {
                       drafts == remaining, let draftID = draft.id,
                       !DuplicateReplyDrafts.ids(in: drafts, published: replies).contains(draftID) else {
                     if currentContext() { confirmationStates[id] = .changed }
+                    return published.isEmpty ? .changed : .partial
+                }
+                guard !Self.containsReplyToResolvedDiscussion([draft], in: discussions) else {
+                    confirmationStates[id] = .discussionResolved
                     return published.isEmpty ? .changed : .partial
                 }
                 try Task.checkCancellation()

@@ -169,7 +169,8 @@ struct MRAutomaticActionPolicyTests {
             let restored = SettingsManager(defaults: defaults)
             #expect(restored.permitsAutomaticAction(.approval, for: reviewed, target: target))
             #expect(restored.permitsAutomaticAction(.commentPublication, for: reviewed, target: target))
-            #expect(restored.publicationPolicy(for: target) == .init(mode: .aiReplies, restrictions: restrictions))
+            #expect(restored.publicationPolicy(for: target) == .init(
+                mode: .aiReplies, restrictions: restrictions, allowsOtherReviewThreadReplies: true))
             let other = MRAutomationScope.Target(host: target.host, username: target.username, projectID: 1, iid: 3)
             #expect(restored.actionPreference(.approval, for: other) == .default)
             #expect(restored.publicationPolicy(for: other).mode == .manual)

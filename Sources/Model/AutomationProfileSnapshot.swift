@@ -30,6 +30,7 @@ struct AutomationProfileSnapshot: Codable, Equatable, Sendable {
     let publication: AutomationPublicationMode
     let requireAI: Bool
     let botReplies: Bool?
+    let otherReviewThreadReplies: Bool?
     private var reviewStartConfirmation: Bool?
     let reviewRule: Rule
     let feedbackRule: Rule
@@ -58,6 +59,7 @@ struct AutomationProfileSnapshot: Codable, Equatable, Sendable {
         publication = configuration.publicationMode
         requireAI = configuration.publicationRestrictions.requireAI
         botReplies = configuration.publicationRestrictions.allowBotReplies
+        otherReviewThreadReplies = configuration.publishOtherReviewThreadReplies ? true : nil
         reviewStartConfirmation = nil
         reviewRule = Rule(configuration.reviewRequested)
         feedbackRule = Rule(configuration.authorFeedback)
@@ -112,6 +114,7 @@ struct AutomationProfileSnapshot: Codable, Equatable, Sendable {
         configuration.publicationMode = publication
         configuration.publicationRestrictions.requireAI = requireAI
         configuration.publicationRestrictions.allowBotReplies = botReplies ?? false
+        configuration.publishOtherReviewThreadReplies = otherReviewThreadReplies ?? false
         reviewRule.apply(to: &configuration.reviewRequested)
         feedbackRule.apply(to: &configuration.authorFeedback)
         for trigger in MergeWorkflowTrigger.allCases {
