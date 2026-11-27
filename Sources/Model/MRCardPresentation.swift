@@ -322,9 +322,14 @@ struct MRCardPresentation {
             contextMatches: row.evidenceMatchesCatalogContext, blocked: actionsBlocked)
     }
 
+    var assignmentClaimRequest: GitLabMergeRequest? {
+        guard row.waitsForAssignmentClaim, let request = row.displayRequest, request.isOpen else { return nil }
+        return request
+    }
+
     var showsAdditionalCommentReview: Bool {
         finishedState == nil && item.requiresCommentReview && item.drafts.isEmpty
-            && humanAction?.kind != .commentReview
+            && (humanAction?.kind != .commentReview || assignmentClaimRequest != nil)
     }
     var waitingStatus: MRWaitingStatus? {
         // A quiet background read keeps the settled waiting list; only a shown refresh replaces it.

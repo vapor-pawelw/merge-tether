@@ -10,6 +10,7 @@ struct MRCardMetadataLayout: Layout {
     var titleToPeopleSpacing: CGFloat = 10
     var keepsBadgesUnderActions = false
     var alignsActionsAtTop = false
+    var placesTitleBelowActions = false
 
     private let controlsClearance: CGFloat = 16
     private let badgeSpacing: CGFloat = 8
@@ -72,7 +73,8 @@ struct MRCardMetadataLayout: Layout {
         let earlyBadgeBottom = earlyBadgeReserve > 0 ? earlyBadgeTop + badges.height : 0
 
         // The reference baseline and the gap below the title compensate for the text line boxes.
-        let titleTop = reference.height > 0 ? reference[.lastTextBaseline] + referenceToTitleSpacing : 0
+        let preferredTitleTop = reference.height > 0 ? reference[.lastTextBaseline] + referenceToTitleSpacing : 0
+        let titleTop = placesTitleBelowActions ? max(preferredTitleTop, actionsBottom) : preferredTitleTop
         let titleReserve = max(titleTop < actionsBottom ? actionReserve : 0,
                                titleTop < earlyBadgeBottom ? earlyBadgeReserve : 0)
         let titleProposal = proposedWidth(reserving: titleReserve)

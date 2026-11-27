@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Use the installed automation guide to answer questions about MergeTether controls available in the current build.
 
+- Make **Claim merge request** the primary card action on Mac, iPhone and iPad when a claim is required. Stack and center groups of card actions on iPhone and iPad, and align the automation and Actions icons with the repository row.
+
 - Open agent chat in a larger sheet with the active verification model and reasoning level. Show timeouts separately and retry the original question when a reply fails.
 
 - Let per-MR On qualify an MR for auto-approval or auto-merge while keeping readiness requirements, including the configured approval threshold and readiness criteria from the active prompt.

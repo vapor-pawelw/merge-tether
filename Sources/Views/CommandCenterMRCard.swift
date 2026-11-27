@@ -75,6 +75,7 @@ private struct CommandCenterMRCardContent: View {
                     hidesBlockedActions: presentation.working, highlightedSubmission: presentation.mergeStage?.submission,
                     statusTopPadding: humanAction == nil ? 0 : 8, statusOpacity: contentOpacity,
                     statusLayout: MRCardStatusLayout(heading: cardHeading, status: cardStatus.opacity(contentOpacity)),
+                    assignmentClaim: presentation.assignmentClaimRequest,
                     statusTrailer: { mergeActionStatus }) { hasDirectMergeAction in
                     if isNewReview && !showsInlineHide {
                         Button(action: markReviewSeen) {
@@ -89,7 +90,7 @@ private struct CommandCenterMRCardContent: View {
                     Spacer(minLength: 6)
                     if let pendingPrimary {
                         primary(pendingPrimary.title, cta: pendingPrimary.cta, enabled: false) {}
-                    } else {
+                    } else if presentation.assignmentClaimRequest == nil {
                         primaryAction(hasDirectMergeAction: hasDirectMergeAction)
                     }
                     if showsInlineHide {
@@ -387,9 +388,7 @@ private struct CommandCenterMRCardContent: View {
 
     @ViewBuilder
     private func primaryAction(hasDirectMergeAction: Bool) -> some View {
-        if row.waitsForAssignmentClaim, let request = row.displayRequest {
-            AssignedMergeRequestClaimButton(request: request, monitor: monitor)
-        } else if let job = row.latestJob, job.execution?.state.isActive == true {
+        if let job = row.latestJob, job.execution?.state.isActive == true {
             Button(role: .destructive) {
                 markReviewSeen()
                 monitor.cancelAssistantJob(job.id)

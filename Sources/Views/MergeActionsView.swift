@@ -24,6 +24,7 @@ struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, Additio
     var statusTopPadding: CGFloat
     var statusOpacity: Double
     var statusLayout: StatusLayout
+    var assignmentClaim: GitLabMergeRequest?
     var statusTrailer: () -> StatusTrailer
     var additionalActions: (Bool) -> AdditionalActions
     @Environment(\.openURL) private var openURL
@@ -48,6 +49,7 @@ struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, Additio
          hidesBlockedActions: Bool = false, highlightedSubmission: MergeSubmissionState? = nil,
          statusTopPadding: CGFloat = 0, statusOpacity: Double = 1,
          statusLayout: StatusLayout = EmptyModifier(),
+         assignmentClaim: GitLabMergeRequest? = nil,
          @ViewBuilder statusTrailer: @escaping () -> StatusTrailer,
          @ViewBuilder additionalActions: @escaping (Bool) -> AdditionalActions) {
         self.item = item; self.monitor = monitor
@@ -62,6 +64,7 @@ struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, Additio
         self.highlightedSubmission = highlightedSubmission
         self.statusTopPadding = statusTopPadding
         self.statusOpacity = statusOpacity
+        self.assignmentClaim = assignmentClaim
         self.statusLayout = statusLayout
         self.statusTrailer = statusTrailer; self.additionalActions = additionalActions
     }
@@ -129,9 +132,12 @@ struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, Additio
             .font(.caption)
             .modifier(statusLayout)
             HStack(spacing: 8) {
+                if let assignmentClaim {
+                    AssignedMergeRequestClaimButton(request: assignmentClaim, monitor: monitor)
+                }
                 if owned {
                     if let action = directMergeAction, let request = item.mergeRequest {
-                        Button {
+                        let mergeButton = Button {
                             let assistant = monitor.settings.automation.selectedAssistant
                             let confirmation = MergeConfirmation(request: request, action: action,
                                 verificationAssistant: assistant, accountRevision: monitor.glab.accountRevision)
@@ -144,7 +150,11 @@ struct MergeActionsView<StatusLayout: ViewModifier, StatusTrailer: View, Additio
                         } label: {
                             MRActionProgressLabel(working: pendingAction == .merge(action)) { Text(action.title) }
                         }
-                        .buttonStyle(.borderedProminent).disabled(actionsBlocked || working)
+                        Group {
+                            if assignmentClaim == nil { mergeButton.buttonStyle(.borderedProminent) }
+                            else { mergeButton.buttonStyle(.bordered) }
+                        }
+                        .disabled(actionsBlocked || working)
                         .mrActionHelp(.merge)
                     }
                     if showsRecoveryActions, pendingAction == .threads || (hasDiscussionBlock && !hidesActions) {

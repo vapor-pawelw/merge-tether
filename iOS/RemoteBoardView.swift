@@ -232,7 +232,7 @@ private struct RemoteCardCTAButton: View {
     let canAct: ((Date) -> Bool)?
     var action: RemoteAction? = nil
     var running = false
-    var labelHitArea: CardControlHitArea? = nil
+    var usesPlainLabel = false
     let onTap: () -> Void
 
     var body: some View {
@@ -248,8 +248,8 @@ private struct RemoteCardCTAButton: View {
             let label = RemoteActionProgressLabel(running: running) {
                 RemoteActionLabel(action: action, title: Text(verbatim: cta.title))
             }
-            if let labelHitArea {
-                label.contentShape(.interaction, labelHitArea)
+            if usesPlainLabel {
+                label.frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
             } else {
                 label
             }
@@ -326,6 +326,9 @@ extension RemotePhoneModel {
             apply: { await self.applyDraftRegeneration($0, batchID: $1) },
             discard: { await self.discardDraftRegeneration($0) })
     }
+    private var claimIsPrimary: Bool {
+        card.actions.contains { $0.kind == .claimAssignment && $0.id == primaryCTA?.actionID }
+    }
 }
 
 struct RemoteCardView: View {
@@ -369,9 +372,9 @@ struct RemoteCardView: View {
                     || (card.id.hasPrefix("todo:") && $0.id == "markDone")))
         }
     }
-    private var showsActions: Bool {
-        !expanded && onOpen != nil && (primaryCTA != nil || secondaryCTA != nil || directAction != nil
-            || !additionalCTAs.isEmpty || gitLabCheckURL != nil)
+    private var actionCount: Int {
+        let individualActions = [primaryCTA != nil, secondaryCTA != nil, directAction != nil, gitLabCheckURL != nil]
+        return individualActions.filter { $0 }.count + additionalCTAs.count
     }
     private var activationTitle: LocalizedStringResource {
         actionsModel != nil && card.reviewSeenAction != nil ? .Board.boardReviewAssignmentSeen : .Board.boardDetails
@@ -394,15 +397,20 @@ struct RemoteCardView: View {
                 }
             } else {
                 compactContent
-                if showsActions { StatusFlowLayout(spacing: 8) { cardActions } }
+                let count = onOpen == nil ? 0 : actionCount
+                if count > 0 {
+                    VStack(spacing: 8) { cardActions }
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, alignment: count > 1 ? .center : .leading)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding([.horizontal, .bottom], 16)
-        .padding(.top, expanded ? 16 : 14)
+        .padding(16)
         .background(Color(uiColor: .secondarySystemGroupedBackground).opacity(contentOpacity),
                     in: RoundedRectangle(cornerRadius: 16))
         .modifier(RemoteCardInteraction(onActivate: activation, title: activationTitle))
+        if let cta = primaryCTA { boardCTA(cta, prominent: claimIsPrimary) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("remote.card.\(card.id)")
         .overlay {
@@ -431,12 +439,11 @@ struct RemoteCardView: View {
             } else {
                 RemoteCardCTAButton(cta: secondary, canAct: { actionsModel?.state.canAct(now: $0) == true },
                                     action: card.actions.first { $0.id == secondary.actionID },
-                                    labelHitArea: CardControlHitArea()) { onOpenCTA?(secondary) }
+                                    usesPlainLabel: true) { onOpenCTA?(secondary) }
                     .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
                     .accessibilityIdentifier("remote.secondary-cta.\(card.id)")
             }
         }
-        if let cta = primaryCTA { boardCTA(cta) }
         ForEach(Array(additionalCTAs.enumerated()), id: \.offset) { _, cta in boardCTA(cta) }
         if let gitLabCheckURL { gitLabCheckLink(gitLabCheckURL) }
         if let action = directAction, let actionsModel {
@@ -448,6 +455,7 @@ struct RemoteCardView: View {
                 if seen {
                     Task { await actionsModel.perform(card: card, action: action) }
                 } else {
+                else if claimIsPrimary { button.buttonStyle(.bordered) }
                     onOpenCTA?(.init(title: String(localized: .CommentReview.commentReviewFinish),
                         destination: .actions, actionID: action.id))
                 }
@@ -468,19 +476,22 @@ struct RemoteCardView: View {
         }
     }
 
-    private func boardCTA(_ cta: RemoteCardCTA) -> some View {
+    private func boardCTA(_ cta: RemoteCardCTA, prominent: Bool = false) -> some View {
         let pending = actionsModel?.pendingActionCard.flatMap { $0.id == card.id ? $0.actions : nil }
         let action = (pending ?? card.actions).first { $0.id == cta.actionID }
-        return RemoteCardCTAButton(cta: cta, canAct: { actionsModel?.state.canAct(now: $0) == true },
+        let button = RemoteCardCTAButton(cta: cta, canAct: { actionsModel?.state.canAct(now: $0) == true },
             action: action, running: action != nil && pending != nil && actionsModel?.state.pending?.actionID == action?.id) {
                 if let actionsModel, let action, action.id == RemoteAction.finishedSeenID {
                     Task { await actionsModel.perform(card: card, action: action) }
                 } else { onOpenCTA?(cta) }
             }
-            .font(.subheadline.weight(.semibold)).buttonStyle(.bordered)
-            .controlSize(.large)
-            .accessibilityIdentifier(action?.kind == .finishCommentReview
-                ? "remote.finish-comment-review.\(card.id)" : "remote.cta.\(card.id)")
+        return Group {
+            if prominent { button.buttonStyle(.borderedProminent) }
+            else { button.buttonStyle(.bordered) }
+        }
+        .font(.subheadline.weight(.semibold)).controlSize(.large)
+        .accessibilityIdentifier(action?.kind == .finishCommentReview
+            ? "remote.finish-comment-review.\(card.id)" : "remote.cta.\(card.id)")
     }
 
     private func gitLabCheckLink(_ url: URL) -> some View {
@@ -490,7 +501,7 @@ struct RemoteCardView: View {
     private var compactContent: some View {
         MRCardMetadataLayout(referenceToTitleSpacing: 11, titleToPeopleSpacing: 6,
                              keepsBadgesUnderActions: card.presentation?.draftBadge != nil && !showsDraftStyle,
-                             alignsActionsAtTop: true) {
+                             placesTitleBelowActions: true) {
             repositoryReference
             title.opacity(contentOpacity)
             people

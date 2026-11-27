@@ -4,6 +4,23 @@ import Testing
 
 @MainActor
 struct MRProgressPresentationTests {
+    @Test(arguments: [false, true])
+    func claimLeavesCommentReviewAvailableAsASecondaryAction(_ awaitsClaim: Bool) throws {
+        let request = try mergeRequestWithAutoMerge(head: String(repeating: "a", count: 40))
+        let item = MergeRequestAttentionMonitor.Item(id: request.mergeRequestID, title: request.title,
+            url: request.webURL, requiresCommentReview: true,
+            commentReviewSnapshot: .init(request: request, discussions: []), mergeRequest: request, isAuthored: true)
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [],
+            attentionPresentation: .init(evidence: item, humanActionRequired: true),
+            waitsForAssignmentClaim: awaitsClaim)
+        let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
+            allowsRemoval: false, assistantReady: true)
+
+        #expect(model.humanAction?.kind == .commentReview)
+        #expect(model.confirmationOffers.finishCommentReview)
+        #expect(model.showsAdditionalCommentReview == awaitsClaim)
+    }
+
     @Test(arguments: ["finished", "confirmation", "cli", "quietRead", "visibleRead", "idle"])
     func cardActivityChoosesOneState(_ scenario: String) throws {
         let original = presentation(scenario == "cli" ? "followUp" : "idle", state: scenario == "cli" ? .queued : nil)
