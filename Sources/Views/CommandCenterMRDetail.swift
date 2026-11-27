@@ -216,7 +216,7 @@ private struct CommandCenterMRDetailContent: View {
                                         excluding: [presentation.humanAction?.explanation ?? "",
                                             presentation.mergeStage.map { String(localized: $0.title) } ?? ""], holdsOnly: true)
                                 }, additionalActions: { _ in EmptyView() })
-                            supplementaryActions(citationContext: citationContext)
+                            supplementaryActions(citationContext: citationContext, reviewing: presentation.reviewingContext)
                         }
                         .id(Anchor.actions)
                     }
@@ -526,6 +526,9 @@ private struct CommandCenterMRDetailContent: View {
                                 icon: { Image(systemName: "arrow.clockwise") }
                                 .help(progress.refreshFailureHelp ?? "")
                                 .font(.callout).foregroundStyle(.secondary)
+                        }
+                        if let reason = progress.reviewActionReason {
+                            Text(verbatim: reason).font(.callout).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -987,7 +990,7 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     @ViewBuilder
-    private func supplementaryActions(citationContext: MRCommentCitation.Context?) -> some View {
+    private func supplementaryActions(citationContext: MRCommentCitation.Context?, reviewing: ReviewingContext) -> some View {
         if !showsDecisions {
             if item.needsConfirmation { confirmationControls }
             // Flattened: an empty wrapper would still take the parent's spacing.
@@ -1001,9 +1004,10 @@ private struct CommandCenterMRDetailContent: View {
                 isStartingReview = true
                 reviewStartError = nil
                 let expectedTarget = discussionTarget
+                let reasons = reviewing.nextStep == .runReview ? reviewing.reviewReasons : []
                 Task {
                     defer { isStartingReview = false }
-                    await monitor.runReview(for: item, confirmed: consent)
+                    await monitor.runReview(for: item, confirmed: consent, reviewReasons: reasons)
                     if discussionTarget == expectedTarget { reviewStartError = monitor.assistantJobActionError }
                 }
             } label: {

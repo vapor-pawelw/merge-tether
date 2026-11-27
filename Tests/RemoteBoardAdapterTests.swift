@@ -812,14 +812,19 @@ import MergeTetherRemote
         #expect(phone.lanes[2].cards.map(\.title) == ["Inspect old job"])
     }
 
-    @Test(arguments: [AssistantJobExecution.State.queued, .running], [false, true])
-    func activeOtherLaneJobsShareQueuedAndRunningProgress(state: AssistantJobExecution.State, proposal: Bool) throws {
+    @Test(arguments: [AssistantJobExecution.State.queued, .running],
+          [(false, false), (false, true), (true, false), (true, true)])
+    func activeOtherLaneJobsShareQueuedAndRunningProgress(
+        state: AssistantJobExecution.State, variant: (proposal: Bool, review: Bool)
+    ) throws {
+        let (proposal, review) = variant
         let item = try item()
         let target = MRAutomationScope.Target(host: "gitlab.example.org", username: "me", projectID: 1, iid: 2)
         let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
             work: .init(host: target.host, projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
-            title: "Follow-up", prompt: "", createdAt: Date(), allowsPush: false,
-            execution: .init(state: state), mergeRequestURL: item.url, workflow: .followUp)
+            title: review ? "Review" : "Follow-up", prompt: "", createdAt: Date(), allowsPush: false,
+            execution: .init(state: state), mergeRequestURL: item.url, workflow: review ? .review : .followUp,
+            reviewLaunchReasons: review ? [.authorReplied] : nil)
         let pin = try #require(BoardCardPin.mergeRequest(host: target.host, username: "me", projectID: 1, iid: 2))
         let content: MergeRequestBoardSnapshot.OtherCard.Content = proposal
             ? .proposal(.init(target: target, title: item.title, url: item.url, item: item, todos: [], intents: [], latestJob: job))
@@ -827,7 +832,9 @@ import MergeTetherRemote
         let board = MergeRequestBoardSnapshot(own: [], reviewed: [], todos: [], attention: [], handoffs: [], host: target.host, username: "me")
         let phone = RemoteBoardAdapter.project(board: board, other: [.init(id: pin, content: content)], session: UUID(), account: "me@host")
         let card = try #require(phone.lanes[2].cards.first)
-        #expect(card.presentation?.status == (state == .queued ? "Queued for agent · Codex" : "Handling feedback · Codex"))
+        let running = review ? "Running review · Codex" : "Handling feedback · Codex"
+        #expect(card.presentation?.status == (state == .queued ? "Queued for agent · Codex" : running))
+        #expect(card.presentation?.statusContext?.activityDetail == (review ? "The author replied to review comments" : nil))
         #expect(card.presentation?.statusSymbol == MRActionCTA.runReview.symbol)
         #expect(card.presentation?.working == true)
         #expect(card.needsAttention == false && card.primaryCTA == nil && card.actions.isEmpty)

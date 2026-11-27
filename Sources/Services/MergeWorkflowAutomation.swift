@@ -909,7 +909,7 @@ final class MergeWorkflowAutomation {
                 configurationSnapshot: bindLaunchSnapshot ? settingsBeforeLaunch : nil,
                 glab: glab.freshSession(), workflowEventKind: event.kind, pipelineHandoffConfirmation: confirmation,
                 preparedWorkflowReview: preparedReviewJobID.map { .init(jobID: $0, user: entry.user) },
-                blockerDiagnosis: currentBlocker
+                blockerDiagnosis: currentBlocker, reviewLaunchReasons: event.reviewUpdateReasons
             )
         } catch let failure as AssistantAutomationRunner.ReviewAdmissionReadFailure where event.kind == .reviewUpdate {
             throw PrelaunchReadFailure(cause: failure.cause, configuration: settingsBeforeLaunch)

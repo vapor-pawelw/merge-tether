@@ -268,7 +268,7 @@ final class MergeRequestTodoRouter {
             settings: settings, isReview: true, mrWorkflow: .review, manual: false, expectedHeadSHA: intent.headSHA,
             configurationSnapshot: configuration, glab: glab.freshSession(),
             taskIntent: .review(configuredInstructions: custom), workflowEventKind: .reviewUpdate,
-            preparedWorkflowReview: .init(jobID: id, user: user))
+            preparedWorkflowReview: .init(jobID: id, user: user), reviewLaunchReasons: [.unverifiedReview])
         return job.id
     }
 
@@ -940,7 +940,8 @@ final class MergeRequestTodoRouter {
             feedbackNoteIDs: intent.noteIDs.sorted(), feedbackTodos: intent.sourceEvents, isReview: intent.kind == .review,
             mrWorkflow: workflow, manual: manual, expectedHeadSHA: foreignDiagnosis ? intent.headSHA : nil, jobCoordinator: jobCoordinator,
             glab: foreignDiagnosis ? glab.freshSession() : nil, retryOf: retryOf, taskIntent: taskIntent,
-            foreignPipeline: foreignDiagnosis ? intent.request.headPipeline : nil, workflowEventKind: intent.workflowEventKind)
+            foreignPipeline: foreignDiagnosis ? intent.request.headPipeline : nil, workflowEventKind: intent.workflowEventKind,
+            reviewLaunchReasons: intent.reviewLaunchReasons)
         transferred = true
         return job.id
     }

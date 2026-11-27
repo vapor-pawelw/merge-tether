@@ -557,7 +557,9 @@ final class TodoAutomationService {
                 mrWorkflow: context.event == .authorFeedback ? .followUp : .review,
                 manual: manual, expectedHeadSHA: expectedHeadSHA, jobCoordinator: jobCoordinator,
                 retryOf: feedbackRecovery?.origin.id, feedbackRecoveryRootID: feedbackRecovery?.rootID,
-                taskIntent: context.event == .reviewRequested ? .review(configuredInstructions: configuredInstructions) : nil
+                taskIntent: context.event == .reviewRequested ? .review(configuredInstructions: configuredInstructions) : nil,
+                reviewLaunchReasons: context.event == .reviewRequested
+                    ? [ReviewLaunchReason.requestReason(for: feedbackTodo?.action) ?? .reviewRequested] : nil
             )
         } else {
             var environment = AssistantAutomationRunner.environment

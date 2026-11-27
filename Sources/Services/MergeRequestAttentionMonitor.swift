@@ -86,7 +86,11 @@ final class MergeRequestAttentionMonitor {
         var feedback: [GitLabMergeRequestDiscussion.Note] = []
         /// Informational participation from complete discussions; nil means not loaded.
         var reviewingActivity: ReviewingActivity?
-        var reviewingProgress: ReviewingProgress?
+        var reviewingAssessment: ReviewingAssessment?
+        var reviewingProgress: ReviewingProgress? {
+            get { reviewingAssessment?.progress }
+            set { reviewingAssessment = newValue.map { .init(progress: $0) } }
+        }
         /// Canonical read-only stack/dependency metadata, separate from merge permissions.
         var dependencies: MergeRequestDependencySummary?
 
@@ -1451,10 +1455,11 @@ final class MergeRequestAttentionMonitor {
                                    discussions: discussions, host: host, glab: glab) {
                                 approvalRead = .init(request: request, startedAt: readStartedAt, previous: approvalBaseline, baseline: baseline)
                             }
-                            updated.reviewingProgress = Self.reviewingProgress(for: updated,
+                            updated.reviewingAssessment = Self.reviewingAssessment(for: updated,
                                 request: request ?? (ownApproval && !hasDrafts ? displayed : nil),
                                 discussions: discussions, host: host, user: user, verdictDirectory: verdictDirectory,
                                 approvedHead: approvedHead, approvalBaseline: approvalRead?.baseline,
+                                previousApprovalBaseline: approvalBaseline,
                                 treatAssignedMergeRequestsAsOwn: treatAssignedMergeRequestsAsOwn)
                         }
                         updated.replyRecipients = [:]
@@ -1852,11 +1857,12 @@ final class MergeRequestAttentionMonitor {
         }.max() ?? .distantPast
     }
 
-    private nonisolated static func reviewingProgress(
+    private nonisolated static func reviewingAssessment(
         for item: Item, request: GitLabMergeRequest?, discussions: [GitLabMergeRequestDiscussion]?,
         host: String, user: GitLabAuthenticatedUser, verdictDirectory: URL, approvedHead: String?,
-        approvalBaseline: ReviewApprovalBaseline?, treatAssignedMergeRequestsAsOwn: Bool
-    ) -> ReviewingProgress? {
+        approvalBaseline: ReviewApprovalBaseline?, previousApprovalBaseline: ReviewApprovalBaseline? = nil,
+        treatAssignedMergeRequestsAsOwn: Bool
+    ) -> ReviewingAssessment? {
         guard !item.isAuthored, let request, let displayed = item.mergeRequest,
               request.projectID == item.id.projectID, request.iid == item.id.iid,
               request.webURL == item.url, request.webURL == displayed.webURL,
@@ -1866,22 +1872,44 @@ final class MergeRequestAttentionMonitor {
               displayed.evidenceContext().binds(to: request.evidenceContext(), policy: .requestText),
               let discussions, ReviewVerdict.fingerprint(discussions) != nil else { return nil }
         if item.approvalProgress?.currentApproverIDs?.contains(user.id) == true {
-            guard MRAttentionRecord.sameContext(displayed, request), let approvalBaseline, approvalBaseline.covers(request),
-                  latestReviewMetadataChange(in: discussions) <= approvalBaseline.approvedAt else { return .needsReview }
-            return .current
+            if MRAttentionRecord.sameContext(displayed, request), let approvalBaseline, approvalBaseline.covers(request),
+               latestReviewMetadataChange(in: discussions) <= approvalBaseline.approvedAt {
+                return .init(progress: .current)
+            }
+            var reasons: [ReviewLaunchReason] = []
+            if let baseline = previousApprovalBaseline ?? approvalBaseline {
+                let target = baseline.reviewedTarget
+                if target.headSHA != head { reasons.append(.headChanged) }
+                if let current = ReviewTargetBinding(request),
+                   target.targetProjectID != current.targetProjectID || target.targetBranch != current.targetBranch
+                       || target.baseSHA != current.baseSHA {
+                    reasons.append(.targetChanged)
+                }
+                if baseline.semanticContext != request.semanticContextDigest { reasons.append(.metadataChanged) }
+            }
+            return .init(progress: .needsReview, reasons: reasons.isEmpty ? [.noVerifiedReview] : reasons)
         }
-        let verdict = ReviewVerdictStore.verdict(host: host, projectID: request.projectID,
-            iid: request.iid, user: user, in: verdictDirectory)
-        guard verdict?.requiresFreshReview(forSemanticContext: request.semanticContextFingerprint) != true,
-              verdict?.covers(head: head, discussions: discussions, reviewerID: user.id,
-            publishedDrafts: ReviewVerdictStore.seenDrafts(host: host, projectID: request.projectID,
-                iid: request.iid, in: verdictDirectory)) == true else { return .needsReview }
+        guard let verdict = ReviewVerdictStore.verdict(host: host, projectID: request.projectID, iid: request.iid,
+            user: user, in: verdictDirectory), verdict.version == 1 else {
+            return .init(progress: .needsReview, reasons: [.noVerifiedReview])
+        }
+        let publishedDrafts = ReviewVerdictStore.seenDrafts(host: host, projectID: request.projectID,
+            iid: request.iid, in: verdictDirectory)
+        var reasons: [ReviewLaunchReason] = []
+        if verdict.headSHA != head { reasons.append(.headChanged) }
+        if verdict.requiresFreshReview(forSemanticContext: request.semanticContextFingerprint) {
+            reasons.append(verdict.semanticContextFingerprint == nil ? .metadataCoverageMissing : .metadataChanged)
+        }
+        if !verdict.covers(head: verdict.headSHA, discussions: discussions, reviewerID: user.id, publishedDrafts: publishedDrafts) {
+            reasons.append(verdict.discussionFingerprint == nil ? .discussionCoverageMissing : .discussionsChanged)
+        }
+        if !reasons.isEmpty { return .init(progress: .needsReview, reasons: reasons) }
         let ownOpen = discussions.flatMap(\.notes).contains {
             $0.system != true && $0.author?.id == user.id && $0.resolvable == true && $0.resolved != true
         }
         let alreadyApproved = head == approvedHead || item.approvalProgress?.approvedBy.contains { $0.id == user.id } == true
-        return verdict?.verdict == .noObjections && !alreadyApproved && !ownOpen && !allResolved(discussions)
-            ? .waitingForOtherDiscussions : .current
+        return .init(progress: verdict.verdict == .noObjections && !alreadyApproved && !ownOpen && !allResolved(discussions)
+            ? .waitingForOtherDiscussions : .current)
     }
 
     private nonisolated static func draftContextIsCurrent(
@@ -3687,7 +3715,7 @@ final class MergeRequestAttentionMonitor {
                 if contextMatches, let discussions {
                     $0.ownPublishedReplies = DuplicateReplyDrafts.publishedReplies(in: discussions, userID: user.id)
                 }
-                $0.reviewingProgress = contextMatches ? Self.reviewingProgress(for: item, request: request,
+                $0.reviewingAssessment = contextMatches ? Self.reviewingAssessment(for: item, request: request,
                     discussions: discussions, host: account.host, user: user, verdictDirectory: verdictDirectory,
                     approvedHead: approvedHeads[item.id], approvalBaseline: settings?.approvalBaseline(for: target, user: user),
                     treatAssignedMergeRequestsAsOwn: settings?.treatAssignedMergeRequestsAsOwn == true) : nil

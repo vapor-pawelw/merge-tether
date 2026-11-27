@@ -361,7 +361,11 @@ struct MRBoardProjector {
             publicationRequiresAI: target.map { input.publicationPolicies[$0]?.requiresAI == true })
     }
     static func reviewingContext(for row: MergeRequestBoardSnapshot.Row, input: RowInput) -> ReviewingContext {
-        ReviewingContext(row: row, workflowState: ReviewingContext.workflowState(for: row, entries: input.workflowEntries),
+        let workflow = ReviewingContext.reviewWorkflow(for: row, entries: input.workflowEntries)
+        let reasons = workflow.flatMap { entry in
+            MRAttentionRecord.sameContext(entry.event.mergeRequest, row.displayRequest) ? entry.event.reviewUpdateReasons : nil
+        } ?? []
+        return ReviewingContext(row: row, workflowState: workflow?.state, workflowReasons: reasons,
             assistantReady: input.assistantReady, assistantChecking: input.assistantChecking,
             draftAutomationAllowed: input.automation.hasEnabledAutomation && row.displayRequest.map {
                 input.automation.scope.permits($0, host: input.account?.host ?? "", username: input.account?.username ?? "")

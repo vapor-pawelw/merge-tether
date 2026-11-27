@@ -24,6 +24,12 @@ struct MRTodoIntent: Codable, Identifiable, Sendable {
     /// The reserved job ID also records that this request has spent its recovery attempt.
     var reviewRecoveryJobID: UUID? = nil
 
+    var reviewLaunchReasons: [ReviewLaunchReason] {
+        guard kind == .review else { return [] }
+        let request = ReviewLaunchReason.requestReason(for: sourceTodo?.actionName ?? sourceEvents.last?.action)
+        return (state == .failed ? [.retryReview] : []) + [request ?? .noVerifiedReview]
+    }
+
     func failureExplanation(currentHead: String?, execution: AssistantJobExecution? = nil) -> String? {
         let diagnostic = if let execution {
             execution.attentionExplanation ?? execution.error ?? execution.summary

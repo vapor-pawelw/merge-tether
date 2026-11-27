@@ -15,6 +15,7 @@ enum ReviewLaunchReason: String, Codable, Sendable {
     case headChanged, authorReplied, discussionsChanged, discussionCoverageMissing
     case metadataChanged, metadataCoverageMissing, targetChanged, pushedDuringReview
     case automaticRetry, unverifiedReview
+    case reviewRequested, approvalRequested, noVerifiedReview, manualReview, fullReview, retryReview, reasonUnavailable
 
     private var label: LocalizedStringResource {
         switch self {
@@ -28,12 +29,27 @@ enum ReviewLaunchReason: String, Codable, Sendable {
         case .pushedDuringReview: .AutomationProgress.reviewReasonPushedDuringReview
         case .automaticRetry: .AutomationProgress.reviewReasonAutomaticRetry
         case .unverifiedReview: .AutomationProgress.reviewReasonUnverifiedReview
+        case .reviewRequested: .ReviewingContext.reviewingReviewRequested
+        case .approvalRequested: .ReviewingContext.reviewingApprovalRequested
+        case .noVerifiedReview: .AutomationProgress.reviewReasonNoVerifiedReview
+        case .manualReview: .AutomationProgress.reviewReasonManualReview
+        case .fullReview: .AutomationProgress.reviewReasonFullReview
+        case .retryReview: .AutomationProgress.reviewReasonRetryReview
+        case .reasonUnavailable: .AutomationProgress.reviewReasonUnavailable
         }
     }
 
     static func message(for reasons: [Self]) -> String? {
         guard !reasons.isEmpty else { return nil }
         return reasons.map { String(localized: $0.label) }.joined(separator: " · ")
+    }
+
+    static func requestReason(for action: ActionName?) -> Self? {
+        switch action {
+        case .reviewRequested: .reviewRequested
+        case .approvalRequired: .approvalRequested
+        default: nil
+        }
     }
 }
 

@@ -68,6 +68,11 @@ enum ReviewingProgress: Equatable, Sendable {
     case needsReview, queued, checking, waitingForOtherDiscussions, current
 }
 
+struct ReviewingAssessment: Equatable, Sendable {
+    let progress: ReviewingProgress
+    var reasons: [ReviewLaunchReason] = []
+}
+
 /// Read-only review progress and next steps; this never authorizes an MR action.
 @MainActor
 struct ReviewingContext {
@@ -84,6 +89,7 @@ struct ReviewingContext {
         case unknown, waitingForViewer, waitingForRequired, complete
     }
     private(set) var nextStep: NextStep = .viewDiscussions
+    private(set) var reviewReasons: [ReviewLaunchReason] = []
     var isAutomaticProcessing: Bool { nextStep == .automaticReview || nextStep == .verifying }
     var isMonitoringCompletedReview: Bool { status == .reviewCompleted && nextStep == .monitoring }
     var hasCompletedApprovals: Bool { completedReviewApproval == .complete }
@@ -119,15 +125,15 @@ struct ReviewingContext {
 
     /// Callers provide entries for the signed-in account. Only the current MR
     /// and head's review workflow can explain work on this card.
-    static func workflowState(for row: MergeRequestBoardSnapshot.Row,
-                              entries: [MergeWorkflowActivityEntry]) -> MergeWorkflowActivityState? {
+    static func reviewWorkflow(for row: MergeRequestBoardSnapshot.Row,
+                               entries: [MergeWorkflowActivityEntry]) -> MergeWorkflowActivityEntry? {
         guard let request = row.item.mergeRequest, let head = request.sha, !head.isEmpty else { return nil }
         return entries.filter {
             let candidate = $0.event.mergeRequest
             return $0.event.kind == .reviewUpdate && candidate.projectID == row.id.projectID
                 && candidate.iid == row.id.iid && candidate.webURL == row.item.url
                 && candidate.sha == head
-        }.max { $0.createdAt < $1.createdAt }?.state
+        }.max { $0.createdAt < $1.createdAt }
     }
 
     var author: Todo.Author?
@@ -138,6 +144,7 @@ struct ReviewingContext {
     private var completedReviewApproval: CompletedReviewApproval = .unknown
 
     init(row: MergeRequestBoardSnapshot.Row, workflowState: MergeWorkflowActivityState? = nil,
+         workflowReasons: [ReviewLaunchReason] = [],
          assistantReady: Bool = true, assistantChecking: Bool = false,
          draftAutomationAllowed: Bool = false, viewerUsername: String? = nil) {
         let item = row.presented
@@ -184,17 +191,18 @@ struct ReviewingContext {
         // A running intent whose worker already finished (latest run is terminal) is stale bookkeeping,
         // e.g. a run cancelled by policy; it must not keep the card in "Preparing review" forever.
         let latestRunFinished = row.latestJob?.operationalExecution?.state.isActive == false
-        let automaticIntent = row.intents.contains {
+        let automaticIntent = row.intents.first {
             $0.kind == .review && $0.headSHA == item.mergeRequest?.sha
                 && (($0.state == .running && !($0.jobID != nil && latestRunFinished))
                     || ($0.state == .pending && item.humanActionRequired == false))
         }
-        let queued = workflowState == .queued || workflowState == .running || workflowState == .waitingForAssistant
-            || automaticIntent || item.reviewingProgress == .queued
+        let queuedWorkflow = workflowState == .queued || workflowState == .running || workflowState == .waitingForAssistant
+        let queued = queuedWorkflow || automaticIntent != nil || item.reviewingProgress == .queued
         let checking = item.reReviewReadiness == .checking || item.authorFeedbackStatus?.phase == .checking
             || item.reviewingProgress == .checking
         let deferredReview = item.mergeRequest?.draft == true && !draftAutomationAllowed
-            && row.intents.contains(where: \.isDeferredReview)
+            ? row.intents.first(where: \.isDeferredReview) : nil
+        let observedReasons = row.evidenceMatchesCatalogContext ? item.evidence.reviewingAssessment?.reasons ?? [] : []
         func readyAction(_ action: NextStep) -> NextStep {
             assistantReady || assistantChecking ? action : .setupAgent
         }
@@ -203,12 +211,16 @@ struct ReviewingContext {
         } else if row.waitsForReviewStart {
             status = .reviewNeeded
             nextStep = readyAction(.runReview)
-        } else if deferredReview, drafts == 0, !MergeRequestBoardSnapshot.Row.jobNeedsAttention(currentReview?.execution?.state) {
+            reviewReasons = row.reviewIntentForManualStart?.reviewLaunchReasons
+                ?? (row.newReviewAssignedAt != nil ? [.reviewRequested] : observedReasons)
+        } else if let deferredReview, drafts == 0, !MergeRequestBoardSnapshot.Row.jobNeedsAttention(currentReview?.execution?.state) {
             status = .waitingForReady
             nextStep = readyAction(.runReview)
+            reviewReasons = deferredReview.reviewLaunchReasons
         } else if queued {
             status = workflowState == .running ? .running : .queued
             nextStep = readyAction(.automaticReview)
+            reviewReasons = queuedWorkflow && !workflowReasons.isEmpty ? workflowReasons : automaticIntent?.reviewLaunchReasons ?? observedReasons
         } else if checking {
             status = .verifying
             nextStep = readyAction(.verifying)
@@ -219,6 +231,7 @@ struct ReviewingContext {
         } else if item.reviewingProgress == .needsReview {
             status = .reviewNeeded
             nextStep = readyAction(.runReview)
+            reviewReasons = observedReasons
         } else if item.reviewingProgress == .waitingForOtherDiscussions {
             status = .waitingForOtherDiscussions
             nextStep = .monitoring
@@ -228,6 +241,7 @@ struct ReviewingContext {
             nextStep = .monitoring
         } else if workflowState == .failed {
             nextStep = readyAction(.runReview)
+            reviewReasons = [.retryReview] + workflowReasons
         } else if (activity?.authorReplyCount ?? 0) > 0 || (activity?.otherReplyCount ?? 0) > 0 {
             nextStep = .viewDiscussions
         } else if (activity?.publishedCommentCount ?? 0) > 0 || currentReview?.execution?.state == .succeeded {
@@ -235,6 +249,8 @@ struct ReviewingContext {
         } else if activity?.isComplete == true {
             nextStep = readyAction(.runReview)
         }
+
+        if nextStep == .runReview, reviewReasons.isEmpty { reviewReasons = [.noVerifiedReview] }
 
         if isMonitoringCompletedReview, row.evidenceMatchesCatalogContext {
             let discussionsBlockMerge = row.displayRequest.map {

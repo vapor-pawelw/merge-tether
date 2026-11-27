@@ -2,6 +2,14 @@ import Foundation
 
 @MainActor
 extension AssistantAutomationRunner.Handoff {
+    func reviewReason(workflows: [MergeWorkflowActivityEntry], intents: [MRTodoIntent]) -> String? {
+        guard AssistantAutomationRunner.recordsReviewVerdict(for: self) || readOnlyReview == true else { return nil }
+        let reasons = MRAutomationHistory.reviewLaunchReasons(for: self, workflows: workflows, intents: intents)
+        let fallback = ReviewLaunchReason.requestReason(for: feedbackTodos?.last?.action)
+            ?? (manual == true ? .manualReview : .reasonUnavailable)
+        return ReviewLaunchReason.message(for: reasons.isEmpty ? [fallback] : reasons)
+    }
+
     func progressStatus(intents: [MRTodoIntent] = [], conflictReceipts: Set<MergeConflictReceipt> = []) -> String {
         MRActivity.agentStatus(progressTitle(intents: intents, conflictReceipts: conflictReceipts), assistant: key.assistant)
     }

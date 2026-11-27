@@ -267,7 +267,21 @@ struct MRProgressPresentationTests {
 
         #expect(card.reviewLaunchReason(workflows: [update], intents: [])
             == (state.isActive ? "Source commit (HEAD) changed" : nil))
-        #expect(card.reviewLaunchReason(workflows: [], intents: []) == nil)
+        #expect(card.reviewLaunchReason(workflows: [], intents: [])
+            == (state.isActive ? "The reason for this review was not recorded" : nil))
+    }
+
+    @Test func manualReviewKeepsItsReasonWhenTheCardAndHistoryChange() throws {
+        let model = presentation("review", state: .running)
+        var job = try #require(model.row.latestJob)
+        job.manual = true
+        job.reviewLaunchReasons = [.headChanged, .discussionsChanged]
+        let saved = try JSONDecoder().decode(AssistantAutomationRunner.Handoff.self, from: JSONEncoder().encode(job))
+        let row = MergeRequestBoardSnapshot.Row(item: model.row.item, latestJob: saved, intents: [])
+        let card = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
+            allowsRemoval: true, assistantReady: true)
+        #expect(card.reviewLaunchReason(workflows: [], intents: [])
+            == "Source commit (HEAD) changed · Discussion content changed")
     }
 
     private func presentation(_ stage: String, state: AssistantJobExecution.State? = nil,

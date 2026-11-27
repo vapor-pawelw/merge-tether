@@ -426,7 +426,8 @@ private struct CommandCenterMRCardContent: View {
                     } else {
                         let current = row.displayItem
                         guard let consent = confirmManualReview(for: current, monitor: monitor) else { return }
-                        start { await monitor.runReview(for: current, confirmed: consent) }
+                        let reasons = reviewingContext.reviewReasons
+                        start { await monitor.runReview(for: current, confirmed: consent, reviewReasons: reasons) }
                     }
                 }
             case .setupAgent: primary(label) { SettingsNavigation.shared.showCodingAgent(openSettings: { openSettings() }) }

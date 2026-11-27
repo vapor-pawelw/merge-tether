@@ -52,7 +52,8 @@ extension TodoMonitorService {
     /// remote callers use the return value so a concurrent action cannot change their reported result.
     @discardableResult
     func runReview(for item: MergeRequestAttentionMonitor.Item, fromScratch: Bool = false,
-                   confirmed: ManualReviewConsent? = nil, readOnly: Bool = false) async -> Bool {
+                   confirmed: ManualReviewConsent? = nil, readOnly: Bool = false,
+                   reviewReasons: [ReviewLaunchReason] = []) async -> Bool {
         assistantJobActionError = nil
         let consent = confirmed ?? manualReviewConsent(for: item)
         guard consent == manualReviewConsent(for: item), canRunReview(for: item), selectedAssistantReady,
@@ -81,6 +82,13 @@ extension TodoMonitorService {
             let task = AssistantAutomationRunner.currentReviewTask(work: work, head: head,
                 semanticContextFingerprint: request.semanticContextFingerprint, user: user, settings: settings,
                 fullReview: fromScratch)
+            let reasons: [ReviewLaunchReason] = if fromScratch {
+                [.fullReview]
+            } else if MRAttentionRecord.sameContext(item.mergeRequest, request), !reviewReasons.isEmpty {
+                reviewReasons
+            } else {
+                [.manualReview]
+            }
             try await AssistantAutomationRunner.launch(assistant,
                 title: "\(request.webURL.gitLabProjectPath) !\(request.iid) — \(request.title)",
                 mergeRequestURL: request.webURL,
@@ -96,7 +104,7 @@ extension TodoMonitorService {
                 work: work,
                 username: target.username, settings: settings, isReview: true, mrWorkflow: .review, manual: true,
                 expectedHeadSHA: head, jobCoordinator: reviewJobCoordinator, taskIntent: .review(fromScratch: fromScratch),
-                readOnlyReview: readOnly)
+                readOnlyReview: readOnly, reviewLaunchReasons: reasons)
             // Starting the review is the go-ahead for a new review that waited for the user.
             if !readOnly {
                 releaseNewReview(.mergeRequest(host: target.host, username: target.username, projectID: target.projectID, iid: target.iid))

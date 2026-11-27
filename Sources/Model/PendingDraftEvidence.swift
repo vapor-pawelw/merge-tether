@@ -9,7 +9,7 @@ extension MergeRequestAttentionMonitor.Item {
             && ownPublishedReplies == previous.ownPublishedReplies
             && requiresCommentReview == previous.requiresCommentReview
             && commentReviewSnapshot == previous.commentReviewSnapshot
-            && reviewingProgress == previous.reviewingProgress
+            && reviewingAssessment == previous.reviewingAssessment
             && reviewingActivity == previous.reviewingActivity
             && observedDiscussionFingerprint == previous.observedDiscussionFingerprint
             && requiresDiscussionRecheck == previous.requiresDiscussionRecheck

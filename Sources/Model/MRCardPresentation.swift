@@ -294,9 +294,22 @@ struct MRCardPresentation {
         return .init(status: status)
     }
     func reviewLaunchReason(workflows: [MergeWorkflowActivityEntry], intents: [MRTodoIntent]) -> String? {
-        guard working, let job = activeJob else { return nil }
-        return ReviewLaunchReason.message(for: MRAutomationHistory.reviewLaunchReasons(for: job,
-            workflows: workflows, intents: intents))
+        guard working else { return nil }
+        if let job = activeJob {
+            return job.reviewReason(workflows: workflows, intents: intents)
+        }
+        guard case .working(.automaticReview, _, _) = cardActivity else { return nil }
+        if case .drafts = reviewingContext.status { return nil }
+        let reasons = reviewingContext.reviewReasons
+        return ReviewLaunchReason.message(for: reasons.isEmpty ? [.reasonUnavailable] : reasons)
+    }
+    var reviewActionReason: String? {
+        guard !working, finishedState == nil else { return nil }
+        if let intent = humanAction?.retryIntent {
+            return ReviewLaunchReason.message(for: intent.reviewLaunchReasons)
+        }
+        guard humanAction == nil, allowsRemoval, assistantReady, reviewingContext.nextStep == .runReview else { return nil }
+        return ReviewLaunchReason.message(for: reviewingContext.reviewReasons)
     }
     private var preservesConfirmedAttention: Bool {
         (isRefreshingAttention || refreshFailed) && row.needsAttention && preservedHumanAction != nil
@@ -431,6 +444,7 @@ struct MRCardPresentation {
         if item.requiresCommentReview || item.draftCount > 0 {
             return String(localized: item.isAuthored ? .CommentReview.commentReviewAfterOwn : .CommentReview.commentReviewAfterReviewed)
         }
+        if let reviewActionReason { return reviewActionReason }
         return finishedState == nil && allowsRemoval && humanAction == nil && !busy
             && !(quietReadCheck && reviewingContext.status == .activityUnknown)
             ? String(localized: reviewingContext.nextStepMessage) : nil

@@ -119,6 +119,41 @@
         "pl": {"stringUnit": {"state": "translated", "value": "Nie udało się zweryfikować wyniku poprzedniego przeglądu"}}
       }
     },
+    "reviewReasonNoVerifiedReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "No verified review for the current merge request"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Brak potwierdzonego przeglądu bieżącej wersji MR"}}
+      }
+    },
+    "reviewReasonManualReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Review started manually"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Przegląd uruchomiono ręcznie"}}
+      }
+    },
+    "reviewReasonFullReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Full review requested"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Zlecono pełny przegląd od początku"}}
+      }
+    },
+    "reviewReasonRetryReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "Retrying the previous review"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Ponowienie poprzedniego przeglądu"}}
+      }
+    },
+    "reviewReasonUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {"stringUnit": {"state": "translated", "value": "The reason for this review was not recorded"}},
+        "pl": {"stringUnit": {"state": "translated", "value": "Powód uruchomienia tego przeglądu nie został zapisany"}}
+      }
+    },
     "progressFeedback": {
       "extractionState": "manual",
       "localizations": {

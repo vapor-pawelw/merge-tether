@@ -76,6 +76,7 @@ struct MRAutomationHistory {
 
     static func reviewLaunchReasons(for job: AssistantAutomationRunner.Handoff,
                                     workflows: [MergeWorkflowActivityEntry], intents: [MRTodoIntent]) -> [ReviewLaunchReason] {
+        if let reasons = job.reviewLaunchReasons, !reasons.isEmpty { return reasons }
         guard job.manual == false, AssistantAutomationRunner.recordsReviewVerdict(for: job),
               let url = job.mergeRequestURL, let head = job.expectedHeadSHA else { return [] }
         let work = job.key.work
@@ -160,6 +161,14 @@ struct MRAutomationHistory {
 }
 
 extension SettingsManager {
+    func reviewReasons(forRetryOf job: AssistantAutomationRunner.Handoff, head: String?, automatic: Bool) -> [ReviewLaunchReason] {
+        let retry: ReviewLaunchReason = automatic ? .automaticRetry : .retryReview
+        guard let head, let previousHead = job.expectedHeadSHA else { return [retry] }
+        guard head == previousHead else { return [retry, .headChanged] }
+        let previous = MRAutomationHistory.reviewLaunchReasons(for: job, workflows: workflowActivity, intents: mrActionIntents)
+        return [retry] + previous.filter { ![.automaticRetry, .retryReview, .manualReview].contains($0) }
+    }
+
     func hasAutomaticApprovalWithOpenFindings(for target: MRAutomationScope.Target, head: String) -> Bool {
         let latest = automationEvents.first {
             $0.target == target && $0.state == .completed && $0.approvedHeadSHA == head

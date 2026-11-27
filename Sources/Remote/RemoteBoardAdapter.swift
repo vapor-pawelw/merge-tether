@@ -256,7 +256,8 @@ import MergeTetherRemote
         let other = board.otherCards(jobs: monitor.assistantHandoffs, host: monitor.glab.resolvedHost,
             username: monitor.glab.currentUsername, pinnedCards: monitor.settings.boardPins)
         var result = project(board: board, other: other, session: session, account: account,
-            intents: monitor.settings.mrActionIntents, conflictReceipts: monitor.settings.conflictReceipts) { row, _ in
+            intents: monitor.settings.mrActionIntents, conflictReceipts: monitor.settings.conflictReceipts,
+            workflows: monitor.settings.workflowActivity) { row, _ in
                 .init(id: mergeRequestCardID(row.id), title: row.displayTitle,
                     project: row.displayURL.gitLabProjectPath, url: row.displayURL)
             }
@@ -838,6 +839,7 @@ import MergeTetherRemote
 
     static func project(board: MergeRequestBoardSnapshot, other: [MergeRequestBoardSnapshot.OtherCard], session: UUID, account: String,
                         intents: [MRTodoIntent] = [], conflictReceipts: Set<MergeConflictReceipt> = [],
+                        workflows: [MergeWorkflowActivityEntry] = [],
                         rowCard: ((MergeRequestBoardSnapshot.Row, Bool) -> RemoteCard)? = nil) -> RemoteBoard {
         let viewerUsername = String(account.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false).first ?? "")
         func projectedRow(_ row: MergeRequestBoardSnapshot.Row, allowsRemoval: Bool) -> RemoteCard {
@@ -854,7 +856,8 @@ import MergeTetherRemote
                         project: proposal.url.gitLabProjectPath, url: proposal.url)
                 card.actions = []
                 card.detail = String(localized: .Remote.remoteProposal)
-                card = jobProgress(card, job: proposal.latestJob, intents: proposal.intents + intents, conflictReceipts: conflictReceipts)
+                card = jobProgress(card, job: proposal.latestJob, intents: proposal.intents + intents,
+                    conflictReceipts: conflictReceipts, workflows: workflows)
                 let request = board.displayRequest(projectID: proposal.target.projectID, iid: proposal.target.iid ?? 0, url: proposal.url)
                     ?? proposal.item?.mergeRequest
                 if let request, ProposalMRContext.matches(request, proposal: proposal) {
@@ -878,7 +881,7 @@ import MergeTetherRemote
                     card.actions = [.init(id: "job:\(job.id)", kind: .retryJob, token: token,
                         codingProvider: job.key.assistant.rawValue)]
                 }
-                return jobProgress(card, job: job, intents: intents, conflictReceipts: conflictReceipts)
+                return jobProgress(card, job: job, intents: intents, conflictReceipts: conflictReceipts, workflows: workflows)
             }
         }
         return .init(hostSession: session, account: account, lanes: [
@@ -905,7 +908,8 @@ import MergeTetherRemote
     }
 
     private static func jobProgress(_ original: RemoteCard, job: AssistantAutomationRunner.Handoff?,
-                                    intents: [MRTodoIntent], conflictReceipts: Set<MergeConflictReceipt>) -> RemoteCard {
+                                    intents: [MRTodoIntent], conflictReceipts: Set<MergeConflictReceipt>,
+                                    workflows: [MergeWorkflowActivityEntry]) -> RemoteCard {
         guard let job, job.operationalExecution?.state.isActive == true else { return original }
         var card = original
         card.needsAttention = false
@@ -916,6 +920,11 @@ import MergeTetherRemote
             status: job.progressStatus(intents: intents, conflictReceipts: conflictReceipts),
             working: true, statusSymbol: MRActionEffect.agent.symbol,
             assignedReviewerCount: original.presentation?.assignedReviewerCount)
+        if let reason = job.reviewReason(workflows: workflows, intents: intents) {
+            var context = RemoteCardStatusContext()
+            context.activityDetail = reason
+            card.presentation?.statusContext = context
+        }
         return card
     }
 

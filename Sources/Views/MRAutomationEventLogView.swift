@@ -26,8 +26,7 @@ struct MRAutomationEventLogRow: View {
                 MREventLogRowHeader(title: Text(title),
                     context: Text(stateLabel).foregroundColor(needsAttention ? .orange : .secondary), createdAt: entry.createdAt,
                     source: .mergeTether, isAutomatic: entry.isAutomatic)
-                if case .workflow(let workflow) = entry.source,
-                   let reason = ReviewLaunchReason.message(for: workflow.event.reviewUpdateReasons ?? []) {
+                if let reason = reviewReason {
                     Text(verbatim: reason).foregroundStyle(.secondary)
                 }
             }
@@ -36,6 +35,14 @@ struct MRAutomationEventLogRow: View {
         .padding(.vertical, 3)
         .onChange(of: initiallyExpandedJobID) { _, id in
             if case .job(let job, _) = entry.source, job.id == id { detailsExpanded = true }
+        }
+    }
+
+    private var reviewReason: String? {
+        switch entry.source {
+        case .job(let job, _): ReviewLaunchReason.message(for: job.reviewLaunchReasons ?? [])
+        case .workflow(let workflow): ReviewLaunchReason.message(for: workflow.event.reviewUpdateReasons ?? [])
+        default: nil
         }
     }
 

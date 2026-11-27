@@ -1096,7 +1096,10 @@ extension RemoteConnection: RemoteHostTransport {}
             return .completed
         case .runReview:
             guard action.id == "runReview", monitor.canRunReview(for: item) else { return .changed }
-            return await monitor.runReview(for: item, confirmed: monitor.manualReviewConsent(for: item)) ? .completed : .failed
+            let reviewing = row.map { monitor.reviewingContext(for: $0) }
+            let reasons = reviewing?.nextStep == .runReview ? reviewing?.reviewReasons ?? [] : []
+            return await monitor.runReview(for: item, confirmed: monitor.manualReviewConsent(for: item),
+                reviewReasons: reasons) ? .completed : .failed
         case .publishDraft:
             guard let id = suffix("publishDraft:").flatMap(Int.init),
                   let draft = item.drafts.first(where: { $0.id == id }), DraftPublicationRisk(draft: draft) == nil,

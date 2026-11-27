@@ -75,6 +75,16 @@ struct ReviewingContextTests {
         let changedWhileClosed = fixture.monitor()
         await fixture.refresh(changedWhileClosed)
         #expect(changedWhileClosed.currentOpenItems.first?.reviewingProgress == .needsReview)
+        let updated = try #require(changedWhileClosed.currentOpenItems.first)
+        let expectedReason = switch change {
+        case "head": "Source commit (HEAD) changed"
+        case "title", "markdownTitle": "MR title or description changed"
+        default: "MR target or diff base changed"
+        }
+        let snapshot = row(updated)
+        let card = MRCardPresentation(row: snapshot, reviewingContext: ReviewingContext(row: snapshot),
+            allowsRemoval: true, assistantReady: true)
+        #expect(card.nextStep == expectedReason)
 
         fixture.approvalTime = "2026-01-02T10:00:00Z"
         await fixture.refresh(changedWhileClosed)
@@ -110,6 +120,29 @@ struct ReviewingContextTests {
         _ = try await fixture.glab.refreshAuthenticatedAccount()
         await fixture.refresh(monitor)
         #expect(monitor.currentOpenItems.first?.reviewingProgress == .current)
+    }
+
+    @Test func changedCommentsAtTheSameHeadExplainTheReviewActionOnMacAndPhone() async throws {
+        let fixture = try ApprovalFixture()
+        defer { fixture.close() }
+        fixture.approvalTime = nil
+        let request = try await fixture.glab.fetchMergeRequest(projectID: 1, iid: 2, host: fixture.target.host)
+        try fixture.recordReview(of: request)
+        let monitor = fixture.monitor()
+        await fixture.refresh(monitor)
+        #expect(monitor.currentOpenItems.first?.reviewingProgress == .current)
+
+        fixture.hasNewComment = true
+        await fixture.refresh(monitor)
+        let item = try #require(monitor.currentOpenItems.first)
+        let snapshot = row(item)
+        let card = MRCardPresentation(row: snapshot, reviewingContext: ReviewingContext(row: snapshot),
+            allowsRemoval: true, assistantReady: true)
+        let phone = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "me@host"), model: card)
+        #expect(item.mergeRequest?.sha == request.sha)
+        #expect(card.reviewingContext.nextStep == .runReview)
+        #expect(card.nextStep == "Discussion content changed")
+        #expect(phone.boardNextStep == card.nextStep)
     }
 
     @Test(arguments: ["merged", "closed", "failed"])
@@ -179,6 +212,7 @@ struct ReviewingContextTests {
         var diffReadFails = false
         var requestReadFails = false
         var approvalReadFails = false
+        var hasNewComment = false
 
         init() throws {
             defaults = try #require(UserDefaults(suiteName: suite))
@@ -205,6 +239,9 @@ struct ReviewingContextTests {
                     if let metadataChange {
                         return InMemoryGitLab.output(#"[{"id":"metadata","notes":[{"id":4,"system":true,"body":"\#(metadataChange)","created_at":"2026-01-02T11:00:00Z"}]}]"#)
                     }
+                    if hasNewComment {
+                        return InMemoryGitLab.output(#"[{"id":"discussion","notes":[{"id":4,"system":false,"author":{"id":7},"body":"Additional context"}]}]"#)
+                    }
                     return InMemoryGitLab.output("[]")
                 default: return InMemoryGitLab.output("[]")
                 }
@@ -214,6 +251,13 @@ struct ReviewingContextTests {
         func monitor() -> MergeRequestAttentionMonitor {
             .init(glab: glab, settings: SettingsManager(defaults: defaults), verdictDirectory: directory,
                   provenanceDirectory: directory, canAutomate: { _ in false })
+        }
+
+        func recordReview(of request: GitLabMergeRequest) throws {
+            try ReviewVerdictStore.saveAuthenticatedVerdict(.init(version: 1, host: target.host, projectID: 1, iid: 2,
+                headSHA: head, verdict: .noObjections, discussionFingerprint: ReviewVerdict.fingerprint([]),
+                username: target.username, userID: userID, semanticContextFingerprint: request.semanticContextFingerprint),
+                in: directory)
         }
 
         func refresh(_ monitor: MergeRequestAttentionMonitor) async {
@@ -548,8 +592,8 @@ struct ReviewingContextTests {
         let obsolete = try entry(.failed, head: "old", kind: .reviewUpdate, createdAt: 9)
         let unrelated = try entry(.running, head: "abc", kind: .newDiscussion, createdAt: 10)
         let snapshot = row(try item())
-        #expect(ReviewingContext.workflowState(for: snapshot, entries: [obsolete, unrelated, current]) == .queued)
-        #expect(ReviewingContext.workflowState(for: snapshot, entries: [obsolete, unrelated]) == nil)
+        #expect(ReviewingContext.reviewWorkflow(for: snapshot, entries: [obsolete, unrelated, current])?.state == .queued)
+        #expect(ReviewingContext.reviewWorkflow(for: snapshot, entries: [obsolete, unrelated]) == nil)
     }
 
     @Test func missingCurrentReviewEvidenceExposesAReviewActionUnlessAlreadyQueued() throws {

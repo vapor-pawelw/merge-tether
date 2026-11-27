@@ -677,7 +677,7 @@ import Testing
             var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 7, iid: 11), title: request.title, url: url)
             item.mergeRequest = request
             if route == "manual-full" { await monitor.resetReviewState(for: item) }
-            else { await monitor.runReview(for: item) }
+            else { await monitor.runReview(for: item, reviewReasons: [.discussionsChanged]) }
         } else {
             let todo = try #require(GlabService.decodeTodos(Data("""
                 [{"id":42,"action_name":"review_requested","target_type":"MergeRequest","target_url":"\(url.absoluteString)",
@@ -692,6 +692,10 @@ import Testing
                 settings: settings, glab: glab, isPending: { true })
         }
         let started = try #require(settings.assistantHandoffs.first { $0.id != past.id })
+        let expectedReason: ReviewLaunchReason = if route == "manual-full" { .fullReview }
+            else if route.hasPrefix("manual-") { .discussionsChanged }
+            else { .reviewRequested }
+        #expect(started.reviewLaunchReasons == [expectedReason])
         #expect(started.prompt.contains("Full review from scratch") == (route == "manual-full"))
         #expect(started.prompt.contains("Do not raise new findings about unchanged code") == (route == "manual-same-head"))
         #expect(started.prompt.contains(reviewedHead) == (sameHead || route == "todo-genuine"))

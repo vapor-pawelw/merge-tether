@@ -148,7 +148,8 @@ struct BoardJobStatusActions: View {
                         conflictReceipts: monitor.settings.conflictReceipts),
                         startedAt: handoff.execution?.state == .running
                             ? handoff.execution?.startedAt ?? handoff.createdAt : handoff.createdAt, effect: .agent,
-                        assistant: handoff.key.assistant)
+                        assistant: handoff.key.assistant,
+                        detail: handoff.reviewReason(workflows: monitor.settings.workflowActivity, intents: monitor.settings.mrActionIntents))
                         .font(.caption).foregroundStyle(muted ? Color.secondary : Color.blue)
                 } else {
                     BoardStatusChip(title: .Board.boardCompactBlocked, symbol: "exclamationmark.circle",

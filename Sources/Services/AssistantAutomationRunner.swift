@@ -205,6 +205,7 @@ enum AssistantAutomationRunner {
         var foreignPipelineDiagnosis: ForeignPipelineDiagnosis? = nil
         var workflowEventKind: MergeWorkflowTrigger? = nil
         var workflowOriginKnown: Bool? = nil
+        var reviewLaunchReasons: [ReviewLaunchReason]? = nil
         var pipelineHandoffConfirmation: PipelineHandoffConfirmation? = nil
         var readOnlyReview: Bool? = nil
         var blockerDiagnosis: MergeBlockerDiagnosis? = nil
@@ -372,7 +373,8 @@ enum AssistantAutomationRunner {
         pipelineHandoffConfirmation: PipelineHandoffConfirmation? = nil,
         preparedWorkflowReview: PreparedWorkflowReview? = nil,
         readOnlyReview: Bool = false,
-        blockerDiagnosis: MergeBlockerDiagnosis? = nil
+        blockerDiagnosis: MergeBlockerDiagnosis? = nil,
+        reviewLaunchReasons: [ReviewLaunchReason]? = nil
     ) async throws -> Handoff {
         guard mrWorkflow != .draftReply else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
         let usesReadOnlyReview = readOnlyReview || (retryOf.flatMap { id in
@@ -622,6 +624,17 @@ enum AssistantAutomationRunner {
             """
         let useReviewModel = assistant == .codex && isReview && recordsReviewVerdict
         let decisionContext = feedbackDecisionRevision(work: work, username: username, settings: settings)
+        let launchReasons: [ReviewLaunchReason]? = if !recordsReviewVerdict {
+            nil
+        } else if let reviewLaunchReasons, !reviewLaunchReasons.isEmpty {
+            reviewLaunchReasons
+        } else if let reviewRetry {
+            settings.reviewReasons(forRetryOf: reviewRetry, head: headSHA, automatic: !manual)
+        } else if manual {
+            [.manualReview]
+        } else {
+            nil
+        }
         let handoff = Handoff(
             id: id, key: key, title: name,
             prompt: """
@@ -660,6 +673,7 @@ enum AssistantAutomationRunner {
             retryOf: retryOf, automaticRetryIdentity: automaticRetryIdentity, feedbackRecoveryRootID: feedbackRecoveryRootID, feedbackDecisionRevision: decisionContext,
             taskIntent: intent, foreignPipelineDiagnosis: pipelineDiagnosis,
             workflowEventKind: workflowEventKind, workflowOriginKnown: true,
+            reviewLaunchReasons: launchReasons,
             pipelineHandoffConfirmation: pipelineHandoffConfirmation,
             readOnlyReview: usesReadOnlyReview ? true : nil,
             blockerDiagnosis: blockerDiagnosis,

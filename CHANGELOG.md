@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- See why a review is offered or running on the board and in merge request Details, including new commits, changed discussions and review requests.
+
 - Stop the Mac **Launch at login** setting from switching itself on and off after macOS rejects a change, and keep it in sync with System Settings. Show comments published from a confirmation without waiting for the next refresh, keep draft controls attached to the right draft, and reduce redraws on the Mac board and on iPhone and iPad.
 
 - Show linked issues as a repository name and number when the repository differs from the merge request's. Hover over the label on Mac or tap it on iPhone and iPad to see the full repository path.
