@@ -3508,6 +3508,27 @@ import MergeTetherRemote
         #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
     }
 
+    @Test(arguments: [MRAutomationPreference.on, .off])
+    func threadPreferenceChangesWhichRepliesTheLiveAIPolicyPublishes(_ preference: MRAutomationPreference) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        let isEnabled = preference == .on
+        let discussion = isEnabled ? duoDiscussion.replacingOccurrences(of: "GitLabDuo", with: "reviewer") : duoDiscussion
+        try harness.write("drafts.json", draftJSON)
+        try harness.write("discussions.json", discussion)
+        if isEnabled { try harness.write("duo.json", #"{"id":8,"username":"reviewer","bot":false}"#) }
+        try harness.recordVerdict("objections", head: head)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: "me", projectID: 1, iid: 2)
+        try #require(harness.settings.bindAuthenticatedAccount(.init(host: host, username: "me", userID: 3)))
+        try #require(harness.settings.setThreadPublication(preference, discussionID: "abc", for: target))
+
+        try await harness.poll()
+        try await harness.poll()
+
+        #expect(harness.log("selected.log").contains("/draft_notes/12/publish") == isEnabled)
+        #expect(!harness.log("selected.log").contains("/draft_notes/11/publish"))
+    }
+
     @Test(arguments: [0, 1, 2], [false, true])
     func sealedStyleEvidenceOnlyPublishesForTrustedAuthors(_ confirmations: Int, _ markedHuman: Bool) async throws {
         let harness = try makeHarness(assistantWorked: true)

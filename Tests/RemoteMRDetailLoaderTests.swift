@@ -167,6 +167,8 @@ import MergeTetherRemote
         let notes = try #require(details.threads?.first?.notes)
         #expect(notes[0].extraContext == nil && notes[1].extraContext == "Published background")
         #expect(notes[0].proposedSolution == nil && notes[1].proposedSolution == true)
+        #expect(!notes[0].isOriginFixed && notes[1].isOriginFixed)
+        #expect(try JSONDecoder().decode(RemoteDetailNote.self, from: JSONEncoder().encode(notes[1])).appGenerated == true)
         let none = RemoteMRDetailLoader.project(request: request, progress: nil, rules: nil, reviewers: nil,
             discussions: discussions, drafts: [current], username: "owner")
         #expect(none.draftContexts == nil && none.proposedSolutionDraftIDs == nil)

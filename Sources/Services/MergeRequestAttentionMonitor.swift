@@ -2914,7 +2914,8 @@ final class MergeRequestAttentionMonitor {
                                          policy: AutomaticPublicationPolicy, host: String, projectID: Int, iid: Int,
                                          user: GitLabAuthenticatedUser) async -> PublicationNoteEvidence {
         guard policy.requiresAI || policy.allowsBotReplies else { return .init() }
-        let notes = drafts.flatMap { AutomaticPublicationPolicy.sourceNotes(for: $0, discussions: discussions, userID: user.id) ?? [] }
+        let notes = drafts.filter { policy.threadOriginPreference(for: $0) == .default }
+            .flatMap { AutomaticPublicationPolicy.sourceNotes(for: $0, discussions: discussions, userID: user.id) ?? [] }
         let authors = Dictionary(grouping: notes.compactMap(\.author), by: \.id)
         var verifiedAutomation: Set<Int> = []
         for (id, identities) in authors.sorted(by: { $0.key < $1.key }) where id > 0 {
@@ -2990,7 +2991,8 @@ final class MergeRequestAttentionMonitor {
               configuration.hasAutomaticActionConsent, policy.mode != .manual, policy.requiresAI,
               configuration.scope.permits(request, host: account.host, username: account.username) else { return }
         var sources: [Int: GitLabMergeRequestDiscussion.Note] = [:]
-        for draft in drafts where policy.couldAllow(draft, request: request, userID: user.id, host: account.host) {
+        for draft in drafts where policy.threadOriginPreference(for: draft) == .default
+            && policy.couldAllow(draft, request: request, userID: user.id, host: account.host) {
             guard let notes = AutomaticPublicationPolicy.sourceNotes(for: draft, discussions: discussions, userID: user.id),
                   notes.allSatisfy({ note in
                       policy.restrictions.sourceCommentAuthors.isEmpty || policy.restrictions.sourceCommentAuthors.contains {
@@ -3004,7 +3006,7 @@ final class MergeRequestAttentionMonitor {
             projectID: request.projectID, iid: request.iid, user: user)
         let unknown = sources.filter { known.lanes[$0.key] == .humanOrUncertain && !known.bots.contains($0.key) }.sorted { $0.key < $1.key }.map(\.value)
         guard !unknown.isEmpty, await permitsAssistantAutomation(for: account), isCurrent(account),
-              settings.automation == configuration, !Task.isCancelled,
+              settings.automation == configuration, settings.publicationPolicy(for: target) == policy, !Task.isCancelled,
               !hasActiveWorker(for: .init(projectID: request.projectID, iid: request.iid), account: account),
               displayAIOriginCoordinator?.isChecking(work: work) != true else { return }
         let model = configuration.assistant == .codex ? configuration.codexVerificationModel.rawValue

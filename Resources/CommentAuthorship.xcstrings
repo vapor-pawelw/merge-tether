@@ -1,0 +1,97 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "commentAuthorship.automatic": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Use automatic assessment" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Użyj automatycznej oceny" } }
+      }
+    },
+    "commentAuthorship.createdWithMergeTether": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Created with MergeTether" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Utworzono w MergeTether" } }
+      }
+    },
+    "commentAuthorship.mergeTetherHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "MergeTether generated this comment. Its classification is fixed while the text matches the original." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "MergeTether wygenerował ten komentarz. Klasyfikacja jest stała, dopóki treść jest zgodna z oryginałem." } }
+      }
+    },
+    "commentAuthorship.no": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Nie" } }
+      }
+    },
+    "commentAuthorship.question": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Written with AI?" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Napisano z pomocą AI?" } }
+      }
+    },
+    "commentAuthorship.threadPublication": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Auto-publishing" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Autopublikacja" } }
+      }
+    },
+    "commentAuthorship.threadPublicationHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "When publication requires AI, Default checks each source comment, On treats the thread as AI, and Off treats it as human. The MR and global publication rules still apply." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Gdy publikacja wymaga AI, opcja Domyślnie sprawdza poszczególne komentarze, Wł. traktuje wątek jako AI, a Wył. jako napisany ręcznie. Nadal obowiązują reguły publikacji dla MR i całej aplikacji." } }
+      }
+    },
+    "commentAuthorship.threadDefault": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Default" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Domyślnie" } }
+      }
+    },
+    "commentAuthorship.threadOn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "On" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Wł." } }
+      }
+    },
+    "commentAuthorship.threadOff": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Off" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Wył." } }
+      }
+    },
+    "commentAuthorship.threadChangeFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Couldn’t change auto-publishing for this thread." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Nie udało się zmienić autopublikacji w tym wątku." } }
+      }
+    },
+    "commentAuthorship.uncertain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Uncertain" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Niepewne" } }
+      }
+    },
+    "commentAuthorship.yes": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Yes" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Tak" } }
+      }
+    }
+  },
+  "version": "1.0"
+}

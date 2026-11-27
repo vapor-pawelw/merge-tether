@@ -4,6 +4,21 @@ import Testing
 
 @MainActor
 struct CommentOriginOverrideTests {
+    @Test func anUncertainChoiceOverridesAIUntilAutomaticAssessmentIsRestored() async throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let source = note()
+        try AICommentAssessmentStore.persist(positive([source]), target: target, notes: [source], assistant: .codex,
+            model: "m", in: directory)
+        let center = CommentOriginOverrideCenter(directory: directory, gain: { _, _, _ in 0 }, resume: { _ in })
+        #expect(isAI(source, in: directory))
+        try await center.apply(.uncertain, to: [source], in: discussions(source), target: target)
+        #expect(AICommentOriginOverrideStore.override(for: source, host: target.host, projectID: 7, iid: 13,
+            in: directory)?.classification == .uncertain)
+        #expect(!isAI(source, in: directory))
+        try await center.apply(nil, to: [source], in: discussions(source), target: target)
+        #expect(isAI(source, in: directory))
+    }
+
     @Test func anOverrideOutranksTheAssessmentAndExpiresWhenTheCommentChanges() throws {
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
         let source = note()

@@ -726,13 +726,13 @@ import MergeTetherRemote
         return card
     }
 
-    /// One entry point for correcting comment origins. It writes only local evidence and stays available
-    /// while the card is busy; the command names its comments and the host re-reads GitLab to match them.
+    /// Local authorship and thread publication preferences for the current account session.
     static func commentOriginControl(item: MergeRequestAttentionMonitor.Item, monitor: TodoMonitorService,
                                      account: String) -> RemoteAction? {
         guard let request = item.mergeRequest, request.isOpen,
               monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) != nil,
-              let token = try? RemoteDigest.token([account, "commentOrigin", String(request.projectID), String(request.iid)])
+              let token = try? RemoteDigest.token([account, String(monitor.glab.accountRevision), "commentOrigin",
+                                                   String(request.projectID), String(request.iid)])
         else { return nil }
         return .init(id: "commentOrigin", kind: .setCommentOrigin, token: token)
     }

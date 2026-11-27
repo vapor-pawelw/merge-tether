@@ -331,12 +331,6 @@ private struct RemoteDiscussionCard: View {
     var onCommentOrigin: ((RemoteCommentOriginRequest) -> Void)? = nil
     var initiallyExpanded = false
     @State private var expansion: Bool?
-    @State private var threadOriginRequest: ThreadOriginRequest?
-
-    private struct ThreadOriginRequest: Identifiable {
-        let id = UUID()
-        let origin: RemoteDetailNote.Origin?
-    }
     private var expanded: Bool { expansion ?? initiallyExpanded }
     private var color: Color {
         switch thread.state { case .open: .orange; case .resolved: .green; case .general: .secondary }
@@ -349,7 +343,7 @@ private struct RemoteDiscussionCard: View {
         }
     }
     var body: some View {
-        // Not a DisclosureGroup: its label is one button, which would swallow taps on the origin menus.
+        // The header contains independently tappable controls.
         VStack(alignment: .leading, spacing: 0) {
             header
             if expanded {
@@ -382,92 +376,85 @@ private struct RemoteDiscussionCard: View {
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: toggleExpansion)
-        .alert(threadOriginTitle, isPresented: Binding(get: { threadOriginRequest != nil },
-                                                       set: { if !$0 { threadOriginRequest = nil } }),
-               presenting: threadOriginRequest) { request in
-            Button(role: .cancel) { threadOriginRequest = nil } label: { Text(.RemoteDetail.remoteDetailOriginCancel) }
-            Button {
-                if !thread.notes.contains(where: { $0.authorKind == .automation }),
-                   let change = RemoteCommentOriginRequest.set(request.origin, notes: thread.notes, in: thread.id) {
-                    onCommentOrigin?(change)
-                }
-                threadOriginRequest = nil
-            } label: { Text(.RemoteDetail.remoteDetailOriginConfirm) }
-        } message: { _ in
-            Text(.RemoteDetail.remoteDetailThreadOriginMessage(thread.notes.count))
-        }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 8) {
-                StatusFlowLayout {
-                    Label(state, systemImage: thread.state == .resolved ? "checkmark.bubble" : "bubble.left")
-                        .font(.caption.weight(.medium)).foregroundStyle(color)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(color.opacity(0.07), in: Capsule())
-                    if let feedback = thread.feedback { feedbackBadge(feedback) }
-                    if thread.showsPublishedReply {
-                        Text(replyTitle).font(.caption).foregroundStyle(Color.blue)
-                            .accessibilityHint(Text(.RemoteDetail.remoteDetailReplyPublishedHelp))
-                    }
-                    if thread.draftCount > 0 {
-                        HStack(spacing: 5) {
-                            Label(.RemoteDetail.remoteDetailDraft, systemImage: "square.and.pencil")
-                            Text(thread.draftCount, format: .number)
-                        }.font(.caption).foregroundStyle(.tint)
-                    }
-                    if let origin = thread.origin ?? (!thread.notes.isEmpty && thread.notes.allSatisfy { $0.authorKind == .automation } ? .ai : nil) {
-                        originBadge(origin, manual: thread.notes.allSatisfy { $0.originManual == true }, thread: true,
-                            bot: !thread.notes.isEmpty && thread.notes.allSatisfy { $0.authorKind == .automation },
-                            locked: thread.notes.contains { $0.authorKind == .automation }) {
-                            threadOriginRequest = .init(origin: $0)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                Button(action: toggleExpansion) {
-                    Image(systemName: "chevron.right").rotationEffect(.degrees(expanded ? 90 : 0))
-                        .font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 4)
-                .accessibilityLabel(Text(.RemoteDetail.remoteDetailToggleThread))
-                .accessibilityValue(Text(expanded ? .RemoteDetail.remoteDetailShowLess : .RemoteDetail.remoteDetailShowMore))
+                threadStatus
+                threadPublicationMenu
+                expandButton
             }
             if let location = thread.location { RemoteDiscussionLocationLabel(full: location) }
             if let first = thread.notes.first {
                 noteHeader(first)
-                if !expanded { RemoteMarkdownText(source: first.body).font(.callout).lineLimit(3).foregroundStyle(.secondary) }
+                if !expanded {
+                    RemoteMarkdownText(source: first.body).font(.callout).lineLimit(3).foregroundStyle(.secondary)
+                    noteAuthorship(first)
+                }
             }
         }
+    }
+
+    private var threadStatus: some View {
+        StatusFlowLayout {
+            Label(state, systemImage: thread.state == .resolved ? "checkmark.bubble" : "bubble.left")
+                .font(.caption.weight(.medium)).foregroundStyle(color)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(color.opacity(0.07), in: Capsule())
+            if let feedback = thread.feedback { feedbackBadge(feedback) }
+            if thread.showsPublishedReply {
+                Text(replyTitle).font(.caption).foregroundStyle(Color.blue)
+                    .accessibilityHint(Text(.RemoteDetail.remoteDetailReplyPublishedHelp))
+            }
+            if thread.draftCount > 0 {
+                HStack(spacing: 5) {
+                    Label(.RemoteDetail.remoteDetailDraft, systemImage: "square.and.pencil")
+                    Text(thread.draftCount, format: .number)
+                }.font(.caption).foregroundStyle(.tint)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private var threadPublicationMenu: some View {
+        if let preference = thread.publicationPreference, let discussionID = thread.gitLabDiscussionID {
+            let select: ((RemoteCardAutomation.Preference) -> Void)? = onCommentOrigin.map { send in
+                { choice in
+                    send(.init(operation: .setThreadPublication,
+                        threadPublication: .init(discussionID: discussionID, expected: preference, preference: choice)))
+                }
+            }
+            ThreadPublicationMenu(preference: preference, onSelect: select)
+        }
+    }
+
+    private var expandButton: some View {
+        Button(action: toggleExpansion) {
+            Image(systemName: "chevron.right").rotationEffect(.degrees(expanded ? 90 : 0))
+                .font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 4)
+        .accessibilityLabel(Text(.RemoteDetail.remoteDetailToggleThread))
+        .accessibilityValue(Text(expanded ? .RemoteDetail.remoteDetailShowLess : .RemoteDetail.remoteDetailShowMore))
     }
 
     private func toggleExpansion() {
         withAnimation(.snappy) { expansion = !expanded }
     }
 
-    private var threadOriginTitle: Text {
-        switch threadOriginRequest?.origin {
-        case .ai: Text(.RemoteDetail.remoteDetailThreadOriginAiTitle)
-        case .uncertain: Text(.RemoteDetail.remoteDetailThreadOriginUncertainTitle)
-        case .human: Text(.RemoteDetail.remoteDetailThreadOriginHumanTitle)
-        case nil: Text(.RemoteDetail.remoteDetailThreadOriginAutomaticTitle)
-        }
-    }
-
-    /// Author and origin on the left (wrapping on narrow screens), date on the right: the same line for every comment.
     private func noteHeader(_ note: RemoteDetailNote) -> some View {
         HStack(alignment: .top, spacing: 8) {
             StatusFlowLayout(spacing: note.authorKind == .automation ? 8 : 6) {
                 PersonLabel(person: .init(name: note.author, username: note.username, avatarURL: note.avatarURL), avatarSize: 20,
                             fallback: Text(.RemoteDetail.remoteDetailUnknownAuthor))
                     .font(.callout.weight(.medium))
-                if let origin = note.displayOrigin {
-                    originBadge(origin, manual: note.originManual == true, thread: false,
-                                bot: note.authorKind == .automation, locked: note.authorKind == .automation) { choice in
-                        if let change = RemoteCommentOriginRequest.set(choice, notes: [note], in: thread.id) { onCommentOrigin?(change) }
-                    }
+                if note.authorKind == .automation {
+                    Label(.AuthorFeedback.authorFeedbackBotAuthor, systemImage: "gearshape")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHint(Text(.RemoteDetail.remoteDetailBotOriginHelp))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -483,6 +470,7 @@ private struct RemoteDiscussionCard: View {
         if let location = note.location, location != thread.location { RemoteDiscussionLocationLabel(full: location) }
         RemoteMarkdownText(source: note.body).font(.callout).lineSpacing(3).textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
+        noteAuthorship(note)
         if let extraContext = note.extraContext, !extraContext.isEmpty {
             RemoteExtraContextButton(markdown: extraContext, proposedSolution: note.proposedSolution == true)
         }
@@ -491,6 +479,19 @@ private struct RemoteDiscussionCard: View {
                 .font(.caption).frame(minHeight: 44)
         }
     }
+
+    @ViewBuilder private func noteAuthorship(_ note: RemoteDetailNote) -> some View {
+        if note.authorKind != .automation, !note.body.isEmpty {
+            let onSelect: ((RemoteDetailNote.Origin?) -> Void)? =
+                onCommentOrigin != nil && !note.isOriginFixed && (Int(note.id) ?? 0) > 0 && (note.authorID ?? 0) > 0
+                ? { choice in
+                    if let change = RemoteCommentOriginRequest.set(choice, notes: [note], in: thread.id) { onCommentOrigin?(change) }
+                } : nil
+            CommentAuthorshipControl(selection: note.displayOrigin, isManual: note.originManual == true,
+                appGenerated: note.appGenerated == true, onSelect: onSelect)
+        }
+    }
+
     @ViewBuilder private func feedbackBadge(_ feedback: RemoteDetailThread.Feedback) -> some View {
         let badge: (title: LocalizedStringResource, color: Color, symbol: String)? = switch feedback {
         case .addressed: (.RemoteDetail.remoteDetailFeedbackAddressed, .green, "checkmark.seal")
@@ -515,78 +516,6 @@ private struct RemoteDiscussionCard: View {
         case .published: .RemoteDetail.remoteDetailReplyPublished
         case .earlier: .RemoteDetail.remoteDetailReplyEarlier
         case .unknown, .unavailable: .RemoteDetail.remoteDetailReplyUnknown
-        }
-    }
-    private func originTitle(_ origin: RemoteDetailNote.Origin) -> LocalizedStringResource {
-        switch origin {
-        case .ai: .RemoteDetail.remoteDetailOriginAI
-        case .uncertain: .RemoteDetail.remoteDetailOriginUncertain
-        case .human: .RemoteDetail.remoteDetailOriginHuman
-        }
-    }
-    private func originSymbol(_ origin: RemoteDetailNote.Origin) -> String {
-        origin == .ai ? "sparkles" : origin == .human ? "person" : "questionmark.circle"
-    }
-
-    private func originColor(_ origin: RemoteDetailNote.Origin, bot: Bool) -> Color {
-        if bot { return .secondary }
-        return switch origin { case .ai: .purple; case .uncertain: .orange; case .human: .teal }
-    }
-
-    @ViewBuilder
-    private func originBadge(_ origin: RemoteDetailNote.Origin, manual: Bool, thread: Bool,
-                             bot: Bool = false, locked: Bool = false,
-                             onSelect: @escaping (RemoteDetailNote.Origin?) -> Void) -> some View {
-        let color = originColor(origin, bot: bot)
-        let title: LocalizedStringResource = bot ? .AuthorFeedback.authorFeedbackBotAuthor : originTitle(origin)
-        let capsule = Group {
-            if bot {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Image(systemName: "gearshape").accessibilityHidden(true)
-                    Text(title)
-                }
-            } else {
-                Label {
-                    HStack(spacing: 3) {
-                        Text(title)
-                        if manual { Image(systemName: "hand.raised.fill").imageScale(.small) }
-                        if onCommentOrigin != nil && !locked { Image(systemName: "chevron.down").imageScale(.small) }
-                    }
-                } icon: { Image(systemName: originSymbol(origin)) }
-            }
-        }
-            .font(.caption.weight(.medium)).foregroundStyle(color)
-            .padding(.horizontal, 7).padding(.vertical, 3).background(color.opacity(0.08), in: Capsule())
-            .fixedSize()
-        if onCommentOrigin != nil && !locked {
-            Menu {
-                Section {
-                    ForEach([RemoteDetailNote.Origin.ai, .uncertain, .human], id: \.self) { choice in
-                        Button { onSelect(choice) } label: {
-                            Label { Text(originTitle(choice)) } icon: {
-                                Image(systemName: manual && choice == origin ? "checkmark" : originSymbol(choice))
-                            }
-                        }
-                    }
-                } header: {
-                    Text(thread ? .RemoteDetail.remoteDetailThreadOriginMenuTitle : .RemoteDetail.remoteDetailOriginMenuTitle)
-                }
-                if manual || thread {
-                    Button { onSelect(nil) } label: {
-                        Label { Text(.RemoteDetail.remoteDetailOriginAutomatic) } icon: { Image(systemName: "arrow.uturn.backward") }
-                    }
-                }
-            } label: { capsule.contentShape(Rectangle()) }
-                .accessibilityLabel(manual ? Text(originTitle(origin)) + Text(verbatim: ", ") + Text(.RemoteDetail.remoteDetailOriginManual)
-                                           : Text(originTitle(origin)))
-                .accessibilityHint(Text(thread ? .RemoteDetail.remoteDetailThreadOriginMenuHint : .RemoteDetail.remoteDetailOriginMenuHint))
-        } else {
-            if bot {
-                capsule.accessibilityElement(children: .combine)
-                    .accessibilityHint(Text(.RemoteDetail.remoteDetailBotOriginHelp))
-            } else {
-                capsule.accessibilityElement(children: .combine)
-            }
         }
     }
 }

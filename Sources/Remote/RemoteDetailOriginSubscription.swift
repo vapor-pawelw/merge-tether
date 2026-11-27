@@ -110,6 +110,7 @@ import MergeTetherRemote
 
     private func change(for origin: AICommentDisplayCoordinator.PersistedOrigin) -> RemoteDetailOriginChange? {
         guard let original = full[origin.noteID], let visible = rendered[origin.noteID], original.threadID == visible.threadID,
+              original.note.appGenerated != true,
               original.note.authorID == origin.authorID, visible.note.authorID == origin.authorID else { return nil }
         let digest = sourceDigests[origin.noteID] ?? AICommentAssessmentStore.digest(original.note.body)
         sourceDigests[origin.noteID] = digest

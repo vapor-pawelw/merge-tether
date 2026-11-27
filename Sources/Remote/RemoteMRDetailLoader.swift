@@ -83,7 +83,8 @@ import MergeTetherRemote
                 let summary = thread.replySummary(currentUsername: username)
                 return RemoteDetailThread(id: thread.id, state: .init(rawValue: String(describing: thread.state)) ?? .general,
                     location: thread.location, notes: thread.notes.enumerated().map { index, note in
-                        let origin: RemoteDetailNote.Origin? = note.id.flatMap { thread.origins[$0] }.map {
+                        let sourceOrigin = note.id.flatMap { thread.origins[$0] }
+                        let origin: RemoteDetailNote.Origin? = sourceOrigin.map {
                             switch $0 {
                             case .appGenerated, .verifiedAssistant, .botAccount, .assessed: .ai
                             case .uncertain: .uncertain
@@ -107,9 +108,10 @@ import MergeTetherRemote
                                 case .unknown, nil: nil
                                 }
                             }, avatarURL: note.author?.avatarURL,
-                            originManual: note.id.flatMap { thread.origins[$0] }?.isManual == true ? true : nil,
+                            originManual: sourceOrigin?.isManual == true ? true : nil,
                             extraContext: extraContext?.markdown,
-                            proposedSolution: extraContext?.proposedSolution == true ? true : nil)
+                            proposedSolution: extraContext?.proposedSolution == true ? true : nil,
+                            appGenerated: sourceOrigin == .appGenerated ? true : nil)
                     }, reply: .init(rawValue: String(describing: summary.publishedReply)) ?? .unavailable,
                     draftCount: summary.draftCount, draftIDs: thread.drafts.compactMap(\.id))
             }

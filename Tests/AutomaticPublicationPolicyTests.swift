@@ -3,6 +3,67 @@ import Testing
 @testable import MergeTether
 
 struct AutomaticPublicationPolicyTests {
+    @Test func threadPermissionSatisfiesOnlyTheAIConditionForThatThread() throws {
+        let request = try request()
+        let reply = try draft(authorID: request.author.id)
+        let incoming = [GitLabMergeRequestDiscussion(id: "thread", notes: [note(40, author: 8)])]
+        var policy = AutomaticPublicationPolicy(mode: .aiReplies, restrictions: .init(), threadPreferences: ["thread": .on])
+        #expect(policy.allows(reply, request: request, discussions: incoming, userID: request.author.id, host: host, aiNoteIDs: []))
+        #expect(!policy.allows(reply, request: request, discussions: incoming + incoming, userID: request.author.id, host: host, aiNoteIDs: []))
+        #expect(try !policy.allows(draft(body: "/resolve", authorID: request.author.id),
+            request: request, discussions: incoming, userID: request.author.id, host: host, aiNoteIDs: []))
+        #expect(try !policy.allows(draft(), request: request, discussions: incoming, userID: 3, host: host, aiNoteIDs: []))
+        policy.threadPreferences = ["another-thread": .on]
+        #expect(!policy.allows(reply, request: request, discussions: incoming, userID: request.author.id, host: host, aiNoteIDs: []))
+        let excluded = AutomaticPublicationPolicy(mode: .aiReplies, restrictions: .init(sourceCommentAuthors: [identity(9)]),
+            threadPreferences: ["thread": .on])
+        #expect(!excluded.allows(reply, request: request, discussions: incoming, userID: request.author.id, host: host, aiNoteIDs: []))
+        let manual = AutomaticPublicationPolicy(mode: .manual, restrictions: .init(), threadPreferences: ["thread": .on])
+        #expect(!manual.allows(reply, request: request, discussions: incoming, userID: request.author.id, host: host, aiNoteIDs: []))
+        let botOnly = AutomaticPublicationPolicy(mode: .filtered, restrictions: .init(allowBotReplies: true),
+            threadPreferences: ["thread": .on])
+        #expect(!botOnly.allows(reply, request: request, discussions: incoming, userID: request.author.id, host: host, aiNoteIDs: []))
+    }
+
+    @Test func threadOffOverridesTheOriginAssessmentButPublishAllStillTakesPriority() throws {
+        let request = try request()
+        let reply = try draft(authorID: request.author.id)
+        let discussions = [GitLabMergeRequestDiscussion(id: "thread", notes: [note(40, author: 8)])]
+        for mode in [AutomationPublicationMode.aiReplies, .all] {
+            let policy = AutomaticPublicationPolicy(mode: mode, restrictions: .init(allowBotReplies: true),
+                threadPreferences: ["thread": .off])
+            #expect(policy.allows(reply, request: request, discussions: discussions, userID: request.author.id,
+                host: host, aiNoteIDs: [40], botNoteIDs: [40]) == (mode == .all))
+        }
+    }
+
+    @MainActor @Test func savedThreadPermissionRemainsScopedAcrossRestartAndAccountChanges() throws {
+        let suite = "ThreadPublicationTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = GitLabAccountIdentity(host: host, username: "alice", userID: 7)
+        let target = MRAutomationScope.Target.mergeRequest(host: host, username: "alice", projectID: 1, iid: 2)
+        let settings = SettingsManager(defaults: defaults)
+        try #require(settings.bindAuthenticatedAccount(first))
+        #expect(settings.threadPublicationPermissions(for: target).isEmpty)
+        try #require(settings.setThreadPublication(.on, discussionID: "thread", for: target))
+        #expect(settings.publicationPolicy(for: target).threadPreferences == ["thread": .on])
+
+        let reopened = SettingsManager(defaults: defaults)
+        #expect(reopened.threadPublicationPermissions(for: target).isEmpty)
+        try #require(reopened.bindAuthenticatedAccount(.init(host: host, username: "alice", userID: 99)))
+        #expect(reopened.threadPublicationPermissions(for: target).isEmpty)
+        let renamed = MRAutomationScope.Target.mergeRequest(host: host, username: "renamed", projectID: 1, iid: 2)
+        try #require(reopened.bindAuthenticatedAccount(.init(host: host, username: "renamed", userID: 7)))
+        #expect(reopened.threadPublicationPermissions(for: renamed) == ["thread": .on])
+        let otherMR = MRAutomationScope.Target.mergeRequest(host: host, username: "renamed", projectID: 1, iid: 3)
+        #expect(reopened.threadPublicationPermissions(for: otherMR).isEmpty)
+        try #require(reopened.setThreadPublication(.off, discussionID: "thread", for: renamed))
+        #expect(reopened.threadPublicationPermissions(for: renamed) == ["thread": .off])
+        try #require(reopened.setThreadPublication(.default, discussionID: "thread", for: renamed))
+        #expect(reopened.threadPublicationPermissions(for: renamed).isEmpty)
+    }
+
     @Test func aCoAssigneesPublishedReplySuppressesOnlyTheDuplicate() throws {
         let request = try request(assignees: #"[{"id":7,"username":"alice","name":"Alice"},{"id":4,"username":"bob","name":"Bob"}]"#)
         let discussions = [GitLabMergeRequestDiscussion(id: "thread", notes: [

@@ -302,10 +302,10 @@ struct AICommentProvenanceTests: Sendable {
             let publication = try #require(AICommentProvenanceStore.capturePublication([generated], context: context, before: [], in: directory))
             let original = try discussions(#"[{"id":20,"body":"Generated reply","author":{"id":9,"username":"me"}}]"#)
             try AICommentProvenanceStore.recordPublished(publication, after: original, in: directory)
-            try AICommentOriginOverrideStore.save(.init(version: 1, host: context.host, username: context.username,
-                projectID: 1, iid: 2, noteID: 20, authorID: 9, bodySHA256: AICommentAssessmentStore.digest(body),
-                classification: .human, createdAt: .now, activatesAt: .now), in: assessmentDirectory)
         }
+        try AICommentOriginOverrideStore.save(.init(version: 1, host: context.host, username: context.username,
+            projectID: 1, iid: 2, noteID: 20, authorID: 9, bodySHA256: AICommentAssessmentStore.digest(body),
+            classification: .human, createdAt: .now, activatesAt: .now), in: assessmentDirectory)
         let gitlab = InMemoryGitLab()
         defer { gitlab.close() }
         let glab = gitlab.service(host: context.host, username: "me")
@@ -323,10 +323,41 @@ struct AICommentProvenanceTests: Sendable {
         // then
         #expect(store.extraContexts.forNote(20)?.markdown == (edited ? nil : "Why this matters"))
         #expect(store.extraContexts.forNote(20)?.proposedSolution == (edited ? nil : true))
-        if edited { #expect(store.origins[20] == .manual(.human)) }
+        #expect(store.origins[20] == (edited ? .manual(.human) : .appGenerated))
         #expect(store.extraContexts.forNote(5) == nil)
         #expect(store.extraContexts.forDraft(generated)?.markdown == "Why this matters")
         #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
+    @MainActor @Test func originChangesRejectAnExactGeneratedNoteAndAcceptItsEditedText() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let generated = draft(11)
+        try AICommentProvenanceStore.recordGenerated([.init(id: 11, bodySHA256: AICommentAssessmentStore.digest(generated.note!))],
+            baseline: [], current: [generated], context: context, runID: UUID(),
+            headSHA: String(repeating: "a", count: 40), in: directory)
+        let original = try discussions(#"[{"id":20,"body":"Generated reply","author":{"id":9,"username":"me"}},{"id":21,"body":"Other note","author":{"id":4,"username":"reviewer"}}]"#)
+        let notes = original[0].notes
+        let target = MRAutomationScope.Target(host: context.host, username: context.username, projectID: context.projectID, iid: context.iid)
+        let assessmentDirectory = directory.appending(path: "assessments")
+        let center = CommentOriginOverrideCenter(directory: assessmentDirectory, provenanceDirectory: directory,
+            gain: { _, _, _ in Issue.record("A fixed comment triggered a publication check"); return 0 }, resume: { _ in })
+
+        let verdicts: [AICommentOriginOverride.Classification?] = [.ai, .human, .uncertain, nil]
+        for verdict in verdicts {
+            await #expect(throws: CommentOriginOverrideCenter.ChangeError.appGeneratedComment) {
+                try await center.apply(verdict, to: notes, in: original, target: target, userID: context.userID)
+            }
+        }
+        #expect(center.revision == 0)
+
+        var edited = notes[0]
+        edited.body = "Generated reply with my clarification"
+        let updated = [GitLabMergeRequestDiscussion(id: original[0].id, notes: [edited, notes[1]])]
+        let change = try await center.apply(.human, to: [edited], in: updated, target: target, userID: context.userID)
+        #expect(change.noteIDs == [20])
+        #expect(AICommentOriginOverrideStore.override(for: edited, host: target.host, projectID: target.projectID,
+            iid: context.iid, username: target.username, userID: context.userID, in: assessmentDirectory)?.classification == .human)
     }
 
     private func recordReply(_ id: Int = 11, body: String = "Generated reply", in directory: URL) throws -> GitLabDraftNote {

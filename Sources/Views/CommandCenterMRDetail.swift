@@ -86,6 +86,7 @@ private struct CommandCenterMRDetailContent: View {
     @State private var feedbackDecisionError: String?
     @State private var feedbackRecheck: MRFeedbackRecheckProgress?
     @State private var originChangeFailed = false
+    @State private var threadPublicationChangeFailed = false
     @State private var isDecidingAIReply = false
     @State private var aiReplyResult: LocalizedStringResource?
     @State private var regenerationPresentation: DraftRegenerationPresentation?
@@ -391,6 +392,9 @@ private struct CommandCenterMRDetailContent: View {
                 Button(role: .cancel) { aiReplyResult = nil } label: { Text(.MRDiscussions.mrDiscussionsOriginCancel) }
             } message: {
                 if aiReplyResult == nil { Text(.MRDiscussions.mrDiscussionsOriginChangeFailedMessage) }
+            }
+            .alert(Text(.CommentAuthorship.commentAuthorshipThreadChangeFailed), isPresented: $threadPublicationChangeFailed) {
+                Button(role: .cancel) {} label: { Text(.MRDiscussions.mrDiscussionsOriginCancel) }
             }
     }
 
@@ -1237,6 +1241,7 @@ private struct CommandCenterMRDetailContent: View {
             onDelete: { draft in Task { await monitor.attention.deleteDraft(draft, from: item.id) } },
             onRegenerate: regenerateDraft, aiReplyControls: aiReplyControls,
             title: .DraftPublication.draftPublicationThreads, codeContext: discussionCodeContext, onSetOrigin: originAction,
+            threadPublicationPreferences: threadPublicationPreferences, onSetThreadPublication: threadPublicationAction,
             extraContexts: current ? discussionStore.extraContexts : .empty,
             currentUserIdentity: current ? discussionStore.currentUser : nil, replyRecipients: item.replyRecipients,
             navigation: discussionNavigation,
@@ -1301,6 +1306,25 @@ private struct CommandCenterMRDetailContent: View {
         }
     }
 
+    private var threadPublicationPreferences: [String: MRAutomationPreference] {
+        originTarget.map { monitor.settings.threadPublicationPermissions(for: $0) } ?? [:]
+    }
+
+    private var threadPublicationAction: MRThreadPublicationAction? {
+        guard originAction != nil, let target = originTarget,
+              let userID = monitor.settings.authenticatedAccountID(host: target.host, username: target.username) else { return nil }
+        let authenticatedTarget = target.forAccount(.init(host: target.host, username: target.username, userID: userID))
+        let revision = monitor.glab.accountRevision
+        return { discussionID, expected, preference in
+            Task {
+                guard monitor.glab.accountRevision == revision else { return }
+                do {
+                    try await monitor.setThreadPublication(preference, replacing: expected, discussionID: discussionID, for: authenticatedTarget)
+                } catch { threadPublicationChangeFailed = true }
+            }
+        }
+    }
+
     @ViewBuilder private func discussionThreads(_ discussions: MRDiscussionSnapshot) -> some View {
         let current = discussionStore.hasCurrentTarget(discussionTarget, accountRevision: monitor.glab.accountRevision)
         let snapshot = showsPublication ? discussions.remainingDiscussions : discussions
@@ -1308,7 +1332,9 @@ private struct CommandCenterMRDetailContent: View {
             MRDiscussionThreadsView(snapshot: snapshot, mergeRequestURL: item.url,
             currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,
             hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
-            codeContext: discussionCodeContext, onSetOrigin: originAction, extraContexts: current ? discussionStore.extraContexts : .empty,
+            codeContext: discussionCodeContext, onSetOrigin: originAction,
+            threadPublicationPreferences: threadPublicationPreferences, onSetThreadPublication: threadPublicationAction,
+            extraContexts: current ? discussionStore.extraContexts : .empty,
                 currentUserIdentity: current ? discussionStore.currentUser : nil, replyRecipients: item.replyRecipients,
                 navigation: discussionNavigation, expansion: $commentsExpanded,
                 onRefresh: { refreshDiscussions(visible: true) })

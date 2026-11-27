@@ -26,6 +26,8 @@ struct MRDiscussionThreadsView: View {
     var codeContext: MRDiscussionCodeContext? = nil
     /// Present when the user may change comment origins; `nil` classification returns to automatic assessment.
     var onSetOrigin: MRDiscussionOriginAction? = nil
+    var threadPublicationPreferences: [String: MRAutomationPreference] = [:]
+    var onSetThreadPublication: MRThreadPublicationAction? = nil
     var extraContexts: AICommentProvenanceStore.ExtraContexts = .empty
     var currentUserIdentity: PersonIdentity? = nil
     var replyRecipients: [String: [PersonIdentity]] = [:]
@@ -129,6 +131,8 @@ struct MRDiscussionThreadsView: View {
                                extraContexts: extraContexts, replyTo: replyMessage(thread.id),
                                onDelete: onDelete, onRegenerate: onRegenerate, aiReplyControls: aiReplyControls,
                                onSetOrigin: onSetOrigin,
+                               publicationPreference: thread.discussionID.flatMap { threadPublicationPreferences[$0] } ?? .default,
+                               onSetThreadPublication: onSetThreadPublication,
                                navigation: expansion)
             .id(anchor)
     }
@@ -144,6 +148,7 @@ struct AIReplyControls {
 }
 
 typealias MRDiscussionOriginAction = (AICommentOriginOverride.Classification?, [GitLabMergeRequestDiscussion.Note]) -> Void
+typealias MRThreadPublicationAction = (String, MRAutomationPreference, MRAutomationPreference) -> Void
 
 private struct MRDiscussionThreadView: View {
     let thread: MRDiscussionSnapshot.Thread
@@ -160,15 +165,11 @@ private struct MRDiscussionThreadView: View {
     var onRegenerate: ((GitLabDraftNote) -> Void)? = nil
     var aiReplyControls: AIReplyControls? = nil
     var onSetOrigin: MRDiscussionOriginAction? = nil
+    var publicationPreference: MRAutomationPreference = .default
+    var onSetThreadPublication: MRThreadPublicationAction? = nil
     let navigation: MRDiscussionNavigation?
     @State private var isExpanded = false
     @State private var appliedInitialExpansion = false
-    @State private var threadOriginRequest: ThreadOriginRequest?
-
-    private struct ThreadOriginRequest: Identifiable {
-        let id = UUID()
-        let classification: AICommentOriginOverride.Classification?
-    }
 
     private var stateLabel: LocalizedStringResource {
         switch thread.state {
@@ -188,19 +189,19 @@ private struct MRDiscussionThreadView: View {
     var body: some View {
         let comments = thread.notes.filter { $0.system != true }
         let summary = thread.replySummary(currentUsername: currentUsername)
-        let originBadge = thread.originBadge
         return VStack(alignment: .leading, spacing: 12) {
             DisclosureGroup(isExpanded: $isExpanded) {
                 if isExpanded {
                     VStack(alignment: .leading, spacing: 12) {
                         // The first comment's author line stays in the header; its body continues here.
                         if let first = comments.first {
-                            MRDiscussionNoteContent(note: first, threadLocation: thread.location, markdownCache: markdownCache)
+                            MRDiscussionNoteContent(note: first, threadLocation: thread.location, markdownCache: markdownCache,
+                                origin: origin(of: first), onSetOrigin: noteOriginAction(first))
                         }
                         ForEach(StableRowKey.rows(Array(comments.dropFirst()), id: \.id)) { row in
                             let note = row.element
                             Divider().padding(.vertical, 2)
-                            MRDiscussionNoteView(note: note, origin: note.id.flatMap { thread.origins[$0] },
+                            MRDiscussionNoteView(note: note, origin: origin(of: note),
                                                  authorKind: (note.author?.id).flatMap { thread.authorKinds[$0] },
                                                  mergeRequestURL: mergeRequestURL, threadLocation: thread.location,
                                                  markdownCache: markdownCache, onSetOrigin: noteOriginAction(note), extraContext: extraContexts.forNote(note.id))
@@ -210,7 +211,7 @@ private struct MRDiscussionThreadView: View {
                     .padding(.top, 10)
                 }
             } label: {
-                threadHeader(firstComment: comments.first, summary: summary, originBadge: originBadge)
+                threadHeader(firstComment: comments.first, summary: summary)
             }
             .disclosureGroupStyle(MRDiscussionDisclosureStyle())
             if selection != nil { draftRows }
@@ -225,79 +226,59 @@ private struct MRDiscussionThreadView: View {
         .onChange(of: navigation, initial: true) { _, request in
             if request != nil { isExpanded = true }
         }
-        .alert(threadOriginTitle, isPresented: Binding(get: { threadOriginRequest != nil },
-                                                       set: { if !$0 { threadOriginRequest = nil } }),
-               presenting: threadOriginRequest) { request in
-            Button(role: .cancel) { threadOriginRequest = nil } label: { Text(.MRDiscussions.mrDiscussionsOriginCancel) }
-            Button { onSetOrigin?(request.classification, comments); threadOriginRequest = nil } label: {
-                Text(.MRDiscussions.mrDiscussionsOriginConfirm)
-            }
-            .disabled(containsBotComment)
-        } message: { _ in
-            Text(.MRDiscussions.mrDiscussionsThreadOriginMessage(comments.count))
-        }
     }
 
-    private var threadOriginTitle: Text {
-        switch threadOriginRequest?.classification {
-        case .ai: Text(.MRDiscussions.mrDiscussionsThreadOriginAiTitle)
-        case .uncertain: Text(.MRDiscussions.mrDiscussionsThreadOriginUncertainTitle)
-        case .human: Text(.MRDiscussions.mrDiscussionsThreadOriginHumanTitle)
-        case nil: Text(.MRDiscussions.mrDiscussionsThreadOriginAutomaticTitle)
-        }
+    private func origin(of note: GitLabMergeRequestDiscussion.Note) -> MRDiscussionSnapshot.Origin? {
+        note.id.flatMap { thread.origins[$0] }
     }
 
     private func noteOriginAction(_ note: GitLabMergeRequestDiscussion.Note) -> ((AICommentOriginOverride.Classification?) -> Void)? {
-        guard let onSetOrigin, note.id.flatMap({ thread.origins[$0] }) != .botAccount else { return nil }
+        guard let onSetOrigin, origin(of: note)?.isFixed != true,
+              (note.id ?? 0) > 0, (note.author?.id ?? 0) > 0, note.body?.isEmpty == false else { return nil }
         return { onSetOrigin($0, [note]) }
     }
 
-    private var containsBotComment: Bool {
-        thread.notes.contains { $0.system != true && $0.id.flatMap { thread.origins[$0] } == .botAccount }
-    }
-
-    private var containsOnlyBotComments: Bool {
-        let comments = thread.notes.filter { $0.system != true }
-        return !comments.isEmpty && comments.allSatisfy { $0.id.flatMap { thread.origins[$0] } == .botAccount }
-    }
-
     private func threadHeader(firstComment: GitLabMergeRequestDiscussion.Note?,
-                              summary: MRDiscussionSnapshot.Thread.ReplySummary,
-                              originBadge: MRDiscussionSnapshot.OriginBadge?) -> some View {
+                              summary: MRDiscussionSnapshot.Thread.ReplySummary) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            StatusFlowLayout(centerRows: true) {
-                HStack(spacing: 4) {
-                    if thread.state == .resolved { Image(systemName: "checkmark") }
-                    Text(stateLabel)
+            HStack(alignment: .discussionHeaderCenter, spacing: 12) {
+                StatusFlowLayout(centerRows: true) {
+                    HStack(spacing: 4) {
+                        if thread.state == .resolved { Image(systemName: "checkmark") }
+                        Text(stateLabel)
+                    }
+                    .font(.caption.weight(thread.state == .open ? .semibold : .regular)).foregroundStyle(stateColor)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(stateColor.opacity(thread.state == .open ? 0.055 : 0.08), in: Capsule())
+                    // Keep the header anchored to the first row when the other badges wrap.
+                    .alignmentGuide(.discussionHeaderCenter) { $0[VerticalAlignment.center] }
+                    if let feedback = thread.feedback { MRDiscussionFeedbackBadge(state: feedback) }
+                    replyStatus(summary)
                 }
-                .font(.caption.weight(thread.state == .open ? .semibold : .regular)).foregroundStyle(stateColor)
-                .fixedSize(horizontal: true, vertical: false)
-                .padding(.horizontal, 7).padding(.vertical, 3)
-                .background(stateColor.opacity(thread.state == .open ? 0.055 : 0.08), in: Capsule())
-                // Keep the header anchored to the first row when the other badges wrap.
-                .alignmentGuide(.discussionHeaderCenter) { $0[VerticalAlignment.center] }
-                if let feedback = thread.feedback { MRDiscussionFeedbackBadge(state: feedback) }
-                replyStatus(summary)
-                if let originBadge {
-                    MRDiscussionOriginBadge(badge: originBadge, origin: containsOnlyBotComments ? .botAccount : nil,
-                        isManual: !thread.origins.isEmpty && thread.origins.values.allSatisfy(\.isManual),
-                        scope: .thread,
-                        onSelect: onSetOrigin == nil || containsBotComment ? nil : { threadOriginRequest = .init(classification: $0) })
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if let id = thread.discussionID, !id.isEmpty, let onSetThreadPublication {
+                    ThreadPublicationMenu(preference: .init(rawValue: publicationPreference.rawValue) ?? .default) { choice in
+                        guard let preference = MRAutomationPreference(rawValue: choice.rawValue) else { return }
+                        onSetThreadPublication(id, publicationPreference, preference)
+                    }
                 }
             }
             if let location = thread.location {
                 MRDiscussionLocationLabel(location: .init(full: location))
             }
             if let firstComment {
-                MRDiscussionNoteHeader(note: firstComment, origin: firstComment.id.flatMap { thread.origins[$0] },
-                    authorKind: (firstComment.author?.id).flatMap { thread.authorKinds[$0] },
-                    mergeRequestURL: mergeRequestURL, onSetOrigin: noteOriginAction(firstComment),
+                MRDiscussionNoteHeader(note: firstComment,
+                    authorKind: origin(of: firstComment) == .botAccount ? .automation
+                        : (firstComment.author?.id).flatMap { thread.authorKinds[$0] },
+                    mergeRequestURL: mergeRequestURL,
                     extraContext: extraContexts.forNote(firstComment.id))
                     .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary)
                 if !isExpanded, let body = firstComment.body {
                     Text(markdownCache.render(body) ?? AttributedString(body)).font(.callout)
                         .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary).lineLimit(2)
                         .padding(.top, 1)
+                    MRDiscussionNoteAuthorship(origin: origin(of: firstComment), onSetOrigin: noteOriginAction(firstComment))
                 }
             }
         }
@@ -335,7 +316,7 @@ private extension VerticalAlignment {
     static let discussionHeaderCenter = VerticalAlignment(DiscussionHeaderCenter.self)
 }
 
-/// The header is not one big button, so origin menus and links inside it stay clickable.
+/// Independent header controls and links stay clickable.
 private struct MRDiscussionDisclosureStyle: DisclosureGroupStyle {
     func makeBody(configuration: Configuration) -> some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -376,32 +357,26 @@ private struct MRDiscussionNoteView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            MRDiscussionNoteHeader(note: note, origin: origin, authorKind: authorKind,
-                                   mergeRequestURL: mergeRequestURL, onSetOrigin: onSetOrigin,
+            MRDiscussionNoteHeader(note: note, authorKind: origin == .botAccount ? .automation : authorKind,
+                                   mergeRequestURL: mergeRequestURL,
                                    extraContext: extraContext)
-            MRDiscussionNoteContent(note: note, threadLocation: threadLocation, markdownCache: markdownCache)
+            MRDiscussionNoteContent(note: note, threadLocation: threadLocation, markdownCache: markdownCache,
+                                    origin: origin, onSetOrigin: onSetOrigin)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-/// One line for every comment, the thread's first included: author, origin, then date and link on the right.
 private struct MRDiscussionNoteHeader: View {
     let note: GitLabMergeRequestDiscussion.Note
-    let origin: MRDiscussionSnapshot.Origin?
     let authorKind: AuthorFeedbackPolicy.AccountKind?
     let mergeRequestURL: URL
-    var onSetOrigin: ((AICommentOriginOverride.Classification?) -> Void)? = nil
     var extraContext: AICommentProvenanceStore.ExtraContexts.Entry? = nil
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            MRDiscussionAuthorView(author: note.author, accountKind: origin == .botAccount ? nil : authorKind)
+            MRDiscussionAuthorView(author: note.author, accountKind: authorKind)
                 .layoutPriority(1)
-            if let origin {
-                MRDiscussionOriginBadge(badge: origin.badge, origin: origin, isManual: origin.isManual,
-                                        scope: .comment, onSelect: onSetOrigin)
-            }
             Spacer(minLength: 4)
             if let extraContext { ExtraContextButton(context: extraContext) }
             if let posted = note.createdAt {
@@ -423,6 +398,8 @@ private struct MRDiscussionNoteContent: View {
     let note: GitLabMergeRequestDiscussion.Note
     let threadLocation: String?
     let markdownCache: MRDiscussionMarkdownCache
+    let origin: MRDiscussionSnapshot.Origin?
+    let onSetOrigin: ((AICommentOriginOverride.Classification?) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -430,8 +407,47 @@ private struct MRDiscussionNoteContent: View {
                 MRDiscussionLocationLabel(location: location).textSelection(.enabled)
             }
             MRDiscussionBody(source: note.body, markdownCache: markdownCache)
+            if note.body?.isEmpty == false {
+                MRDiscussionNoteAuthorship(origin: origin, onSetOrigin: onSetOrigin)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct MRDiscussionNoteAuthorship: View {
+    let origin: MRDiscussionSnapshot.Origin?
+    let onSetOrigin: ((AICommentOriginOverride.Classification?) -> Void)?
+
+    var body: some View {
+        if origin != .botAccount {
+            let control = CommentAuthorshipControl(selection: selection, isManual: origin?.isManual == true,
+                appGenerated: origin == .appGenerated, onSelect: onSetOrigin.map { action in
+                    { choice in action(choice.flatMap { AICommentOriginOverride.Classification(rawValue: $0.rawValue) }) }
+                })
+            if let explanation { control.help(explanation) }
+            else { control }
+        }
+    }
+
+    private var selection: RemoteDetailNote.Origin? {
+        switch origin?.badge {
+        case .ai: .ai
+        case .human: .human
+        case .uncertain: .uncertain
+        case nil: nil
+        }
+    }
+
+    private var explanation: Text? {
+        switch origin {
+        case .verifiedAssistant: Text(.MRDiscussions.mrDiscussionsAiVerified)
+        case .assessed(let evidence): Text(.MRDiscussions.mrDiscussionsAiAssessed) + Text(verbatim: "\n" + evidence)
+        case .uncertain(let evidence): Text(.MRDiscussions.mrDiscussionsAiUncertainHelp) + Text(verbatim: "\n" + evidence)
+        case .humanLikely(let evidence): Text(.MRDiscussions.mrDiscussionsHumanHelp) + Text(verbatim: "\n" + evidence)
+        case .manual: Text(.MRDiscussions.mrDiscussionsManualHelp)
+        case .appGenerated, .botAccount, nil: nil
+        }
     }
 }
 
@@ -616,133 +632,6 @@ private struct ExtraContextButton: View {
             }
             .frame(width: 440)
             .frame(maxHeight: 520)
-        }
-    }
-}
-
-private struct MRDiscussionOriginBadge: View {
-    enum Scope { case comment, thread }
-    let badge: MRDiscussionSnapshot.OriginBadge
-    var origin: MRDiscussionSnapshot.Origin? = nil
-    var isManual = false
-    var scope: Scope = .comment
-    /// Present when the user may change the classification; `nil` returns to automatic assessment.
-    var onSelect: ((AICommentOriginOverride.Classification?) -> Void)? = nil
-
-    private var title: LocalizedStringResource {
-        if origin == .botAccount { return .AuthorFeedback.authorFeedbackBotAuthor }
-        if origin == .appGenerated { return .MRDiscussions.mrDiscussionsAiMergeTether }
-        return switch badge {
-        case .ai: .MRDiscussions.mrDiscussionsAi
-        case .uncertain: .MRDiscussions.mrDiscussionsAiUncertain
-        case .human: .MRDiscussions.mrDiscussionsHuman
-        }
-    }
-    private var color: Color {
-        if origin == .botAccount { return .secondary }
-        return switch badge {
-        case .ai: .purple
-        case .uncertain: .orange
-        case .human: .teal
-        }
-    }
-    private var symbol: String {
-        if origin == .botAccount { return "gearshape" }
-        if origin == .appGenerated { return "wand.and.stars" }
-        return switch badge {
-        case .ai: "sparkles"
-        case .uncertain: "questionmark"
-        case .human: "person.fill"
-        }
-    }
-    private var explanation: Text {
-        var text: Text = switch origin {
-        case .botAccount: Text(.MRDiscussions.mrDiscussionsBotOriginHelp)
-        case .verifiedAssistant: Text(.MRDiscussions.mrDiscussionsAiVerified)
-        case .appGenerated: Text(.MRDiscussions.mrDiscussionsAiAppGenerated)
-        case .assessed(let evidence): Text(.MRDiscussions.mrDiscussionsAiAssessed) + Text(verbatim: "\n" + evidence)
-        case .uncertain(let evidence): Text(.MRDiscussions.mrDiscussionsAiUncertainHelp) + Text(verbatim: "\n" + evidence)
-        case .humanLikely(let evidence): Text(.MRDiscussions.mrDiscussionsHumanHelp) + Text(verbatim: "\n" + evidence)
-        case .manual: Text(.MRDiscussions.mrDiscussionsManualHelp)
-        case nil:
-            switch badge {
-            case .ai: Text(.MRDiscussions.mrDiscussionsThreadAiHelp)
-            case .uncertain: Text(.MRDiscussions.mrDiscussionsThreadUncertainHelp)
-            case .human: Text(.MRDiscussions.mrDiscussionsThreadHumanHelp)
-            }
-        }
-        if onSelect != nil && origin != .botAccount {
-            text = text + Text(verbatim: "\n\n") + Text(scope == .thread
-                ? .MRDiscussions.mrDiscussionsThreadOriginMenuHelp : .MRDiscussions.mrDiscussionsOriginMenuHelp)
-        }
-        return text
-    }
-    private var current: AICommentOriginOverride.Classification? {
-        guard isManual else { return nil }
-        return switch badge { case .ai: .ai; case .uncertain: .uncertain; case .human: .human }
-    }
-
-    private var capsule: some View {
-        Group {
-            if origin == .botAccount {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Image(systemName: "gearshape").accessibilityHidden(true)
-                    Text(title)
-                }
-            } else {
-                Label {
-                    HStack(spacing: 3) {
-                        Text(title)
-                        if isManual { Image(systemName: "hand.raised.fill").imageScale(.small).accessibilityHidden(true) }
-                        if onSelect != nil { Image(systemName: "chevron.down").imageScale(.small).accessibilityHidden(true) }
-                    }
-                } icon: { Image(systemName: symbol) }
-            }
-        }
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(color).padding(.horizontal, 6).padding(.vertical, 2)
-            .background(color.opacity(0.1), in: Capsule())
-            .fixedSize(horizontal: true, vertical: false)
-    }
-
-    var body: some View {
-        if let onSelect, origin != .botAccount {
-            Menu {
-                Section {
-                    option(.ai, title: .MRDiscussions.mrDiscussionsAi, symbol: "sparkles", onSelect: onSelect)
-                    option(.uncertain, title: .MRDiscussions.mrDiscussionsAiUncertain, symbol: "questionmark", onSelect: onSelect)
-                    option(.human, title: .MRDiscussions.mrDiscussionsHuman, symbol: "person.fill", onSelect: onSelect)
-                } header: {
-                    Text(scope == .thread ? .MRDiscussions.mrDiscussionsThreadOriginMenuTitle : .MRDiscussions.mrDiscussionsOriginMenuTitle)
-                }
-                if isManual || scope == .thread {
-                    Divider()
-                    Button { onSelect(nil) } label: {
-                        Label { Text(.MRDiscussions.mrDiscussionsOriginAutomatic) } icon: { Image(systemName: "arrow.uturn.backward") }
-                    }
-                }
-            } label: { capsule }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help(explanation)
-                .accessibilityLabel(Text(title))
-                .accessibilityHint(explanation)
-        } else {
-            capsule
-                .help(explanation)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(Text(title))
-                .accessibilityHint(explanation)
-        }
-    }
-
-    @ViewBuilder
-    private func option(_ value: AICommentOriginOverride.Classification, title: LocalizedStringResource, symbol: String,
-                        onSelect: @escaping (AICommentOriginOverride.Classification?) -> Void) -> some View {
-        Button { onSelect(value) } label: {
-            Label { Text(title) } icon: { Image(systemName: current == value ? "checkmark" : symbol) }
         }
     }
 }

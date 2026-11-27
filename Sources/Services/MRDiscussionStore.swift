@@ -164,7 +164,9 @@ final class MRDiscussionStore {
                 if verified {
                     verifiedAssistantIDs.insert(id)
                     for note in result.flatMap(\.notes) where note.system != true && note.author?.id == id {
-                        if let noteID = note.id, assessed[noteID]?.isManual != true { assessed[noteID] = .verifiedAssistant }
+                        if let noteID = note.id, assessed[noteID]?.isManual != true, assessed[noteID] != .appGenerated {
+                            assessed[noteID] = .verifiedAssistant
+                        }
                     }
                 }
             }
@@ -225,7 +227,9 @@ final class MRDiscussionStore {
         var updated = cached.0
         let contexts = cached.1
         guard originToken == token, isCurrent(current, target: target, glab: glab, revision: revision) else { return }
-        for (id, origin) in origins where origin == .verifiedAssistant && updated[id]?.isManual != true { updated[id] = origin }
+        for (id, origin) in origins where origin == .verifiedAssistant && updated[id]?.isManual != true && updated[id] != .appGenerated {
+            updated[id] = origin
+        }
         origins = updated
         extraContexts = contexts
     }
@@ -254,15 +258,15 @@ final class MRDiscussionStore {
             for thread in result {
                 for note in thread.notes where note.system != true {
                     let isGenerated = generated?.contains(note, discussionID: thread.id) == true
-                    if let id = note.id, !isGenerated { contexts.removeNote(id) }
+                    if let id = note.id, isGenerated {
+                        origins[id] = .appGenerated
+                        continue
+                    }
+                    if let id = note.id { contexts.removeNote(id) }
                     if let id = note.id, let override = AICommentOriginOverrideStore.override(for: note, host: target.host,
                         projectID: target.projectID, iid: target.iid, username: target.username, userID: userID,
                         legacyUsernames: legacyUsernames, in: directory) {
                         origins[id] = .manual(override.badge)
-                        continue
-                    }
-                    if let id = note.id, isGenerated {
-                        origins[id] = .appGenerated
                         continue
                     }
                     if let declared = AICommentOriginAssessor.declaredAttribution(for: note) {

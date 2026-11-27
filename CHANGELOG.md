@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Ask Agent checks GitLab status and discussions before answering a question that names an MR number. Select and copy text across paragraphs and links in chat messages.
 
+- Classify published comments below their text on Mac, iPhone and iPad. **Written with AI?** offers **Yes**, **No** and **Uncertain**. Comments that match MergeTether's original text show a **Created with MergeTether** badge. A compact **Auto-publishing** menu in each thread offers **Default**, **On** and **Off** for the AI publication rule.
+
 - Hide the empty **Next step** panel in Mac merge request Details when no decision is available, including while waiting on open review threads.
 
 - Trace MR activity from the Mac Event log and ask the agent about earlier events. See comment text, the people involved and links to the GitLab notes. Hover over a person's name for their profile.

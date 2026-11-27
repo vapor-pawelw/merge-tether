@@ -27,8 +27,10 @@ struct MRDiscussionSnapshot {
         case assessed(evidence: String)
         case uncertain(evidence: String)
         case humanLikely(evidence: String)
-        /// The user's own verdict; it replaces every automatic signal for this comment.
+        /// The user's own verdict for an ordinary comment.
         case manual(OriginBadge)
+
+        var isFixed: Bool { self == .appGenerated || self == .botAccount }
 
         var isManual: Bool {
             if case .manual = self { return true }

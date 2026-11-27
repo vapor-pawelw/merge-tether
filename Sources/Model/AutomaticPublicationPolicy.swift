@@ -65,6 +65,7 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
     var aiCommentCriteriaOverride: String? = nil
     var treatAssignedMergeRequestsAsOwn = true
     var allowsOtherReviewThreadReplies = false
+    var threadPreferences: [String: MRAutomationPreference] = [:]
 
     func allows(_ draft: GitLabDraftNote, request: GitLabMergeRequest,
                 discussions: [GitLabMergeRequestDiscussion]?, userID: Int, host: String,
@@ -88,13 +89,21 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
         guard let sources = Self.sourceNotes(for: draft, discussions: discussions, userID: userID),
               !sources.isEmpty else { return false }
         if mode == .all { return true }
+        let threadPreference = threadOriginPreference(for: draft)
+        guard threadPreference != .off else { return false }
         return sources.allSatisfy { note in
             guard let authorID = note.author?.id, let noteID = note.id else { return false }
             return matches(restrictions.sourceCommentAuthors, host: host, id: authorID)
-                && (!(requiresAI || allowsBotReplies)
+                && (threadPreference == .on || !(requiresAI || allowsBotReplies)
                     || (requiresAI && aiNoteIDs.contains(noteID))
                     || (allowsBotReplies && botNoteIDs.contains(noteID)))
         }
+    }
+
+    /// Thread preferences replace source-origin assessments only when the current policy checks for AI.
+    func threadOriginPreference(for draft: GitLabDraftNote) -> MRAutomationPreference {
+        guard requiresAI, let id = draft.discussionID else { return .default }
+        return threadPreferences[id] ?? .default
     }
 
     /// A cheap necessary-condition check for proof warnings. It can prove that

@@ -65,6 +65,17 @@ import MergeTetherRemote
         #expect(subscription.nextUpdate() == nil)
     }
 
+    @Test func aLateAssessmentCannotReplaceTheOriginOfAnExactGeneratedNote() throws {
+        let (source, request, original) = try fixture()
+        var details = original
+        details.threads?[0].notes[0].origin = .ai
+        details.threads?[0].notes[0].appGenerated = true
+        let subscription = RemoteDetailOriginSubscription(request: request, source: source, accountRevision: 10)
+        #expect(subscription.record(event(source, classification: .manualLikely)))
+        subscription.delivered(full: details, rendered: details)
+        #expect(subscription.nextUpdate() == nil)
+    }
+
     @Test(arguments: ["body", "author", "account", "revision", "head"])
     func mismatchedSourceCannotAnnotateAnUnchangedRenderedPrefix(_ mismatch: String) throws {
         let (source, request, full) = try fixture()

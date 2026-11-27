@@ -21,6 +21,18 @@ import MergeTetherRemote
               let username = monitor.glab.currentUsername else { return }
         details.issues = monitor.issueTags(for: request)
         let target = MRAutomationScope.Target.mergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
+        if request.isOpen, details.discussionFingerprint != nil,
+           monitor.settings.authenticatedAccountID(host: host, username: username) != nil {
+            let choices = monitor.settings.threadPublicationPermissions(for: target)
+            if var threads = details.threads {
+                for index in threads.indices {
+                    guard let id = threads[index].gitLabDiscussionID else { continue }
+                    let preference = choices[id] ?? .default
+                    threads[index].publicationPreference = .init(rawValue: preference.rawValue)
+                }
+                details.threads = threads
+            }
+        }
         let people = request.personDirectory(approvals: item.approvalProgress, notes: item.feedback)
         let assessment = details.discussionFingerprint.flatMap {
             monitor.attention.discussionAssessment(for: request, fingerprint: $0,

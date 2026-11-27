@@ -36,6 +36,47 @@ final class SettingsManager {
     private var accountBindingSaved = false
     var accountReadyForWrites: Bool { !requiresAuthenticatedGitLabAccount || accountBindingSaved }
 
+    private struct ThreadPublicationKey: Codable, Hashable {
+        let host: String
+        let userID: Int
+        let request: GitLabMergeRequestID
+        let discussionID: String
+    }
+
+    private var threadPublicationChoices: [ThreadPublicationKey: MRAutomationPreference] = [:]
+
+    func threadPublicationPermissions(for target: MRAutomationScope.Target) -> [String: MRAutomationPreference] {
+        guard accountReadyForWrites, let userID = authenticatedAccountID(host: target.host, username: target.username),
+              target.userID == nil || target.userID == userID, let iid = target.iid else { return [:] }
+        let request = GitLabMergeRequestID(projectID: target.projectID, iid: iid)
+        return threadPublicationChoices.reduce(into: [:]) { choices, entry in
+            if entry.key.host == target.host, entry.key.userID == userID, entry.key.request == request {
+                choices[entry.key.discussionID] = entry.value
+            }
+        }
+    }
+
+    @discardableResult
+    func setThreadPublication(_ preference: MRAutomationPreference, discussionID: String,
+                              for target: MRAutomationScope.Target) -> Bool {
+        guard accountReadyForWrites, let userID = authenticatedAccountID(host: target.host, username: target.username),
+              target.userID == nil || target.userID == userID, target.projectID > 0, let iid = target.iid, iid > 0,
+              !discussionID.isEmpty else { return false }
+        let key = ThreadPublicationKey(host: target.host, userID: userID,
+            request: .init(projectID: target.projectID, iid: iid), discussionID: discussionID)
+        var choices = threadPublicationChoices
+        choices[key] = preference == .default ? nil : preference
+        guard choices != threadPublicationChoices else { return true }
+        persistenceStore.preserveCorruptValues()
+        guard persistenceStore.save(choices, forKey: Key.threadPublicationChoices) else { return false }
+        guard persistenceStore.synchronize() else {
+            persistenceStore.save(threadPublicationChoices, forKey: Key.threadPublicationChoices)
+            return false
+        }
+        threadPublicationChoices = choices
+        return true
+    }
+
     func approvalBaseline(for target: MRAutomationScope.Target, user: GitLabAuthenticatedUser) -> ReviewApprovalBaseline? {
         guard let key = MRSettingsKey(target.forAccount(.init(host: target.host, username: target.username))),
               target.account.matches(user.account(on: target.host)) else { return nil }
@@ -582,6 +623,7 @@ final class SettingsManager {
             self.glabPath = nil
         }
 
+        threadPublicationChoices = store.load(Key.threadPublicationChoices, fallback: [:])
         lastSeenTodoIDs = store.load(Key.lastSeenTodoIDs, fallback: [])
         let legacyArchive = store.load(Key.mergeRequestRecords, fallback: MRSettingsArchive())
         mrSettingsArchive = store.load(Key.mergeRequestAccountRecords, fallback: legacyArchive)
@@ -891,6 +933,7 @@ final class SettingsManager {
         static let ignoredMergeRequests = "ignoredMergeRequests"
         static let feedbackSuggestionDecisions = "feedbackSuggestionDecisions"
         static let reviewParticipationPreferences = "reviewParticipationPreferences"
+        static let threadPublicationChoices = "threadPublicationChoices"
     }
 }
 

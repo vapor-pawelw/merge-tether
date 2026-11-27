@@ -585,6 +585,36 @@ import MergeTetherRemote
         #expect(f.readerCount == 1 && f.gitlab.requests.count == reads)
     }
 
+    @Test func phoneThreadPublicationChangesValidateTheLiveThreadAndExpectedPreference() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        let previous = try #require(f.gitlab.handler)
+        f.gitlab.handler = { call in
+            if call.endpoint.contains("/discussions?") {
+                return InMemoryGitLab.output(#"[{"id":"thread","notes":[{"id":7,"author":{"id":9,"username":"reviewer"},"body":"Check the retry."}]}]"#)
+            }
+            return try await previous(call)
+        }
+        let target = MRAutomationScope.Target.mergeRequest(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2)
+        for (discussionID, expected, preference, result) in [
+            ("thread", RemoteCardAutomation.Preference.default, RemoteCardAutomation.Preference.on, RemoteCommandResult.Status.completed),
+            ("thread", .default, .off, .changed),
+            ("missing", .default, .on, .changed),
+            ("thread", .on, .off, .completed),
+        ] {
+            let board = try await f.board(commentOrigins: true)
+            let card = try #require(board.cards.first { $0.id == "mr:1:2" })
+            let action = try #require(card.actions.first { $0.kind == .setCommentOrigin })
+            let change = RemoteCommentOriginRequest(operation: .setThreadPublication,
+                threadPublication: .init(discussionID: discussionID, expected: expected, preference: preference))
+            let command = RemoteCommand(hostSession: board.hostSession, account: board.account, cardID: card.id,
+                actionID: action.id, token: action.token, argument: change.argument)
+            await f.transport.onMessage?(.init(type: .command, command: command))
+            #expect(f.transport.messages.last(where: { $0.type == .result })?.result?.status == result)
+        }
+        #expect(f.monitor.settings.threadPublicationPermissions(for: target) == ["thread": .off])
+        #expect(f.gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
     @Test(arguments: ["server", "local"], ["ai", "human", "uncertain", "automatic"])
     func knownBotAuthorsRejectManualOriginChangesWithoutWritingOverrides(_ identity: String, _ choice: String) async throws {
         let f = try Fixture(); defer { f.clean() }
@@ -990,16 +1020,18 @@ import MergeTetherRemote
                 actionID: action.id, token: action.token)
         }
         func board(originUpdates: Bool = false, markReady: Bool = false, detailPreviews: Bool = false,
-                   detailAvatars: Bool = false, cardActions: Bool = false, mrBoardActions: Bool = false) async throws -> RemoteBoard {
+                   detailAvatars: Bool = false, cardActions: Bool = false, mrBoardActions: Bool = false,
+                   commentOrigins: Bool = false) async throws -> RemoteBoard {
             await host.startupLoadTask?.value
             if monitor.lastRefresh == nil { await monitor.refreshNow() }
-            let capabilities = [RemoteMessage.detailsCapability]
+            var capabilities = [RemoteMessage.detailsCapability]
                 + (originUpdates ? [RemoteMessage.detailOriginsCapability] : [])
                 + (markReady ? [RemoteMessage.markReadyCapability] : [])
                 + (detailPreviews ? [RemoteMessage.detailPreviewCapability] : [])
                 + (detailAvatars ? [RemoteMessage.detailAvatarsCapability] : [])
                 + (cardActions ? ["card-actions-v1"] : [])
                 + (mrBoardActions ? [RemoteMessage.mrBoardActionsCapability] : [])
+            if commentOrigins { capabilities.append(RemoteMessage.commentOriginCapability) }
             await transport.onMessage?(.init(type: .hello, challenge: UUID(), capabilities: capabilities))
             // Both background dependency reads can change the card digest after the catalog is idle.
             let deadline = ContinuousClock.now + .seconds(3)

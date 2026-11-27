@@ -197,8 +197,9 @@ public struct RemoteDetailNote: Codable, Equatable, Identifiable, Sendable {
     public let createdAt: Date?
     public let url: URL?
     public var origin: Origin?
-    /// Bot identity is a fixed display classification; the raw text verdict survives removal of that identity.
-    public var displayOrigin: Origin? { authorKind == .automation ? .ai : origin }
+    /// Fixed classifications display as AI independently of text assessments.
+    public var displayOrigin: Origin? { isOriginFixed ? .ai : origin }
+    public var isOriginFixed: Bool { authorKind == .automation || appGenerated == true }
     public let authorID: Int?
     public var authorKind: AuthorKind?
     public let avatarURL: URL?
@@ -208,10 +209,12 @@ public struct RemoteDetailNote: Codable, Equatable, Identifiable, Sendable {
     public var extraContext: String?
     /// When true, the Extra context belongs to a proposed solution.
     public var proposedSolution: Bool?
+    /// The host matched this exact comment to a saved MergeTether authorship record.
+    public var appGenerated: Bool?
     public init(id: String, author: String? = nil, username: String? = nil, body: String, location: String? = nil,
                 createdAt: Date? = nil, url: URL? = nil, origin: Origin? = nil, authorID: Int? = nil,
                 authorKind: AuthorKind? = nil, avatarURL: URL? = nil, originManual: Bool? = nil, extraContext: String? = nil,
-                proposedSolution: Bool? = nil) {
+                proposedSolution: Bool? = nil, appGenerated: Bool? = nil) {
         self.originManual = originManual
         self.id = id; self.author = author; self.username = username; self.body = body; self.location = location
         self.createdAt = createdAt; self.url = url; self.origin = origin
@@ -220,6 +223,7 @@ public struct RemoteDetailNote: Codable, Equatable, Identifiable, Sendable {
         self.avatarURL = avatarURL
         self.extraContext = extraContext
         self.proposedSolution = proposedSolution
+        self.appGenerated = appGenerated
     }
 }
 
@@ -238,6 +242,12 @@ public struct RemoteDetailThread: Codable, Equatable, Identifiable, Sendable {
     /// Links to the current board's draft bodies; older hosts omit this field.
     public var draftIDs: [Int]?
     public var feedback: Feedback?
+    /// Omitted by hosts that cannot edit this thread's publication preference.
+    public var publicationPreference: RemoteCardAutomation.Preference?
+    public var gitLabDiscussionID: String? {
+        guard id.hasPrefix("discussion/"), id.count > "discussion/".count else { return nil }
+        return String(id.dropFirst("discussion/".count))
+    }
     public var showsPublishedReply: Bool { draftCount == 0 && reply == .published }
     public var truncated = false
     public init(id: String, state: State, location: String? = nil, notes: [RemoteDetailNote], reply: Reply = .unavailable,
@@ -690,7 +700,8 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
             let matchingNotes = threads[thread].notes.indices.filter { threads[thread].notes[$0].id == change.noteID }
             guard matchingNotes.count == 1, let note = matchingNotes.first,
                   threads[thread].notes[note].originIdentity(in: change.threadID) == change.identity else { return false }
-            if change.revision > originRevisions[change.identity, default: 0] { edits.append((thread, note, change)) }
+            if threads[thread].notes[note].appGenerated != true,
+               change.revision > originRevisions[change.identity, default: 0] { edits.append((thread, note, change)) }
         }
         for change in authors {
             let matchingThreads = threads.indices.filter { threads[$0].id == change.threadID }

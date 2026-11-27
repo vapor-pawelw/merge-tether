@@ -1078,6 +1078,16 @@ extension RemoteConnection: RemoteHostTransport {}
                 return .completed
             } catch is CommentOriginOverrideCenter.ChangeError { return .changed }
             catch { return .failed }
+        case .setThreadPublication:
+            guard let change = request.threadPublication, !change.discussionID.isEmpty,
+                  let expected = MRAutomationPreference(rawValue: change.expected.rawValue),
+                  let preference = MRAutomationPreference(rawValue: change.preference.rawValue) else { return .changed }
+            do {
+                try await monitor.setThreadPublication(preference, replacing: expected, discussionID: change.discussionID, for: target)
+                return .completed
+            } catch CommentOriginOverrideCenter.ChangeError.storage { return .failed }
+            catch is CommentOriginOverrideCenter.ChangeError { return .changed }
+            catch { return .failed }
         }
     }
 

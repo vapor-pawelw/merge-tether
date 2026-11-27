@@ -14,7 +14,7 @@ final class CommentOriginOverrideCenter {
     typealias Activate = @MainActor ([Note]) -> Bool
     typealias Sleep = @Sendable (Duration) async throws -> Void
 
-    enum ChangeError: Error, Equatable { case invalidTarget, unknownComment, automatedAuthor, storage }
+    enum ChangeError: Error, Equatable { case invalidTarget, unknownComment, automatedAuthor, appGeneratedComment, storage }
 
     struct Change: Identifiable, Equatable {
         let id: UUID
@@ -32,6 +32,8 @@ final class CommentOriginOverrideCenter {
     static let gracePeriod: Duration = .seconds(10)
 
     let directory: URL
+    private let provenanceDirectory: URL
+    private let knownUsernames: (GitLabAccountIdentity) -> Set<String>
     private let grace: Duration
     private let gain: Gain
     private let resume: Resume
@@ -45,10 +47,14 @@ final class CommentOriginOverrideCenter {
     @ObservationIgnored private var activations: [UUID: @MainActor () -> Bool] = [:]
     @ObservationIgnored private var timers: [UUID: Task<Void, Never>] = [:]
 
-    init(directory: URL, grace: Duration = gracePeriod, gain: @escaping Gain, resume: @escaping Resume,
+    init(directory: URL, provenanceDirectory: URL = AICommentProvenanceStore.directory,
+         knownUsernames: @escaping (GitLabAccountIdentity) -> Set<String> = { _ in [] },
+         grace: Duration = gracePeriod, gain: @escaping Gain, resume: @escaping Resume,
          onRevision: @escaping @MainActor () -> Void = {},
          sleep: @escaping Sleep = { try await Task.sleep(for: $0) }, now: @escaping @MainActor () -> Date = { Date() }) {
-        self.directory = directory; self.grace = grace; self.gain = gain; self.resume = resume
+        self.directory = directory; self.provenanceDirectory = provenanceDirectory
+        self.knownUsernames = knownUsernames
+        self.grace = grace; self.gain = gain; self.resume = resume
         self.sleep = sleep; self.now = now; self.onRevision = onRevision
     }
 
@@ -61,7 +67,7 @@ final class CommentOriginOverrideCenter {
     func apply(_ classification: Classification?, to notes: [Note], in discussions: [GitLabMergeRequestDiscussion],
                target: MRAutomationScope.Target, userID: Int? = nil, legacyUsernames: Set<String>? = nil,
                activate: @escaping Activate = { _ in true }) async throws -> Change {
-        let selected = try validated(notes, in: discussions, target: target)
+        let selected = try validated(notes, in: discussions, target: target, userID: userID)
         let becomingAI = Set(selected.compactMap(\.id))
         let drafts = classification == .ai ? await gain(target, discussions, becomingAI) : 0
         let change = try store(classification, notes: selected, target: target, userID: userID,
@@ -73,14 +79,14 @@ final class CommentOriginOverrideCenter {
     func applyImmediately(_ classification: Classification, to notes: [Note], in discussions: [GitLabMergeRequestDiscussion],
                           target: MRAutomationScope.Target, userID: Int? = nil, legacyUsernames: Set<String>? = nil,
                           activate: @escaping Activate) throws {
-        let selected = try validated(notes, in: discussions, target: target)
+        let selected = try validated(notes, in: discussions, target: target, userID: userID)
         _ = try store(classification, notes: selected, target: target, userID: userID,
             legacyUsernames: legacyUsernames ?? [target.username], drafts: 0, activate: activate)
     }
 
     private func validated(_ notes: [Note], in discussions: [GitLabMergeRequestDiscussion],
-                           target: MRAutomationScope.Target) throws -> [Note] {
-        guard (target.iid ?? 0) > 0, target.projectID > 0, !target.host.isEmpty, !target.username.isEmpty else {
+                           target: MRAutomationScope.Target, userID: Int?) throws -> [Note] {
+        guard let iid = target.iid, iid > 0, target.projectID > 0, !target.host.isEmpty, !target.username.isEmpty else {
             throw ChangeError.invalidTarget
         }
         let current = discussions.flatMap(\.notes).filter { $0.system != true }
@@ -95,6 +101,20 @@ final class CommentOriginOverrideCenter {
             selected.append(note)
         }
         guard !selected.isEmpty else { throw ChangeError.unknownComment }
+        if let userID, selected.contains(where: { $0.author?.id == userID }) {
+            let account = GitLabAccountIdentity(host: target.host, username: target.username, userID: userID)
+            let context = AICommentProvenanceStore.Context(host: target.host, username: target.username, userID: userID,
+                projectID: target.projectID, iid: iid, legacyUsernames: knownUsernames(account))
+            let provenance = AICommentProvenanceStore.reconcile(discussions, context: context, in: provenanceDirectory)
+            let selectedIDs = Set(selected.compactMap(\.id))
+            for discussion in discussions {
+                if discussion.notes.contains(where: { note in
+                    note.id.map { selectedIDs.contains($0) } == true && provenance.contains(note, discussionID: discussion.id)
+                }) {
+                    throw ChangeError.appGeneratedComment
+                }
+            }
+        }
         return selected
     }
 

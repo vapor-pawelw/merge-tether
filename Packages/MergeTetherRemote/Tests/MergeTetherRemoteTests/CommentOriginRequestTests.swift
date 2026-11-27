@@ -3,6 +3,19 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct CommentOriginRequestTests {
+    @Test func threadPublicationCarriesTheDisplayedAndRequestedPreferences() throws {
+        var thread = RemoteDetailThread(id: "discussion/example", state: .open, notes: [])
+        #expect(thread.publicationPreference == nil)
+        let id = try #require(thread.gitLabDiscussionID)
+        #expect(id == "example")
+        thread.publicationPreference = .off
+        let decoded = try JSONDecoder().decode(RemoteDetailThread.self, from: JSONEncoder().encode(thread))
+        #expect(decoded.publicationPreference == .off)
+        let request = RemoteCommentOriginRequest(operation: .setThreadPublication,
+            threadPublication: .init(discussionID: id, expected: .off, preference: .default))
+        #expect(RemoteCommentOriginRequest(argument: request.argument) == request)
+    }
+
     @Test func aThreadRequestNamesEveryDisplayedNoteAndRoundTrips() throws {
         let notes = [RemoteDetailNote(id: "11", body: "First", origin: .uncertain, authorID: 7),
                      RemoteDetailNote(id: "12", body: "Reply", origin: .ai, authorID: 8)]
@@ -21,6 +34,14 @@ import Testing
         let tooMany = RemoteCommentOriginRequest(operation: .set, origin: .ai, notes: Array(repeating:
             .init(threadID: "discussion/abc", noteID: "1", identity: "x"), count: RemoteCommentOriginRequest.maximumNotes + 1))
         #expect(RemoteCommentOriginRequest(argument: tooMany.argument) == nil)
+    }
+
+    @Test func aFixedNoteBlocksTheThreadChangeAndLeavesOtherNotesEditable() {
+        let generated = RemoteDetailNote(id: "11", body: "Original", origin: .ai, authorID: 7, appGenerated: true)
+        let human = RemoteDetailNote(id: "12", body: "Edited", origin: .human, authorID: 7)
+        #expect(RemoteCommentOriginRequest.set(.human, notes: [generated], in: "thread") == nil)
+        #expect(RemoteCommentOriginRequest.set(nil, notes: [generated, human], in: "thread") == nil)
+        #expect(RemoteCommentOriginRequest.set(.ai, notes: [human], in: "thread")?.notes.map(\.noteID) == ["12"])
     }
 
     @Test func olderPhonesNeverReceiveTheOriginAction() throws {
