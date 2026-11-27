@@ -463,7 +463,7 @@ private struct CommandCenterMRDetailContent: View {
                         .lineLimit(3).textSelection(.enabled)
                     HStack(spacing: 0) {
                         if let author = ReviewingContext(row: presentationRow).author {
-                            BoardCardAuthor(author: author)
+                            BoardCardAuthor(author: author, assignees: presentationRow.displayRequest?.displayAssignees ?? [])
                         }
                         Spacer(minLength: 16)
                         if finishedState == nil {

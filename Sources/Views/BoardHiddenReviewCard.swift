@@ -20,8 +20,8 @@ struct BoardHiddenAssignmentCard: View {
             BoardCardTitle(title: request?.title ?? review.title, repositoryPath: repositoryPath, titleColor: .secondary)
                 .opacity(contentOpacity)
             HStack(spacing: 0) {
-                if let author = request?.author {
-                    BoardCardAuthor(author: author, contentOpacity: contentOpacity)
+                if let request {
+                    BoardCardAuthor(author: request.author, assignees: request.displayAssignees, contentOpacity: contentOpacity)
                 } else {
                     PersonAvatar(url: nil, size: 16)
                         .opacity(contentOpacity)

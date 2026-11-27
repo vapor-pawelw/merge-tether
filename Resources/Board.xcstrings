@@ -442,6 +442,13 @@
         } } }
       }
     },
+    "board.assignees": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Assignees" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Przypisane osoby" } }
+      }
+    },
     "board.person.openProfile": {
       "extractionState": "manual",
       "localizations": {

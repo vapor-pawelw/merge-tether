@@ -81,6 +81,7 @@ struct BoardDraftBadge: View {
 
 struct BoardCardAuthor: View {
     let author: Todo.Author
+    var assignees: [Todo.Author] = []
     var roleLabel: LocalizedStringResource? = .ReviewingContext.reviewingAuthorLabel
     var contentOpacity = 1.0
 
@@ -91,10 +92,76 @@ struct BoardCardAuthor: View {
     }
 
     var body: some View {
-        PersonLabel(person: author.person, contentOpacity: contentOpacity)
-            .font(.caption).foregroundStyle(.secondary)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(accessibilityLabel)
+        HStack(spacing: 6) {
+            PersonLabel(person: author.person, contentOpacity: contentOpacity)
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(accessibilityLabel)
+            if !assignees.isEmpty {
+                BoardAssigneesBadge(assignees: assignees, contentOpacity: contentOpacity)
+            }
+        }
+    }
+}
+
+private struct BoardAssigneesBadge: View {
+    let assignees: [Todo.Author]
+    let contentOpacity: Double
+    @State private var isPresented = false
+
+    var body: some View {
+        Button { isPresented.toggle() } label: {
+            Label {
+                Text(assignees.count, format: .number).monospacedDigit()
+            } icon: {
+                Image(systemName: "person.2")
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 5).padding(.vertical, 3)
+            .background(.secondary.opacity(0.08), in: Capsule())
+            .opacity(contentOpacity)
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .boardHeaderControlHover()
+        .accessibilityLabel(Text(.Board.boardAssignees))
+        .accessibilityValue(Text(assignees.count, format: .number))
+        .help(Text(.Board.boardAssignees))
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(.Board.boardAssignees).font(.headline)
+                ViewThatFits(in: .vertical) {
+                    people.fixedSize(horizontal: false, vertical: true)
+                    ScrollView { people }
+                }
+                .frame(maxHeight: 260)
+            }
+            .frame(width: 230, alignment: .leading)
+            .padding(14)
+        }
+        .preference(key: BoardDetailPopoverPresentedKey.self, value: isPresented)
+    }
+
+    private var people: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(assignees, id: \.id) { assignee in
+                let person = assignee.person
+                HStack(spacing: 8) {
+                    PersonAvatar(url: person.avatarURL, size: 24, initials: person.initials)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(verbatim: person.displayName ?? assignee.username).font(.callout)
+                        if let handle = person.handle {
+                            Text(verbatim: handle).font(.caption.monospaced()).foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

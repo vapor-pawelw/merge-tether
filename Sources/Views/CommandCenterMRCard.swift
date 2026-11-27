@@ -327,7 +327,8 @@ private struct CommandCenterMRCardContent: View {
     @ViewBuilder
     private var author: some View {
         if let author = ReviewingContext(row: row).author {
-            BoardCardAuthor(author: author, contentOpacity: contentOpacity)
+            BoardCardAuthor(author: author, assignees: row.displayRequest?.displayAssignees ?? [],
+                contentOpacity: contentOpacity)
         } else if allowsRemoval {
             PersonAvatar(url: nil, size: 16)
                 .opacity(contentOpacity)
@@ -699,9 +700,11 @@ struct BoardTodoRow: View {
     }
 
     private var metadataHeader: some View {
-        HStack(spacing: 6) {
-            BoardCardAuthor(author: todo.target.author ?? todo.author,
-                roleLabel: todo.targetType == .mergeRequest && todo.target.author != nil
+        let request = displayRequest
+        return HStack(spacing: 6) {
+            BoardCardAuthor(author: request?.author ?? todo.target.author ?? todo.author,
+                assignees: request?.displayAssignees ?? [],
+                roleLabel: todo.targetType == .mergeRequest && (request != nil || todo.target.author != nil)
                     ? .ReviewingContext.reviewingAuthorLabel : nil)
             Spacer(minLength: 4)
             if isDraft { BoardDraftBadge() }

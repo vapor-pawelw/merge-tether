@@ -5,6 +5,20 @@ import MergeTetherRemote
 
 @MainActor
 struct MergeRequestBoardSnapshotTests {
+    @Test(arguments: [(nil, []), ([], []), ([7], []), ([9], [9]), ([9, 7, 11], [9, 7, 11])] as [([Int]?, [Int])])
+    func assigneeListAppearsOnlyWhenSomeoneBesidesTheAuthorIsAssigned(_ ids: [Int]?, _ expectedIDs: [Int]) throws {
+        let assignees = ids.map { ids in
+            let people = ids.map { #"{"id":\#($0),"username":"user\#($0)","name":"User \#($0)"}"# }
+            return ",\"assignees\":[\(people.joined(separator: ","))]"
+        } ?? ""
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data("""
+        {"project_id":1,"iid":42,"author":{"id":7,"username":"author","name":"Author"},"title":"MR",
+         "web_url":"https://\(host)/g/p/-/merge_requests/42","state":"opened",
+         "source_branch":"feature","target_branch":"main","labels":[]\(assignees)}
+        """.utf8))
+        #expect(request.displayAssignees.map(\.id) == expectedIDs)
+    }
+
     @Test func draftFlipDoesNotRebindThePrivateActionCheckpoint() throws {
         let json = """
         {"project_id":1,"iid":42,"author":{"id":3,"username":"me","name":"Me"},"title":"MR",

@@ -214,6 +214,11 @@ struct GitLabMergeRequest: Codable, Sendable {
     var isOpen: Bool { state == .opened }
     var isDraft: Bool { isDraft(fallback: false) }
 
+    var displayAssignees: [Todo.Author] {
+        guard let assignees, assignees.contains(where: { $0.id != author.id }) else { return [] }
+        return assignees
+    }
+
     var assigneeIdentities: Set<GitLabAuthenticatedUser> {
         Set((assignees ?? []).filter { $0.id > 0 }.map { .init(id: $0.id, username: $0.username) })
     }

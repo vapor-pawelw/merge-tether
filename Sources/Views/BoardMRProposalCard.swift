@@ -227,7 +227,9 @@ struct BoardMRProposalCard: View {
 
     @ViewBuilder
     private var author: some View {
-        if let author = context.author {
+        if let request = currentRequest, ProposalMRContext.matches(request, proposal: proposal) {
+            BoardCardAuthor(author: request.author, assignees: request.displayAssignees)
+        } else if let author = context.author {
             BoardCardAuthor(author: author)
         } else {
             HStack(spacing: 5) {

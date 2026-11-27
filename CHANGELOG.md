@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Stop the Mac **Launch at login** setting from switching itself on and off after macOS rejects a change, and keep it in sync with System Settings. Show comments published from a confirmation without waiting for the next refresh, keep draft controls attached to the right draft, and reduce redraws on the Mac board and on iPhone and iPad.
 
+- See assignees next to the author on Mac merge request cards and in Details. Click the assignee count for the complete list.
+
 - Show all open GitLab discussions in completed review summaries, with separate counts for your account and other authors.
 
 - Keep replies to resolved GitLab threads private when publishing from MergeTether, and have review agents check whether later changes already address a comment before drafting a reply.
