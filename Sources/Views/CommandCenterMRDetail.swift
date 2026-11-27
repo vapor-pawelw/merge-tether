@@ -320,13 +320,13 @@ private struct CommandCenterMRDetailContent: View {
                 if old?.isBusy == true && current?.isBusy != true { refreshDiscussions() }
             }
             .onChange(of: monitor.attention.displayAIOriginCoordinator?.revision) { _, _ in
-                Task { await discussionStore.reloadOrigins(glab: monitor.glab) }
+                discussionStore.scheduleOriginReload(glab: monitor.glab)
             }
             .onChange(of: monitor.settings.automation.aiCommentCriteriaOverride) { _, _ in
                 refreshDiscussions()
             }
             .onChange(of: monitor.commentOrigins.revision) { _, _ in
-                Task { await discussionStore.reloadOrigins(glab: monitor.glab) }
+                discussionStore.scheduleOriginReload(glab: monitor.glab)
             }
             .onChange(of: jobs.first?.id) { _, _ in retryError = nil }
             .onChange(of: feedbackRecheck != nil) { _, checking in
@@ -338,7 +338,7 @@ private struct CommandCenterMRDetailContent: View {
             }
             .onChange(of: item.drafts) { _, drafts in
                 publicationSession.draftsChanged(drafts)
-                Task { await discussionStore.reloadOrigins(glab: monitor.glab) }
+                discussionStore.scheduleOriginReload(glab: monitor.glab)
             }
             .onChange(of: discussionTarget) { _, _ in
                 publicationSession.clearSelection()

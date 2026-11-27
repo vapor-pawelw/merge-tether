@@ -15,13 +15,34 @@ private final class FeedbackAccountKindObservation: Sendable {
     }
 }
 
+/// Callers that asked for a discussion read while an equivalent read was already in flight.
+/// They share exactly one follow-up read, because the in-flight one may predate the change they observed.
+@MainActor private final class MRDiscussionRefreshBatch {
+    var glab: GlabService
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(glab: GlabService) { self.glab = glab }
+
+    func wait() async { await withCheckedContinuation { waiters.append($0) } }
+
+    func finish() {
+        let waiting = waiters
+        waiters = []
+        for waiter in waiting { waiter.resume() }
+    }
+}
+
 @MainActor @Observable
 final class MRDiscussionStore {
     enum IdentityError: Error { case accountChanged }
     typealias Load = @MainActor (MRDiscussionTarget) async throws -> [GitLabMergeRequestDiscussion]
     typealias VerifyAssistant = @MainActor (Int, String) async throws -> Bool
     typealias VerifyAuthorKind = @MainActor (Int, String) async throws -> AuthorFeedbackPolicy.AccountKind
+    typealias LoadOrigins = @MainActor (MRDiscussionTarget, [GitLabMergeRequestDiscussion]) async
+        -> ([Int: MRDiscussionSnapshot.Origin], AICommentProvenanceStore.ExtraContexts)
     private let load: Load?
+    /// Test seam replacing the local origin and provenance reads; nil reads the configured directories.
+    private let loadOrigins: LoadOrigins?
     private let verifyAssistant: VerifyAssistant?
     private let verifyAuthorKind: VerifyAuthorKind?
     @ObservationIgnored private var authorKindObservation: FeedbackAccountKindObservation?
@@ -36,6 +57,12 @@ final class MRDiscussionStore {
     private var loadedRevision: UInt64?
     private var assessmentCriteria: String?
     private var generation = 0
+    @ObservationIgnored private var queuedRefresh: MRDiscussionRefreshBatch?
+    @ObservationIgnored private(set) var followUpTask: Task<Void, Never>?
+    @ObservationIgnored private var followUpToken = 0
+    /// Advances when an origin reload starts or a full read applies origins; only the latest result may apply.
+    @ObservationIgnored private var originToken = 0
+    @ObservationIgnored private(set) var originReloadTask: Task<Void, Never>?
     private(set) var target: MRDiscussionTarget?
     private var discussionContent: MRDiscussionContent?
     var discussions: [GitLabMergeRequestDiscussion] { discussionContent?.discussions ?? [] }
@@ -54,8 +81,9 @@ final class MRDiscussionStore {
     init(load: Load? = nil, verifyAssistant: VerifyAssistant? = nil, verifyAuthorKind: VerifyAuthorKind? = nil,
          assessmentDirectory: URL = AICommentAssessmentStore.directory,
          provenanceDirectory: URL = AICommentProvenanceStore.directory, legacyAssessmentDirectory: URL? = nil,
-         displayAssessmentDirectory: URL? = nil) {
+         displayAssessmentDirectory: URL? = nil, loadOrigins: LoadOrigins? = nil) {
         self.load = load
+        self.loadOrigins = loadOrigins
         self.verifyAssistant = verifyAssistant
         self.verifyAuthorKind = verifyAuthorKind
         self.assessmentDirectory = assessmentDirectory
@@ -64,11 +92,27 @@ final class MRDiscussionStore {
         self.provenanceDirectory = provenanceDirectory
     }
 
+    /// Returns after a read issued no earlier than this call has finished, or after the request was
+    /// superseded, cancelled or cleared. An equivalent read already in flight is followed by one shared read.
     func refresh(target requested: MRDiscussionTarget, glab: GlabService, criteriaOverride: String? = nil) async {
         guard matchesAccount(requested, glab: glab) else { clear(); return }
-        guard target != requested || assessmentCriteria != criteriaOverride || !isLoading else { return }
+        if target == requested, assessmentCriteria == criteriaOverride, isLoading {
+            let batch = queuedRefresh ?? MRDiscussionRefreshBatch(glab: glab)
+            batch.glab = glab
+            queuedRefresh = batch
+            await batch.wait()
+            return
+        }
         if target != requested { clear(); target = requested }
         assessmentCriteria = criteriaOverride
+        // A newer read for this target answers callers queued behind the read it supersedes.
+        let superseded = queuedRefresh
+        queuedRefresh = nil
+        await read(target: requested, glab: glab, criteriaOverride: criteriaOverride)
+        superseded?.finish()
+    }
+
+    private func read(target requested: MRDiscussionTarget, glab: GlabService, criteriaOverride: String?) async {
         observeAuthorKinds(glab)
         authorKindTask?.cancel(); authorKindTask = nil
         generation += 1
@@ -76,7 +120,11 @@ final class MRDiscussionStore {
         let revision = glab.accountRevision
         isLoading = true
         hasError = false
-        defer { if generation == current { isLoading = false } }
+        defer {
+            if generation == current {
+                scheduleFollowUp(target: requested, criteriaOverride: criteriaOverride, revision: revision)
+            }
+        }
         do {
             let result: [GitLabMergeRequestDiscussion]
             let authenticatedUserID: Int?
@@ -93,6 +141,7 @@ final class MRDiscussionStore {
                     iid: requested.iid, host: requested.host)
             }
             guard isCurrent(current, target: requested, glab: glab, revision: revision) else { return }
+            let originsRequested = originToken
             let preparedContent = Task.detached { MRDiscussionContent(result) }
             let cached = await cachedOrigins(in: result, target: requested, userID: authenticatedUserID,
                 criteriaOverride: criteriaOverride, glab: glab)
@@ -130,6 +179,10 @@ final class MRDiscussionStore {
             self.currentUser = currentUser
             loadedRevision = revision
             discussionContent = content
+            // Origin reloads already running used the previous discussions and older local records; supersede
+            // them. One that started after this read's origin lookup is repeated so its change is not lost.
+            let missedOriginReload = originToken != originsRequested
+            originToken += 1
             origins = assessed
             extraContexts = contexts
             authorKinds = kinds
@@ -137,6 +190,7 @@ final class MRDiscussionStore {
             if load == nil || verifyAuthorKind != nil {
                 enrichAuthorKinds(in: result, current: current, target: requested, glab: glab, revision: revision)
             }
+            if missedOriginReload { scheduleOriginReload(glab: glab) }
         } catch {
             guard isCurrent(current, target: requested, glab: glab, revision: revision) else { return }
             // A 401 cannot prove the account changed. Keep its readable cache;
@@ -155,14 +209,22 @@ final class MRDiscussionStore {
         }
     }
 
+    /// Starts the one store-owned origin reload, cancelling an older one so it cannot apply.
+    func scheduleOriginReload(glab: GlabService) {
+        originReloadTask?.cancel()
+        originReloadTask = Task { [self] in await reloadOrigins(glab: glab) }
+    }
+
     func reloadOrigins(glab: GlabService) async {
-        guard let target, hasLoaded, loadedRevision == glab.accountRevision, matchesAccount(target, glab: glab) else { return }
-        let current = generation, revision = glab.accountRevision
+        guard !Task.isCancelled, let target, hasLoaded, loadedRevision == glab.accountRevision,
+              matchesAccount(target, glab: glab) else { return }
+        originToken += 1
+        let current = generation, revision = glab.accountRevision, token = originToken
         let cached = await cachedOrigins(in: discussions, target: target, userID: authenticatedUserID,
             criteriaOverride: assessmentCriteria, glab: glab)
         var updated = cached.0
         let contexts = cached.1
-        guard isCurrent(current, target: target, glab: glab, revision: revision) else { return }
+        guard originToken == token, isCurrent(current, target: target, glab: glab, revision: revision) else { return }
         for (id, origin) in origins where origin == .verifiedAssistant && updated[id]?.isManual != true { updated[id] = origin }
         origins = updated
         extraContexts = contexts
@@ -171,6 +233,7 @@ final class MRDiscussionStore {
     private func cachedOrigins(in result: [GitLabMergeRequestDiscussion], target: MRDiscussionTarget,
                                userID: Int?, criteriaOverride: String?, glab: GlabService) async
         -> ([Int: MRDiscussionSnapshot.Origin], AICommentProvenanceStore.ExtraContexts) {
+        if let loadOrigins { return await loadOrigins(target, result) }
         let directory = assessmentDirectory
         let legacyDirectory = legacyAssessmentDirectory
         let displayDirectory = displayAssessmentDirectory
@@ -228,6 +291,37 @@ final class MRDiscussionStore {
         generation += 1; isLoading = false
         authorKindTask?.cancel(); authorKindTask = nil
         authorKindObservation?.cancel(); authorKindObservation = nil
+        originToken += 1
+        originReloadTask?.cancel(); originReloadTask = nil
+        followUpTask?.cancel(); followUpTask = nil
+        let queued = queuedRefresh
+        queuedRefresh = nil
+        queued?.finish()
+    }
+
+    /// Called when the current read finishes. Keeps `isLoading` set while a queued follow-up is pending
+    /// so later equivalent requests join the next batch instead of starting a parallel read.
+    private func scheduleFollowUp(target requested: MRDiscussionTarget, criteriaOverride: String?, revision: UInt64) {
+        guard let batch = queuedRefresh, target == requested, assessmentCriteria == criteriaOverride else {
+            isLoading = false
+            return
+        }
+        queuedRefresh = nil
+        followUpToken += 1
+        let token = followUpToken, scheduled = generation
+        followUpTask = Task { [self] in
+            defer {
+                if followUpToken == token { followUpTask = nil }
+                batch.finish()
+            }
+            // cancel(), clear(), a target change and a newer read all advance the generation.
+            guard generation == scheduled, target == requested, !Task.isCancelled else { return }
+            guard matchesAccount(requested, glab: batch.glab), batch.glab.accountRevision == revision else {
+                clear()
+                return
+            }
+            await read(target: requested, glab: batch.glab, criteriaOverride: criteriaOverride)
+        }
     }
 
     private func observeAuthorKinds(_ glab: GlabService) {

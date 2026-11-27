@@ -427,6 +427,54 @@ struct MRDiscussionStoreTests {
     }
 
     private final class Flag { var value = false }
+
+    /// Discussion reads answered in call order; listed calls wait for `release`.
+    @MainActor private final class DiscussionReads {
+        private var gated: Set<Int>
+        private var pending: [Int: CheckedContinuation<Void, Never>] = [:]
+        private(set) var count = 0
+        init(gated: Set<Int>) { self.gated = gated }
+        func read() async throws -> [GitLabMergeRequestDiscussion] {
+            count += 1
+            let call = count
+            if gated.contains(call) { await withCheckedContinuation { pending[call] = $0 } }
+            return try MRDiscussionStoreTests.notes("read \(call)")
+        }
+        func waitFor(_ call: Int) async throws {
+            for _ in 0..<1000 where pending[call] == nil { await Task.yield() }
+            try #require(pending[call] != nil)
+        }
+        func release(_ call: Int) { gated.remove(call); pending.removeValue(forKey: call)?.resume() }
+    }
+
+    /// Local origin reads answered in call order; listed calls wait for `release`.
+    @MainActor private final class OriginReads {
+        typealias Result = ([Int: MRDiscussionSnapshot.Origin], AICommentProvenanceStore.ExtraContexts)
+        private let gated: Set<Int>
+        private var pending: [Int: CheckedContinuation<Result, Never>] = [:]
+        private(set) var count = 0
+        init(gated: Set<Int>) { self.gated = gated }
+        func read() async -> Result {
+            count += 1
+            let call = count
+            guard gated.contains(call) else { return ([3: .assessed(evidence: "read \(call)")], .empty) }
+            return await withCheckedContinuation { pending[call] = $0 }
+        }
+        func waitFor(_ call: Int) async throws {
+            for _ in 0..<1000 where pending[call] == nil { await Task.yield() }
+            try #require(pending[call] != nil)
+        }
+        func release(_ call: Int, _ evidence: String) {
+            pending.removeValue(forKey: call)?.resume(returning: ([3: .assessed(evidence: evidence)], .empty))
+        }
+    }
+
+    fileprivate static func notes(_ body: String) throws -> [GitLabMergeRequestDiscussion] {
+        [GitLabMergeRequestDiscussion(id: "thread", notes: [
+            .init(id: 3, author: .init(id: 7, username: "alice", name: "Alice"), system: false,
+                  resolvable: true, resolved: false, resolvedBy: nil, body: body)
+        ])]
+    }
     private let target = MRDiscussionTarget(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2,
         url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!)
     private func glab() -> GlabService {
@@ -656,6 +704,174 @@ struct MRDiscussionStoreTests {
         #expect(store.hasError && !store.hasLoaded)
     }
 
+    @Test func aRefreshDuringAnInflightReadRunsOneFollowUpThatItsCallerAwaits() async throws {
+        let reads = DiscussionReads(gated: [1])
+        let store = MRDiscussionStore(load: { _ in try await reads.read() },
+            assessmentDirectory: URL(fileURLWithPath: "/nonexistent"))
+        defer { store.cancel() }
+        let glab = glab()
+        let first = Task { await store.refresh(target: target, glab: glab) }
+        try await reads.waitFor(1)
+        let queued = Flag()
+        let second = Task { queued.value = true; await store.refresh(target: target, glab: glab); return store.latestBody }
+        for _ in 0..<1000 where !queued.value { await Task.yield() }
+        try #require(queued.value)
+        reads.release(1)
+        await first.value
+        #expect(await second.value == "read 2")
+        #expect(reads.count == 2 && !store.isLoading && store.followUpTask == nil)
+    }
+
+    @Test func severalRefreshesDuringOneReadShareOneFollowUp() async throws {
+        let reads = DiscussionReads(gated: [1, 2])
+        let store = MRDiscussionStore(load: { _ in try await reads.read() },
+            assessmentDirectory: URL(fileURLWithPath: "/nonexistent"))
+        defer { store.cancel() }
+        let glab = glab()
+        let first = Task { await store.refresh(target: target, glab: glab) }
+        try await reads.waitFor(1)
+        let queued = Flag()
+        var waiting: [Task<String?, Never>] = []
+        for _ in 0..<3 {
+            queued.value = false
+            waiting.append(Task { queued.value = true; await store.refresh(target: target, glab: glab); return store.latestBody })
+            for _ in 0..<1000 where !queued.value { await Task.yield() }
+            try #require(queued.value)
+        }
+        reads.release(1)
+        await first.value
+        try await reads.waitFor(2)
+        #expect(store.isLoading)
+        reads.release(2)
+        for task in waiting { #expect(await task.value == "read 2") }
+        await store.followUpTask?.value
+        #expect(reads.count == 2 && !store.isLoading)
+    }
+
+    @Test(arguments: ["cancel", "clear", "target", "account"])
+    func cancellationOrAnotherConversationPreventsTheQueuedFollowUp(_ variant: String) async throws {
+        let newer = MRDiscussionTarget(host: target.host, username: target.username, projectID: 1, iid: 4,
+            url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/4")!)
+        let reads = DiscussionReads(gated: [1])
+        var newerReads = 0
+        let store = MRDiscussionStore(load: { request in
+            if request.iid == newer.iid { newerReads += 1; return try MRDiscussionStoreTests.notes("Other conversation") }
+            return try await reads.read()
+        }, assessmentDirectory: URL(fileURLWithPath: "/nonexistent"))
+        defer { store.cancel() }
+        let glab = glab()
+        let first = Task { await store.refresh(target: target, glab: glab) }
+        try await reads.waitFor(1)
+        let queued = Flag()
+        let second = Task { queued.value = true; await store.refresh(target: target, glab: glab) }
+        for _ in 0..<1000 where !queued.value { await Task.yield() }
+        try #require(queued.value)
+        switch variant {
+        case "cancel": store.cancel()
+        case "clear": store.clear()
+        case "target": await store.refresh(target: newer, glab: glab)
+        default: glab.currentUsername = "other"; glab.currentUsername = target.username
+        }
+        if variant != "account" { await second.value }
+        reads.release(1)
+        await first.value
+        await second.value
+        await store.followUpTask?.value
+        #expect(reads.count == 1 && !store.isLoading && store.followUpTask == nil)
+        if variant == "target" {
+            #expect(store.target == newer && newerReads == 1 && store.latestBody == "Other conversation")
+        } else {
+            #expect(store.discussions.isEmpty)
+        }
+    }
+
+    @Test func anOlderOriginReloadFinishingLastCannotOverwriteTheNewerOne() async throws {
+        let origins = OriginReads(gated: [2, 3])
+        let notes = try threads()
+        let store = MRDiscussionStore(load: { _ in notes }, assessmentDirectory: URL(fileURLWithPath: "/nonexistent"),
+            loadOrigins: { _, _ in await origins.read() })
+        defer { store.cancel() }
+        let glab = glab()
+        await store.refresh(target: target, glab: glab)
+        #expect(store.origins[3] == .assessed(evidence: "read 1"))
+        let older = Task { await store.reloadOrigins(glab: glab) }
+        try await origins.waitFor(2)
+        let newer = Task { await store.reloadOrigins(glab: glab) }
+        try await origins.waitFor(3)
+        origins.release(3, "newer")
+        await newer.value
+        #expect(store.origins[3] == .assessed(evidence: "newer"))
+        origins.release(2, "older")
+        await older.value
+        #expect(store.origins[3] == .assessed(evidence: "newer"))
+    }
+
+    @Test func aScheduledOriginReloadCancelsTheOneItReplaces() async throws {
+        let origins = OriginReads(gated: [2, 3])
+        let notes = try threads()
+        let store = MRDiscussionStore(load: { _ in notes }, assessmentDirectory: URL(fileURLWithPath: "/nonexistent"),
+            loadOrigins: { _, _ in await origins.read() })
+        defer { store.cancel() }
+        let glab = glab()
+        await store.refresh(target: target, glab: glab)
+        store.scheduleOriginReload(glab: glab)
+        let older = try #require(store.originReloadTask)
+        try await origins.waitFor(2)
+        store.scheduleOriginReload(glab: glab)
+        let newer = try #require(store.originReloadTask)
+        try await origins.waitFor(3)
+        origins.release(2, "older")
+        await older.value
+        #expect(store.origins[3] == .assessed(evidence: "read 1"))
+        origins.release(3, "newer")
+        await newer.value
+        #expect(store.origins[3] == .assessed(evidence: "newer"))
+        store.scheduleOriginReload(glab: glab)
+        let cancelled = try #require(store.originReloadTask)
+        store.cancel()
+        await cancelled.value
+        #expect(store.originReloadTask == nil && origins.count == 3 && store.origins[3] == .assessed(evidence: "newer"))
+    }
+
+    @Test func aCompletedReadSupersedesAnOriginReloadThatStartedBeforeIt() async throws {
+        let origins = OriginReads(gated: [2])
+        let reads = DiscussionReads(gated: [])
+        let store = MRDiscussionStore(load: { _ in try await reads.read() },
+            assessmentDirectory: URL(fileURLWithPath: "/nonexistent"), loadOrigins: { _, _ in await origins.read() })
+        defer { store.cancel() }
+        let glab = glab()
+        await store.refresh(target: target, glab: glab)
+        let stale = Task { await store.reloadOrigins(glab: glab) }
+        try await origins.waitFor(2)
+        await store.refresh(target: target, glab: glab)
+        #expect(store.origins[3] == .assessed(evidence: "read 3") && store.latestBody == "read 2")
+        origins.release(2, "stale")
+        await stale.value
+        await store.originReloadTask?.value
+        #expect(store.origins[3] == .assessed(evidence: "read 3") && origins.count == 3)
+    }
+
+    @Test func anOriginReloadDuringAReadIsRepeatedAgainstTheNewDiscussions() async throws {
+        let origins = OriginReads(gated: [2, 3])
+        let reads = DiscussionReads(gated: [])
+        let store = MRDiscussionStore(load: { _ in try await reads.read() },
+            assessmentDirectory: URL(fileURLWithPath: "/nonexistent"), loadOrigins: { _, _ in await origins.read() })
+        defer { store.cancel() }
+        let glab = glab()
+        await store.refresh(target: target, glab: glab)
+        let refresh = Task { await store.refresh(target: target, glab: glab) }
+        try await origins.waitFor(2)
+        let reload = Task { await store.reloadOrigins(glab: glab) }
+        try await origins.waitFor(3)
+        origins.release(3, "previous discussions")
+        await reload.value
+        origins.release(2, "before the override")
+        await refresh.value
+        await store.originReloadTask?.value
+        #expect(origins.count == 4 && store.origins[3] == .assessed(evidence: "read 4"))
+        #expect(store.latestBody == "read 2")
+    }
+
     @Test func expiredAuthenticationKeepsPreviouslyLoadedDiscussionReadable() async throws {
         let expired = Flag()
         let notes = try threads()
@@ -670,4 +886,8 @@ struct MRDiscussionStoreTests {
         #expect(store.hasError && store.hasLoaded)
         #expect(store.discussions.first?.notes.first?.body == "Published comment")
     }
+}
+
+private extension MRDiscussionStore {
+    var latestBody: String? { discussions.first?.notes.first?.body }
 }
