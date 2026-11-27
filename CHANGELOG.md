@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- _No notable changes yet._
+
+## 2.0.0 - 2026-11-27
+
+
 - The macOS 2.0.0 build is signed ad hoc. If macOS blocks the first launch, open **System Settings → Privacy & Security** and choose **Open Anyway** for MergeTether. [Apple's first-launch instructions](https://support.apple.com/en-us/102445)
 
 - Prevent merge request Details from freezing while scrolling through discussions on Mac.
@@ -860,6 +865,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Preserve private user-created drafts and require checked draft IDs for automatic publication.
 - Align wrapped MR titles, avatars, metadata and action controls, and avoid a SwiftUI lazy-layout loop in MR lists.
 - Coordinate failed pipeline ownership and isolated follow-up work to avoid duplicate fixes.
+
 
 ## 1.1.0 - 2026-08-13
 
