@@ -314,9 +314,6 @@ extension RemotePhoneModel {
             apply: { await self.applyDraftRegeneration($0, batchID: $1) },
             discard: { await self.discardDraftRegeneration($0) })
     }
-    private var claimIsPrimary: Bool {
-        card.actions.contains { $0.kind == .claimAssignment && $0.id == primaryCTA?.actionID }
-    }
 }
 
 struct RemoteCardView: View {
@@ -329,6 +326,9 @@ struct RemoteCardView: View {
     var onOpenCTA: ((RemoteCardCTA) -> Void)? = nil
     var actionsModel: RemotePhoneModel? = nil
     private var primaryCTA: RemoteCardCTA? { card.primaryCTA.flatMap { $0.duplicatesCardTap ? nil : $0 } }
+    private var claimIsPrimary: Bool {
+        card.actions.contains { $0.kind == .claimAssignment && $0.id == primaryCTA?.actionID }
+    }
     private var secondaryCTA: RemoteCardCTA? { card.presentation?.secondaryCTA.flatMap { $0.duplicatesCardTap ? nil : $0 } }
     private var additionalCTAs: [RemoteCardCTA] { (card.presentation?.additionalCTAs ?? []).filter { !$0.duplicatesCardTap } }
     private var statusContext: RemoteCardStatusContext? { card.presentation?.statusContext }
@@ -398,7 +398,6 @@ struct RemoteCardView: View {
         .background(Color(uiColor: .secondarySystemGroupedBackground).opacity(contentOpacity),
                     in: RoundedRectangle(cornerRadius: 16))
         .modifier(RemoteCardInteraction(onActivate: activation, title: activationTitle))
-        if let cta = primaryCTA { boardCTA(cta, prominent: claimIsPrimary) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("remote.card.\(card.id)")
         .overlay {
@@ -411,6 +410,7 @@ struct RemoteCardView: View {
 
     @ViewBuilder
     private var cardActions: some View {
+        if let cta = primaryCTA { boardCTA(cta, prominent: claimIsPrimary) }
         if let secondary = secondaryCTA {
             if let actionsModel, card.id.hasPrefix("completion:"),
                let action = card.actions.first(where: { $0.id == secondary.actionID && $0.kind == .markDone }) {
@@ -443,7 +443,6 @@ struct RemoteCardView: View {
                 if seen {
                     Task { await actionsModel.perform(card: card, action: action) }
                 } else {
-                else if claimIsPrimary { button.buttonStyle(.bordered) }
                     onOpenCTA?(.init(title: String(localized: .CommentReview.commentReviewFinish),
                         destination: .actions, actionID: action.id))
                 }
@@ -456,6 +455,7 @@ struct RemoteCardView: View {
             }
             Group {
                 if seen && action.label == nil { button.buttonStyle(.bordered).tint(.secondary) }
+                else if claimIsPrimary { button.buttonStyle(.bordered) }
                 else { button.buttonStyle(.borderedProminent) }
             }
             .font(.subheadline.weight(.semibold)).controlSize(.large)
