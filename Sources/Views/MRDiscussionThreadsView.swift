@@ -265,7 +265,7 @@ private struct MRDiscussionThreadView: View {
                               summary: MRDiscussionSnapshot.Thread.ReplySummary,
                               originBadge: MRDiscussionSnapshot.OriginBadge?) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            StatusFlowLayout {
+            StatusFlowLayout(centerRows: true) {
                 HStack(spacing: 4) {
                     if thread.state == .resolved { Image(systemName: "checkmark") }
                     Text(stateLabel)
@@ -274,6 +274,8 @@ private struct MRDiscussionThreadView: View {
                 .fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, 7).padding(.vertical, 3)
                 .background(stateColor.opacity(thread.state == .open ? 0.055 : 0.08), in: Capsule())
+                // Keep the header anchored to the first row when the other badges wrap.
+                .alignmentGuide(.discussionHeaderCenter) { $0[VerticalAlignment.center] }
                 if let feedback = thread.feedback { MRDiscussionFeedbackBadge(state: feedback) }
                 replyStatus(summary)
                 if let originBadge {
@@ -325,18 +327,26 @@ private struct MRDiscussionThreadView: View {
     }
 }
 
+private extension VerticalAlignment {
+    private enum DiscussionHeaderCenter: AlignmentID {
+        static func defaultValue(in context: ViewDimensions) -> CGFloat { context[VerticalAlignment.center] }
+    }
+
+    static let discussionHeaderCenter = VerticalAlignment(DiscussionHeaderCenter.self)
+}
+
 /// The header is not one big button, so origin menus and links inside it stay clickable.
 private struct MRDiscussionDisclosureStyle: DisclosureGroupStyle {
     func makeBody(configuration: Configuration) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .discussionHeaderCenter, spacing: 12) {
                 Button {
                     configuration.isExpanded.toggle()
                 } label: {
                     Image(systemName: configuration.isExpanded ? "chevron.down" : "chevron.right")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                        .frame(width: 12, height: 14)
+                        .frame(width: 12, height: 14, alignment: .leading)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Align thread disclosure controls with the first row of status badges and match the side insets in Comments and replies on Mac.
+
 - Recheck apparent discussion blockers on your MRs against the individual GitLab merge request when the discussion read confirms all threads are resolved.
 
 - Ask Agent checks GitLab status and discussions before answering a question that names an MR number. Select and copy text across paragraphs and links in chat messages.
