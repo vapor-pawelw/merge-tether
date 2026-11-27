@@ -24,8 +24,13 @@ extension EnvironmentValues {
 
 struct CodingProviderIcon: View {
     @Environment(\.codingProviderGlyph) private var selectedProvider
-    @ScaledMetric(relativeTo: .body) private var size = 12.0
-    var provider: CodingProviderGlyph? = nil
+    @ScaledMetric private var size: CGFloat
+    var provider: CodingProviderGlyph?
+
+    init(provider: CodingProviderGlyph? = nil, size: CGFloat = 12) {
+        self.provider = provider
+        _size = ScaledMetric(wrappedValue: size, relativeTo: .body)
+    }
 
     var body: some View {
         Group {

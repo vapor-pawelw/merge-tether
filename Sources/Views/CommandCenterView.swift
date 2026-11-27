@@ -93,13 +93,13 @@ struct CommandCenterView: View {
                     Label { Text(.Remote.remoteMacPairPhone) } icon: { Image(systemName: "iphone") }
                 }
                 agentQuestionButton
+                draftRegenerationButton
             }
             if #available(macOS 26.0, *) {
                 ToolbarSpacer(.fixed, placement: .primaryAction)
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 globalAutomationToggle
-                draftRegenerationButton
                 Button { showingAdd = true } label: {
                     Label { Text(.Board.boardAdd) } icon: { Image(systemName: "plus") }
                 }
@@ -199,9 +199,10 @@ struct CommandCenterView: View {
     @ViewBuilder
     private var draftRegenerationButton: some View {
         let regeneration = monitor.draftRegeneration
+        let icon = CodingProviderIcon(size: 16)
         if let phase = regeneration.batch?.phase {
             Button { regenerationPresentation = .init(scope: nil) } label: {
-                Label { Text(phase.regenerationTitle) } icon: { CodingProviderIcon() }
+                Label { Text(phase.regenerationTitle) } icon: { icon }
                     .overlay(alignment: .topTrailing) {
                         if phase == .ready {
                             Circle().fill(Color.accentColor).frame(width: 7, height: 7)
@@ -216,7 +217,7 @@ struct CommandCenterView: View {
                 guard requireCodingAssistant(monitor) else { return }
                 regenerationPresentation = .init(scope: .all)
             } label: {
-                Label { Text(.DraftRegeneration.draftRegenerationAllAction) } icon: { CodingProviderIcon() }
+                Label { Text(.DraftRegeneration.draftRegenerationAllAction) } icon: { icon }
             }
             .disabled(!regeneration.isAvailable)
             .help(Text(.DraftRegeneration.draftRegenerationAllAction))
