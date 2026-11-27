@@ -26,7 +26,7 @@ import MergeTetherRemote
         #expect(first == 1 && second == 2)
     }
 
-    @Test func freshDisplayOriginNotificationAndReopenedDetailsIgnoreAStaleNonAIActionClassification() async throws {
+    @Test func reopeningDetailsKeepsTheCompletedOpinionFromEarlierCriteria() async throws {
         let f = try Fixture(); defer { f.close() }
         f.notes = [note(1)]
         let source = f.notes[0]
@@ -42,13 +42,12 @@ import MergeTetherRemote
         defer { coordinator.removeOriginObserver(observer) }
         await coordinator.schedule(request: f.request, notes: f.notes)
         try await settle(coordinator, f)
-        let deadline = ContinuousClock.now + .seconds(3)
-        while events.isEmpty, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(1)) }
-        #expect(events.first?.origins.first?.classification == .aiAssisted)
+        #expect(events.isEmpty)
+        #expect(f.batches.isEmpty)
         let store = MRDiscussionStore(load: { _ in [.init(id: "thread", notes: f.notes)] },
             assessmentDirectory: f.actionDirectory, displayAssessmentDirectory: f.displayDirectory)
         await store.refresh(target: .init(host: "gitlab.example.test", username: "me", projectID: 7, iid: 13, url: f.request.webURL), glab: f.glab)
-        #expect(store.origins[1] == .assessed(evidence: "Synthetic source evidence"))
+        #expect(store.origins[1] == .humanLikely(evidence: "Older criteria"))
         #expect(!AICommentAssessmentStore.isAI(source, host: "gitlab.example.test", projectID: 7, iid: 13, in: f.actionDirectory))
         #expect(!AICommentAssessmentStore.isAI(source, host: "gitlab.example.test", projectID: 7, iid: 13, in: f.displayDirectory))
     }
@@ -119,7 +118,7 @@ import MergeTetherRemote
         func coordinator(cacheRead: AICommentDisplayCoordinator.CacheRead? = nil) -> AICommentDisplayCoordinator {
             AICommentDisplayCoordinator(glab: glab, settings: settings, assessmentDirectory: actionDirectory,
                 displayDirectory: displayDirectory, canAutomate: { [self] _ in ready },
-                publicationIsChecking: { [self] _ in publicationBusy }, assess: { [self] _, notes, _, _, _, _ in
+                publicationIsChecking: { [self] _ in publicationBusy }, assess: { [self] _, notes, _, _, _, _, _ in
                     batches.append(notes.compactMap(\.id))
                     bodies.append(notes.compactMap(\.body))
                     afterAssessment?()
@@ -302,8 +301,8 @@ import MergeTetherRemote
         let task = try #require(pending)
         await task.value
         try await settle(coordinator, f)
-        #expect(f.batches.flatMap { $0 } == [1, 2, 3])
-        #expect(f.bodies.flatMap { $0 } == ["Complete current source", "Complete author reply", "Published message"])
+        #expect(f.batches.flatMap { $0 } == [1, 3, 2])
+        #expect(f.bodies.flatMap { $0 } == ["Complete current source", "Published message", "Complete author reply"])
         #expect(f.gitlab.requests.allSatisfy { $0.method == "GET" })
     }
 

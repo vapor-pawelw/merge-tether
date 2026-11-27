@@ -273,14 +273,14 @@ final class MRDiscussionStore {
                         origins[declared.noteID] = .assessed(evidence: declared.evidence)
                         continue
                     }
-                    if let id = note.id, id > 0, let record = AICommentAssessmentStore.displayResult(for: note,
+                    if let id = note.id, id > 0, let record = AICommentAssessmentStore.completedResult(for: note,
                         host: target.host, projectID: target.projectID, iid: target.iid,
                         username: target.username, userID: userID, legacyUsernames: legacyUsernames,
                         criteriaOverride: criteriaOverride, in: directory, legacyDirectory: legacyDirectory,
-                        displayDirectory: displayDirectory) {
+                        displayDirectory: displayDirectory ?? AICommentAssessmentStore.displayDirectory(for: directory)) {
                         if record.qualifiesAsAI {
                             origins[id] = .assessed(evidence: record.evidence)
-                        } else if record.criteriaVersion == AICommentOriginAssessor.criteriaVersion {
+                        } else {
                             origins[id] = record.classification == "manual_likely" && record.confidence != "uncertain"
                                 ? .humanLikely(evidence: record.evidence) : .uncertain(evidence: record.evidence)
                         }

@@ -61,6 +61,35 @@ struct AICommentAssessment: Codable, Sendable, Equatable {
 }
 
 enum AICommentAssessmentStore {
+    nonisolated static func authorContexts(for notes: [GitLabMergeRequestDiscussion.Note],
+        histories: [Int: AICommentOriginAssessment.AuthorHistory], examples: [GitLabMergeRequestDiscussion.Note],
+        target: MRAutomationScope.Target, account: GitLabAccountIdentity, legacyUsernames: Set<String>,
+        in directory: URL, at now: Date = Date()) -> [Int: AICommentOriginAssessment.AuthorContext] {
+        guard !histories.isEmpty, let iid = target.iid, let userID = account.userID else { return [:] }
+        let authors = Set(notes.filter { histories[$0.id ?? 0] != nil }.compactMap { $0.author?.id })
+        let assessedIDs = Set(notes.compactMap(\.id))
+        let candidates = Dictionary(grouping: examples.filter { $0.system != true }, by: \.id)
+        var excerpts: [Int: [(label: AICommentOriginOverride.Classification, body: String)]] = [:]
+        for (id, matches) in candidates.sorted(by: { ($0.key ?? 0) > ($1.key ?? 0) }) {
+            guard let id, !assessedIDs.contains(id), matches.count == 1, let note = matches.first, let authorID = note.author?.id,
+                  authors.contains(authorID), let body = note.body, !body.isEmpty,
+                  let verdict = AICommentOriginOverrideStore.override(for: note, host: target.host,
+                    projectID: target.projectID, iid: iid, username: account.username, userID: userID,
+                    legacyUsernames: legacyUsernames, in: directory),
+                  verdict.classification != .uncertain, verdict.isActive(at: now),
+                  verdict.createdAt >= now.addingTimeInterval(-90 * 86_400),
+                  !excerpts[authorID, default: []].contains(where: { $0.label == verdict.classification }) else { continue }
+            excerpts[authorID, default: []].append((verdict.classification,
+                String(GlabService.redactWorkflowEvidence(body).prefix(300))))
+        }
+        return notes.reduce(into: [:]) { contexts, note in
+            guard let id = note.id, let history = histories[id], let authorID = note.author?.id else { return }
+            let examples = excerpts[authorID, default: []]
+            contexts[id] = .init(authorID: authorID, history: history, aiExample: examples.first { $0.label == .ai }?.body,
+                humanExample: examples.first { $0.label == .human }?.body)
+        }
+    }
+
     private struct PendingContext: Codable, Sendable {
         let target: MRAutomationScope.Target
         let noteID: Int
@@ -187,6 +216,10 @@ enum AICommentAssessmentStore {
         .appending(path: "ai-assessments", directoryHint: .isDirectory)
     nonisolated static let displayDirectory = InstallationStorage.current.evidence.appending(path: "display-ai-assessments")
 
+    nonisolated static func displayDirectory(for actionDirectory: URL) -> URL {
+        actionDirectory == directory ? displayDirectory : actionDirectory.appending(path: ".display-only")
+    }
+
     nonisolated static func scopedDirectory(_ directory: URL, criteriaOverride: String?) -> URL {
         guard let criteriaOverride else { return directory }
         return directory.appending(path: ".custom-criteria", directoryHint: .isDirectory)
@@ -233,9 +266,10 @@ enum AICommentAssessmentStore {
            record.qualifiesAsAI || record.criteriaVersion == AICommentOriginAssessor.criteriaVersion {
             return record
         }
-        if let display, FileManager.default.fileExists(atPath: fileURL(host: host, projectID: projectID, iid: iid, noteID: id, in: display).path) {
-            guard let record = result(for: note, host: host, projectID: projectID, iid: iid, in: display),
-                  record.purpose == .display, validDisplayBinding(record, note: note, username: username) else { return nil }
+        if let display, let record = stored(for: note, host: host, projectID: projectID, iid: iid, userID: userID,
+                                            legacyUsernames: names, in: display)?.record,
+           record.purpose == .display,
+           validDisplayBinding(record, note: note, username: userID == nil ? username : nil) {
             return record
         }
         guard !currentExists, criteriaOverride == nil else { return nil }
@@ -249,6 +283,44 @@ enum AICommentAssessmentStore {
         guard let record = result(for: note, host: host, projectID: projectID, iid: iid, in: legacy),
               let previousName = record.username, names.contains(previousName),
               validDisplayBinding(record, note: note, username: previousName) else { return nil }
+        return record
+    }
+
+    /// A completed verdict is kept for the exact note even after the evaluation settings change.
+    nonisolated static func completedResult(for note: GitLabMergeRequestDiscussion.Note, host: String, projectID: Int,
+        iid: Int, username: String, userID: Int?, legacyUsernames: Set<String>, criteriaOverride: String?,
+        in actionDirectory: URL, legacyDirectory: URL? = nil, displayDirectory: URL) -> AICommentAssessment? {
+        let current = displayResult(for: note, host: host, projectID: projectID, iid: iid, username: username, userID: userID,
+            legacyUsernames: legacyUsernames, criteriaOverride: criteriaOverride, in: actionDirectory,
+            legacyDirectory: legacyDirectory, displayDirectory: displayDirectory)
+        if let current { return current }
+        if criteriaOverride != nil, let previous = displayResult(for: note, host: host, projectID: projectID, iid: iid,
+            username: username, userID: userID, legacyUsernames: legacyUsernames, in: actionDirectory,
+            legacyDirectory: legacyDirectory, displayDirectory: displayDirectory) { return previous }
+
+        for root in [actionDirectory, displayDirectory] {
+            let scoped = root.appending(path: ".custom-criteria")
+            let folders = (try? FileManager.default.contentsOfDirectory(at: scoped,
+                includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
+            for folder in [scopedDirectory(root, criteriaOverride: criteriaOverride), root]
+                + folders.sorted(by: { $0.lastPathComponent > $1.lastPathComponent }) {
+                guard let record = stored(for: note, host: host, projectID: projectID, iid: iid, userID: userID,
+                    legacyUsernames: legacyUsernames, in: folder)?.record,
+                    record.username == username || record.username.map(legacyUsernames.contains) == true
+                        || record.username == nil && legacyUsernames.contains(username) else { continue }
+                return record
+            }
+        }
+        return nil
+    }
+
+    /// Publication may reuse a verified app assessment without another model call.
+    nonisolated static func sealedDisplayAssessment(for note: GitLabMergeRequestDiscussion.Note, host: String,
+        projectID: Int, iid: Int, userID: Int, legacyUsernames: Set<String>, in directory: URL) -> AICommentAssessment? {
+        guard let (record, sealed) = stored(for: note, host: host, projectID: projectID, iid: iid, userID: userID,
+                                           legacyUsernames: legacyUsernames, in: directory),
+              sealed, record.purpose == .display, record.qualifiesAsAI,
+              validDisplayBinding(record, note: note, username: nil) else { return nil }
         return record
     }
 
@@ -392,9 +464,12 @@ enum AICommentAssessmentStore {
         return record
     }
 
-    nonisolated static func workerInstructions(criteriaOverride: String?, existing: [String]) -> String {
+    nonisolated static func workerInstructions(criteriaOverride: String?, existing: [String],
+        authorContexts: [Int: AICommentOriginAssessment.AuthorContext] = [:]) -> String {
         """
         \(criteriaOverride ?? AICommentOriginAssessor.criteriaInstructions)
+
+        \(AICommentOriginAssessor.authorHistoryInstructions(authorContexts))
 
         Only assess source comments for private replies you actually create or update in this run. Check every
         incoming source in the latest exchange addressed by the reply, including general prose. Never classify

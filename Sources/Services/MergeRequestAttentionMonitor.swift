@@ -387,7 +387,8 @@ final class MergeRequestAttentionMonitor {
             try await DraftProofRecoveryVerifier.verify($0, assistant: $1, model: $2)
         },
         assessAIOrigin: @escaping AICommentOriginCoordinator.Assess = {
-            try await AICommentOriginAssessor.verify(target: $0, notes: $1, assistant: $2, model: $3, thinking: $4, criteriaOverride: $5)
+            try await AICommentOriginAssessor.verify(target: $0, notes: $1, assistant: $2, model: $3,
+                thinking: $4, criteriaOverride: $5, authorContexts: $6)
         }
     ) {
         self.glab = glab
@@ -431,7 +432,11 @@ final class MergeRequestAttentionMonitor {
                     : settings.automation.claudeVerificationModel.rawValue
                 return model == configured && settings.automation.verificationThinking == thinking
             }, criteriaOverride: { settings?.automation.aiCommentCriteriaOverride },
-            legacyUsernames: { settings?.unambiguousLegacyUsernames(for: $0) ?? [$0.username] })
+            legacyUsernames: { settings?.unambiguousLegacyUsernames(for: $0) ?? [$0.username] },
+            authorHistories: { account, notes in
+                settings?.reviewParticipationPreferences.authorHistories(for: notes, host: account.host,
+                    accountID: account.userID) ?? [:]
+            })
         self.aiOriginCoordinator = publicationOrigins
         self.displayAIOriginCoordinator = settings.map { settings in
             AICommentDisplayCoordinator(glab: glab, settings: settings, assessmentDirectory: aiAssessmentDirectory,
@@ -2945,7 +2950,8 @@ final class MergeRequestAttentionMonitor {
             let styleSaysAI = verdict == nil && !definite && hasCurrentStyleAssessment(note, policy: policy,
                 host: host, projectID: projectID, iid: iid, userID: user.id, legacyUsernames: legacyUsernames)
             evidence.lanes[id] = .init(override: verdict, definite: definite, styleSaysAI: styleSaysAI,
-                trustsAuthor: preferences?.aiReplyTrust(host: host, accountID: user.id, authorID: authorID)?.trustsStyleAssessment == true)
+                trustsAuthor: preferences?.aiReplyTrust(host: host, accountID: user.id, authorID: authorID)?
+                    .history(at: now, excluding: id).basis.favorsAI == true)
         }
         return evidence
     }
@@ -2953,10 +2959,17 @@ final class MergeRequestAttentionMonitor {
     private func hasCurrentStyleAssessment(_ note: GitLabMergeRequestDiscussion.Note, policy: AutomaticPublicationPolicy,
                                             host: String, projectID: Int, iid: Int, userID: Int, legacyUsernames: Set<String>) -> Bool {
         let directory = AICommentAssessmentStore.scopedDirectory(aiAssessmentDirectory, criteriaOverride: policy.aiCommentCriteriaOverride)
-        guard let record = AICommentAssessmentStore.assessment(for: note, host: host, projectID: projectID, iid: iid,
-            userID: userID, legacyUsernames: legacyUsernames, in: directory),
-              record.criteriaVersion == AICommentOriginAssessor.criteriaVersion else { return false }
-        return record.authorID == note.author?.id
+        if AICommentAssessmentStore.stored(for: note, host: host, projectID: projectID, iid: iid,
+            userID: userID, legacyUsernames: legacyUsernames, in: directory) != nil {
+            guard let record = AICommentAssessmentStore.assessment(for: note, host: host, projectID: projectID, iid: iid,
+                userID: userID, legacyUsernames: legacyUsernames, in: directory),
+                  record.criteriaVersion == AICommentOriginAssessor.criteriaVersion else { return false }
+            return record.authorID == note.author?.id
+        }
+        let displayDirectory = AICommentAssessmentStore.scopedDirectory(
+            AICommentAssessmentStore.displayDirectory(for: aiAssessmentDirectory), criteriaOverride: policy.aiCommentCriteriaOverride)
+        return AICommentAssessmentStore.sealedDisplayAssessment(for: note, host: host, projectID: projectID, iid: iid,
+            userID: userID, legacyUsernames: legacyUsernames, in: displayDirectory) != nil
     }
 
     private func rememberManuallyConfirmedAIReply(_ draft: GitLabDraftNote, discussions: [GitLabMergeRequestDiscussion],

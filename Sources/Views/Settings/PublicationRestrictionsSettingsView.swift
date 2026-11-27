@@ -122,16 +122,15 @@ private struct AIReplyTrustSettings: View {
                 Text(.PublicationPolicy.publicationAiReplyTrustEmpty).font(.caption).foregroundStyle(.secondary)
             }
             ForEach(records) { record in
+                let history = record.history(at: Date())
                 HStack {
-                    VStack(alignment: .leading) {
+                    VStack(alignment: .leading, spacing: 4) {
                         Text(verbatim: record.label)
-                        HStack(spacing: 8) {
-                            Text(record.confirmedAINotes.count, format: .number).monospacedDigit()
-                            Text(record.trustsStyleAssessment ? .PublicationPolicy.publicationAiReplyTrustEligible
-                                : record.humanNotes.isEmpty ? .PublicationPolicy.publicationAiReplyTrustWaiting
-                                : .PublicationPolicy.publicationAiReplyTrustHuman)
-                        }
-                        .font(.caption).foregroundStyle(.secondary)
+                        distribution(.PublicationPolicy.publicationAiReplyTrustLast30Days, sample: history.last30Days)
+                        distribution(.PublicationPolicy.publicationAiReplyTrustLast90Days, sample: history.last90Days)
+                        Text(history.basis.favorsAI ? .PublicationPolicy.publicationAiReplyTrustEligible
+                            : .PublicationPolicy.publicationAiReplyTrustWaiting)
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                     Button {
@@ -159,6 +158,31 @@ private struct AIReplyTrustSettings: View {
             accountID = user.id
             loadedRevision = revision
         }
+    }
+
+    private func distribution(_ title: LocalizedStringResource,
+                              sample: ReviewParticipationPreferences.AIReplyTrust.Sample) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                Text(title)
+                if let share = sample.aiShare {
+                    let format = FloatingPointFormatStyle<Double>.Percent.percent.precision(.fractionLength(0))
+                    Text(.PublicationPolicy.publicationAiReplyTrustSample(
+                        share.formatted(format), sample.ai, (1 - share).formatted(format), sample.human))
+                        .monospacedDigit()
+                } else {
+                    Text(.PublicationPolicy.publicationAiReplyTrustNoRecentLabels)
+                }
+            }
+            if let share = sample.aiShare {
+                ProgressView(value: share)
+                    .progressViewStyle(.linear)
+                    .frame(maxWidth: 215)
+                    .accessibilityHidden(true)
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 }
 

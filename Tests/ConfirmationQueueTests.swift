@@ -462,25 +462,27 @@ import MergeTetherRemote
 
         func assess(noteID: Int, body: String, trustAuthor: Bool = true,
                     criteriaVersion: Int = AICommentOriginAssessor.criteriaVersion, username: String = "me", ownerID: Int? = nil) throws {
+            if trustAuthor { confirmAIComments(2) }
             let path = AICommentAssessmentStore.fileURL(host: "gitlab.example.org", projectID: 1, iid: 2, noteID: noteID,
                 userID: ownerID ?? glab.authenticatedUserID, in: folder.appending(path: "ai-assessments"))
             try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
             let record = AICommentAssessment(version: 2, host: "gitlab.example.org", projectID: 1, iid: 2,
                 noteID: noteID, bodySHA256: AICommentAssessmentStore.digest(body), confidence: "very_high", evidence: "Style assessment",
                 provider: "codex", model: "test", criteriaVersion: criteriaVersion, username: username, authorID: 8, purpose: .publication)
-            if trustAuthor { confirmAIComments(2) }
             // Simulates the app's own sealed result; plain records never authorize publication.
             try SealedAssessmentFile.write(record, to: path)
         }
 
         func confirmAIComments(_ count: Int, authorID: Int = 8,
-                               classification: AICommentOriginOverride.Classification = .ai) {
+                               classification: AICommentOriginOverride.Classification = .ai,
+                               account: GitLabAuthenticatedUser = .init(id: 3, username: "me")) {
             let sources = (0..<count).map { index in
-                GitLabMergeRequestDiscussion.Note(id: 900 + index, author: .init(id: authorID, username: "reviewer", name: nil),
+                GitLabMergeRequestDiscussion.Note(id: (classification == .human ? 950 : 900) + index,
+                    author: .init(id: authorID, username: "reviewer", name: nil),
                     system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "Earlier feedback")
             }
             #expect(settings.recordAIReplyTrust(classification, notes: sources, host: "gitlab.example.org",
-                user: .init(id: 3, username: "me")))
+                user: account))
         }
 
         func verifyFollowUpDrafts() throws {
@@ -835,7 +837,7 @@ import MergeTetherRemote
                 })
             },
             verifyDraftProofRecovery: verifyDraftRecovery ?? { _, _, _ in throw DraftProofRecoveryVerifier.Failure.failed },
-            assessAIOrigin: assessAIOrigin ?? { _, notes, _, _, _, _ in
+            assessAIOrigin: assessAIOrigin ?? { _, notes, _, _, _, _, _ in
                 .init(notes: notes.compactMap { note in note.id.map {
                     .init(noteID: $0, classification: .uncertain, confidence: .uncertain, evidence: "No AI provenance in this fixture.")
                 } })
@@ -3529,19 +3531,19 @@ import MergeTetherRemote
         #expect(!harness.log("selected.log").contains("/draft_notes/11/publish"))
     }
 
-    @Test(arguments: [0, 1, 2], [false, true])
-    func sealedStyleEvidenceOnlyPublishesForTrustedAuthors(_ confirmations: Int, _ markedHuman: Bool) async throws {
+    @Test(arguments: [0, 1, 2], [0, 1, 2])
+    func sealedStyleEvidenceOnlyPublishesForTrustedAuthors(_ confirmations: Int, _ humanLabels: Int) async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
         try harness.write("drafts.json", draftJSON)
         try harness.write("discussions.json", duoDiscussion.replacingOccurrences(of: "GitLabDuo", with: "reviewer"))
         try harness.write("duo.json", #"{"id":8,"username":"reviewer","bot":false}"#)
         try harness.recordVerdict("objections", head: head)
-        try harness.assess(noteID: 40, body: "AI finding", trustAuthor: false)
         harness.confirmAIComments(confirmations)
-        if markedHuman { harness.confirmAIComments(1, classification: .human) }
+        harness.confirmAIComments(humanLabels, classification: .human)
+        try harness.assess(noteID: 40, body: "AI finding", trustAuthor: false)
 
-        let trusted = confirmations >= 2 && !markedHuman
+        let trusted = confirmations == 2 && humanLabels <= 1
         try await harness.poll()
         let item = try #require(harness.monitor.currentItems.first)
         #expect(item.automaticDraftIDs == (trusted ? [12] : []))
@@ -3577,6 +3579,32 @@ import MergeTetherRemote
         #expect(!harness.log("selected.log").contains("/draft_notes/12/publish"))
     }
 
+    @Test func theLivePublicationGateCanReuseASealedDetailsVerdictWithoutCallingTheAssessor() async throws {
+        let harness = try makeHarness(assistantWorked: true, assessAIOrigin: { _, _, _, _, _, _, _ in
+            Issue.record("The source already has a completed verdict")
+            throw CancellationError()
+        })
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try harness.write("discussions.json", duoDiscussion.replacingOccurrences(of: "GitLabDuo", with: "reviewer"))
+        try harness.write("duo.json", #"{"id":8,"username":"reviewer","bot":false}"#)
+        try harness.recordVerdict("objections", head: head)
+        harness.confirmAIComments(2)
+        let note = GitLabMergeRequestDiscussion.Note(id: 40, author: .init(id: 8, username: "reviewer", name: nil),
+            system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "AI finding")
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+            .forAccount(.init(host: host, username: "me", userID: 3))
+        let display = AICommentAssessmentStore.displayDirectory(for: harness.folder.appending(path: "ai-assessments"))
+        try AICommentAssessmentStore.persist(.init(notes: [.init(noteID: 40, classification: .aiAssisted,
+            confidence: .high, evidence: "Saved classification")]), target: target, notes: [note],
+            assistant: .codex, model: "test", purpose: .display, in: display)
+
+        try await harness.poll()
+        try await harness.poll()
+        #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
+        #expect(!harness.log("selected.log").contains("/draft_notes/11/publish"))
+    }
+
     @Test func renamingAnAccountPreservesItsHumanOverride() async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
@@ -3603,6 +3631,7 @@ import MergeTetherRemote
         defer { harness.cleanUp() }
         let previous = GitLabAccountIdentity(host: host, username: renamed ? "old-name" : "me", userID: renamed ? 3 : 21)
         #expect(harness.settings.bindAuthenticatedAccount(previous))
+        harness.confirmAIComments(2, account: .init(id: renamed ? 3 : 21, username: previous.username))
         try harness.assess(noteID: 40, body: "AI finding", trustAuthor: false,
             username: previous.username, ownerID: legacy ? nil : previous.userID)
         #expect(harness.settings.bindAuthenticatedAccount(.init(host: host, username: "me", userID: 3)))
@@ -5522,7 +5551,7 @@ import MergeTetherRemote
         let probe = OriginProbe()
         defer { probe.finish(ai: false) }
         let harness = try makeHarness(assistantWorked: outcome != "noWorker", authored: true,
-            assessAIOrigin: { _, notes, _, _, _, _ in await probe.assess(notes) })
+            assessAIOrigin: { _, notes, _, _, _, _, _ in await probe.assess(notes) })
         defer { harness.cleanUp() }
         harness.settings.automation.publicationMode = .aiReplies
         if outcome == "trustedAuthor" { harness.confirmAIComments(2, authorID: 9) }

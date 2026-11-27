@@ -74,7 +74,7 @@ import Observation
                         projectID: target.projectID, iid: iid, username: target.username, userID: userID,
                         legacyUsernames: names, in: actionDirectory) != nil { return nil }
                     guard let id = note.id, let authorID = note.author?.id, authorID > 0, let body = note.body,
-                          let iid = target.iid, let record = AICommentAssessmentStore.displayResult(for: note, host: target.host,
+                          let iid = target.iid, let record = AICommentAssessmentStore.completedResult(for: note, host: target.host,
                             projectID: target.projectID, iid: iid, username: target.username, userID: userID, legacyUsernames: names,
                             criteriaOverride: criteriaOverride, in: actionDirectory, displayDirectory: displayDirectory),
                           let classification = AICommentOriginAssessment.Classification(rawValue: record.classification),
@@ -97,11 +97,11 @@ import Observation
          assessmentDirectory: URL = AICommentAssessmentStore.directory, displayDirectory: URL? = nil,
          canAutomate: @escaping @MainActor (AutomationAssistant) async -> Bool,
          publicationIsChecking: @escaping @MainActor (AssistantAutomationRunner.MergeRequestWork) -> Bool = { _ in false },
-         assess: @escaping AICommentOriginCoordinator.Assess = { try await AICommentOriginAssessor.verify(target: $0, notes: $1, assistant: $2, model: $3, thinking: $4, criteriaOverride: $5) },
+         assess: @escaping AICommentOriginCoordinator.Assess = { try await AICommentOriginAssessor.verify(target: $0, notes: $1,
+            assistant: $2, model: $3, thinking: $4, criteriaOverride: $5, authorContexts: $6) },
          cacheRead: CacheRead? = nil) {
         self.glab = glab; self.settings = settings; self.assessmentDirectory = assessmentDirectory
-        self.displayDirectory = displayDirectory ?? (assessmentDirectory == AICommentAssessmentStore.directory
-            ? AICommentAssessmentStore.displayDirectory : assessmentDirectory.appending(path: ".display-only"))
+        self.displayDirectory = displayDirectory ?? AICommentAssessmentStore.displayDirectory(for: assessmentDirectory)
         self.canAutomate = canAutomate; self.publicationIsChecking = publicationIsChecking; self.assess = assess
         self.cacheRead = cacheRead ?? { notes, target, actionDirectory, displayDirectory, criteriaOverride in
             let userID = glab.authenticatedUserID
@@ -126,7 +126,8 @@ import Observation
             guard let id = $0.id, id > 0 else { return false }
             return $0.system != true && ($0.author?.id ?? 0) > 0 && $0.body?.isEmpty == false
                 && counts[id] == 1 && !knownNoteIDs.contains(id)
-        }.sorted { $0.id! < $1.id! }
+                && AICommentOriginAssessor.declaredAttribution(for: $0) == nil
+        }.sorted { ($0.author!.id, $0.id!) < ($1.author!.id, $1.id!) }
         let actionDirectory = assessmentDirectory, displayDirectory = self.displayDirectory
         let missing = await cacheRead(candidates, target, actionDirectory, displayDirectory, configuration.aiCommentCriteriaOverride)
         guard latest[target] == invocation, !Task.isCancelled, settings.automation == configuration,
@@ -171,7 +172,7 @@ import Observation
 
     private func makeCoordinator() -> AICommentOriginCoordinator {
         let worker = AICommentOriginCoordinator(directory: displayDirectory, overrideDirectory: assessmentDirectory, purpose: .display,
-            assess: { [weak self] target, notes, assistant, model, thinking, criteriaOverride in
+            assess: { [weak self] target, notes, assistant, model, thinking, criteriaOverride, contexts in
                 guard let self, let generation = latest[target], isCurrent(target, assistant: assistant, model: model, thinking: thinking),
                       await canAutomate(assistant), !Task.isCancelled, latest[target] == generation,
                       isCurrent(target, assistant: assistant, model: model, thinking: thinking) else { throw CancellationError() }
@@ -181,7 +182,7 @@ import Observation
                     return matches.count == 1 && original.matchesOriginSource(matches[0])
                 }), isCurrent(target, assistant: assistant, model: model, thinking: thinking),
                       settings.automation.aiCommentCriteriaOverride == criteriaOverride else { throw CancellationError() }
-                return try await assess(target, notes, assistant, model, thinking, criteriaOverride)
+                return try await assess(target, notes, assistant, model, thinking, criteriaOverride, contexts)
             }, fetchCurrent: { [weak self] target in
                 guard let self else { throw CancellationError() }
                 return try await readCurrent(target)
@@ -190,7 +191,11 @@ import Observation
             }, criteriaOverride: { [weak self] in self?.settings.automation.aiCommentCriteriaOverride },
             overrideAccount: { [weak self] target in
                 .init(host: target.host, username: target.username, userID: self?.glab.authenticatedUserID)
-            }, legacyUsernames: { [weak self] in self?.settings.unambiguousLegacyUsernames(for: $0) ?? [$0.username] })
+            }, legacyUsernames: { [weak self] in self?.settings.unambiguousLegacyUsernames(for: $0) ?? [$0.username] },
+            authorHistories: { [weak self] account, notes in
+                self?.settings.reviewParticipationPreferences.authorHistories(for: notes, host: account.host,
+                    accountID: account.userID) ?? [:]
+            })
         worker.onChange = { [weak self] in
             guard let self else { return }
             revision &+= 1
@@ -276,10 +281,10 @@ import Observation
             if let iid = target.iid, AICommentOriginOverrideStore.override(for: note, host: target.host,
                 projectID: target.projectID, iid: iid, username: target.username, userID: userID,
                 legacyUsernames: legacyUsernames, in: actionDirectory) != nil { return false }
-            guard let iid = target.iid, let record = AICommentAssessmentStore.displayResult(for: note, host: target.host,
+            guard let iid = target.iid else { return false }
+            return AICommentAssessmentStore.completedResult(for: note, host: target.host,
                 projectID: target.projectID, iid: iid, username: target.username, userID: userID, legacyUsernames: legacyUsernames,
-                criteriaOverride: criteriaOverride, in: actionDirectory, displayDirectory: displayDirectory) else { return true }
-            return !(record.qualifiesAsAI || record.criteriaVersion == AICommentOriginAssessor.criteriaVersion)
+                criteriaOverride: criteriaOverride, in: actionDirectory, displayDirectory: displayDirectory) == nil
         }
     }
 }

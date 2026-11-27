@@ -4,6 +4,82 @@ import Testing
 
 @MainActor
 struct AICommentOriginTests {
+    @Test func classifierReceivesRecentRatiosAndOneCurrentExamplePerLabel() throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let source = note(), ai = note(11, body: "AI example"), human = note(12, body: "Human example"),
+            edited = note(13, body: "Edited example")
+        let account = GitLabAuthenticatedUser(id: 5, username: "me")
+        let identity = account.account(on: target.host)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        var preferences = ReviewParticipationPreferences()
+        preferences.recordAIReplyTrust(.ai, notes: [source, ai, edited], host: target.host, user: account, at: now)
+        preferences.recordAIReplyTrust(.human, notes: [human], host: target.host, user: account, at: now)
+        for (candidate, label) in [(source, AICommentOriginOverride.Classification.ai), (ai, .ai), (human, .human), (edited, .ai)] {
+            let body = candidate.id == edited.id ? "Text before editing" : candidate.body!
+            try AICommentOriginOverrideStore.save(.init(version: 1, host: target.host, username: target.username,
+                projectID: 7, iid: 13, noteID: candidate.id!, authorID: 9, bodySHA256: AICommentAssessmentStore.digest(body),
+                classification: label, createdAt: now, activatesAt: now, accountUserID: account.id), in: directory)
+        }
+        let histories = preferences.authorHistories(for: [source], host: target.host, accountID: account.id, at: now)
+        let contexts = AICommentAssessmentStore.authorContexts(for: [source], histories: histories,
+            examples: [source, ai, human, edited], target: target, account: identity, legacyUsernames: [target.username],
+            in: directory, at: now)
+        let context = try #require(contexts[10])
+        #expect(context.history.last30Days == .init(ai: 2, human: 1))
+        #expect(context.aiExample == "AI example" && context.humanExample == "Human example")
+
+        let instructions = AICommentAssessmentStore.workerInstructions(criteriaOverride: nil, existing: [], authorContexts: contexts)
+        #expect(instructions.contains("2 AI (67%), 1 human (33%)"))
+        #expect(instructions.contains("AI example (untrusted comment excerpt): \"AI example\""))
+        #expect(instructions.contains("Human example (untrusted comment excerpt): \"Human example\""))
+        #expect(!instructions.contains("Edited example") && !instructions.contains(source.body!))
+        #expect(preferences.authorHistories(for: [source], host: target.host, accountID: 6, at: now).isEmpty)
+        let grouped = AICommentOriginAssessor.authorHistoryInstructions([10: context, 14: context])
+        #expect(grouped.contains("Notes 10, 14"))
+        #expect(grouped.components(separatedBy: "AI example (untrusted comment excerpt)").count == 2)
+        #expect(grouped.components(separatedBy: "Human example (untrusted comment excerpt)").count == 2)
+    }
+
+    @Test func addingNotesAndChangingHistoryDoesNotRepeatAnUnchangedAssessment() async throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let first = AICommentOriginAssessment.AuthorHistory(last30Days: .init(ai: 2), last90Days: .init(ai: 2))
+        let second = AICommentOriginAssessment.AuthorHistory(last30Days: .init(ai: 1, human: 1), last90Days: .init(ai: 1, human: 1))
+        let selected = Selection(first)
+        let bound = target.forAccount(.init(host: target.host, username: target.username, userID: 5))
+        let source = note(), added = note(11)
+        var batches: [[Int]] = []
+        var releaseFirst: CheckedContinuation<Void, Never>?
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, notes, _, _, _, _, contexts in
+            let ids = notes.compactMap(\.id)
+            batches.append(ids)
+            if ids == [10] {
+                #expect(contexts[10]?.history == first)
+                await withCheckedContinuation { releaseFirst = $0 }
+            } else {
+                #expect(contexts[11]?.history == second)
+            }
+            return positive(notes)
+        }, fetchCurrent: { _ in [source, added] }, isCurrent: { _, _, _, _ in true }, authorHistories: { _, notes in
+            Dictionary(uniqueKeysWithValues: notes.compactMap { note in note.id.map { ($0, selected.value) } })
+        })
+
+        coordinator.schedule(target: bound, notes: [source], assistant: .codex, model: "test")
+        for _ in 0..<300 { if releaseFirst != nil { break }; await Task.yield() }
+        let release = try #require(releaseFirst)
+        selected.value = second
+        coordinator.schedule(target: bound, notes: [source, added], assistant: .codex, model: "test")
+        release.resume()
+        await settle(coordinator)
+        coordinator.schedule(target: bound, notes: [source, added], assistant: .codex, model: "another-model")
+        await settle(coordinator)
+
+        #expect(batches == [[10], [11]])
+        for note in [source, added] {
+            #expect(AICommentAssessmentStore.assessment(for: note, host: target.host, projectID: 7, iid: 13,
+                userID: 5, in: directory) != nil)
+        }
+    }
+
     @Test func customCriteriaSurvivesSettingsReloadAndCanBeRestoredToDefault() throws {
         var settings = try JSONDecoder().decode(AutomationSettings.self, from: Data("{}".utf8))
         #expect(settings.aiCommentCriteria == AICommentOriginAssessor.criteriaInstructions)
@@ -48,7 +124,7 @@ struct AICommentOriginTests {
         let selected = Selection("First prompt")
         var inputs: [String?] = []
         var first: CheckedContinuation<Void, Never>?
-        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, notes, _, _, _, criteria in
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, notes, _, _, _, criteria, _ in
             inputs.append(criteria)
             if criteria == "First prompt" { await withCheckedContinuation { first = $0 } }
             return positive(notes)
@@ -127,7 +203,7 @@ struct AICommentOriginTests {
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
         var events = 0
         let coordinator = AICommentOriginCoordinator(directory: directory,
-            assess: { _, notes, _, _, _, _ in
+            assess: { _, notes, _, _, _, _, _ in
                 try AICommentAssessmentStore.persist(positive(notes), target: target, notes: notes, assistant: .codex, model: "cheap", in: directory)
                 return .init(notes: notes.map { .init(noteID: $0.id!, classification: .uncertain,
                     confidence: .uncertain, evidence: "A late lightweight opinion") })
@@ -145,7 +221,7 @@ struct AICommentOriginTests {
         try Data("Blocked record folder".utf8).write(to: directory.appending(path: target.host))
         var calls = 0, events = 0
         let coordinator = AICommentOriginCoordinator(directory: directory, purpose: .display,
-            assess: { _, notes, _, _, _, _ in calls += 1; return positive(notes) },
+            assess: { _, notes, _, _, _, _, _ in calls += 1; return positive(notes) },
             fetchCurrent: { _ in [note()] }, isCurrent: { _, _, _, _ in true }, retryWait: { _ in })
         coordinator.onPersisted = { _, _, _ in events += 1 }
         coordinator.schedule(target: target, notes: [note()], assistant: .codex, model: "cheap")
@@ -159,7 +235,7 @@ struct AICommentOriginTests {
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
         var failed = false, events: [[Int]] = []
         let coordinator = AICommentOriginCoordinator(directory: directory, purpose: .display,
-            assess: { _, notes, _, _, _, _ in
+            assess: { _, notes, _, _, _, _, _ in
                 if failed { throw AICommentOriginAssessor.AssessmentError.invalidEvidence }
                 return positive(notes)
             }, fetchCurrent: { _ in [note(10), note(11)] }, isCurrent: { _, _, _, _ in true }, retryWait: { _ in })
@@ -190,7 +266,7 @@ struct AICommentOriginTests {
         var calls: [Int] = [], fail = true
         var retryDelays: [Duration] = []
         let coordinator = AICommentOriginCoordinator(directory: directory, purpose: .display,
-            assess: { _, notes, _, _, _, _ in
+            assess: { _, notes, _, _, _, _, _ in
                 calls += notes.compactMap(\.id)
                 if fail && notes.first?.id == 10 { throw AICommentOriginAssessor.AssessmentError.invalidEvidence }
                 return positive(notes)
@@ -240,6 +316,30 @@ struct AICommentOriginTests {
         #expect(AICommentAssessmentStore.result(for: source, host: target.host, projectID: 7, iid: 13, in: directory) == nil)
     }
 
+    @Test func aSavedDisplayVerdictPreventsAnotherAssessmentAndOnlySealedEvidenceIsReusableForPublishing() async throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let display = AICommentAssessmentStore.displayDirectory(for: directory)
+        let source = note(), bound = target.forAccount(.init(host: target.host, username: target.username, userID: 5))
+        try AICommentAssessmentStore.persist(positive([source]), target: bound, notes: [source],
+            assistant: .codex, model: "cheap", purpose: .display, in: display)
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, _, _, _, _, _, _ in
+            Issue.record("A saved display decision must be reused for the unchanged source")
+            throw CancellationError()
+        }, fetchCurrent: { _ in [source] }, isCurrent: { _, _, _, _ in true },
+            criteriaOverride: { "New prompt for future evaluations" })
+        coordinator.schedule(target: bound, notes: [source], assistant: .codex, model: "different-model")
+        await settle(coordinator)
+        #expect(AICommentAssessmentStore.sealedDisplayAssessment(for: source, host: target.host, projectID: 7, iid: 13,
+            userID: 5, legacyUsernames: [], in: display) != nil)
+        #expect(AICommentAssessmentStore.sealedDisplayAssessment(for: source, host: target.host, projectID: 7, iid: 13,
+            userID: 6, legacyUsernames: [], in: display) == nil)
+        let path = AICommentAssessmentStore.fileURL(host: target.host, projectID: 7, iid: 13, noteID: 10, userID: 5, in: display)
+        let payload = try SealedAssessmentFile.payload(at: path)
+        try payload.write(to: path)
+        #expect(AICommentAssessmentStore.sealedDisplayAssessment(for: source, host: target.host, projectID: 7, iid: 13,
+            userID: 5, legacyUsernames: [], in: display) == nil)
+    }
+
     @Test func pendingDisplayOpinionCannotBeRestoredAsAnActionOpinion() throws {
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
         let verdict = try #require(positive([note()]).notes.first)
@@ -271,7 +371,7 @@ struct AICommentOriginTests {
         let source = note()
         var calls = 0
         var reads = 0
-        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, notes, _, _, _, _ in
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, notes, _, _, _, _, _ in
             calls += 1
             if stage == "assessment" && calls == 1 { throw AICommentOriginAssessor.AssessmentError.failed }
             return positive(notes)
@@ -293,7 +393,7 @@ struct AICommentOriginTests {
     func completedNonAIVerdictSurvivesFinalReadFailuresAndCooldown(_ classification: AICommentOriginAssessment.Classification) async throws {
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
         let state = RetryState()
-        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _ in
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _, _ in
             state.calls += 1
             if state.calls > 1 { return positive(incoming) }
             return .init(notes: incoming.map { .init(noteID: $0.id!, classification: classification,
@@ -328,7 +428,7 @@ struct AICommentOriginTests {
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
         let state = RetryState()
         do {
-            let original = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _ in
+            let original = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _, _ in
                 state.calls += 1
                 return .init(notes: incoming.map { .init(noteID: $0.id!, classification: classification,
                     confidence: classification == .aiAssisted ? .veryHigh : .uncertain,
@@ -343,7 +443,7 @@ struct AICommentOriginTests {
             #expect(AICommentAssessmentStore.result(for: note(), host: target.host, projectID: 7, iid: 13, in: directory) == nil)
         }
         state.now = state.now.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
-        let restarted = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _ in
+        let restarted = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _, _ in
             state.calls += 1
             return positive(incoming)
         }, fetchCurrent: { _ in state.reads += 1; return [note()] }, isCurrent: { _, _, _, _ in true },
@@ -363,7 +463,7 @@ struct AICommentOriginTests {
         let changed = GitLabMergeRequestDiscussion.Note(id: original.id,
             author: .init(id: 19, username: "different-author", name: "Different Author"),
             system: false, resolvable: nil, resolved: nil, resolvedBy: nil, body: original.body)
-        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _ in
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _, _ in
             state.calls += 1
             if state.calls > 1 { return positive(incoming) }
             return .init(notes: incoming.map { .init(noteID: $0.id!, classification: .uncertain,
@@ -398,7 +498,7 @@ struct AICommentOriginTests {
             system: false, resolvable: nil, resolved: nil, resolvedBy: nil,
             body: changed == "body" ? "An edited source body" : source.body)
         var calls = 0
-        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _ in
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _, _ in
             calls += 1; return positive(incoming)
         }, fetchCurrent: { _ in [nextSource] }, isCurrent: { _, _, _, _ in true })
         coordinator.schedule(target: nextTarget, notes: [nextSource], assistant: changed == "provider" ? .claude : .codex,
@@ -425,7 +525,7 @@ struct AICommentOriginTests {
         let path = try #require(jsonFiles.first)
         try Data("malformed pending verdict".utf8).write(to: path)
         var calls = 0
-        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _ in
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _, _ in
             calls += 1; return positive(incoming)
         }, fetchCurrent: { _ in [source] }, isCurrent: { _, _, _, _ in true }, retryWait: { _ in await Task.yield() })
         coordinator.schedule(target: target, notes: [source], assistant: .codex, model: "cheap")
@@ -439,7 +539,7 @@ struct AICommentOriginTests {
     func exhaustedReadOnlyBudgetDoesNotRestartOnLaterPolls(_ recovery: String) async throws {
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
         let state = RetryState()
-        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _ in
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _, _ in
             state.calls += 1
             if state.recovered { return positive(incoming) }
             throw AICommentOriginAssessor.AssessmentError.failed
@@ -467,7 +567,7 @@ struct AICommentOriginTests {
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
         var calls = 0
         var clock = Date()
-        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _ in
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _, _ in
             calls += 1
             return .init(notes: incoming.map { .init(noteID: $0.id!, classification: classification,
                 confidence: .uncertain, evidence: "Current source evidence remains uncertain.") })
@@ -486,7 +586,7 @@ struct AICommentOriginTests {
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
         var calls = 0
         var current = true
-        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, _, _, _, _, _ in
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, _, _, _, _, _, _ in
             calls += 1
             throw AICommentOriginAssessor.AssessmentError.failed
         }, fetchCurrent: { _ in [note()] }, isCurrent: { _, _, _, _ in current }, retryWait: { _ in current = false })
@@ -539,7 +639,7 @@ struct AICommentOriginTests {
     }
 
     @Test(arguments: ["manual_likely", "uncertain"])
-    func earlierCriteriaResultsAreReassessedOnce(_ classification: String) async throws {
+    func earlierCriteriaResultsStayVisibleWithoutAnotherAssessment(_ classification: String) async throws {
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
         let source = note()
         let old = AICommentAssessment(version: 2, host: target.host, projectID: 7, iid: 13, noteID: 10,
@@ -550,7 +650,7 @@ struct AICommentOriginTests {
         try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONEncoder().encode(old).write(to: path)
         var calls = 0
-        let assess: AICommentOriginCoordinator.Assess = { _, notes, _, _, _, _ in
+        let assess: AICommentOriginCoordinator.Assess = { _, notes, _, _, _, _, _ in
             calls += 1
             return .init(notes: notes.map { .init(noteID: $0.id!, classification: .aiAssisted, confidence: .high,
                 evidence: "Precise cross-code references with consistent formatting and polished language.") })
@@ -559,15 +659,15 @@ struct AICommentOriginTests {
             fetchCurrent: { _ in [source] }, isCurrent: { _, _, _, _ in true })
         coordinator.schedule(target: target, notes: [source], assistant: .codex, model: "cheap")
         await settle(coordinator)
-        #expect(calls == 1)
-        #expect(AICommentAssessmentStore.isAI(source, host: target.host, projectID: 7, iid: 13, in: directory))
-        let saved = try #require(JSONSerialization.jsonObject(with: SealedAssessmentFile.payload(at: path)) as? [String: Any])
-        #expect(saved["criteriaVersion"] as? Int == AICommentOriginAssessor.criteriaVersion)
+        #expect(calls == 0)
+        #expect(!AICommentAssessmentStore.isAI(source, host: target.host, projectID: 7, iid: 13, in: directory))
+        let saved = try JSONDecoder().decode(AICommentAssessment.self, from: Data(contentsOf: path))
+        #expect(saved == old)
         let restarted = AICommentOriginCoordinator(directory: directory, assess: assess,
             fetchCurrent: { _ in [source] }, isCurrent: { _, _, _, _ in true })
         restarted.schedule(target: target, notes: [source], assistant: .codex, model: "cheap")
         await settle(restarted)
-        #expect(calls == 1)
+        #expect(calls == 0)
     }
 
     @Test func legacyEvidenceArraysNormalizeWithoutTreatingHumanAccountAsNegative() throws {
@@ -600,7 +700,7 @@ struct AICommentOriginTests {
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
         let notes = [note(), note(11, body: "Please rename the variable")]
         var calls = 0
-        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _ in
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _, _ in
             calls += 1
             return .init(notes: incoming.map { .init(noteID: $0.id!, classification: $0.id == 10 ? .aiAssisted : .uncertain,
                 confidence: $0.id == 10 ? .veryHigh : .uncertain, evidence: "Content and context assessment; not based on account name.") })
@@ -621,7 +721,7 @@ struct AICommentOriginTests {
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
         let source = note()
         var calls = 0
-        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, notes, _, _, _, _ in
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, notes, _, _, _, _, _ in
             calls += 1; return positive(notes)
         }, fetchCurrent: { _ in [note(body: "Changed while assessing")] }, isCurrent: { _, _, _, _ in true })
         coordinator.schedule(target: target, notes: [source], assistant: .codex, model: "cheap")
@@ -630,7 +730,7 @@ struct AICommentOriginTests {
         #expect(AICommentAssessmentStore.assessment(for: source, host: target.host, projectID: 7, iid: 13, in: directory) == nil)
         let failedDirectory = try folder(); defer { try? FileManager.default.removeItem(at: failedDirectory) }
         var failedCalls = 0
-        let failed = AICommentOriginCoordinator(directory: failedDirectory, assess: { _, _, _, _, _, _ in
+        let failed = AICommentOriginCoordinator(directory: failedDirectory, assess: { _, _, _, _, _, _, _ in
             failedCalls += 1; throw AICommentOriginAssessor.AssessmentError.failed
         }, fetchCurrent: { _ in [source] }, isCurrent: { _, _, _, _ in true }, retryWait: { _ in await Task.yield() })
         for _ in 0..<3 {
@@ -643,7 +743,7 @@ struct AICommentOriginTests {
         let obsoleteDirectory = try folder(); defer { try? FileManager.default.removeItem(at: obsoleteDirectory) }
         var current = true
         var obsoleteCalls = 0
-        let obsolete = AICommentOriginCoordinator(directory: obsoleteDirectory, assess: { _, notes, _, _, _, _ in
+        let obsolete = AICommentOriginCoordinator(directory: obsoleteDirectory, assess: { _, notes, _, _, _, _, _ in
             obsoleteCalls += 1; current = false; return positive(notes)
         }, fetchCurrent: { _ in [source] }, isCurrent: { _, _, _, _ in current })
         obsolete.schedule(target: target, notes: [source], assistant: .codex, model: "cheap")
@@ -664,7 +764,7 @@ struct AICommentOriginTests {
         var waiting: [CheckedContinuation<Void, Never>] = []
         var active = 0
         var maximum = 0
-        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, notes, _, _, _, _ in
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, notes, _, _, _, _, _ in
             active += 1; maximum = max(maximum, active)
             await withCheckedContinuation { waiting.append($0) }
             active -= 1
@@ -697,6 +797,8 @@ struct AICommentOriginTests {
             text=(incoming if codex else args[args.index('-p')+1]+' '+incoming).lower()
             full=('--dangerously-bypass-approvals-and-sandbox' in args) if codex else ('--dangerously-skip-permissions' in args and '--tools' in args and 'default' in args)
             role=all(token in text for token in ['read-only','do not publish','untrusted','ai-assisted'])
+            role=role and all(token in text for token in ['last 30 days: 2 ai (67%), 1 human (33%)',
+                'last 90 days: 3 ai (60%), 2 human (40%)', 'synthetic ai excerpt', 'synthetic human excerpt'])
             custom='look for the team review format' in text
             role=role and custom==\(custom ? "True" : "False") and ('probabilistic' in text) != custom
             high=('model_reasoning_effort=\"high\"' in args) if codex else (args[args.index('--effort')+1]=='high')
@@ -706,8 +808,12 @@ struct AICommentOriginTests {
             else: print(json.dumps({'is_error':False,'structured_output':result}))
             """.utf8).write(to: executable)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let history = AICommentOriginAssessment.AuthorHistory(
+            last30Days: .init(ai: 2, human: 1), last90Days: .init(ai: 3, human: 2))
         let result = try await AICommentOriginAssessor.run(target: target, notes: [note()], assistant: assistant,
-            model: "cheap", criteriaOverride: custom ? "Look for the team review format." : nil, executable: executable)
+            model: "cheap", criteriaOverride: custom ? "Look for the team review format." : nil,
+            authorContexts: [10: .init(history: history, aiExample: "Synthetic AI excerpt", humanExample: "Synthetic human excerpt")],
+            executable: executable)
         #expect(result.notes.first?.classification == .aiAssisted)
         #expect(result.notes.first?.confidence == .veryHigh)
     }
@@ -740,11 +846,11 @@ struct AICommentOriginTests {
     }
 
     @Test(arguments: [AICommentOriginAssessment.Classification.uncertain, .manualLikely, .aiAssisted])
-    func thinkingChangeRechecksOnlyNonAICacheEntries(_ classification: AICommentOriginAssessment.Classification) async throws {
+    func confirmedVerdictsSurviveAChangeInThinking(_ classification: AICommentOriginAssessment.Classification) async throws {
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
         var seen: [VerificationThinking] = []
         let selected = Selection(VerificationThinking.low)
-        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, thinking, _ in
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, thinking, _, _ in
             seen.append(thinking)
             return .init(notes: incoming.map { .init(noteID: $0.id!, classification: classification,
                 confidence: classification == .aiAssisted ? .high : .uncertain, evidence: "A completed assessment for this exact source.") })
@@ -754,7 +860,7 @@ struct AICommentOriginTests {
         selected.value = .high
         coordinator.schedule(target: target, notes: [note()], assistant: .codex, model: "cheap", thinking: .high)
         await settle(coordinator)
-        #expect(seen == (classification == .aiAssisted ? [.low] : [.low, .high]))
+        #expect(seen == [.low])
     }
 
     @Test func changingThinkingDiscardsAnInFlightOriginAssessment() async throws {
@@ -762,7 +868,7 @@ struct AICommentOriginTests {
         let selected = Selection(VerificationThinking.low)
         var continuation: CheckedContinuation<Void, Never>?
         var seen: [VerificationThinking] = []
-        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, thinking, _ in
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, thinking, _, _ in
             seen.append(thinking)
             if thinking == .low { await withCheckedContinuation { continuation = $0 }; return positive(incoming) }
             return .init(notes: incoming.map { .init(noteID: $0.id!, classification: .manualLikely,
@@ -826,7 +932,7 @@ struct AICommentOriginTests {
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
         let notes = [note(), note(11, body: "A second source with uncertain origin")]
         var release: CheckedContinuation<Void, Never>?
-        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _ in
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _, _, _, _ in
             await withCheckedContinuation { release = $0 }
             return .init(notes: incoming.map { .init(noteID: $0.id!, classification: .uncertain,
                 confidence: .uncertain, evidence: "The source text does not establish AI assistance.") })

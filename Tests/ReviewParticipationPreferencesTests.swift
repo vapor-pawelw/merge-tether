@@ -4,6 +4,34 @@ import Testing
 
 @MainActor
 struct ReviewParticipationPreferencesTests {
+    @Test func twoAIConfirmationsAndOneHumanCommentStillSupportAI() {
+        let now = Date()
+        let history = ReviewParticipationPreferences.AIReplyTrust(
+            id: .init(host: "gitlab.example.org", accountID: 3, authorID: 8), label: "alice",
+            confirmedAINotes: [1: now, 2: now], humanNotes: [3: now])
+
+        #expect(history.history(at: now).basis.favorsAI)
+        #expect(history.history(at: now).last30Days.aiShare == 2.0 / 3.0)
+        #expect(!history.history(at: now, excluding: 1).basis.favorsAI)
+    }
+
+    @Test func recentLabelsTakePrecedenceAndOldOrDuplicateLabelsDoNotDistortTheSample() {
+        let now = Date()
+        func daysAgo(_ days: Int) -> Date { now.addingTimeInterval(Double(-days) * 86_400) }
+        var record = ReviewParticipationPreferences.AIReplyTrust(
+            id: .init(host: "gitlab.example.org", accountID: 3, authorID: 8), label: "alice",
+            confirmedAINotes: [1: daysAgo(40), 2: daysAgo(40), 3: daysAgo(91), 4: daysAgo(60), 7: daysAgo(-1)],
+            humanNotes: [4: daysAgo(40)])
+
+        #expect(record.history(at: now).basis.favorsAI)
+        record.humanNotes[5] = daysAgo(1)
+        record.humanNotes[6] = daysAgo(2)
+        let history = record.history(at: now)
+        #expect(history.last30Days == .init(ai: 0, human: 2))
+        #expect(history.last90Days == .init(ai: 2, human: 3))
+        #expect(history.basis.favorsHuman)
+    }
+
     @Test func AIReplyTrustSurvivesRestartAndUsesTheGitLabAccountAndAuthorIDs() throws {
         let suite = "AIReplyTrust.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -23,18 +51,23 @@ struct ReviewParticipationPreferencesTests {
         let records = reopened.reviewParticipationPreferences
         let record = try #require(records.aiReplyTrust(host: host, accountID: 3, authorID: 8))
         #expect(record.confirmedAINotes == [40: date, 41: date])
-        #expect(record.trustsStyleAssessment)
+        #expect(record.history(at: date).basis.favorsAI)
         #expect(records.aiReplyTrust(host: host, accountID: 9, authorID: 8) == nil)
         #expect(records.aiReplyTrust(host: "another.example.org", accountID: 3, authorID: 8) == nil)
         #expect(records.aiReplyTrust(host: host, accountID: 3, authorID: 9) == nil)
 
         #expect(reopened.recordAIReplyTrust(.human, notes: [note(42)], host: host, user: account, at: date))
         #expect(reopened.recordAIReplyTrust(.ai, notes: [note(42)], host: host, user: account, at: date))
-        let blocked = try #require(SettingsManager(defaults: defaults).reviewParticipationPreferences
+        let corrected = try #require(SettingsManager(defaults: defaults).reviewParticipationPreferences
             .aiReplyTrust(host: host, accountID: 3, authorID: 8))
-        #expect(blocked.humanNotes == [42: date])
-        #expect(!blocked.trustsStyleAssessment)
-        #expect(reopened.resetAIReplyTrust(blocked.id))
+        #expect(corrected.humanNotes.isEmpty)
+        #expect(corrected.confirmedAINotes[42] == date)
+        #expect(reopened.recordAIReplyTrust(.uncertain, notes: [note(42)], host: host, user: account, at: date))
+        #expect(reopened.recordAIReplyTrust(nil, notes: [note(40)], host: host, user: account, at: date))
+        let withdrawn = try #require(SettingsManager(defaults: defaults).reviewParticipationPreferences
+            .aiReplyTrust(host: host, accountID: 3, authorID: 8))
+        #expect(withdrawn.confirmedAINotes == [41: date])
+        #expect(reopened.resetAIReplyTrust(corrected.id))
         #expect(SettingsManager(defaults: defaults).reviewParticipationPreferences.aiReplyTrustRecords.isEmpty)
     }
 
@@ -57,7 +90,7 @@ struct ReviewParticipationPreferencesTests {
         let restarted = SettingsManager(defaults: defaults)
         #expect(restarted.bindAuthenticatedAccount(.init(host: host, username: account.username, userID: account.id)))
         #expect(restarted.reviewParticipationPreferences.aiReplyTrust(host: host, accountID: 3, authorID: 8)?
-            .trustsStyleAssessment == true)
+            .history(at: date).basis.favorsAI == true)
         #expect(restarted.bindAuthenticatedAccount(.init(host: host, username: "renamed", userID: account.id)))
         #expect(restarted.save())
 

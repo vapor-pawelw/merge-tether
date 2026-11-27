@@ -771,7 +771,7 @@ final class SettingsManager {
     }
 
     @discardableResult
-    func recordAIReplyTrust(_ classification: AICommentOriginOverride.Classification,
+    func recordAIReplyTrust(_ classification: AICommentOriginOverride.Classification?,
         notes: [GitLabMergeRequestDiscussion.Note], host: String, user: GitLabAuthenticatedUser, at date: Date = Date()) -> Bool {
         var candidate = reviewParticipationPreferences
         candidate.recordAIReplyTrust(classification, notes: notes, host: host, user: user, at: date)

@@ -43,9 +43,7 @@ extension TodoMonitorService {
         return try await commentOrigins.apply(classification, to: notes, in: discussions, target: target, userID: account.id,
             legacyUsernames: settings.unambiguousLegacyUsernames(for: account.account(on: target.host))) { [weak self] selected in
             guard let self, self.isCurrentAccount(target), self.glab.accountRevision == revision else { return false }
-            guard classification.map({ self.settings.recordAIReplyTrust($0, notes: selected, host: target.host, user: account) }) ?? true
-            else { return false }
-            return true
+            return self.settings.recordAIReplyTrust(classification, notes: selected, host: target.host, user: account)
         }
     }
 

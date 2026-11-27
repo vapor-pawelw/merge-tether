@@ -11,7 +11,9 @@ extension GitLabMergeRequestDiscussion.Note {
 @MainActor @Observable
 final class AICommentOriginCoordinator {
     typealias Note = GitLabMergeRequestDiscussion.Note
-    typealias Assess = @MainActor (MRAutomationScope.Target, [Note], AutomationAssistant, String, VerificationThinking, String?) async throws -> AICommentOriginAssessment
+    typealias Assess = @MainActor (MRAutomationScope.Target, [Note], AutomationAssistant, String, VerificationThinking, String?,
+        [Int: AICommentOriginAssessment.AuthorContext]) async throws -> AICommentOriginAssessment
+    typealias AuthorHistories = @MainActor (GitLabAccountIdentity, [Note]) -> [Int: AICommentOriginAssessment.AuthorHistory]
     typealias FetchCurrent = @MainActor (MRAutomationScope.Target) async throws -> [Note]
     typealias IsCurrent = @MainActor (MRAutomationScope.Target, AutomationAssistant, String, VerificationThinking) -> Bool
     private struct Request {
@@ -22,6 +24,7 @@ final class AICommentOriginCoordinator {
         let model: String
         let thinking: VerificationThinking
         let criteriaOverride: String?
+        let histories: [Int: AICommentOriginAssessment.AuthorHistory]
         let directory: URL
         var signature: String {
             ([directory.path] + notes.map { "\($0.id ?? 0):\($0.author?.id ?? 0):\(AICommentAssessmentStore.digest($0.body ?? ""))" }.sorted())
@@ -48,6 +51,7 @@ final class AICommentOriginCoordinator {
     private let criteriaOverride: @MainActor () -> String?
     private let overrideAccount: @MainActor (MRAutomationScope.Target) -> GitLabAccountIdentity
     private let legacyUsernames: @MainActor (GitLabAccountIdentity) -> Set<String>
+    private let authorHistories: AuthorHistories
     private let retryWait: ReadOnlyAssessmentRetry.Wait
     private let now: ReadOnlyAssessmentRetry.Clock
     @ObservationIgnored private var pending: [MRAutomationScope.Target: Request] = [:]
@@ -73,11 +77,13 @@ final class AICommentOriginCoordinator {
     var onPersisted: (@MainActor (MRAutomationScope.Target, [Note], AICommentOriginAssessment) -> Void)?
 
     init(directory: URL = AICommentAssessmentStore.directory, overrideDirectory: URL? = nil, purpose: AICommentAssessment.Purpose? = nil,
-         assess: @escaping Assess = { try await AICommentOriginAssessor.verify(target: $0, notes: $1, assistant: $2, model: $3, thinking: $4, criteriaOverride: $5) },
+         assess: @escaping Assess = { try await AICommentOriginAssessor.verify(target: $0, notes: $1, assistant: $2,
+            model: $3, thinking: $4, criteriaOverride: $5, authorContexts: $6) },
          fetchCurrent: @escaping FetchCurrent, isCurrent: @escaping IsCurrent,
          criteriaOverride: @escaping @MainActor () -> String? = { nil },
          overrideAccount: @escaping @MainActor (MRAutomationScope.Target) -> GitLabAccountIdentity = { $0.account },
          legacyUsernames: @escaping @MainActor (GitLabAccountIdentity) -> Set<String> = { [$0.username] },
+         authorHistories: @escaping AuthorHistories = { _, _ in [:] },
          retryWait: @escaping ReadOnlyAssessmentRetry.Wait = ReadOnlyAssessmentRetry.wait,
          now: @escaping ReadOnlyAssessmentRetry.Clock = { Date() }) {
         self.directory = directory; self.overrideDirectory = overrideDirectory ?? directory; self.assess = assess; self.fetchCurrent = fetchCurrent; self.isCurrent = isCurrent
@@ -85,6 +91,7 @@ final class AICommentOriginCoordinator {
         self.criteriaOverride = criteriaOverride
         self.overrideAccount = overrideAccount
         self.legacyUsernames = legacyUsernames
+        self.authorHistories = authorHistories
         self.retryWait = retryWait
         self.now = now
     }
@@ -99,8 +106,16 @@ final class AICommentOriginCoordinator {
               notes.allSatisfy({ ($0.id ?? 0) > 0 && $0.body != nil && $0.system != true && ($0.author?.id ?? 0) > 0 }),
               Set(notes.compactMap(\.id)).count == notes.count else { return }
         let criteria = criteriaOverride()
+        let decidingAccount = overrideAccount(target)
         let candidate = Request(target: target, notes: notes, assistant: assistant, model: model, thinking: thinking,
-            criteriaOverride: criteria, directory: AICommentAssessmentStore.scopedDirectory(directory, criteriaOverride: criteria))
+            criteriaOverride: criteria, histories: [:],
+            directory: AICommentAssessmentStore.scopedDirectory(directory, criteriaOverride: criteria))
+        let active = running[target].flatMap { entry -> Request? in
+            let request = entry.0
+            guard !entry.1.isCancelled, requestIsCurrent(request), request.assistant == assistant,
+                  request.model == model, request.thinking == thinking else { return nil }
+            return request
+        }
         let incomingKeys = Set(notes.map { key(candidate, $0) })
         let incomingIDs = Set(notes.compactMap(\.id))
         for stale in failures.filter({ $0.value.target == target && !incomingKeys.contains($0.key)
@@ -112,9 +127,9 @@ final class AICommentOriginCoordinator {
             && (purpose != .display || incomingIDs.contains($0.value.note.noteID)) }).keys {
             validated.removeValue(forKey: stale)
         }
-        let decidingAccount = overrideAccount(target)
         let names = legacyUsernames(decidingAccount)
         let uncovered = notes.filter { note in
+            if active?.notes.contains(where: { $0.id == note.id && $0.matchesOriginSource(note) }) == true { return false }
             let identity = key(candidate, note)
             if let attemptedAt = attempted[identity] {
                 guard failures[identity] != nil,
@@ -123,31 +138,16 @@ final class AICommentOriginCoordinator {
             if AICommentOriginOverrideStore.override(for: note, host: target.host, projectID: target.projectID,
                 iid: target.iid!, username: target.username, userID: decidingAccount.userID,
                 legacyUsernames: names, in: overrideDirectory) != nil { return false }
-            if purpose != .display,
-               AICommentAssessmentStore.reusable(note, target: target, legacyUsernames: names,
-                                                 in: candidate.directory)?.purpose == .publication { return false }
-            if let (record, sealed) = AICommentAssessmentStore.stored(for: note, host: target.host,
-                projectID: target.projectID, iid: target.iid!, userID: target.userID, legacyUsernames: names, in: candidate.directory) {
-                // An unsealed publication record, such as one a worker wrote, is re-assessed by the app.
-                guard purpose == .display || sealed else { return true }
-                let sameAccount = target.userID != nil || record.username == target.username
-                if record.qualifiesAsAI && (purpose == .display || record.purpose != .display)
-                    && (record.username == nil || sameAccount)
-                    && (record.criteriaVersion == AICommentOriginAssessor.criteriaVersion
-                        || purpose == .display && record.criteriaVersion == nil)
-                    && (purpose == .display || sameAccount && record.authorID == note.author?.id) { return false }
-                if record.provider == assistant.rawValue && record.model == model
-                    && record.criteriaVersion == AICommentOriginAssessor.criteriaVersion
-                    && sameAccount && record.authorID == note.author?.id
-                    && record.thinking == thinking && record.purpose == purpose { return false }
-            }
-            return true
+            let display = purpose == .display ? directory : AICommentAssessmentStore.displayDirectory(for: directory)
+            return AICommentAssessmentStore.completedResult(for: note, host: target.host, projectID: target.projectID,
+                iid: target.iid!, username: target.username, userID: decidingAccount.userID, legacyUsernames: names,
+                criteriaOverride: criteria, in: overrideDirectory, displayDirectory: display) == nil
         }
         guard !uncovered.isEmpty else { return }
         let request = Request(target: target, notes: uncovered, assistant: assistant, model: model, thinking: thinking,
-            criteriaOverride: criteria, directory: candidate.directory)
-        if running[target]?.0.matches(request) == true || pending[target]?.matches(request) == true { return }
-        running[target]?.1.cancel()
+            criteriaOverride: criteria, histories: authorHistories(decidingAccount, uncovered), directory: candidate.directory)
+        if pending[target]?.matches(request) == true { return }
+        if active == nil { running[target]?.1.cancel() }
         pending[target] = request
         updateChecking(); startNext()
     }
@@ -210,7 +210,7 @@ final class AICommentOriginCoordinator {
                     updateChecking(); startNext(); onChange?()
                 }
                 do {
-                    if self.purpose != .display { _ = await AssistantJobJournal.loadKey() }
+                    _ = await AssistantJobJournal.loadKey()
                     let persisted = try await ReadOnlyAssessmentRetry.run(isCurrent: {
                         self.requestIsCurrent(request)
                     }, wait: retryWait) {
@@ -230,7 +230,14 @@ final class AICommentOriginCoordinator {
                         }
                         let missing = request.notes.filter { self.validated[self.key(request, $0)] == nil }
                         if !missing.isEmpty {
-                            let fresh = try await self.assess(target, missing, request.assistant, request.model, request.thinking, request.criteriaOverride)
+                            let examples = request.histories.isEmpty ? [] : try await self.fetchCurrent(target)
+                            guard !Task.isCancelled, self.requestIsCurrent(request) else { throw CancellationError() }
+                            let account = self.overrideAccount(target)
+                            let contexts = AICommentAssessmentStore.authorContexts(for: missing, histories: request.histories,
+                                examples: examples, target: target, account: account,
+                                legacyUsernames: self.legacyUsernames(account), in: self.overrideDirectory)
+                            let fresh = try await self.assess(target, missing, request.assistant, request.model,
+                                request.thinking, request.criteriaOverride, contexts)
                             try AICommentOriginAssessor.validate(fresh, noteIDs: missing.compactMap(\.id))
                             guard !Task.isCancelled, self.requestIsCurrent(request) else { throw CancellationError() }
                             for note in missing {
@@ -246,7 +253,8 @@ final class AICommentOriginCoordinator {
                                 throw AICommentOriginAssessor.AssessmentError.invalidEvidence
                             }
                             let preserved = try AICommentAssessmentStore.preservePendingVerdict(assessment, for: note,
-                                target: target, assistant: request.assistant, model: request.model, thinking: request.thinking, purpose: self.purpose, in: request.directory)
+                                target: target, assistant: request.assistant, model: request.model, thinking: request.thinking,
+                                purpose: self.purpose, in: request.directory)
                             self.validated[self.key(request, note)] = .init(target: target, note: preserved)
                         }
                         let result = AICommentOriginAssessment(notes: request.notes.compactMap { self.validated[self.key(request, $0)]?.note })
@@ -254,11 +262,15 @@ final class AICommentOriginCoordinator {
                         guard !Task.isCancelled, self.requestIsCurrent(request) else { throw CancellationError() }
                         let live = try await self.fetchCurrent(target)
                         guard !Task.isCancelled, self.requestIsCurrent(request) else { throw CancellationError() }
-                        guard request.notes.allSatisfy({ original in
+                        let currentNotes = request.notes.filter { original in
                             let matches = live.filter { $0.id == original.id }
                             return matches.count == 1 && original.matchesOriginSource(matches[0])
-                        }) else { throw CancellationError() }
-                        let written = try AICommentAssessmentStore.persist(result, target: target, notes: request.notes,
+                        }
+                        let currentIDs = Set(currentNotes.compactMap(\.id))
+                        guard !currentIDs.isEmpty else { throw CancellationError() }
+                        let currentResult = AICommentOriginAssessment(notes: result.notes.filter { currentIDs.contains($0.noteID) })
+                        let written = try AICommentAssessmentStore.persist(currentResult, target: target.forAccount(self.overrideAccount(target)),
+                            notes: currentNotes,
                             assistant: request.assistant, model: request.model, thinking: request.thinking, purpose: self.purpose,
                             legacyUsernames: names, in: request.directory)
                         for note in request.notes {

@@ -13,7 +13,45 @@ struct ReviewParticipationPreferences: Codable, Equatable, Sendable {
         var confirmedAINotes: [Int: Date] = [:]
         var humanNotes: [Int: Date] = [:]
 
-        var trustsStyleAssessment: Bool { confirmedAINotes.count >= 2 && humanNotes.isEmpty }
+        struct Sample: Hashable, Sendable {
+            var ai = 0
+            var human = 0
+
+            var total: Int { ai + human }
+            var aiShare: Double? { total > 0 ? Double(ai) / Double(total) : nil }
+            var favorsAI: Bool { ai >= 2 && ai >= 2 * human }
+            var favorsHuman: Bool { human >= 2 && human >= 2 * ai }
+        }
+
+        struct History: Hashable, Sendable {
+            var last30Days = Sample()
+            var last90Days = Sample()
+
+            var basis: Sample { last30Days.total >= 2 ? last30Days : last90Days }
+        }
+
+        func history(at now: Date, excluding noteID: Int? = nil) -> History {
+            history(at: now, excluding: Set(noteID.map { [$0] } ?? []))
+        }
+
+        func history(at now: Date, excluding noteIDs: Set<Int>) -> History {
+            let recent = now.addingTimeInterval(-30 * 86_400)
+            let cutoff = now.addingTimeInterval(-90 * 86_400)
+            var result = History()
+            // Old records can contain both decisions for a note. Use the later decision,
+            // favoring Human if the saved timestamps are equal.
+            for (id, date) in confirmedAINotes where !noteIDs.contains(id) && date >= cutoff && date <= now {
+                if let human = humanNotes[id], human <= now, human >= date { continue }
+                result.last90Days.ai += 1
+                if date >= recent { result.last30Days.ai += 1 }
+            }
+            for (id, date) in humanNotes where !noteIDs.contains(id) && date >= cutoff && date <= now {
+                if let ai = confirmedAINotes[id], ai <= now, ai > date { continue }
+                result.last90Days.human += 1
+                if date >= recent { result.last30Days.human += 1 }
+            }
+            return result
+        }
     }
 
     struct Entry: Codable, Equatable, Identifiable, Sendable {
@@ -85,24 +123,53 @@ struct ReviewParticipationPreferences: Codable, Equatable, Sendable {
         return aiReplyTrustRecords.first { $0.id == id }
     }
 
-    mutating func recordAIReplyTrust(_ classification: AICommentOriginOverride.Classification,
+    func authorHistories(for notes: [GitLabMergeRequestDiscussion.Note], host: String, accountID: Int?,
+                         at now: Date = Date()) -> [Int: AIReplyTrust.History] {
+        guard let accountID else { return [:] }
+        let records = Dictionary(uniqueKeysWithValues: aiReplyTrustRecords
+            .filter { $0.id.host == host && $0.id.accountID == accountID }.map { ($0.id.authorID, $0) })
+        let groups = Dictionary(grouping: notes, by: { $0.author?.id ?? 0 })
+        return groups.reduce(into: [:]) { histories, group in
+            guard let record = records[group.key] else { return }
+            let ids = Set(group.value.compactMap(\.id))
+            let history = record.history(at: now, excluding: ids)
+            if history.last90Days.total > 0 {
+                for id in ids { histories[id] = history }
+            }
+        }
+    }
+
+    mutating func recordAIReplyTrust(_ classification: AICommentOriginOverride.Classification?,
         notes: [GitLabMergeRequestDiscussion.Note], host: String, user: GitLabAuthenticatedUser, at date: Date) {
-        guard classification != .uncertain, !host.isEmpty, user.id > 0 else { return }
+        guard !host.isEmpty, user.id > 0 else { return }
         for note in notes {
             guard note.system != true, let noteID = note.id, noteID > 0,
                   let author = note.author, author.id > 0, author.id != user.id else { continue }
             let id = AIReplyTrust.ID(host: host, accountID: user.id, authorID: author.id)
             let index = aiReplyTrustRecords.firstIndex { $0.id == id } ?? aiReplyTrustRecords.endIndex
             let label = author.username ?? author.name ?? "#\(author.id)"
-            if index == aiReplyTrustRecords.endIndex { aiReplyTrustRecords.append(.init(id: id, label: label)) }
-            if classification == .ai {
-                let original = aiReplyTrustRecords[index].confirmedAINotes[noteID]
-                aiReplyTrustRecords[index].confirmedAINotes[noteID] = original ?? date
-            } else {
-                let original = aiReplyTrustRecords[index].humanNotes[noteID]
-                aiReplyTrustRecords[index].humanNotes[noteID] = original ?? date
+            if index == aiReplyTrustRecords.endIndex {
+                guard classification == .ai || classification == .human else { continue }
+                aiReplyTrustRecords.append(.init(id: id, label: label))
             }
-            aiReplyTrustRecords[index].label = label
+            var record = aiReplyTrustRecords[index]
+            switch classification {
+            case .ai:
+                let recategorized = record.humanNotes.removeValue(forKey: noteID) != nil
+                if recategorized || record.confirmedAINotes[noteID] == nil { record.confirmedAINotes[noteID] = date }
+            case .human:
+                let recategorized = record.confirmedAINotes.removeValue(forKey: noteID) != nil
+                if recategorized || record.humanNotes[noteID] == nil { record.humanNotes[noteID] = date }
+            case .uncertain, nil:
+                record.confirmedAINotes.removeValue(forKey: noteID)
+                record.humanNotes.removeValue(forKey: noteID)
+            }
+            record.label = label
+            if record.confirmedAINotes.isEmpty && record.humanNotes.isEmpty {
+                aiReplyTrustRecords.remove(at: index)
+            } else {
+                aiReplyTrustRecords[index] = record
+            }
         }
     }
 

@@ -42,13 +42,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Verified or declared automation, generation footers, and comments you mark as AI qualify directly. Style assessments qualify after two confirmed AI comments from the same author and zero marked human."
+            "value": "Verified or declared automation, generation footers, and comments you mark as AI qualify directly. Style assessments qualify when at least two comments from the author were confirmed as AI and at least two thirds of their recent labels are AI. We use the last 30 days when they contain at least two labels and the last 90 days otherwise."
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Zweryfikowana lub zadeklarowana automatyzacja, stopka o wygenerowaniu oraz komentarze oznaczone przez Ciebie jako AI kwalifikują się bezpośrednio. Ocena stylu wystarcza po dwóch potwierdzeniach AI u tego autora, jeśli nie oznaczono żadnego jego komentarza jako napisanego przez człowieka."
+            "value": "Zweryfikowana lub zadeklarowana automatyzacja, stopka o wygenerowaniu oraz komentarze oznaczone przez Ciebie jako AI kwalifikują się bezpośrednio. Ocena stylu kwalifikuje się, jeśli co najmniej dwa komentarze autora potwierdzono jako AI i stanowią one co najmniej dwie trzecie jego ostatnich oznaczeń. Przy co najmniej dwóch oznaczeniach liczymy ostatnie 30 dni, a przy mniejszej liczbie ostatnie 90 dni."
           }
         }
       }
@@ -87,19 +87,70 @@
         }
       }
     },
-    "publication.aiReplyTrustHuman": {
+    "publication.aiReplyTrustLast30Days": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Human comment marked"
+            "value": "Last 30 days"
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Oznaczono komentarz człowieka"
+            "value": "Ostatnie 30 dni"
+          }
+        }
+      }
+    },
+    "publication.aiReplyTrustLast90Days": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last 90 days"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ostatnie 90 dni"
+          }
+        }
+      }
+    },
+    "publication.aiReplyTrustNoRecentLabels": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No labels"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Brak oznaczeń"
+          }
+        }
+      }
+    },
+    "publication.aiReplyTrustSample": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI %1$@ (%2$lld) · Human %3$@ (%4$lld)"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI %1$@ (%2$lld) · Człowiek %3$@ (%4$lld)"
           }
         }
       }
@@ -127,13 +178,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "More confirmations needed"
+            "value": "Below the threshold for AI replies"
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Potrzeba więcej potwierdzeń"
+            "value": "Poniżej progu dla odpowiedzi AI"
           }
         }
       }

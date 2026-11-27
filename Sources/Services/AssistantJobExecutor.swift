@@ -210,8 +210,6 @@ enum AssistantJobExecutor {
         let boundAssessmentTarget = assessmentTarget.forAccount(decidingAccount)
         let legacyUsernames = settings.unambiguousLegacyUsernames(for: decidingAccount)
         let assessmentPolicy = settings.publicationPolicy(for: assessmentTarget)
-        let assessmentDirectory = AICommentAssessmentStore.scopedDirectory(AICommentAssessmentStore.directory,
-            criteriaOverride: assessmentPolicy.aiCommentCriteriaOverride)
         let mayAssess = settings.automaticPublicWritesAllowed && assessmentPolicy.requiresAI
             && assessmentPolicy.covers(request, host: assessmentTarget.host)
             && (handoff.workflow != .followUp || handoff.followUpPushAllowed == true)
@@ -221,17 +219,36 @@ enum AssistantJobExecutor {
         if mayAssess {
             let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid,
                 host: assessmentTarget.host)
-            let cached = (discussions ?? []).flatMap(\.notes).compactMap { note -> String? in
-                guard let id = note.id, let body = note.body,
-                      AICommentAssessmentStore.reusable(note, target: boundAssessmentTarget, legacyUsernames: legacyUsernames,
-                                                        in: assessmentDirectory) != nil
+            let notes = (discussions ?? []).flatMap(\.notes)
+            let cached = notes.filter { note in
+                AICommentAssessmentStore.completedResult(for: note, host: assessmentTarget.host,
+                    projectID: request.projectID, iid: request.iid, username: user.username, userID: user.id,
+                    legacyUsernames: legacyUsernames, criteriaOverride: assessmentPolicy.aiCommentCriteriaOverride,
+                    in: AICommentAssessmentStore.directory, displayDirectory: AICommentAssessmentStore.displayDirectory) != nil
                         || AICommentOriginOverrideStore.override(for: note, host: assessmentTarget.host, projectID: request.projectID,
                             iid: request.iid, username: user.username, userID: user.id, legacyUsernames: legacyUsernames,
-                            in: AICommentAssessmentStore.directory) != nil else { return nil }
+                            in: AICommentAssessmentStore.directory) != nil
+                        || AICommentOriginAssessor.declaredAttribution(for: note) != nil
+            }
+            let cachedIDs = Set(cached.compactMap(\.id))
+            let candidates = notes.filter { !cachedIDs.contains($0.id ?? 0) && $0.system != true }
+            let histories = settings.reviewParticipationPreferences.authorHistories(for: candidates,
+                host: assessmentTarget.host, accountID: user.id)
+            let contextualNotes = candidates.filter { histories[$0.id ?? 0] != nil }
+                .sorted { ($0.id ?? 0) > ($1.id ?? 0) }.prefix(100)
+            let contexts = AICommentAssessmentStore.authorContexts(for: Array(contextualNotes), histories: histories,
+                examples: notes, target: boundAssessmentTarget, account: decidingAccount, legacyUsernames: legacyUsernames,
+                in: AICommentAssessmentStore.directory)
+            let cachedDigests = cached.compactMap { note -> String? in
+                guard let id = note.id, let body = note.body else { return nil }
                 return "\(id):\(AICommentAssessmentStore.digest(body))"
             }
-            assessmentInstructions = AICommentAssessmentStore.workerInstructions(
-                criteriaOverride: assessmentPolicy.aiCommentCriteriaOverride, existing: Array(Set(cached).sorted().prefix(100)))
+            assessmentInstructions = if discussions != nil && cachedDigests.count <= 100 {
+                AICommentAssessmentStore.workerInstructions(criteriaOverride: assessmentPolicy.aiCommentCriteriaOverride,
+                    existing: Array(Set(cachedDigests).sorted()), authorContexts: contexts)
+            } else {
+                "Return an empty sourceAssessments list. MergeTether handles any needed assessment for this run."
+            }
         } else {
             assessmentInstructions = "Return an empty sourceAssessments list. MergeTether handles any needed assessment for this run."
         }
@@ -590,10 +607,19 @@ enum AssistantJobExecutor {
                 }
                 do {
                     let account = user.account(on: work.host)
-                    try AICommentAssessmentStore.persistWorkerAssessments(classifications, draftClaims: claims,
+                    let names = settings.unambiguousLegacyUsernames(for: account)
+                    let notes = Dictionary(grouping: discussions.flatMap(\.notes), by: \.id)
+                    let currentClaims = classifications.filter { claim in
+                        guard let matches = notes[claim.noteID], matches.count == 1, let note = matches.first else { return false }
+                        return AICommentAssessmentStore.completedResult(for: note, host: work.host,
+                            projectID: work.projectID, iid: work.iid, username: user.username, userID: user.id,
+                            legacyUsernames: names, criteriaOverride: assessmentPolicy.aiCommentCriteriaOverride,
+                            in: AICommentAssessmentStore.directory, displayDirectory: AICommentAssessmentStore.displayDirectory) == nil
+                    }
+                    try AICommentAssessmentStore.persistWorkerAssessments(currentClaims, draftClaims: claims,
                         baseline: baseline, current: drafts, discussions: discussions, userID: user.id,
                         target: handoff.key.automationTarget.forAccount(account), assistant: handoff.key.assistant, model: model,
-                        legacyUsernames: settings.unambiguousLegacyUsernames(for: account), in: assessmentDirectory)
+                        legacyUsernames: names, in: assessmentDirectory)
                 } catch {
                     Log.monitor.error("Could not save the worker's comment assessments: \(String(describing: error), privacy: .private)")
                 }

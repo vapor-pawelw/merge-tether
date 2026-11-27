@@ -117,7 +117,7 @@ struct AICommentPublicationTests {
             == (scenario == "same source"))
         if scenario == "same source" || scenario == "likely human" {
             // A new coordinator after app restart must use the same saved result, even with another model.
-            let reopened = AICommentOriginCoordinator(directory: folder, assess: { _, _, _, _, _, _ in
+            let reopened = AICommentOriginCoordinator(directory: folder, assess: { _, _, _, _, _, _, _ in
                 Issue.record("The source was already evaluated by the reply worker")
                 throw AICommentOriginAssessor.AssessmentError.failed
             }, fetchCurrent: { _ in [note] }, isCurrent: { _, _, _, _ in true })

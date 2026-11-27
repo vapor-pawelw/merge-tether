@@ -31,7 +31,7 @@ struct MRDiscussionStoreTests {
             username: target.username, accountRevision: glab.accountRevision)
         let restored: MRDiscussionSnapshot.Origin? = switch variant {
         case "uncertain": .uncertain(evidence: "Recorded origin evidence")
-        case "human": .humanLikely(evidence: "Recorded origin evidence")
+        case "human", "staleHuman": .humanLikely(evidence: "Recorded origin evidence")
         default: nil
         }
         #expect(projectedOrigin(in: store) == restored)
@@ -587,7 +587,7 @@ struct MRDiscussionStoreTests {
     }
 
     @Test(arguments: ["body", "author", "account", "host", "project", "mr", "note", "criteria"])
-    func staleOrMismatchedManualEvidenceNeverBecomesAHumanBadge(mismatch: String) async throws {
+    func mismatchedCommentsAreIgnoredAndEarlierCriteriaKeepTheirVerdict(mismatch: String) async throws {
         // given
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -605,7 +605,7 @@ struct MRDiscussionStoreTests {
         await store.refresh(target: target, glab: glab())
         // then
         #expect(store.hasLoaded)
-        #expect(store.origins.isEmpty)
+        #expect(store.origins[3] == (mismatch == "criteria" ? .humanLikely(evidence: record.evidence) : nil))
     }
 
     private func assessment(note: GitLabMergeRequestDiscussion.Note, classification: String, confidence: String) -> AICommentAssessment {
