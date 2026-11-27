@@ -71,6 +71,10 @@ import Observation
         refreshFailed()
         if let pending { result = .init(id: pending.id, status: .uncertain); clearPending() }
     }
+    /// The earliest instant after `now` at which `isConnected`, `isRefreshing` or `canAct` can flip by time alone.
+    public func nextTimeChange(after now: Date) -> Date? {
+        [validUntil, connectedUntil, challengeUntil].filter { $0 > now }.min()
+    }
     public func isConnected(now: Date = Date()) -> Bool { now < connectedUntil }
     public func isRefreshing(now: Date = Date()) -> Bool { expected != nil && now < challengeUntil }
     public func needsRefresh(now: Date = Date()) -> Bool {

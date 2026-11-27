@@ -580,6 +580,20 @@ import MergeTetherRemote
         #expect(model.state.result?.status == .uncertain)
     }
 
+    @Test func nextConnectionChangeIncludesTheConnectingDeadline() async throws {
+        let fixture = try PhoneFixture(), model = fixture.model
+        let start = fixture.date
+        #expect(model.nextConnectionChange(after: start) == nil)
+        model.connect(); await model.refresh()
+        let connecting = start.addingTimeInterval(45)
+        #expect(model.connectionStatus(now: start) == .connecting)
+        #expect(model.nextConnectionChange(after: start) == connecting)
+        #expect(model.nextConnectionChange(after: connecting) == nil)
+        #expect(model.connectionStatus(now: connecting) == .offline)
+        #expect(model.isLoadingBoard(now: start))
+        #expect(!model.isLoadingBoard(now: connecting))
+    }
+
     @Test func savedPairingConnectsThenTimesOutWithoutLosingTrustAndAcceptsALateSnapshot() async throws {
         let fixture = try PhoneFixture(), model = fixture.model
         model.connect(); await model.refresh()

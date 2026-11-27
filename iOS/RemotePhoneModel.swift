@@ -172,6 +172,15 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         if now < connectingUntil { return .connecting }
         return .offline
     }
+    /// The earliest instant after `now` at which time alone can change `connectionStatus` or the state's time-derived values.
+    func nextConnectionChange(after now: Date) -> Date? {
+        [state.nextTimeChange(after: now), connectingUntil > now ? connectingUntil : nil].compactMap { $0 }.min()
+    }
+    /// Connecting, or connected while a snapshot is still awaited.
+    func isLoadingBoard(now: Date = Date()) -> Bool {
+        let status = connectionStatus(now: now)
+        return status == .connecting || (status == .connected && state.isRefreshing(now: now))
+    }
     func reconnect() {
         guard paired, connectionStatus(now: now()) != .connecting else { return }
         disconnect(); connect()

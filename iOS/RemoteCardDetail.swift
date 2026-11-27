@@ -492,11 +492,33 @@ private struct RemoteDetailRefreshButton: View {
     }
 }
 
+/// Re-evaluates `content` only when a time-derived value can change, instead of on a clock.
+/// `nextChange` is read while evaluating the body, so observed deadline changes reschedule the wake-up.
+struct RemoteDeadlineTimeline<Content: View>: View {
+    let nextChange: (Date) -> Date?
+    @ViewBuilder let content: (Date) -> Content
+    @State private var tick = 0
+
+    var body: some View {
+        let _ = tick
+        let now = Date()
+        let next = nextChange(now)
+        content(now).task(id: next) {
+            guard let next else { return }
+            while !Task.isCancelled, Date() < next {
+                do { try await Task.sleep(for: .seconds(max(next.timeIntervalSinceNow, 0.01))) } catch { return }
+            }
+            guard !Task.isCancelled else { return }
+            tick &+= 1
+        }
+    }
+}
+
 struct RemoteActionAvailability: ViewModifier {
     let state: RemotePhoneState
     func body(content: Content) -> some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            content.disabled(!state.canAct(now: context.date))
+        RemoteDeadlineTimeline(nextChange: state.nextTimeChange(after:)) { now in
+            content.disabled(!state.canAct(now: now))
         }
     }
 }

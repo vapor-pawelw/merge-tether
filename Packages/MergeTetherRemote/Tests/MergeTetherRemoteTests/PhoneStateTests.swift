@@ -3,6 +3,27 @@ import Testing
 @testable import MergeTetherRemote
 
 @MainActor @Suite struct PhoneStateTests {
+    @Test func nextTimeChangeReportsTheEarliestFutureDeadlineAndIgnoresPastOnes() throws {
+        let state = RemotePhoneState(), now = Date()
+        #expect(state.nextTimeChange(after: now) == nil)
+
+        // The challenge deadline is the response window; a snapshot sets every deadline to it.
+        let challenge = state.challenge(now: now)
+        let deadline = now.addingTimeInterval(45)
+        #expect(state.nextTimeChange(after: now) == deadline)
+        #expect(state.nextTimeChange(after: deadline.addingTimeInterval(-1)) == deadline)
+        #expect(state.nextTimeChange(after: deadline) == nil)
+
+        state.receive(.init(type: .snapshot, challenge: challenge, board: CommandGateTests().board()), now: now)
+        #expect(state.canAct(now: now) && state.isConnected(now: now))
+        #expect(state.nextTimeChange(after: now) == deadline)
+        #expect(state.canAct(now: deadline) == false && state.isConnected(now: deadline) == false)
+        #expect(state.nextTimeChange(after: deadline.addingTimeInterval(1)) == nil)
+
+        state.refreshFailed()
+        #expect(state.nextTimeChange(after: now) == deadline)
+    }
+
     @Test func inboxReadUsesOnlyTheControlFromTheCurrentCompleteSnapshot() throws {
         let state = RemotePhoneState(), now = Date()
         var board = CommandGateTests().board()

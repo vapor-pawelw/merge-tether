@@ -161,7 +161,7 @@ struct RemotePersonalApprovalControl: View {
 
     var body: some View {
         let confirmingKind = confirmation?.action.kind ?? action.kind
-        TimelineView(.periodic(from: .now, by: 1)) { context in
+        RemoteDeadlineTimeline(nextChange: model.state.nextTimeChange(after:)) { now in
             Button(role: action.kind == .removeApproval ? .destructive : nil) {
                 guard let board = model.state.board,
                       let latest = board.cards.first(where: { $0.hasSameActionContext(as: card) && $0.actions.contains(action) }),
@@ -171,7 +171,7 @@ struct RemotePersonalApprovalControl: View {
                 Label(action.kind.title, systemImage: action.kind == .removeApproval ? "minus.circle" : "checkmark.seal")
                     .frame(minHeight: 44)
             }
-            .disabled(!model.state.canAct(now: context.date))
+            .disabled(!model.state.canAct(now: now))
             .accessibilityIdentifier("remote.approvals.personalAction")
         }
         .alert(Text(confirmingKind == .removeApproval ? .Board.boardApprovalsRemoveWarningTitle : confirmingKind.title), isPresented: Binding(

@@ -44,8 +44,8 @@ struct RemoteBoardView: View {
                         }
                     }
                 } else {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        let status = model.connectionStatus(now: context.date)
+                    RemoteDeadlineTimeline(nextChange: model.nextConnectionChange(after:)) { now in
+                        let status = model.connectionStatus(now: now)
                         ContentUnavailableView {
                             Label(status.title, systemImage: status.symbol)
                         } description: {
@@ -113,16 +113,12 @@ struct RemoteBoardView: View {
                 regenerationPresentation = nil
             }
             .popover(isPresented: $showingInbox, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    let status = model.connectionStatus(now: context.date)
-                    RemoteInboxView(cards: model.state.inboxCards,
-                        isLoading: status == .connecting || (status == .connected && model.state.isRefreshing(now: context.date)),
-                        onRetry: retryInbox,
-                        onOpen: { pendingInboxCard = .init(card: $0); showingInbox = false },
-                        onOpenCTA: { pendingInboxCard = .init(card: $0, cta: $1); showingInbox = false },
-                        model: model,
-                        onRefresh: { await model.refreshContent() })
-                }
+                RemoteInboxView(cards: model.state.inboxCards,
+                    onRetry: retryInbox,
+                    onOpen: { pendingInboxCard = .init(card: $0); showingInbox = false },
+                    onOpenCTA: { pendingInboxCard = .init(card: $0, cta: $1); showingInbox = false },
+                    model: model,
+                    onRefresh: { await model.refreshContent() })
                 .frame(idealWidth: 520, idealHeight: 680)
                 .presentationCompactAdaptation(.sheet)
                 .presentationDetents([.medium, .large])
@@ -218,9 +214,9 @@ struct RemoteBoardView: View {
             .accessibilityIdentifier("remote.reconnect")
     }
     private var connectionStatus: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            let status = model.connectionStatus(now: context.date)
-            let refreshing = status == .connecting || (status == .connected && model.state.isRefreshing(now: context.date))
+        RemoteDeadlineTimeline(nextChange: model.nextConnectionChange(after:)) { now in
+            let status = model.connectionStatus(now: now)
+            let refreshing = model.isLoadingBoard(now: now)
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Label(status.title, systemImage: status.symbol)
@@ -245,7 +241,7 @@ struct RemoteBoardView: View {
 
 private struct RemoteCardCTAButton: View {
     let cta: RemoteCardCTA
-    let canAct: ((Date) -> Bool)?
+    let state: RemotePhoneState?
     var action: RemoteAction? = nil
     var running = false
     var usesPlainLabel = false
@@ -253,9 +249,11 @@ private struct RemoteCardCTAButton: View {
 
     var body: some View {
         if cta.actionID != nil {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                button.disabled(canAct?(context.date) != true)
-            }
+            if let state {
+                RemoteDeadlineTimeline(nextChange: state.nextTimeChange(after:)) { now in
+                    button.disabled(!state.canAct(now: now))
+                }
+            } else { button.disabled(true) }
         } else { button }
     }
 
@@ -425,7 +423,7 @@ struct RemoteCardView: View {
                 .font(.subheadline.weight(.medium)).buttonStyle(.bordered).controlSize(.large)
                 .modifier(RemoteActionAvailability(state: actionsModel.state))
             } else {
-                RemoteCardCTAButton(cta: secondary, canAct: { actionsModel?.state.canAct(now: $0) == true },
+                RemoteCardCTAButton(cta: secondary, state: actionsModel?.state,
                                     action: card.actions.first { $0.id == secondary.actionID },
                                     usesPlainLabel: true) { onOpenCTA?(secondary) }
                     .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
@@ -467,7 +465,7 @@ struct RemoteCardView: View {
     private func boardCTA(_ cta: RemoteCardCTA, prominent: Bool = false) -> some View {
         let pending = actionsModel?.pendingActionCard.flatMap { $0.id == card.id ? $0.actions : nil }
         let action = (pending ?? card.actions).first { $0.id == cta.actionID }
-        let button = RemoteCardCTAButton(cta: cta, canAct: { actionsModel?.state.canAct(now: $0) == true },
+        let button = RemoteCardCTAButton(cta: cta, state: actionsModel?.state,
             action: action, running: action != nil && pending != nil && actionsModel?.state.pending?.actionID == action?.id) {
                 if let actionsModel, let action, action.id == RemoteAction.finishedSeenID {
                     Task { await actionsModel.perform(card: card, action: action) }

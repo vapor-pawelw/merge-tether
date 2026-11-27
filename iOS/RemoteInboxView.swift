@@ -3,7 +3,6 @@ import MergeTetherRemote
 
 struct RemoteInboxView: View {
     let cards: [RemoteCard]?
-    let isLoading: Bool
     let onRetry: () -> Void
     let onOpen: (RemoteCard) -> Void
     let onOpenCTA: (RemoteCard, RemoteCardCTA) -> Void
@@ -57,12 +56,14 @@ struct RemoteInboxView: View {
             Divider()
 
             if cards == nil {
-                if isLoading {
-                    ProgressView()
-                        .accessibilityLabel(Text(.Board.boardInitialSync))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    unavailableState
+                RemoteDeadlineTimeline(nextChange: model.nextConnectionChange(after:)) { now in
+                    if model.isLoadingBoard(now: now) {
+                        ProgressView()
+                            .accessibilityLabel(Text(.Board.boardInitialSync))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        unavailableState
+                    }
                 }
             } else if cards?.isEmpty == true {
                 VStack(spacing: 10) {
