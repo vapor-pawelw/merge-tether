@@ -262,12 +262,12 @@ private struct CommandCenterMRCardContent: View {
                 if let chain = presentation.stepChain {
                     BoardStepChain(steps: chain.steps.map { String(localized: $0) }, current: chain.current)
                 } else if let nextStep = presentation.cardNextStep {
-                    let followsReviewThreadStatus = presentation.nextStepExplainsReviewThreadStatus && neutralStatus != nil
+                    let explainsStatus = neutralStatus != nil && presentation.nextStepExplainsReviewStatus
                     Text(verbatim: nextStep)
                         .font(.subheadline).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .layoutValue(key: MRCardContentSpacing.self,
-                                     value: followsReviewThreadStatus ? 4 : MRCardContentSpacing.defaultValue)
+                                     value: explainsStatus ? 4 : MRCardContentSpacing.defaultValue)
                 }
             }
         }

@@ -603,6 +603,23 @@ struct ReviewingContextTests {
         #expect(ReviewingContext(row: snapshot, workflowState: .queued).nextStep == .automaticReview)
     }
 
+    @Test func missingCurrentReviewEvidenceExplainsTheReviewRequiredStatus() throws {
+        var item = try item(); item.reviewingProgress = .needsReview
+        let snapshot = row(item, humanAttention: false)
+        let model = MRCardPresentation(row: snapshot, reviewingContext: ReviewingContext(row: snapshot),
+            allowsRemoval: true, assistantReady: true)
+
+        #expect(model.cardNeutralStatus.map { String(localized: $0) } == "Review required")
+        #expect(model.cardNextStep == "No verified review for the current merge request")
+        #expect(model.nextStepExplainsReviewStatus)
+
+        let projected = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "me@host"), model: model)
+        let phone = try JSONDecoder().decode(RemoteCard.self, from: JSONEncoder().encode(projected))
+        #expect(phone.boardStatus == "Review required")
+        #expect(phone.boardNextStep == model.cardNextStep)
+        #expect(phone.presentation?.nextStepExplainsStatus == true)
+    }
+
     @Test func waitingForOtherReviewThreadsIsReadOnlyAndDoesNotInventApproval() throws {
         var item = try item(); item.reviewingProgress = .waitingForOtherDiscussions
         let snapshot = row(item, humanAttention: false)
@@ -660,6 +677,7 @@ struct ReviewingContextTests {
         #expect(model.actionLabel.map { String(localized: $0) } == (openThread ? "View discussions" : nil))
         #expect(model.cardNeutralStatus.map { String(localized: $0) } == (openThread ? model.status : nil))
         #expect(model.cardNextStep == (openThread ? model.nextStep : nil))
+        #expect(model.nextStepExplainsReviewStatus == openThread)
 
         let projected = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "me@host"), model: model)
         let phone = try JSONDecoder().decode(RemoteCard.self, from: JSONEncoder().encode(projected))
@@ -667,6 +685,7 @@ struct ReviewingContextTests {
         #expect(phone.visibleNextStep == model.nextStep)
         #expect(phone.boardStatus == (openThread ? model.status : nil))
         #expect(phone.boardNextStep == model.cardNextStep)
+        #expect(phone.presentation?.nextStepExplainsStatus == (openThread ? true : nil))
         #expect(phone.primaryCTA?.destination == (openThread ? .discussions : nil))
     }
 
@@ -709,8 +728,10 @@ struct ReviewingContextTests {
         #expect(model.cardNeutralStatus.map { String(localized: $0) } == "Review run completed")
         #expect(model.cardNextStep == (viewerApproved ? "Waiting for required approvals."
             : "You haven’t approved this revision."))
+        #expect(!model.nextStepExplainsReviewStatus)
         #expect(phone.boardStatus == model.status)
         #expect(phone.boardNextStep == model.cardNextStep)
+        #expect(phone.presentation?.nextStepExplainsStatus == nil)
     }
 
     @Test func freshWaitingForOtherThreadsSupersedesAnOlderFailedWorkflow() throws {

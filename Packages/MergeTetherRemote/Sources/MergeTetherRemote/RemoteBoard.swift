@@ -167,6 +167,8 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
     /// Additive marker for active AI work; absent for deterministic reads and older hosts.
     public var statusSymbol: String?
     public var nextStep: String?
+    /// The next-step text explains the status and belongs directly below it.
+    public var nextStepExplainsStatus: Bool?
     /// Keep the completed review summary available in Details on the companion.
     public var reviewCompletionInDetailsOnly: Bool?
     public var working: Bool

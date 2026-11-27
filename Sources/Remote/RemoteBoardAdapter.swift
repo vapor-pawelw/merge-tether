@@ -1025,6 +1025,7 @@ import MergeTetherRemote
             assignedReviewerCount: MergeRequestApprovalProgress.assignedReviewerCount(model.row.displayRequest?.reviewers),
             assignees: displayAssignees(for: model.row.displayRequest))
         card.presentation?.statusPeopleMessage = model.statusPeopleMessage
+        card.presentation?.nextStepExplainsStatus = model.nextStepExplainsReviewStatus ? true : nil
         card.presentation?.reviewCompletionInDetailsOnly = model.reviewCompletionInDetailsOnly ? true : nil
         card.presentation?.pendingDraftsPeopleMessage = pendingDrafts?.peopleMessage
         card.presentation?.requirementPeopleMessage = waiting?.reviewerPeopleMessage

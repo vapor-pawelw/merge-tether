@@ -388,11 +388,10 @@ struct MRCardPresentation {
         return waitingStatus
     }
     var cardNextStep: String? { reviewCompletionInDetailsOnly ? nil : nextStep }
-    var nextStepExplainsReviewThreadStatus: Bool {
-        guard !working, !refreshFailed, humanAction == nil, generalNeutralStatus == nil,
-              reviewingContext.nextStep == .monitoring else { return false }
-        return switch reviewingContext.status {
-        case .openThreads, .waitingForOtherDiscussions: true
+    var nextStepExplainsReviewStatus: Bool {
+        guard !working, !refreshFailed, humanAction == nil, generalNeutralStatus == nil else { return false }
+        return switch (reviewingContext.status, reviewingContext.nextStep) {
+        case (.reviewNeeded, .runReview), (.openThreads, .monitoring), (.waitingForOtherDiscussions, .monitoring): true
         default: false
         }
     }

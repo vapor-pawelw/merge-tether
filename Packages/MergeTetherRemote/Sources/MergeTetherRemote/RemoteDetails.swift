@@ -30,7 +30,11 @@ public struct RemoteDetailRequest: Codable, Equatable, Sendable {
             && board.cards.contains { card in
                 guard card.id == cardID else { return false }
                 if let contentDigest { return card.detailContextDigest == contentDigest }
-                return Self.digests(card).contains(cardDigest)
+                if Self.digests(card).contains(cardDigest) { return true }
+                guard card.presentation?.nextStepExplainsStatus != nil else { return false }
+                var legacyCard = card
+                legacyCard.presentation?.nextStepExplainsStatus = nil
+                return Self.digests(legacyCard).contains(cardDigest)
             }
     }
     /// Older phones drop fields they do not know before hashing the card they open:

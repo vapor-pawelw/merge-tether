@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Bring review reasons closer to **Review required** on merge request cards on Mac, iPhone, and iPad.
+
 - Show progress under the Comments heading in Mac merge request Details when comments first load or you refresh them.
 
 - Align thread disclosure controls with the first row of status badges and match the side insets in Comments and replies on Mac.

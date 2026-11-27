@@ -314,6 +314,23 @@ import Testing
         #expect(!request.matches(board))
     }
 
+    @Test func reviewStatusExplanationSurvivesTransportAndKeepsOlderDetailsRequestsValid() throws {
+        var board = board()
+        board.lanes[0].cards[0].presentation = .init(repository: "p", status: "Review required",
+            nextStep: "No verified review for the current merge request")
+        let request = try RemoteDetailRequest(card: board.cards[0], board: board)
+        let payload = #"{"repository":"p","status":"Review required","nextStep":"No verified review for the current merge request","nextStepExplainsStatus":true,"working":false,"chips":[]}"#
+        let presentation = try JSONDecoder().decode(RemoteCardText.self, from: Data(payload.utf8))
+        board.lanes[0].cards[0].presentation = presentation
+
+        let encoded = try JSONEncoder().encode(presentation)
+        let fields = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        #expect(fields["nextStepExplainsStatus"] as? Bool == true)
+        #expect(request.matches(board))
+        board.lanes[0].cards[0].presentation?.nextStep = "Source commit changed"
+        #expect(!request.matches(board))
+    }
+
     @MainActor @Test func presentationUpdatesDoNotInterruptAnOpenDetailsRead() throws {
         var board = board()
         let state = RemoteDetailState()

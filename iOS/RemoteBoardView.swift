@@ -607,6 +607,13 @@ struct RemoteCardView: View {
     }
     private var visibleStatus: String? { expanded ? card.visibleStatus : card.boardStatus }
     private var visibleNextStep: String? { expanded ? card.visibleNextStep : card.boardNextStep }
+    private var displayedStatus: String? {
+        guard card.presentation?.requirements?.isEmpty != false,
+              let status = visibleStatus, status != statusContext?.mergeStage?.title,
+              trainConflictURL == nil || card.presentation?.working == true || statusContext?.refreshFailureHelp != nil
+        else { return nil }
+        return status
+    }
     private var hasSupportingInformation: Bool {
         card.presentation?.requirements?.isEmpty == false || visibleStatus != nil
             || card.presentation?.pendingDrafts != nil || (expanded && card.dependencies != nil)
@@ -616,7 +623,10 @@ struct RemoteCardView: View {
             || (expanded && gitLabCheckURL != nil)
     }
     private var informationRows: some View {
-        Group {
+        let status = displayedStatus
+        let explanation = status != nil && card.presentation?.nextStepExplainsStatus == true
+            && card.presentation?.steps?.isEmpty != false ? visibleNextStep : nil
+        return Group {
             if let stage = statusContext?.mergeStage {
                 mergeStage(stage)
             }
@@ -650,9 +660,11 @@ struct RemoteCardView: View {
                 }
                 .font(.subheadline)
                 .modifier(MRDetailStatusCard(isPresented: expanded))
-            } else if let status = visibleStatus, status != statusContext?.mergeStage?.title,
-                      trainConflictURL == nil || card.presentation?.working == true || statusContext?.refreshFailureHelp != nil {
-                statusLine(status)
+            } else if let status {
+                VStack(alignment: .leading, spacing: 4) {
+                    statusLine(status)
+                    if let explanation { nextStepText(explanation) }
+                }
             }
             if let trainConflictURL {
                 Link(destination: trainConflictURL) {
@@ -675,8 +687,8 @@ struct RemoteCardView: View {
             if let steps = card.presentation?.steps, !steps.isEmpty {
                 RemoteStepChain(steps: steps, current: card.presentation?.currentStep ?? 0)
                     .font(expanded ? .callout : .caption)
-            } else if let nextStep = visibleNextStep {
-                Text(verbatim: nextStep).font(expanded ? .callout : .caption).foregroundStyle(.secondary)
+            } else if explanation == nil, let nextStep = visibleNextStep {
+                nextStepText(nextStep)
             }
             if let chips = card.presentation?.chips {
                 let notices = statusContext?.notices ?? []
@@ -691,6 +703,10 @@ struct RemoteCardView: View {
             }
             if expanded, let gitLabCheckURL { gitLabCheckLink(gitLabCheckURL) }
         }
+    }
+
+    private func nextStepText(_ text: String) -> some View {
+        Text(verbatim: text).font(expanded ? .callout : .caption).foregroundStyle(.secondary)
     }
 
     private func statusLine(_ status: String) -> some View {
