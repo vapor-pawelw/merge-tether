@@ -5,7 +5,7 @@ import Testing
 
 @MainActor
 struct AssistantRunReclamationTests {
-    @Test(arguments: ["closed", "merged"])
+    @Test(arguments: ["closed", "merged", "opened"])
     func reclaimsRepositoriesFromKnownRunAndLeavesEvidenceAcrossRetries(_ state: String) async throws {
         let fixture = try Fixture(useLegacyStorage: state == "merged")
         defer { fixture.remove() }
@@ -23,13 +23,113 @@ struct AssistantRunReclamationTests {
         let checkpoint = fixture.storage.checkpoints.appending(path: "\(fixture.job.id).json")
         try Data("checkpoint".utf8).write(to: checkpoint)
 
-        try await fixture.clean(state: state, head: head, authorize: false)
+        var job = fixture.job
+        job.execution?.finishedAt = Date().addingTimeInterval(state == "opened" ? -2 * 86_400 : -3_600)
+        try await fixture.clean(state: state, head: head, authorize: false, job: job)
         #expect(exists(clone) && exists(linked))
-        try await fixture.clean(state: state, head: head)
-        try await fixture.clean(state: state, head: head)
+        try await fixture.clean(state: state, head: head, job: job)
+        try await fixture.clean(state: state, head: head, job: job)
         #expect(!exists(clone) && !exists(linked))
         for path in proofPaths { #expect(try Data(contentsOf: fixture.run.appending(path: path)) == Data(path.utf8)) }
         #expect(try Data(contentsOf: checkpoint) == Data("checkpoint".utf8))
+    }
+
+    @Test(arguments: ["clean", "ignored", "outside"])
+    func reclaimsOnlyReproducibleBareRepositoriesAndTheirLinkedWorktrees(_ scenario: String) async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let upstream = fixture.home.appending(path: "upstream", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: upstream, withIntermediateDirectories: false)
+        let head = try await initialize(upstream)
+        let bare = fixture.run.appending(path: "mirror.git", directoryHint: .isDirectory)
+        try await git(["clone", "--bare", "--no-tags", "--no-hardlinks", "--", upstream.path, bare.path], in: fixture.home)
+        let owner = scenario == "outside" ? fixture.home : fixture.run
+        let checkout = owner.appending(path: "working tree", directoryHint: .isDirectory)
+        try await git(["worktree", "add", "--detach", checkout.path, head], in: bare)
+        if scenario == "ignored" {
+            let ignored = checkout.appending(path: "target", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: ignored, withIntermediateDirectories: false)
+            try Data("local work".utf8).write(to: ignored.appending(path: "local.patch"))
+        }
+
+        try await fixture.clean(state: "opened", head: head)
+        #expect(exists(bare) == (scenario != "clean"))
+        #expect(exists(checkout) == (scenario != "clean"))
+        #expect(exists(upstream))
+    }
+
+    @Test(arguments: ["listed", "omitted", "accountChanged", "activeRun", "readFailed", "staleWorkflow", "preparedWorkflow"])
+    func monitorReclaimsAnExpiredFailedRunOnAnOpenMergeRequest(_ scenario: String) async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let clone = try fixture.directory("repo")
+        let head = try await initialize(clone)
+        let logs = try fixture.directory("cli-output")
+        let stdout = logs.appending(path: "stdout")
+        let diagnostics = Data(repeating: 65, count: 262_144)
+        try diagnostics.write(to: stdout)
+        try FileManager.default.setAttributes([.modificationDate: fixture.finishedAt], ofItemAtPath: stdout.path)
+        let suite = "AssistantRunReclamationTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        var run = fixture.job
+        run.execution?.state = .failed
+        settings.assistantHandoffs = [run]
+        if scenario == "activeRun" {
+            settings.assistantHandoffs.append(.init(id: UUID(), key: run.key, title: "Active", prompt: "Active",
+                createdAt: Date(), allowsPush: false, execution: .init(state: .running)))
+        }
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: run.key.work.host, username: run.key.username)
+        let request = fixture.requestJSON(state: "opened", head: head)
+        if scenario == "staleWorkflow" || scenario == "preparedWorkflow" {
+            let mergeRequest = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(request.utf8))
+            let prepared = scenario == "preparedWorkflow"
+            settings.workflowActivity = [.init(id: "review-update",
+                event: .init(kind: .reviewUpdate, mergeRequest: mergeRequest, identity: "review-update", context: "Updated review"),
+                createdAt: fixture.finishedAt, host: run.key.work.host, user: .init(id: 21, username: run.key.username),
+                state: prepared ? .running : .waitingForAssistant, assistantJobID: prepared ? nil : run.id,
+                preparedReviewJobID: prepared ? run.id : nil)]
+        }
+        var exactReads = 0
+        var accountReads = 0
+        gitlab.handler = { command in
+            switch command.endpoint {
+            case "/user":
+                accountReads += 1
+                let id = scenario == "accountChanged" && accountReads > 1 ? 22 : 21
+                return InMemoryGitLab.output(#"{"id":\#(id),"username":"me","name":"Viewer"}"#)
+            case "/projects/7/merge_requests/11":
+                exactReads += 1
+                if scenario == "readFailed" { throw GlabError.notAuthenticated }
+                return InMemoryGitLab.output(request)
+            case let path where path.hasPrefix("/merge_requests?"):
+                return InMemoryGitLab.output(scenario == "omitted" ? "[]" : "[\(request)]")
+            default: return InMemoryGitLab.output("[]")
+            }
+        }
+        let monitor = MergeRequestAttentionMonitor(glab: glab, settings: settings, provenanceDirectory: fixture.home,
+            runStorage: fixture.storage, canAutomate: { _ in false })
+        func refresh() async {
+            await withCheckedContinuation { continuation in
+                monitor.onRefreshed = { monitor.onRefreshed = nil; continuation.resume() }
+                monitor.refresh(host: run.key.work.host, username: run.key.username, todos: [])
+            }
+        }
+        await refresh()
+
+        let shouldReclaim = ["listed", "omitted", "staleWorkflow"].contains(scenario)
+        #expect(exists(clone) == !shouldReclaim)
+        #expect(try Data(contentsOf: stdout) == diagnostics)
+        #expect(settings.assistantHandoffs.contains(where: { $0.id == run.id }))
+        if scenario == "listed" {
+            #expect(exactReads == 1)
+            await refresh()
+            #expect(exactReads == 1)
+        }
+        #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
     }
 
     @Test(arguments: ["modified", "untracked", "ignored", "unpublished", "dangling", "outside-worktree", "linked-dirty", "skip-worktree", "outside-gitdir"])
@@ -159,12 +259,32 @@ struct AssistantRunReclamationTests {
     }
 
     @Test(arguments: [AssistantJobExecution.State.queued, .running, .blocked, .failed, .cancelled, .interrupted, .feedbackResolved])
-    func retainsWorkThatDidNotFinishSuccessfully(_ state: AssistantJobExecution.State) async throws {
+    func retainsActiveRunsAndGivesUnsuccessfulRunsTimeForDiagnosis(_ state: AssistantJobExecution.State) throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
         var job = fixture.job
+        let now = Date()
         job.execution?.state = state
-        #expect(AssistantRunReclamation.candidate(job, storage: fixture.storage, finishedBy: Date()) == nil)
+        #expect((AssistantRunReclamation.candidate(job, storage: fixture.storage, finishedBy: now) == nil) == state.isActive)
+        job.execution?.finishedAt = now.addingTimeInterval(-86_400)
+        #expect(AssistantRunReclamation.candidate(job, storage: fixture.storage, finishedBy: now) == nil)
+    }
+
+    @Test func openCleanupProtectsRecentRunsAndDoesNotTrustTheOldExpectedHead() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let clone = try fixture.directory("repo")
+        let liveHead = try await initialize(clone)
+        var job = fixture.job
+        job.execution?.finishedAt = Date().addingTimeInterval(-3_600)
+        try await fixture.clean(state: "opened", head: liveHead, job: job)
+        #expect(exists(clone))
+
+        try await git(["commit", "--allow-empty", "-m", "Old head replaced on GitLab"], in: clone)
+        job.expectedHeadSHA = try await git(["rev-parse", "HEAD"], in: clone)
+        job.execution?.finishedAt = fixture.finishedAt
+        try await fixture.clean(state: "opened", head: liveHead, job: job)
+        #expect(exists(clone))
     }
 
     private struct Fixture {
@@ -194,11 +314,15 @@ struct AssistantRunReclamationTests {
             return directory
         }
 
-        func clean(state: String, head: String, authorize: Bool = true) async throws {
+        func clean(state: String, head: String, authorize: Bool = true, job: AssistantAutomationRunner.Handoff? = nil) async throws {
             let observedAt = Date()
-            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":7,"iid":11,"author":{"id":21,"username":"me","name":"Viewer"},"title":"Fixture","web_url":"https://gitlab.example.test/team/repo/-/merge_requests/11","state":"\#(state)","sha":"\#(head)","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
-            let candidate = try #require(AssistantRunReclamation.candidate(job, storage: storage, finishedBy: observedAt))
-            await AssistantRunReclamation.reclaimTerminalRuns([candidate], request: request, readStartedAt: observedAt) { _ in authorize }
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(requestJSON(state: state, head: head).utf8))
+            let candidate = try #require(AssistantRunReclamation.candidate(job ?? self.job, storage: storage, finishedBy: observedAt))
+            await AssistantRunReclamation.reclaimObservedRuns([candidate], request: request, readStartedAt: observedAt) { _ in authorize }
+        }
+
+        func requestJSON(state: String, head: String) -> String {
+            #"{"project_id":7,"iid":11,"author":{"id":21,"username":"me","name":"Viewer"},"title":"Fixture","web_url":"https://gitlab.example.test/team/repo/-/merge_requests/11","state":"\#(state)","sha":"\#(head)","source_branch":"feature","target_branch":"main","labels":[]}"#
         }
     }
 

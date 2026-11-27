@@ -59,7 +59,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Show Play for active automation and Pause for suspended automation on the Mac and companion app.
 
 - Keep hidden merge requests across restarts, closure and merge while you remain assigned as a reviewer. Restore open reviews at any time or leave the review in GitLab.
-- Reclaim reproducible worker files after a merge request closes or merges, and trim old raw logs.
+- Reclaim reproducible worker checkouts after one day for successful runs and seven days for other completed runs, including on open merge requests. Keep local changes, checkpoints and unsuccessful run logs available for recovery.
 - Queue agent work based on free disk space on the Mac and show disk waits and failures on paired iPhones and iPads.
 - Stop agent runs when required workspace directories disappear, record possible GitLab effects before retrying, and cap persistent worker output.
 

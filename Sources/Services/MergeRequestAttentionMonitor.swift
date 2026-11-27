@@ -279,7 +279,7 @@ final class MergeRequestAttentionMonitor {
     /// Historical chats remain recorded after their MR closes. Recheck them only
     /// after an open listing makes them current again, or after an account change.
     private var terminalCatalogRequests: Set<Item.ID> = []
-    @ObservationIgnored private var runCleanupAttempts: [MRAutomationScope.Target: Date] = [:]
+    @ObservationIgnored private var runCleanupAttempts: [MRAutomationScope.Target: (date: Date, open: Bool)] = [:]
     @ObservationIgnored private var runCleanupInProgress: Set<MRAutomationScope.Target> = []
     @ObservationIgnored private var latestOpenForRunCleanup: [MRAutomationScope.Target: Date] = [:]
     private(set) var isLoading = false
@@ -707,6 +707,8 @@ final class MergeRequestAttentionMonitor {
         attentionCandidateIDs = []
         catalogIDs = []
         terminalCatalogRequests = []
+        runCleanupAttempts = [:]
+        latestOpenForRunCleanup = [:]
         recentTodos = []
         hasError = false
         hasOwnListing = false
@@ -821,7 +823,7 @@ final class MergeRequestAttentionMonitor {
 
         let terminalSince = settings.mrLifecycleLedger.terminalObservedAt(for: target, state: request.state) ?? readStartedAt
         settings.retireMRProgress(for: target, state: request.state, terminalSince: terminalSince, now: readStartedAt, user: user)
-        await reclaimConfirmedRuns(request, target: target, account: account, revision: revision, readStartedAt: readStartedAt)
+        await reclaimConfirmedRuns(request, target: target, user: user, revision: revision, readStartedAt: readStartedAt)
         guard isCurrent(account, revision: revision), !Task.isCancelled,
               settings.mrLifecycleLedger.accepts(request, for: target, observedAt: readStartedAt) else { return false }
         if request.state == .merged && !isConfirming(request.mergeRequestID)
@@ -847,17 +849,35 @@ final class MergeRequestAttentionMonitor {
     }
 
     private func reclaimConfirmedRuns(_ request: GitLabMergeRequest, target: MRAutomationScope.Target,
-                                      account: Account, revision: UInt64, readStartedAt: Date) async {
+                                      user: GitLabAuthenticatedUser, revision: UInt64, readStartedAt: Date) async {
+        let account = user.account(on: target.host)
         guard let settings, settings.automaticActionsAllowed, request.sha.map(GlabService.isFullGitSHA) == true,
+              isCurrent(account, revision: revision), !Task.isCancelled,
+              settings.mrLifecycleLedger.accepts(request, for: target, observedAt: readStartedAt),
               latestOpenForRunCleanup[target].map({ $0 <= readStartedAt }) != false,
-              runCleanupIsDue(for: target, at: readStartedAt), !isConfirming(request.mergeRequestID) else { return }
+              runCleanupIsDue(for: target, at: readStartedAt, open: request.isOpen), !isConfirming(request.mergeRequestID) else { return }
         let scoped = settings.assistantHandoffs.filter { $0.key.automationTarget == target }
         guard !hasPendingRunWork(for: target, jobs: scoped, settings: settings) else { return }
-        let candidates = scoped.compactMap { AssistantRunReclamation.candidate($0, storage: runStorage, finishedBy: readStartedAt) }
+        let candidates = scoped.compactMap { job -> AssistantRunReclamation.Candidate? in
+            guard ownsRun(job, user: user, host: target.host),
+                  let candidate = AssistantRunReclamation.candidate(job, storage: runStorage, finishedBy: readStartedAt),
+                  !request.isOpen || candidate.hasExpired(at: readStartedAt) else { return nil }
+            return candidate
+        }
         guard !candidates.isEmpty, runCleanupInProgress.insert(target).inserted else { return }
         defer { runCleanupInProgress.remove(target) }
-        runCleanupAttempts[target] = readStartedAt
-        await AssistantRunReclamation.reclaimTerminalRuns(candidates, request: request, readStartedAt: readStartedAt) { [weak self] candidate in
+        let inspection = Task.detached(priority: .utility) {
+            candidates.filter { !Task.isCancelled && AssistantRunReclamation.hasFilesToInspect($0,
+                isListedOpen: request.isOpen, at: readStartedAt) }
+        }
+        let inspected = await withTaskCancellationHandler { await inspection.value } onCancel: { inspection.cancel() }
+        guard !inspected.isEmpty, isCurrent(account, revision: revision), !Task.isCancelled else { return }
+        if request.isOpen {
+            guard (try? await glab.fetchAuthenticatedUser(host: target.host, expectedUsername: user.username)) == user,
+                  isCurrent(account, revision: revision), !Task.isCancelled else { return }
+        }
+        runCleanupAttempts[target] = (readStartedAt, request.isOpen)
+        await AssistantRunReclamation.reclaimObservedRuns(inspected, request: request, readStartedAt: readStartedAt) { [weak self] candidate in
             guard let self, !Task.isCancelled, isCurrent(account, revision: revision), settings.automaticActionsAllowed,
                   !isConfirming(request.mergeRequestID), Date().timeIntervalSince(readStartedAt) <= 300,
                   latestOpenForRunCleanup[target].map({ $0 <= readStartedAt }) != false,
@@ -865,9 +885,42 @@ final class MergeRequestAttentionMonitor {
             let jobs = settings.assistantHandoffs.filter { $0.key.automationTarget == target }
             guard !hasPendingRunWork(for: target, jobs: jobs, settings: settings) else { return false }
             let owners = settings.assistantHandoffs.filter { $0.id == candidate.id || $0.execution?.workingDirectory == candidate.path }
-            return owners.count == 1 && owners.first?.key.automationTarget == target
-                && owners.first.flatMap { AssistantRunReclamation.candidate($0, storage: runStorage, finishedBy: readStartedAt) } == candidate
+            guard let owner = owners.first, owners.count == 1, owner.key.automationTarget == target,
+                  ownsRun(owner, user: user, host: target.host) else { return false }
+            return AssistantRunReclamation.candidate(owner, storage: runStorage, finishedBy: readStartedAt) == candidate
         }
+    }
+
+    private func ownsRun(_ job: AssistantAutomationRunner.Handoff, user: GitLabAuthenticatedUser, host: String) -> Bool {
+        job.accountUserID.map { $0 == user.id }
+            ?? (settings?.handoffMatchesAccount(job, host: host, username: user.username) == true)
+    }
+
+    private func workspaceCleanupTargets(host: String, user: GitLabAuthenticatedUser, listed: [GitLabMergeRequest],
+                                         observedAt: Date) async -> Set<MRAutomationScope.Target> {
+        guard let settings, settings.automaticActionsAllowed else { return [] }
+        let observations = Dictionary(listed.filter { [.opened, .closed, .merged].contains($0.state) }
+            .map { ($0.mergeRequestID, $0.isOpen) }, uniquingKeysWith: { first, _ in first })
+        let pending = settings.assistantHandoffs.compactMap { job -> (MRAutomationScope.Target, AssistantRunReclamation.Candidate)? in
+            let target = job.key.automationTarget
+            guard target.host == host, target.username == user.username, ownsRun(job, user: user, host: host),
+                  runCleanupIsDue(for: target, at: observedAt, open: target.mergeRequestID.flatMap { observations[$0] }),
+                  let candidate = AssistantRunReclamation.candidate(job, storage: runStorage, finishedBy: observedAt) else { return nil }
+            return (target, candidate)
+        }
+        guard !pending.isEmpty else { return [] }
+        let inspection = Task.detached(priority: .utility) {
+            var targets: Set<MRAutomationScope.Target> = []
+            for (target, candidate) in pending {
+                guard !Task.isCancelled else { break }
+                if !targets.contains(target), AssistantRunReclamation.hasFilesToInspect(candidate,
+                    isListedOpen: target.mergeRequestID.flatMap { observations[$0] } == true, at: observedAt) {
+                    targets.insert(target)
+                }
+            }
+            return targets
+        }
+        return await withTaskCancellationHandler { await inspection.value } onCancel: { inspection.cancel() }
     }
 
     private func hasPendingRunWork(for target: MRAutomationScope.Target, jobs: [AssistantAutomationRunner.Handoff],
@@ -878,19 +931,24 @@ final class MergeRequestAttentionMonitor {
             $0.target == target && [.pending, .verifying, .running].contains($0.state)
                 && ($0.jobID.map(ids.contains) == true || $0.reviewRecoveryJobID.map(ids.contains) == true)
         }) { return true }
-        return settings.workflowActivity.contains {
-            [.awaitingPipelineHandoff, .queued, .running, .waitingForAssistant].contains($0.state)
-                && ($0.assistantJobID.map(ids.contains) == true || $0.preparedReviewJobID.map(ids.contains) == true)
+        let executions = WorkflowExecutionProjection.JobIndex(jobs)
+        return settings.workflowActivity.contains { entry in
+            guard [.awaitingPipelineHandoff, .queued, .running, .waitingForAssistant].contains(entry.state) else { return false }
+            if entry.preparedReviewJobID.map(ids.contains) == true { return true }
+            // Persisted admissions keep their original state even after their linked run finishes.
+            return entry.assistantJobID.map(ids.contains) == true && !executions.hasTerminalExecution(entry)
         }
     }
 
-    private func runCleanupIsDue(for target: MRAutomationScope.Target, at now: Date) -> Bool {
-        !runCleanupInProgress.contains(target) && (runCleanupAttempts[target].map { now.timeIntervalSince($0) >= 3_600 } ?? true)
+    private func runCleanupIsDue(for target: MRAutomationScope.Target, at now: Date, open: Bool? = nil) -> Bool {
+        guard !runCleanupInProgress.contains(target) else { return false }
+        guard let attempt = runCleanupAttempts[target], open == nil || open == attempt.open else { return true }
+        return now.timeIntervalSince(attempt.date) >= 3_600
     }
 
     private func recordOpenRunCleanupObservation(_ target: MRAutomationScope.Target, at observedAt: Date) {
         if latestOpenForRunCleanup[target].map({ $0 < observedAt }) ?? true { latestOpenForRunCleanup[target] = observedAt }
-        if runCleanupAttempts[target].map({ $0 < observedAt }) == true { runCleanupAttempts[target] = nil }
+        if let attempt = runCleanupAttempts[target], !attempt.open, attempt.date < observedAt { runCleanupAttempts[target] = nil }
     }
 
     private func poll(_ account: Account, todos: [Todo], revision: UInt64,
@@ -1065,12 +1123,9 @@ final class MergeRequestAttentionMonitor {
         let trackedLookupTargets = feedbackDecision == nil
             ? scopeTargets.union(recordedTargets).union(intentTargets).union(trackedTargets).union(hiddenTargets).union(transientTargets) : []
         let approvalTargets = feedbackDecision == nil ? (settings?.approvalBaselineTargets(host: host, user: user) ?? []) : []
-        let workspaceCleanupTargets = Set((settings?.assistantHandoffs ?? []).compactMap { job -> MRAutomationScope.Target? in
-            let target = job.key.automationTarget
-            guard target.host == host, target.username == user.username, runCleanupIsDue(for: target, at: observedAt),
-                  AssistantRunReclamation.candidate(job, storage: runStorage, finishedBy: observedAt) != nil else { return nil }
-            return target
-        })
+        let workspaceCleanupTargets = feedbackDecision == nil
+            ? await self.workspaceCleanupTargets(host: host, user: user, listed: listed, observedAt: observedAt) : []
+        guard isCurrent(account, revision: revision), !Task.isCancelled else { return }
         let lookupTargets = feedbackDecision == nil
             ? trackedLookupTargets.union(approvalTargets).union(workspaceCleanupTargets) : []
         var explicit: [GitLabMergeRequest] = []
@@ -1084,12 +1139,13 @@ final class MergeRequestAttentionMonitor {
             guard let iid = target.iid else { continue }
             let hide = settings?.hiddenReviewDetails[target]
             let id = Item.ID(projectID: target.projectID, iid: iid)
+            let supplementaryRead = cleanupOnly || listedIDs.contains(id)
             if hidden {
                 // The assignment listing only contains open MRs. An omitted row
                 // cannot distinguish closure, unassignment and a partial listing.
-                if listedAssignments.contains(id), hide?.request?.isOpen == true,
+                if !needsWorkspaceRead, listedAssignments.contains(id), hide?.request?.isOpen == true,
                    hide?.request?.reviewers?.contains(where: { $0.id == user.id }) == true { continue }
-            } else if listedIDs.contains(id), !needsWorkspaceRead || listed.contains(where: { $0.mergeRequestID == id && $0.isOpen }) {
+            } else if listedIDs.contains(id), !needsWorkspaceRead {
                 continue
             }
             // Merged MRs cannot reopen. Closed rows, including Seen tombstones,
@@ -1100,7 +1156,7 @@ final class MergeRequestAttentionMonitor {
                     && !approvalTargets.contains(target)) { continue }
             let requestReadStartedAt = Date()
             guard let request = try? await glab.fetchMergeRequest(projectID: target.projectID, iid: iid, host: host) else {
-                if hidden || cleanupOnly { continue }
+                if hidden || supplementaryRead { continue }
                 explicitFetchFailed = true
                 if var previous = previousCatalog[id] {
                     previous.approvalProgress = nil
@@ -1112,8 +1168,13 @@ final class MergeRequestAttentionMonitor {
             guard request.projectID == target.projectID, request.iid == iid,
                   request.webURL.isGitLabMergeRequest(host: host, iid: iid),
                   [.opened, .closed, .merged].contains(request.state) else {
-                if !hidden && !cleanupOnly { explicitFetchFailed = true }
+                if !hidden && !supplementaryRead { explicitFetchFailed = true }
                 continue
+            }
+            if needsWorkspaceRead, request.isOpen {
+                recordOpenRunCleanupObservation(target, at: requestReadStartedAt)
+                await reclaimConfirmedRuns(request, target: target, user: user, revision: revision, readStartedAt: requestReadStartedAt)
+                guard isCurrent(account, revision: revision), !Task.isCancelled else { return }
             }
             if hidden {
                 guard !Task.isCancelled else { return }
@@ -1137,7 +1198,7 @@ final class MergeRequestAttentionMonitor {
                         readStartedAt: requestReadStartedAt)
                     guard isCurrent(account, revision: revision) else { return }
                     guard confirmed else {
-                        if !cleanupOnly { explicitFetchFailed = true }
+                        if !supplementaryRead { explicitFetchFailed = true }
                         continue
                     }
                 }
@@ -1147,7 +1208,6 @@ final class MergeRequestAttentionMonitor {
                 retainedCatalog.removeValue(forKey: id)
             } else {
                 terminalCatalogRequests.remove(id)
-                if needsWorkspaceRead { recordOpenRunCleanupObservation(target, at: requestReadStartedAt) }
                 // A cleanup read may observe an MR outside the board's tracked scope.
                 guard !cleanupOnly else { continue }
                 remember(request, readStartedAt: requestReadStartedAt)

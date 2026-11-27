@@ -3,15 +3,20 @@ import Foundation
 
 enum AssistantRunReclamation {
     typealias Handoff = AssistantAutomationRunner.Handoff
-    typealias Target = MRAutomationScope.Target
-
     struct Candidate: Equatable, Sendable {
         let id: UUID
         let path: String
         let finishedAt: Date
-        let expectedHead: String?
+        let state: AssistantJobExecution.State
+
+        func hasExpired(at date: Date) -> Bool {
+            let lifetime = state == .succeeded ? successfulWorkspaceLifetime : diagnosticWorkspaceLifetime
+            return finishedAt <= date.addingTimeInterval(-lifetime)
+        }
     }
 
+    private static let successfulWorkspaceLifetime: TimeInterval = 24 * 60 * 60
+    private static let diagnosticWorkspaceLifetime: TimeInterval = 7 * 24 * 60 * 60
     private static let rawLogLifetime: TimeInterval = 7 * 24 * 60 * 60
     private static let rawLogTailBytes = 128 * 1024
     private static let claims = Claims()
@@ -23,71 +28,93 @@ enum AssistantRunReclamation {
     }
 
     static func candidate(_ job: Handoff, storage: InstallationStorage, finishedBy: Date) -> Candidate? {
-        guard let execution = job.execution, execution.state == .succeeded,
+        guard let execution = job.execution, !execution.state.isActive,
               execution.pendingWorkerAudit == nil, let finishedAt = execution.finishedAt, finishedAt <= finishedBy,
               let path = execution.workingDirectory, [storage.runs, storage.legacyRuns].contains(where: {
                   $0.appending(path: job.id.uuidString, directoryHint: .isDirectory).path == path
               }) else { return nil }
-        return Candidate(id: job.id, path: path, finishedAt: finishedAt, expectedHead: job.expectedHeadSHA)
+        let candidate = Candidate(id: job.id, path: path, finishedAt: finishedAt, state: execution.state)
+        return candidate.state == .succeeded || candidate.hasExpired(at: finishedBy) ? candidate : nil
+    }
+
+    /// Avoid GitLab reads for runs whose repository was already reclaimed.
+    static func hasFilesToInspect(_ candidate: Candidate, isListedOpen: Bool, at now: Date) -> Bool {
+        guard !isListedOpen || candidate.hasExpired(at: now),
+              let run = AssistantRunDirectory.open(candidate.path) else { return false }
+        if !isListedOpen, candidate.state == .succeeded,
+           expiredRawLogs(in: run, finishedAt: candidate.finishedAt, now: now) != nil { return true }
+        return !discoverRepositories(in: run).isEmpty
     }
 
     /// Called by the queue after it persists a successful completion and before it admits more work.
     @MainActor
     static func reclaimGeneratedFiles(after handoff: Handoff, storage: InstallationStorage = .current) async {
-        guard let candidate = candidate(handoff, storage: storage, finishedBy: Date()) else { return }
+        guard let candidate = candidate(handoff, storage: storage, finishedBy: Date()),
+              candidate.state == .succeeded else { return }
         let task = Task.detached(priority: .utility) {
-            await reclaim(candidate, terminalAt: nil, anchors: [], authorize: { !Task.isCancelled })
+            await reclaim(candidate, trimLogsAt: nil, anchors: [], authorize: { !Task.isCancelled })
         }
         await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
     }
 
-    static func reclaimTerminalRuns(_ candidates: [Candidate], request: GitLabMergeRequest, readStartedAt: Date,
+    static func reclaimObservedRuns(_ candidates: [Candidate], request: GitLabMergeRequest, readStartedAt: Date,
                                     authorize: @escaping @MainActor @Sendable (Candidate) -> Bool) async {
-        guard request.state == .closed || request.state == .merged,
+        guard [.opened, .closed, .merged].contains(request.state),
               let head = request.sha, GlabService.isFullGitSHA(head) else { return }
         let diff = request.diffRefs.flatMap { $0.headSHA == head ? $0 : nil }
         let anchors = [head, diff?.baseSHA, diff?.startSHA].compactMap { $0 }.filter(GlabService.isFullGitSHA)
         let task = Task.detached(priority: .utility) {
             for candidate in candidates {
                 guard !Task.isCancelled else { return }
-                let known = anchors + [candidate.expectedHead].compactMap { $0 }.filter(GlabService.isFullGitSHA)
-                await reclaim(candidate, terminalAt: readStartedAt, anchors: known, authorize: { authorize(candidate) })
+                guard !request.isOpen || candidate.hasExpired(at: readStartedAt) else { continue }
+                let trimLogsAt = !request.isOpen && candidate.state == .succeeded ? readStartedAt : nil
+                await reclaim(candidate, trimLogsAt: trimLogsAt, anchors: anchors, authorize: { authorize(candidate) })
             }
         }
         await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
     }
 
-    private static func reclaim(_ candidate: Candidate, terminalAt: Date?, anchors: [String],
+    private static func reclaim(_ candidate: Candidate, trimLogsAt: Date?, anchors: [String],
                                 authorize: @escaping @MainActor @Sendable () -> Bool) async {
         guard await claims.acquire(candidate.path) else { return }
-        await reclaimClaimedRun(candidate, terminalAt: terminalAt, anchors: anchors, authorize: authorize)
+        await reclaimClaimedRun(candidate, trimLogsAt: trimLogsAt, anchors: anchors, authorize: authorize)
         await claims.release(candidate.path)
     }
 
-    private static func reclaimClaimedRun(_ candidate: Candidate, terminalAt: Date?, anchors: [String],
+    private static func reclaimClaimedRun(_ candidate: Candidate, trimLogsAt: Date?, anchors: [String],
                                           authorize: @escaping @MainActor @Sendable () -> Bool) async {
         guard await authorize(), let run = AssistantRunDirectory.open(candidate.path), !hasProcess(in: run.path) else { return }
-        if let terminalAt, await authorize() {
-            trimExpiredRawLogs(in: run, finishedAt: candidate.finishedAt, now: terminalAt)
+        if let trimLogsAt, await authorize() {
+            trimExpiredRawLogs(in: run, finishedAt: candidate.finishedAt, now: trimLogsAt)
         }
         if let tmp = run.child("tmp"), await authorize() { reclaimJavaTemporaryFiles(in: tmp) }
-        for clone in discoverClones(in: run) {
+        for directory in discoverRepositories(in: run) {
             guard await authorize() else { return }
-            guard let repository = await AssistantRunRepository.inspect(clone, in: run) else { continue }
+            guard let repository = await AssistantRunRepository.inspect(directory, in: run) else { continue }
             await repository.reclaimGeneratedFiles(authorize: authorize)
-            if terminalAt != nil {
+            if !anchors.isEmpty {
                 await repository.reclaimIfReproducible(anchors: anchors, authorize: authorize)
             }
         }
         if await authorize() { run.child("tmp")?.removeIfEmpty() }
     }
 
-    private static func trimExpiredRawLogs(in run: AssistantRunDirectory, finishedAt: Date, now: Date) {
+    private static func expiredRawLogs(in run: AssistantRunDirectory, finishedAt: Date, now: Date)
+        -> (AssistantRunDirectory, [(String, AssistantRunDirectory.Entry)])? {
         let cutoff = now.addingTimeInterval(-rawLogLifetime)
-        guard finishedAt <= cutoff, let logs = run.child("cli-output") else { return }
-        for name in ["stdout", "stderr"] {
-            guard let entry = logs.entry(name), entry.modified <= cutoff, entry.bytes > rawLogTailBytes,
-                  let handle = logs.openFile(name, matching: entry, writable: true) else { continue }
+        guard finishedAt <= cutoff, let logs = run.child("cli-output") else { return nil }
+        let expired = ["stdout", "stderr"].compactMap { name -> (String, AssistantRunDirectory.Entry)? in
+            guard let entry = logs.entry(name), entry.isFile, entry.isOwned,
+                  entry.modified <= cutoff, entry.bytes > rawLogTailBytes else { return nil }
+            return (name, entry)
+        }
+        return expired.isEmpty ? nil : (logs, expired)
+    }
+
+    private static func trimExpiredRawLogs(in run: AssistantRunDirectory, finishedAt: Date, now: Date) {
+        guard let (logs, expired) = expiredRawLogs(in: run, finishedAt: finishedAt, now: now) else { return }
+        for (name, entry) in expired {
+            guard let handle = logs.openFile(name, matching: entry, writable: true) else { continue }
             do {
                 try handle.seek(toOffset: UInt64(entry.bytes - Int64(rawLogTailBytes)))
                 guard let tail = try handle.read(upToCount: rawLogTailBytes), tail.count == rawLogTailBytes,
@@ -136,14 +163,18 @@ enum AssistantRunReclamation {
         return false
     }
 
-    private static func discoverClones(in run: AssistantRunDirectory) -> [AssistantRunDirectory] {
+    private static func discoverRepositories(in run: AssistantRunDirectory) -> [AssistantRunDirectory] {
         var pending: [(AssistantRunDirectory, Int)] = [(run, 0)]
-        var clones: [AssistantRunDirectory] = []
+        var repositories: [AssistantRunDirectory] = []
         var inspected = 0
         while let (folder, depth) = pending.popLast(), inspected < 256 {
             inspected += 1
-            if folder.entry(".git") != nil {
-                if folder !== run, folder.entry(".git")?.isDirectory == true { clones.append(folder) }
+            if let git = folder.entry(".git") {
+                if folder !== run, git.isDirectory { repositories.append(folder) }
+                continue
+            }
+            if folder !== run, AssistantRunRepository.isBareWithWorktrees(folder) {
+                repositories.append(folder)
                 continue
             }
             guard depth < 5 else { continue }
@@ -152,7 +183,7 @@ enum AssistantRunReclamation {
                 pending.append((child, depth + 1))
             }
         }
-        return clones
+        return repositories
     }
 
     static func isWorkspaceDirectoryName(_ name: String) -> Bool {

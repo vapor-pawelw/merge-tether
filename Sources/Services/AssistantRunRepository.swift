@@ -1,31 +1,43 @@
 import Foundation
 
-/// Locally inspects ordinary Git clones inside a single run. Git never contacts a remote.
+/// Locally inspects Git repositories inside a single run. Git never contacts a remote.
 struct AssistantRunRepository {
-    let clone: AssistantRunDirectory
+    let directory: AssistantRunDirectory
+    let metadata: AssistantRunDirectory
     let worktrees: [AssistantRunDirectory]
 
-    static func inspect(_ clone: AssistantRunDirectory, in run: AssistantRunDirectory) async -> Self? {
-        guard let metadata = clone.child(".git"), metadata.isCurrent,
+    private var checkouts: [AssistantRunDirectory] {
+        directory === metadata ? worktrees : [directory] + worktrees
+    }
+
+    static func isBareWithWorktrees(_ directory: AssistantRunDirectory) -> Bool {
+        directory.entry("HEAD")?.isFile == true && directory.entry("config")?.isFile == true
+            && directory.entry("objects")?.isDirectory == true && directory.entry("worktrees")?.isDirectory == true
+    }
+
+    static func inspect(_ directory: AssistantRunDirectory, in run: AssistantRunDirectory) async -> Self? {
+        let bare = directory.entry(".git") == nil && isBareWithWorktrees(directory)
+        guard let metadata = bare ? directory : directory.child(".git"), metadata.isCurrent,
               metadataTreeIsLocal(metadata, depth: 0),
               metadata.child("info")?.entry("grafts") == nil,
               metadata.child("objects")?.child("info")?.entry("alternates") == nil,
               metadata.child("objects")?.child("info")?.entry("http-alternates") == nil,
               let config = metadata.read("config"),
-              let configuration = await git(["config", "--file", "-", "--no-includes", "--null", "--list"], in: clone, input: config),
-              configuration.exitCode == 0, supportedConfig(configuration.stdout),
+              let configuration = await git(["config", "--file", "-", "--no-includes", "--null", "--list"], in: directory, input: config),
+              configuration.exitCode == 0, supportedConfig(configuration.stdout, bare: bare),
               let worktrees = registeredWorktrees(metadata: metadata, in: run),
-              let known = await git(["worktree", "list", "--porcelain", "-z"], in: clone), known.exitCode == 0 else { return nil }
+              !bare || !worktrees.isEmpty,
+              let known = await git(["worktree", "list", "--porcelain", "-z"], in: directory), known.exitCode == 0 else { return nil }
         let paths = records(known.stdout).compactMap { record in
             record.hasPrefix("worktree ") ? String(record.dropFirst("worktree ".count)) : nil
         }
-        let expected = [clone.path] + worktrees.map(\.path)
+        let expected = [directory.path] + worktrees.map(\.path)
         guard paths.count == expected.count, Set(paths) == Set(expected) else { return nil }
-        return Self(clone: clone, worktrees: worktrees)
+        return Self(directory: directory, metadata: metadata, worktrees: worktrees)
     }
 
     func reclaimGeneratedFiles(authorize: @MainActor @Sendable () -> Bool) async {
-        for checkout in [clone] + worktrees {
+        for checkout in checkouts {
             guard let tracked = await Self.git(["ls-files", "-z"], in: checkout), tracked.exitCode == 0 else { continue }
             for path in Set(Self.records(tracked.stdout)) where path == "pom.xml" || path.hasSuffix("/pom.xml") {
                 let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
@@ -47,27 +59,27 @@ struct AssistantRunRepository {
     }
 
     func reclaimIfReproducible(anchors: [String], authorize: @MainActor @Sendable () -> Bool) async {
-        guard let metadata = clone.child(".git"), Self.hasOnlyCloneMetadata(metadata) else { return }
+        guard metadata.isCurrent, Self.hasOnlyRepositoryMetadata(metadata) else { return }
         var known: [String] = []
         for sha in Set(anchors) {
-            guard let type = await Self.git(["cat-file", "-t", sha], in: clone), type.exitCode == 0,
+            guard let type = await Self.git(["cat-file", "-t", sha], in: directory), type.exitCode == 0,
                   type.stdout == Data("commit\n".utf8) else { continue }
             known.append(sha)
         }
         guard !known.isEmpty else { return }
-        for checkout in [clone] + worktrees {
+        for checkout in checkouts {
             guard await Self.isClean(checkout) else { return }
         }
         // Explicit roots exclude remote-tracking refs and reflogs as proof of delivery.
         // Even dangling objects can be the only remaining copy of a reset edit or commit.
-        guard let objects = await Self.git(["fsck", "--full", "--unreachable", "--no-reflogs", "--no-progress"] + known, in: clone),
+        guard let objects = await Self.git(["fsck", "--full", "--unreachable", "--no-reflogs", "--no-progress"] + known, in: directory),
               objects.exitCode == 0, objects.stdout.isEmpty, objects.stderr.isEmpty, await authorize() else { return }
         for worktree in worktrees {
             guard worktree.isCurrent, await authorize(),
-                  let result = await Self.git(["worktree", "remove", "--", worktree.path], in: clone), result.exitCode == 0 else { return }
+                  let result = await Self.git(["worktree", "remove", "--", worktree.path], in: directory), result.exitCode == 0 else { return }
         }
-        guard await authorize(), clone.removeContents() else { return }
-        clone.removeIfEmpty()
+        guard await authorize(), metadata.isCurrent, directory.removeContents() else { return }
+        directory.removeIfEmpty()
     }
 
     private static func isClean(_ checkout: AssistantRunDirectory) async -> Bool {
@@ -97,7 +109,7 @@ struct AssistantRunRepository {
         return worktrees
     }
 
-    private static func hasOnlyCloneMetadata(_ metadata: AssistantRunDirectory) -> Bool {
+    private static func hasOnlyRepositoryMetadata(_ metadata: AssistantRunDirectory) -> Bool {
         let checkoutMetadata: Set<String> = ["HEAD", "index", "logs", "ORIG_HEAD", "FETCH_HEAD", "COMMIT_EDITMSG"]
         let cloneMetadata = checkoutMetadata.union(["branches", "config", "description", "hooks", "info", "objects", "packed-refs", "refs", "shallow", "worktrees"])
         guard let names = metadata.names(), Set(names).isSubset(of: cloneMetadata) else { return false }
@@ -124,13 +136,15 @@ struct AssistantRunRepository {
         return true
     }
 
-    private static func supportedConfig(_ bytes: Data) -> Bool {
+    private static func supportedConfig(_ bytes: Data, bare: Bool) -> Bool {
         let coreKeys: Set<String> = ["core.repositoryformatversion", "core.filemode", "core.bare", "core.logallrefupdates",
             "core.ignorecase", "core.precomposeunicode", "core.symlinks", "core.autocrlf", "core.eol"]
-        return records(bytes).allSatisfy { record in
+        let entries = records(bytes)
+        if bare, entries.filter({ $0 == "core.bare" || $0.hasPrefix("core.bare\n") }) != ["core.bare\ntrue"] { return false }
+        return entries.allSatisfy { record in
             let key = record.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
             return coreKeys.contains(key) || key.hasPrefix("user.") || key.hasPrefix("branch.")
-                || (key.hasPrefix("remote.") && (key.hasSuffix(".url") || key.hasSuffix(".fetch")))
+                || (key.hasPrefix("remote.") && (key.hasSuffix(".url") || key.hasSuffix(".fetch") || key.hasSuffix(".tagopt")))
         }
     }
 
