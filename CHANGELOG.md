@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- _No notable changes yet._
+
+## 2.0.1 - 2026-11-28
+
+
 - The macOS build is signed ad hoc. If macOS blocks the first launch, use **Open Anyway** in **System Settings → Privacy & Security**. [Apple's first-launch instructions](https://support.apple.com/en-us/102445)
 
 - Enable **Auto-publishing** and **Written with AI?** on iPhone and iPad by loading the current discussion automatically when you open merge request Details.
@@ -31,6 +36,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Hide the empty **Next step** panel in Mac merge request Details when no decision is available, including while waiting on open review threads.
 
 - Trace MR activity from the Mac Event log and ask the agent about earlier events. See comment text, the people involved and links to the GitLab notes. Hover over a person's name for their profile.
+
 
 ## 2.0.0 - 2026-11-27
 
