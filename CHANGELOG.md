@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- The macOS build is signed ad hoc. If macOS blocks the first launch, use **Open Anyway** in **System Settings → Privacy & Security**. [Apple's first-launch instructions](https://support.apple.com/en-us/102445)
+
 - Enable **Auto-publishing** and **Written with AI?** on iPhone and iPad by loading the current discussion automatically when you open merge request Details.
 
 - Show merge request counts on a separate line in the iPhone board switcher to keep the buttons steady when switching lanes.

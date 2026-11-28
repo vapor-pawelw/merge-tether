@@ -61,7 +61,7 @@ let project = Project(
     settings: .settings(
         base: [
             "SWIFT_VERSION": "6.0",
-            "MARKETING_VERSION": "2.0.0",
+            "MARKETING_VERSION": "2.0.1",
             "CURRENT_PROJECT_VERSION": "1",
             "LOCALIZATION_PREFERS_STRING_CATALOGS": "YES",
             "STRING_CATALOG_GENERATE_SYMBOLS": "YES",
