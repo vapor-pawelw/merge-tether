@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Enable **Auto-publishing** and **Written with AI?** on iPhone and iPad by loading the current discussion automatically when you open merge request Details.
+
 - Show merge request counts on a separate line in the iPhone board switcher to keep the buttons steady when switching lanes.
 
 - See the comment authorship controls in Mac setup in light or dark appearance and learn how saved verdicts and thread auto-publishing work.

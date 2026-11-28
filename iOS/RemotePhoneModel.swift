@@ -521,7 +521,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         }
         viewedCardID = card.id
         // Older Macs only have the original live detail read. Keep it for opening Details.
-        let live = fromGitLab ?? (needsLiveDetailReload || (opening && !supportsCachedDetails))
+        let needsCurrentDiscussions = card.actions.contains { $0.kind == .setCommentOrigin }
+        let live = needsCurrentDiscussions || (fromGitLab ?? (needsLiveDetailReload || (opening && !supportsCachedDetails)))
         if state.pending != nil || (state.isRefreshing(now: now()) && (needsDetailReload || isManuallyRefreshingContent)) {
             needsDetailReload = true; needsLiveDetailReload = needsLiveDetailReload || live
             isSynchronizingDetails = true; return

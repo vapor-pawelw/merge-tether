@@ -271,16 +271,19 @@ import MergeTetherRemote
         #expect(model.pendingActionCard == nil)
     }
 
-    @Test(arguments: [false, true])
-    func actionsReloadOpenDetailsEvenWhenTheBoardContextDoesNotChange(_ closeBeforeResult: Bool) async throws {
+    @Test(arguments: [false, true], [false, true])
+    func actionsReloadOpenDetailsEvenWhenTheBoardContextDoesNotChange(_ closeBeforeResult: Bool, _ canEditComments: Bool) async throws {
         let f = try PhoneFixture(), model = f.model
         var board = f.board; board.lanes[0].cards[0].id = "mr:1:2"
+        if canEditComments {
+            board.lanes[0].cards[0].actions.append(.init(id: "commentOrigin", kind: .setCommentOrigin, token: "origin-token"))
+        }
         let capabilities = [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability, RemoteMessage.cachedDetailsCapability]
         model.connect(); await model.refresh(); await f.reply(board: board, capabilities: capabilities)
         let transport = f.transports[0], card = board.cards[0]
         await model.requestDetails(card: card)
         let original = try #require(transport.sent.last?.detailRequest)
-        #expect(original.cachedOnly == true)
+        #expect((original.cachedOnly != true) == canEditComments)
         await transport.onMessage?(.init(type: .details, detailResponse: .init(request: original,
             status: .current, details: .init(checkedAt: f.date))))
         if closeBeforeResult { model.cancelDetails() }
@@ -291,9 +294,35 @@ import MergeTetherRemote
         await f.reply(board: board, capabilities: capabilities)
         #expect(transport.sent.filter { $0.type == .detailRequest }.count == (closeBeforeResult ? 1 : 2))
         if !closeBeforeResult {
-            #expect(transport.sent.last?.detailRequest?.id != original.id)
-            #expect(transport.sent.last?.detailRequest?.cachedOnly == true)
+            let reloaded = try #require(transport.sent.last?.detailRequest)
+            #expect(reloaded.id != original.id)
+            #expect((reloaded.cachedOnly != true) == canEditComments)
         }
+    }
+
+    @Test(arguments: [false, true])
+    func openingDetailsLoadsCurrentDiscussionsWhenCommentControlsAreAvailable(_ canEditComments: Bool) async throws {
+        let f = try PhoneFixture(), model = f.model
+        var board = f.board
+        board.lanes[0].cards[0].id = "mr:1:2"
+        if canEditComments {
+            board.lanes[0].cards[0].actions = [.init(id: "commentOrigin", kind: .setCommentOrigin, token: "origin-token")]
+        }
+        let card = board.cards[0]
+        model.connect()
+        await model.refresh()
+        await f.reply(board: board, capabilities: [RemoteMessage.detailsCapability, RemoteMessage.cachedDetailsCapability])
+        let transport = f.transports[0]
+
+        await model.requestDetails(card: card)
+        let request = try #require(transport.sent.last?.detailRequest)
+        let note = RemoteDetailNote(id: "1", body: "Review comment", authorID: 7)
+        let details = RemoteMRDetails(checkedAt: f.date, threads: [.init(id: "thread", state: .open, notes: [note])])
+        await transport.onMessage?(.init(type: .details, detailResponse: .init(request: request, status: .current, details: details)))
+
+        #expect((request.cachedOnly != true) == canEditComments)
+        #expect(model.detailState.displayedDetails(for: card, board: board)?.threads == details.threads)
+        #expect(model.detailState.details(for: card, board: board)?.threads == (canEditComments ? details.threads : nil))
     }
 
     @Test(arguments: [false, true])
